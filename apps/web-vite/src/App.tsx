@@ -256,7 +256,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                 : sessionsPage
                   ? <SessionsPage key={organizationRevision} />
                   : projectsPage
-                    ? <ProjectsPage key={organizationRevision} />
+                    ? <ProjectsPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                     : analyticsPage
                       ? <AnalyticsPage key={organizationRevision} />
                       : teamPage

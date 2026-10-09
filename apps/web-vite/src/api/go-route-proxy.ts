@@ -51,6 +51,14 @@ export function goPosCloseSessionSliceFromEnv(env: Record<string, string | undef
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_POS_CLOSE_SESSION_SLICE !== "0";
 }
 
+export function goProjectsWritesFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PROJECTS_WRITES === "1";
+}
+
+export function goSessionCapabilityRouteFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
+}
+
 export function goInventoryTransferWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_INVENTORY_TRANSFER_WRITES !== "0";
 }

@@ -90,18 +90,156 @@ const PendingProjectActionSchema = z.object({
 const ApiErrorSchema = z.object({ error: z.string().optional(), message: z.string().optional() });
 
 const ProjectActionOutputSchemas = {
-  createProject: z.object({ projectId: z.string().min(1) }),
-  createTask: z.object({ taskId: z.string().min(1) }),
-  assignTask: z.object({ assigned: z.literal(true) }),
-  moveTask: z.object({ moved: z.literal(true), status: z.string().min(1) }),
-  archiveProject: z.object({ archived: z.literal(true) }),
+  createProject: z.object({ projectId: z.string().uuid() }).strict(),
+  createTask: z.object({
+    taskId: z.string().uuid(), projectId: z.string().uuid().optional(), title: z.string().optional(),
+    parentTaskId: z.string().uuid().nullable().optional(), status: z.enum(["todo", "doing", "done"]).optional(),
+    priority: z.enum(["low", "medium", "high"]).optional(), assigneeUserId: z.string().uuid().nullable().optional(),
+    dueAt: z.string().datetime().nullable().optional(), position: z.number().int().nonnegative().optional(),
+    note: z.string().nullable().optional(), createdAt: z.string().datetime().optional(),
+  }).strict(),
+  assignTask: z.object({
+    assigned: z.literal(true), taskId: z.string().uuid().optional(),
+    restoreAssigneeUserId: z.string().uuid().nullable().optional(), expectedAssigneeUserId: z.string().uuid().nullable().optional(),
+  }).strict(),
+  moveTask: z.object({
+    moved: z.literal(true), status: z.enum(["todo", "doing", "done"]), position: z.number().int().nonnegative().optional(),
+    taskId: z.string().uuid().optional(), restoreStatus: z.enum(["todo", "doing", "done"]).optional(),
+    restorePosition: z.number().int().nonnegative().optional(), expectedStatus: z.enum(["todo", "doing", "done"]).optional(),
+    expectedPosition: z.number().int().nonnegative().optional(),
+  }).strict(),
+  archiveProject: z.object({ archived: z.literal(true), projectId: z.string().uuid().optional() }).strict(),
 } as const;
+
+const PROJECT_ATTEMPT_PREFIX = "chaste:projects:go:attempt:v1:";
+const ProjectAttemptSchema = z.object({
+  fingerprint: z.string().length(64),
+  intentId: z.string().uuid(),
+  action: ProjectActionSchema,
+}).strict();
+
+type ProjectAttempt = PendingProjectAction & { storageKey: string; fingerprint: string };
+
+function goProjectsWritesSelected(): boolean {
+  return typeof __GO_PROJECTS_WRITES__ !== "undefined" && __GO_PROJECTS_WRITES__;
+}
+
+function projectCapabilityInput(action: ProjectAction): Record<string, unknown> {
+  const { action: _action, ...input } = action;
+  return input;
+}
+
+async function projectDigest(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function projectScope(scope: ProjectsRetryScope): Promise<{ actorId: string; organizationId: string; hash: string }> {
+  const actorId = scope.actorId?.trim() ?? "";
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+    throw new ProjectsApiError(0, "Wait for your account and organization to finish loading before changing projects.");
+  }
+  try {
+    return { actorId, organizationId, hash: await projectDigest(JSON.stringify({ actorId, organizationId })) };
+  } catch {
+    throw new ProjectsApiError(0, "Project retry protection is unavailable. Check browser security settings and try again.");
+  }
+}
+
+function parseProjectAttempt(raw: string, storageKey: string): ProjectAttempt {
+  let value: unknown;
+  try { value = JSON.parse(raw) as unknown; }
+  catch { throw new ProjectsApiError(0, "A saved project retry marker is damaged. Check the project board before submitting another change.", true); }
+  const parsed = ProjectAttemptSchema.safeParse(value);
+  if (!parsed.success) throw new ProjectsApiError(0, "A saved project retry marker is invalid. Check the project board before submitting another change.", true);
+  return { ...parsed.data, storageKey };
+}
+
+async function createProjectAttempt(action: ProjectAction, scope: ProjectsRetryScope, retry?: PendingProjectAction): Promise<ProjectAttempt> {
+  const scoped = await projectScope(scope);
+  const fingerprint = await projectDigest(JSON.stringify({ actorId: scoped.actorId, organizationId: scoped.organizationId, action }));
+  if (retry) {
+    const prefix = `${PROJECT_ATTEMPT_PREFIX}${scoped.hash}:`;
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const candidate = parseProjectAttempt(window.localStorage.getItem(key) ?? "", key);
+      if (candidate.intentId === retry.intentId && candidate.fingerprint === fingerprint && JSON.stringify(candidate.action) === JSON.stringify(action)) return candidate;
+    }
+    throw new ProjectsApiError(0, "The saved project action could not be verified. Check the board before trying again.", true);
+  }
+  const prefix = `${PROJECT_ATTEMPT_PREFIX}${scoped.hash}:`;
+  const storageKey = `${prefix}${fingerprint}`;
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const candidate = parseProjectAttempt(window.localStorage.getItem(key) ?? "", key);
+      if (candidate.fingerprint === fingerprint && JSON.stringify(candidate.action) === JSON.stringify(action)) return candidate;
+    }
+    const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID(), action };
+    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, action }));
+    const persisted = parseProjectAttempt(window.localStorage.getItem(storageKey) ?? "", storageKey);
+    if (persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId) throw new Error("attempt did not persist");
+    return persisted;
+  } catch (error) {
+    if (error instanceof ProjectsApiError) throw error;
+    throw new ProjectsApiError(0, "Enable browser storage before changing projects so an uncertain action can be retried safely.");
+  }
+}
+
+function clearProjectAttempt(attempt: ProjectAttempt): void {
+  try {
+    const saved = parseProjectAttempt(window.localStorage.getItem(attempt.storageKey) ?? "", attempt.storageKey);
+    if (saved.fingerprint === attempt.fingerprint && saved.intentId === attempt.intentId) window.localStorage.removeItem(attempt.storageKey);
+  } catch { /* Retain the marker when storage cannot verify its identity. */ }
+}
+
+export async function readPendingProjectActions(scope: ProjectsRetryScope): Promise<PendingProjectAction[]> {
+  if (!goProjectsWritesSelected()) return [];
+  return listProjectAttempts(scope);
+}
+
+async function listProjectAttempts(scope: ProjectsRetryScope): Promise<PendingProjectAction[]> {
+  const scoped = await projectScope(scope);
+  const prefix = `${PROJECT_ATTEMPT_PREFIX}${scoped.hash}:`;
+  const pending: PendingProjectAction[] = [];
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const attempt = parseProjectAttempt(window.localStorage.getItem(key) ?? "", key);
+      const fingerprint = await projectDigest(JSON.stringify({ actorId: scoped.actorId, organizationId: scoped.organizationId, action: attempt.action }));
+      if (fingerprint !== attempt.fingerprint) throw new ProjectsApiError(0, "A saved project retry marker does not match its action. Check the board before retrying.", true);
+      pending.push({ action: attempt.action, intentId: attempt.intentId });
+    }
+  } catch (error) {
+    if (error instanceof ProjectsApiError) throw error;
+    throw new ProjectsApiError(0, "Enable browser storage to check for unresolved project actions.");
+  }
+  return pending;
+}
+
+function hasSavedProjectAttempts(): boolean {
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      if (window.localStorage.key(index)?.startsWith(PROJECT_ATTEMPT_PREFIX)) return true;
+    }
+    return false;
+  } catch {
+    throw new ProjectsApiError(0, "Project retry state is unavailable. Enable browser storage before submitting changes.", true);
+  }
+}
 
 export type Project = z.infer<typeof ProjectSchema>;
 export type BoardTask = z.infer<typeof BoardTaskSchema>;
 export type BoardColumn = z.infer<typeof BoardColumnSchema>;
 export type ProjectMember = z.infer<typeof ProjectMembersSchema>["members"][number];
 export type ProjectAction = z.infer<typeof ProjectActionSchema>;
+
+export type ProjectsRetryScope = { actorId: string | null; organizationId: string | null };
+export type PendingProjectAction = { action: ProjectAction; intentId: string };
 
 export type ProjectActionOutput<Action extends ProjectAction> = z.infer<typeof ProjectActionOutputSchemas[Action["action"]]>;
 
@@ -110,7 +248,7 @@ export type ProjectActionOutcome<Output> =
   | { kind: "pending"; reason?: string };
 
 export class ProjectsApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly mayHaveReachedServer = false) {
     super(message);
     this.name = "ProjectsApiError";
   }
@@ -201,40 +339,79 @@ export async function fetchProjectsEnabled(signal?: AbortSignal): Promise<boolea
 
 export async function submitProjectAction<Action extends ProjectAction>(
   action: Action,
-  intentId: string = crypto.randomUUID(),
+  retryScopeOrLegacyIntent: ProjectsRetryScope | string = { actorId: null, organizationId: null },
+  retry?: PendingProjectAction,
 ): Promise<ProjectActionOutcome<ProjectActionOutput<Action>>> {
   const parsedAction = ProjectActionSchema.safeParse(action);
   if (!parsedAction.success) throw new ProjectsApiError(0, "The project action contains invalid details.");
+  const retryScope = typeof retryScopeOrLegacyIntent === "string"
+    ? { actorId: null, organizationId: null }
+    : retryScopeOrLegacyIntent;
+  const goSelected = typeof __GO_PROJECTS_WRITES__ !== "undefined" && __GO_PROJECTS_WRITES__;
+  if (goSelected && typeof retryScopeOrLegacyIntent === "string") {
+    throw new ProjectsApiError(0, "Wait for your account and organization to finish loading before changing projects.");
+  }
+  if (!goSelected) {
+    const hasScopedAttempts = retryScope.actorId && retryScope.organizationId
+      ? (await listProjectAttempts(retryScope)).length > 0
+      : hasSavedProjectAttempts();
+    if (hasScopedAttempts) {
+      throw new ProjectsApiError(0, "A Go project action has an unresolved result. Restore the Go Projects route and retry that exact action before using a different route.", true);
+    }
+  }
+  const attempt = goSelected ? await createProjectAttempt(parsedAction.data, retryScope, retry) : null;
+  const intentId = attempt?.intentId ?? retry?.intentId ?? (typeof retryScopeOrLegacyIntent === "string" ? retryScopeOrLegacyIntent : crypto.randomUUID());
   if (!intentId.trim()) throw new ProjectsApiError(0, "The project action needs an intent identity. Try again.");
-
-  const url = "/api/projects";
+  const capabilityIDs: Record<ProjectAction["action"], string> = {
+    createProject: "projects.createProject",
+    archiveProject: "projects.archiveProject",
+    createTask: "projects.createTask",
+    moveTask: "projects.moveTask",
+    assignTask: "projects.assignTask",
+  };
+  const url = goSelected ? "/api/capabilities/execute" : "/api/projects";
+  const body = goSelected
+    ? { capabilityId: capabilityIDs[parsedAction.data.action], input: projectCapabilityInput(parsedAction.data), intentId }
+    : { ...parsedAction.data, intentId };
   let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ ...parsedAction.data, intentId }),
+      body: JSON.stringify(body),
       signal: requestSignal(undefined, 20_000),
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new ProjectsApiError(0, "The project action took too long. Check the board before trying again.");
+      throw new ProjectsApiError(0, "The project action took too long. Check the board before trying again.", goSelected);
     }
-    throw new ProjectsApiError(0, "Could not reach the projects service. Check your connection and try again.");
+    throw new ProjectsApiError(0, "Could not reach the projects service. Check your connection and try again.", goSelected);
   }
 
-  const raw = await readJson(response);
+  let raw: unknown;
+  try { raw = await readJson(response); }
+  catch (error) {
+    if (attempt) throw new ProjectsApiError(response.status, errorMessage(response.status, null), true);
+    throw error;
+  }
   if (response.status === 202) {
     const pending = PendingProjectActionSchema.safeParse(raw);
     if (pending.success) return { kind: "pending", reason: pending.data.reason };
-    throw new ProjectsApiError(response.status, "The projects service returned an unexpected approval response.");
+    throw new ProjectsApiError(response.status, "The projects service returned an unexpected approval response.", Boolean(attempt));
   }
-  if (!response.ok) throw new ProjectsApiError(response.status, errorMessage(response.status, raw));
+  if (!response.ok) {
+    const mayHaveReachedServer = Boolean(attempt) && (response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429);
+    if (attempt && !mayHaveReachedServer) clearProjectAttempt(attempt);
+    throw new ProjectsApiError(response.status, errorMessage(response.status, raw), mayHaveReachedServer);
+  }
 
-  const envelope = ProjectActionResponseSchema.safeParse(raw);
-  if (!envelope.success) throw new ProjectsApiError(response.status, "The projects service returned an unexpected action response.");
+  const envelope = goSelected
+    ? z.object({ ok: z.literal(true), data: z.unknown() }).safeParse(raw)
+    : ProjectActionResponseSchema.safeParse(raw);
+  if (!envelope.success) throw new ProjectsApiError(response.status, "The projects service returned an unexpected action response.", Boolean(attempt));
   const output = ProjectActionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
-  if (!output.success) throw new ProjectsApiError(response.status, "The projects service returned an unexpected action result.");
+  if (!output.success) throw new ProjectsApiError(response.status, "The projects service returned an unexpected action result.", Boolean(attempt));
+  if (attempt) clearProjectAttempt(attempt);
   return { kind: "completed", data: output.data as ProjectActionOutput<Action> };
 }

@@ -5,6 +5,8 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import {
   createGoRouteProxyPlugin,
   goPosCloseSessionSliceFromEnv,
+  goProjectsWritesFromEnv,
+  goSessionCapabilityRouteFromEnv,
   goInventoryTransferWritesFromEnv,
   goInventoryLocationReservationWritesFromEnv,
   goInventoryBarcodeLookupFromEnv,
@@ -51,6 +53,22 @@ import {
 } from "./go-route-proxy";
 
 const runningServers: Array<{ close: () => Promise<void> }> = [];
+
+describe("Projects write selector", () => {
+  it("requires both the Projects write selector and the session capability route", () => {
+    expect(goProjectsWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PROJECTS_WRITES: "1" })).toBe(true);
+    expect(goProjectsWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PROJECTS_WRITES: "1" })).toBe(false);
+    expect(goProjectsWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PROJECTS_WRITES: "0" })).toBe(false);
+  });
+});
+
+describe("session capability proxy selector", () => {
+  it("enables the Go executor proxy only with its explicit route flag", () => {
+    expect(goSessionCapabilityRouteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goSessionCapabilityRouteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
+    expect(goSessionCapabilityRouteFromEnv({})).toBe(false);
+  });
+});
 
 describe("POS register opening Go selector", () => {
   it("enables the existing Go capability with the session route and supports rollback", () => {

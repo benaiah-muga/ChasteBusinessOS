@@ -210,6 +210,13 @@ board would append an extra capability audit event. All flags default off and
 the public route remains legacy-owned pending the remaining browser parity
 gates.
 
+The React Projects page can independently send project creation, archival, task
+creation, movement, and assignment straight to Go's session capability endpoint
+with `CHASTE_GO_PROJECTS_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`.
+This keeps the existing project and board read path while Go owns these writes.
+The browser stores exact actor and organization scoped action intents for reload
+recovery and blocks legacy writes while a Go action has an unresolved result.
+
 Go CRM read parity covers the timeline and task query modes through an
 explicit signed opt-in; CRM writes and unported read modes remain on the
 legacy route. The Go metrics reader matches the newest-200-session aggregate,
@@ -2115,3 +2122,16 @@ new owners and the manifest shows zero legacy runtime paths.
      surface pending, malformed, and unavailable responses without falling
      back to `/api/accounting`. Keep other Accounting routes unchanged; add
      focused Vite API, page, proxy selector, and Go contract checks.
+208. Route the existing Vite Projects create, archive, task create, move, and
+     assignment actions through Go's session-authenticated capabilities when
+     `CHASTE_GO_PROJECTS_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep Projects list and board reads
+     on their current path. Persist exact actor- and organization-scoped action
+     intents through pending approvals and uncertain results; while Go is
+     selected, do not fall back on a missing route or unresolved outcome.
+     Provide reciprocal archive/restore and task create/delete/restore
+     capability receipts. Task deletion requires an unchanged full snapshot
+     and no children; placement and assignment restores require the expected
+     current value. Fail closed while actor or organization scope is loading.
+     Add focused API, proxy, page, parser, receipt replay, guard, and tenant
+     tests. Browser proof remains open.

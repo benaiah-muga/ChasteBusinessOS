@@ -3,6 +3,7 @@ package capability
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,11 @@ var projectUUIDPattern = regexp.MustCompile(`(?i)^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-
 const (
 	ProjectBoardReadCapabilityID     = "projects.listBoard"
 	ProjectCollectionReadOperationID = "projects.list"
+	projectRestoreCapabilityID       = "projects.restoreProject"
+	projectDeleteTaskCapabilityID    = "projects.deleteTask"
+	projectRestoreTaskCapabilityID   = "projects.restoreTask"
+	projectRestorePlacementID        = "projects.restoreTaskPlacement"
+	projectRestoreAssigneeID         = "projects.restoreTaskAssignment"
 )
 
 type ProjectBoardInput struct {
@@ -72,7 +78,8 @@ type ArchiveProjectInput struct {
 }
 
 type ArchiveProjectOutput struct {
-	Archived bool `json:"archived"`
+	Archived  bool   `json:"archived"`
+	ProjectID string `json:"projectId"`
 }
 
 type CreateProjectTaskInput struct {
@@ -85,8 +92,39 @@ type CreateProjectTaskInput struct {
 }
 
 type CreateProjectTaskOutput struct {
-	TaskID string `json:"taskId"`
+	ProjectTaskSnapshot
 }
+
+type ProjectTaskSnapshot struct {
+	TaskID         string  `json:"taskId"`
+	ProjectID      string  `json:"projectId"`
+	Title          string  `json:"title"`
+	ParentTaskID   *string `json:"parentTaskId"`
+	Status         string  `json:"status"`
+	Priority       string  `json:"priority"`
+	AssigneeUserID *string `json:"assigneeUserId"`
+	DueAt          *string `json:"dueAt"`
+	Position       int64   `json:"position"`
+	Note           *string `json:"note"`
+	CreatedAt      string  `json:"createdAt"`
+}
+
+type RestoreProjectInput struct {
+	ProjectID string `json:"projectId"`
+}
+
+type RestoreProjectOutput struct {
+	ProjectID string `json:"projectId"`
+	Restored  bool   `json:"restored"`
+}
+
+type DeleteProjectTaskInput struct{ ProjectTaskSnapshot }
+
+type DeleteProjectTaskOutput struct{ ProjectTaskSnapshot }
+
+type RestoreProjectTaskInput struct{ ProjectTaskSnapshot }
+
+type RestoreProjectTaskOutput struct{ ProjectTaskSnapshot }
 
 type MoveProjectTaskInput struct {
 	TaskID   string   `json:"taskId"`
@@ -95,8 +133,33 @@ type MoveProjectTaskInput struct {
 }
 
 type MoveProjectTaskOutput struct {
-	Moved  bool   `json:"moved"`
-	Status string `json:"status"`
+	Moved            bool   `json:"moved"`
+	Status           string `json:"status"`
+	Position         int64  `json:"position"`
+	TaskID           string `json:"taskId"`
+	RestoreStatus    string `json:"restoreStatus"`
+	RestorePosition  int64  `json:"restorePosition"`
+	ExpectedStatus   string `json:"expectedStatus"`
+	ExpectedPosition int64  `json:"expectedPosition"`
+}
+
+type RestoreProjectTaskPlacementInput struct {
+	TaskID           string `json:"taskId"`
+	RestoreStatus    string `json:"restoreStatus"`
+	RestorePosition  int64  `json:"restorePosition"`
+	ExpectedStatus   string `json:"expectedStatus"`
+	ExpectedPosition int64  `json:"expectedPosition"`
+}
+
+type RestoreProjectTaskPlacementOutput struct {
+	Moved            bool   `json:"moved"`
+	TaskID           string `json:"taskId"`
+	Status           string `json:"status"`
+	Position         int64  `json:"position"`
+	RestoreStatus    string `json:"restoreStatus"`
+	RestorePosition  int64  `json:"restorePosition"`
+	ExpectedStatus   string `json:"expectedStatus"`
+	ExpectedPosition int64  `json:"expectedPosition"`
 }
 
 type AssignProjectTaskInput struct {
@@ -105,7 +168,24 @@ type AssignProjectTaskInput struct {
 }
 
 type AssignProjectTaskOutput struct {
-	Assigned bool `json:"assigned"`
+	Assigned               bool    `json:"assigned"`
+	TaskID                 string  `json:"taskId"`
+	RestoreAssigneeUserID  *string `json:"restoreAssigneeUserId"`
+	ExpectedAssigneeUserID *string `json:"expectedAssigneeUserId"`
+}
+
+type RestoreProjectTaskAssigneeInput struct {
+	TaskID                 string  `json:"taskId"`
+	RestoreAssigneeUserID  *string `json:"restoreAssigneeUserId"`
+	ExpectedAssigneeUserID *string `json:"expectedAssigneeUserId"`
+}
+
+type RestoreProjectTaskAssigneeOutput struct {
+	Assigned               bool    `json:"assigned"`
+	TaskID                 string  `json:"taskId"`
+	AssigneeUserID         *string `json:"assigneeUserId"`
+	RestoreAssigneeUserID  *string `json:"restoreAssigneeUserId"`
+	ExpectedAssigneeUserID *string `json:"expectedAssigneeUserId"`
 }
 
 func ParseCreateProjectInput(raw json.RawMessage) (CreateProjectInput, error) {
@@ -146,6 +226,135 @@ func ParseArchiveProjectInput(raw json.RawMessage) (ArchiveProjectInput, error) 
 		return ArchiveProjectInput{}, err
 	}
 	return ArchiveProjectInput{ProjectID: projectID}, nil
+}
+
+func ParseRestoreProjectInput(raw json.RawMessage) (RestoreProjectInput, error) {
+	fields, err := projectInputObject(raw)
+	if err != nil {
+		return RestoreProjectInput{}, err
+	}
+	projectID, err := projectRequiredUUID(fields, "projectId")
+	if err != nil {
+		return RestoreProjectInput{}, err
+	}
+	return RestoreProjectInput{ProjectID: projectID}, nil
+}
+
+func ParseDeleteProjectTaskInput(raw json.RawMessage) (DeleteProjectTaskInput, error) {
+	snapshot, err := parseProjectTaskSnapshot(raw)
+	return DeleteProjectTaskInput{ProjectTaskSnapshot: snapshot}, err
+}
+
+func ParseRestoreProjectTaskInput(raw json.RawMessage) (RestoreProjectTaskInput, error) {
+	snapshot, err := parseProjectTaskSnapshot(raw)
+	return RestoreProjectTaskInput{ProjectTaskSnapshot: snapshot}, err
+}
+
+func parseProjectTaskSnapshot(raw json.RawMessage) (ProjectTaskSnapshot, error) {
+	fields, err := projectInputObject(raw)
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	taskID, err := projectRequiredUUID(fields, "taskId")
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	projectID, err := projectRequiredUUID(fields, "projectId")
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	title, err := projectRequiredText(fields, "title", 1, 200)
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	parentTaskID, err := projectRequiredOptionalUUID(fields, "parentTaskId")
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	status, err := projectRequiredEnum(fields, "status", []string{"todo", "doing", "done"})
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	priority, err := projectRequiredEnum(fields, "priority", []string{"low", "medium", "high"})
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	assigneeUserID, err := projectRequiredOptionalUUID(fields, "assigneeUserId")
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	dueAt, err := projectRequiredOptionalDateTime(fields, "dueAt")
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	position, err := projectRequiredPosition(fields, "position")
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	note, err := projectRequiredOptionalText(fields, "note", 10000)
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	createdAt, err := projectRequiredDateTime(fields, "createdAt")
+	if err != nil {
+		return ProjectTaskSnapshot{}, err
+	}
+	return ProjectTaskSnapshot{
+		TaskID: taskID, ProjectID: projectID, Title: title, ParentTaskID: parentTaskID,
+		Status: status, Priority: priority, AssigneeUserID: assigneeUserID,
+		DueAt: dueAt, Position: position, Note: note, CreatedAt: createdAt,
+	}, nil
+}
+
+func ParseRestoreProjectTaskPlacementInput(raw json.RawMessage) (RestoreProjectTaskPlacementInput, error) {
+	fields, err := projectInputObject(raw)
+	if err != nil {
+		return RestoreProjectTaskPlacementInput{}, err
+	}
+	taskID, err := projectRequiredUUID(fields, "taskId")
+	if err != nil {
+		return RestoreProjectTaskPlacementInput{}, err
+	}
+	restoreStatus, err := projectRequiredEnum(fields, "restoreStatus", []string{"todo", "doing", "done"})
+	if err != nil {
+		return RestoreProjectTaskPlacementInput{}, err
+	}
+	restorePosition, err := projectRequiredPosition(fields, "restorePosition")
+	if err != nil {
+		return RestoreProjectTaskPlacementInput{}, err
+	}
+	expectedStatus, err := projectRequiredEnum(fields, "expectedStatus", []string{"todo", "doing", "done"})
+	if err != nil {
+		return RestoreProjectTaskPlacementInput{}, err
+	}
+	expectedPosition, err := projectRequiredPosition(fields, "expectedPosition")
+	if err != nil {
+		return RestoreProjectTaskPlacementInput{}, err
+	}
+	return RestoreProjectTaskPlacementInput{
+		TaskID: taskID, RestoreStatus: restoreStatus, RestorePosition: restorePosition,
+		ExpectedStatus: expectedStatus, ExpectedPosition: expectedPosition,
+	}, nil
+}
+
+func ParseRestoreProjectTaskAssigneeInput(raw json.RawMessage) (RestoreProjectTaskAssigneeInput, error) {
+	fields, err := projectInputObject(raw)
+	if err != nil {
+		return RestoreProjectTaskAssigneeInput{}, err
+	}
+	taskID, err := projectRequiredUUID(fields, "taskId")
+	if err != nil {
+		return RestoreProjectTaskAssigneeInput{}, err
+	}
+	restoreAssigneeUserID, err := projectRequiredOptionalUUID(fields, "restoreAssigneeUserId")
+	if err != nil {
+		return RestoreProjectTaskAssigneeInput{}, err
+	}
+	expectedAssigneeUserID, err := projectRequiredOptionalUUID(fields, "expectedAssigneeUserId")
+	if err != nil {
+		return RestoreProjectTaskAssigneeInput{}, err
+	}
+	return RestoreProjectTaskAssigneeInput{TaskID: taskID, RestoreAssigneeUserID: restoreAssigneeUserID, ExpectedAssigneeUserID: expectedAssigneeUserID}, nil
 }
 
 func ParseCreateProjectTaskInput(raw json.RawMessage) (CreateProjectTaskInput, error) {
@@ -255,6 +464,18 @@ func projectRequiredUUID(fields map[string]json.RawMessage, key string) (string,
 	return *value, nil
 }
 
+func projectRequiredOptionalUUID(fields map[string]json.RawMessage, key string) (*string, error) {
+	raw, ok := fields[key]
+	if !ok {
+		return nil, fmt.Errorf("%s is required", key)
+	}
+	value, err := projectNullableString(raw)
+	if err != nil || (value != nil && !projectUUIDPattern.MatchString(*value)) {
+		return nil, fmt.Errorf("%s must be a UUID or null", key)
+	}
+	return value, nil
+}
+
 func projectOptionalUUID(fields map[string]json.RawMessage, key string) (*string, error) {
 	raw, ok := fields[key]
 	if !ok {
@@ -280,6 +501,69 @@ func projectOptionalDateTime(fields map[string]json.RawMessage, key string) (*st
 		return nil, fmt.Errorf("%s must be a UTC ISO datetime", key)
 	}
 	return value, nil
+}
+
+func projectRequiredOptionalDateTime(fields map[string]json.RawMessage, key string) (*string, error) {
+	raw, ok := fields[key]
+	if !ok {
+		return nil, fmt.Errorf("%s is required", key)
+	}
+	value, err := projectNullableString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be a UTC ISO datetime or null", key)
+	}
+	if value != nil {
+		if _, err := parseProjectDateTime(*value); err != nil {
+			return nil, fmt.Errorf("%s must be a UTC ISO datetime or null", key)
+		}
+	}
+	return value, nil
+}
+
+func projectRequiredDateTime(fields map[string]json.RawMessage, key string) (string, error) {
+	value, err := projectRequiredText(fields, key, 1, 64)
+	if err != nil {
+		return "", err
+	}
+	if _, err := parseProjectDateTime(value); err != nil {
+		return "", fmt.Errorf("%s must be a UTC ISO datetime", key)
+	}
+	return value, nil
+}
+
+func projectRequiredOptionalText(fields map[string]json.RawMessage, key string, max int) (*string, error) {
+	raw, ok := fields[key]
+	if !ok {
+		return nil, fmt.Errorf("%s is required", key)
+	}
+	value, err := projectNullableString(raw)
+	if err != nil || (value != nil && utf16Length(*value) > max) {
+		return nil, fmt.Errorf("%s must be a string or null", key)
+	}
+	return value, nil
+}
+
+func projectNullableString(raw json.RawMessage) (*string, error) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
+func projectRequiredPosition(fields map[string]json.RawMessage, key string) (int64, error) {
+	raw, ok := fields[key]
+	if !ok {
+		return 0, fmt.Errorf("%s is required", key)
+	}
+	var value float64
+	if err := json.Unmarshal(raw, &value); err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || math.Trunc(value) != value || value > math.MaxInt64 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", key)
+	}
+	return int64(value), nil
 }
 
 func parseProjectDateTime(value string) (time.Time, error) {
@@ -498,7 +782,7 @@ func archiveProject(ctx context.Context, tx pgx.Tx, orgID string, input ArchiveP
 	var id string
 	err := tx.QueryRow(ctx, `
 		UPDATE projects SET status = 'archived'
-		WHERE id = $1::uuid AND org_id = $2::uuid
+		WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'active'
 		RETURNING id::text`, input.ProjectID, orgID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ArchiveProjectOutput{}, errors.New("project not found")
@@ -506,7 +790,22 @@ func archiveProject(ctx context.Context, tx pgx.Tx, orgID string, input ArchiveP
 	if err != nil {
 		return ArchiveProjectOutput{}, err
 	}
-	return ArchiveProjectOutput{Archived: true}, nil
+	return ArchiveProjectOutput{Archived: true, ProjectID: id}, nil
+}
+
+func restoreProject(ctx context.Context, tx pgx.Tx, orgID string, input RestoreProjectInput) (RestoreProjectOutput, error) {
+	var id string
+	err := tx.QueryRow(ctx, `
+		UPDATE projects SET status = 'active'
+		WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'archived'
+		RETURNING id::text`, input.ProjectID, orgID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RestoreProjectOutput{}, errors.New("project not found or is not archived")
+	}
+	if err != nil {
+		return RestoreProjectOutput{}, err
+	}
+	return RestoreProjectOutput{ProjectID: id, Restored: true}, nil
 }
 
 func createProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input CreateProjectTaskInput) (CreateProjectTaskOutput, error) {
@@ -551,41 +850,205 @@ func createProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input Creat
 		return CreateProjectTaskOutput{}, err
 	}
 	var output CreateProjectTaskOutput
+	var position int64
+	var createdAt time.Time
 	err = tx.QueryRow(ctx, `
 		INSERT INTO project_tasks (org_id, project_id, parent_task_id, title, status, priority, assignee_user_id, due_at, position)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'todo', $5, $6::uuid, $7::timestamptz, $8)
-		RETURNING id::text`, orgID, input.ProjectID, input.ParentTaskID, input.Title, priority, input.AssigneeUserID, dueAt, maxPosition+1).Scan(&output.TaskID)
-	return output, err
+		RETURNING id::text, position, created_at`, orgID, input.ProjectID, input.ParentTaskID, input.Title, priority, input.AssigneeUserID, dueAt, maxPosition+1).Scan(&output.TaskID, &position, &createdAt)
+	if err != nil {
+		return output, err
+	}
+	output.ProjectID = input.ProjectID
+	output.Title = input.Title
+	output.ParentTaskID = input.ParentTaskID
+	output.Status = "todo"
+	output.Priority = priority
+	output.AssigneeUserID = input.AssigneeUserID
+	output.Position = position
+	output.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+	if input.DueAt != nil {
+		parsed, parseErr := parseProjectDateTime(*input.DueAt)
+		if parseErr != nil {
+			return CreateProjectTaskOutput{}, parseErr
+		}
+		formatted := parsed.UTC().Truncate(time.Millisecond).Format(time.RFC3339Nano)
+		output.DueAt = &formatted
+	}
+	return output, nil
+}
+
+func deleteProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input DeleteProjectTaskInput) (DeleteProjectTaskOutput, error) {
+	createdAt, err := parseProjectDateTime(input.CreatedAt)
+	if err != nil {
+		return DeleteProjectTaskOutput{}, errors.New("invalid task snapshot")
+	}
+	dueAt, err := projectSnapshotTimeValue(input.DueAt)
+	if err != nil {
+		return DeleteProjectTaskOutput{}, err
+	}
+	var deletedID string
+	err = tx.QueryRow(ctx, `
+		DELETE FROM project_tasks task
+		WHERE task.id = $1::uuid AND task.org_id = $2::uuid AND task.project_id = $3::uuid
+		  AND task.parent_task_id IS NOT DISTINCT FROM $4::uuid
+		  AND task.title = $5 AND task.status = $6 AND task.priority = $7
+		  AND task.assignee_user_id IS NOT DISTINCT FROM $8::uuid
+		  AND task.due_at IS NOT DISTINCT FROM $9::timestamptz
+		  AND task.position = $10 AND task.note IS NOT DISTINCT FROM $11::text
+		  AND task.created_at = $12::timestamptz
+		  AND NOT EXISTS (SELECT 1 FROM project_tasks child WHERE child.org_id = task.org_id AND child.parent_task_id = task.id)
+		RETURNING task.id::text`, input.TaskID, orgID, input.ProjectID, input.ParentTaskID, input.Title, input.Status, input.Priority, input.AssigneeUserID, dueAt, input.Position, input.Note, createdAt).Scan(&deletedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DeleteProjectTaskOutput{}, errors.New("task changed or has child tasks")
+	}
+	if err != nil {
+		return DeleteProjectTaskOutput{}, err
+	}
+	input.TaskID = deletedID
+	return DeleteProjectTaskOutput{ProjectTaskSnapshot: input.ProjectTaskSnapshot}, nil
+}
+
+func restoreProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input RestoreProjectTaskInput) (RestoreProjectTaskOutput, error) {
+	snapshotJSON, err := marshalJS(input.ProjectTaskSnapshot)
+	if err != nil {
+		return RestoreProjectTaskOutput{}, err
+	}
+	var hasDeleteReceipt bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM action_receipts
+			WHERE org_id = $1::uuid AND capability_id = $2 AND ok = true AND outcome = 'known'
+			  AND data = $3::jsonb
+		)`, orgID, deleteProjectTaskCapabilityID, snapshotJSON).Scan(&hasDeleteReceipt); err != nil {
+		return RestoreProjectTaskOutput{}, err
+	}
+	if !hasDeleteReceipt {
+		return RestoreProjectTaskOutput{}, errors.New("task restore requires a matching successful delete receipt")
+	}
+	createdAt, err := parseProjectDateTime(input.CreatedAt)
+	if err != nil {
+		return RestoreProjectTaskOutput{}, errors.New("invalid task snapshot")
+	}
+	dueAt, err := projectSnapshotTimeValue(input.DueAt)
+	if err != nil {
+		return RestoreProjectTaskOutput{}, err
+	}
+	var projectStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM projects WHERE id=$1::uuid AND org_id=$2::uuid FOR UPDATE`, input.ProjectID, orgID).Scan(&projectStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RestoreProjectTaskOutput{}, errors.New("project not found")
+	}
+	if err != nil {
+		return RestoreProjectTaskOutput{}, err
+	}
+	if projectStatus != "active" {
+		return RestoreProjectTaskOutput{}, errors.New("project is not active")
+	}
+	if input.ParentTaskID != nil {
+		var parentProjectID string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM project_tasks WHERE id=$1::uuid AND org_id=$2::uuid`, *input.ParentTaskID, orgID).Scan(&parentProjectID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return RestoreProjectTaskOutput{}, errors.New("parent task not found")
+			}
+			return RestoreProjectTaskOutput{}, err
+		}
+		if parentProjectID != input.ProjectID {
+			return RestoreProjectTaskOutput{}, errors.New("parent task belongs to a different project")
+		}
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO project_tasks (id, org_id, project_id, parent_task_id, title, status, priority, assignee_user_id, due_at, position, note, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8::uuid, $9::timestamptz, $10, $11, $12::timestamptz)`,
+		input.TaskID, orgID, input.ProjectID, input.ParentTaskID, input.Title, input.Status, input.Priority, input.AssigneeUserID, dueAt, input.Position, input.Note, createdAt)
+	if err != nil {
+		return RestoreProjectTaskOutput{}, errors.New("task cannot be restored because its ID is already in use")
+	}
+	return RestoreProjectTaskOutput{ProjectTaskSnapshot: input.ProjectTaskSnapshot}, nil
+}
+
+func projectSnapshotTimeValue(value *string) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	parsed, err := parseProjectDateTime(*value)
+	if err != nil {
+		return nil, errors.New("task snapshot contains an invalid datetime")
+	}
+	return parsed.UTC(), nil
 }
 
 func moveProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input MoveProjectTaskInput) (MoveProjectTaskOutput, error) {
 	if err := lockActiveProjectForTask(ctx, tx, orgID, input.TaskID); err != nil {
 		return MoveProjectTaskOutput{}, err
 	}
-	var id string
-	var err error
-	if input.Position == nil {
-		err = tx.QueryRow(ctx, `
-			UPDATE project_tasks SET status = $1
-			WHERE id = $2::uuid AND org_id = $3::uuid
-			RETURNING id::text`, input.Status, input.TaskID, orgID).Scan(&id)
-	} else {
-		err = tx.QueryRow(ctx, `
-			UPDATE project_tasks SET status = $1, position = $2::double precision::integer
-			WHERE id = $3::uuid AND org_id = $4::uuid
-			RETURNING id::text`, input.Status, *input.Position, input.TaskID, orgID).Scan(&id)
+	var previousStatus string
+	var previousPosition int64
+	if err := tx.QueryRow(ctx, `SELECT status, position FROM project_tasks WHERE id=$1::uuid AND org_id=$2::uuid FOR UPDATE`, input.TaskID, orgID).Scan(&previousStatus, &previousPosition); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return MoveProjectTaskOutput{}, errors.New("task not found")
+		}
+		return MoveProjectTaskOutput{}, err
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		return MoveProjectTaskOutput{}, errors.New("task not found")
+	position := previousPosition
+	if input.Position != nil {
+		position = int64(*input.Position)
 	}
+	var newPosition int64
+	err := tx.QueryRow(ctx, `
+		UPDATE project_tasks SET status=$1, position=$2
+		WHERE id=$3::uuid AND org_id=$4::uuid
+		RETURNING position`, input.Status, position, input.TaskID, orgID).Scan(&newPosition)
 	if err != nil {
 		return MoveProjectTaskOutput{}, err
 	}
-	return MoveProjectTaskOutput{Moved: true, Status: input.Status}, nil
+	return MoveProjectTaskOutput{
+		Moved: true, Status: input.Status, Position: newPosition, TaskID: input.TaskID,
+		RestoreStatus: previousStatus, RestorePosition: previousPosition,
+		ExpectedStatus: input.Status, ExpectedPosition: newPosition,
+	}, nil
+}
+
+func restoreProjectTaskPlacement(ctx context.Context, tx pgx.Tx, orgID string, input RestoreProjectTaskPlacementInput) (RestoreProjectTaskPlacementOutput, error) {
+	var projectStatus string
+	err := tx.QueryRow(ctx, `
+		SELECT p.status FROM project_tasks t JOIN projects p ON p.id=t.project_id AND p.org_id=t.org_id
+		WHERE t.id=$1::uuid AND t.org_id=$2::uuid FOR UPDATE OF p, t`, input.TaskID, orgID).Scan(&projectStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RestoreProjectTaskPlacementOutput{}, errors.New("task not found")
+	}
+	if err != nil {
+		return RestoreProjectTaskPlacementOutput{}, err
+	}
+	if projectStatus != "active" {
+		return RestoreProjectTaskPlacementOutput{}, errors.New("project is not active")
+	}
+	var id string
+	err = tx.QueryRow(ctx, `
+		UPDATE project_tasks SET status=$1, position=$2
+		WHERE id=$3::uuid AND org_id=$4::uuid AND status=$5 AND position=$6
+		RETURNING id::text`, input.RestoreStatus, input.RestorePosition, input.TaskID, orgID, input.ExpectedStatus, input.ExpectedPosition).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RestoreProjectTaskPlacementOutput{}, errors.New("task placement changed since this action")
+	}
+	if err != nil {
+		return RestoreProjectTaskPlacementOutput{}, err
+	}
+	return RestoreProjectTaskPlacementOutput{
+		Moved: true, TaskID: id, Status: input.ExpectedStatus, Position: input.ExpectedPosition, RestoreStatus: input.ExpectedStatus, RestorePosition: input.ExpectedPosition,
+		ExpectedStatus: input.RestoreStatus, ExpectedPosition: input.RestorePosition,
+	}, nil
 }
 
 func assignProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input AssignProjectTaskInput) (AssignProjectTaskOutput, error) {
 	if err := lockActiveProjectForTask(ctx, tx, orgID, input.TaskID); err != nil {
+		return AssignProjectTaskOutput{}, err
+	}
+	var previousAssignee sql.NullString
+	if err := tx.QueryRow(ctx, `SELECT assignee_user_id::text FROM project_tasks WHERE id=$1::uuid AND org_id=$2::uuid FOR UPDATE`, input.TaskID, orgID).Scan(&previousAssignee); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return AssignProjectTaskOutput{}, errors.New("task not found")
+		}
 		return AssignProjectTaskOutput{}, err
 	}
 	var id string
@@ -599,7 +1062,35 @@ func assignProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input Assig
 	if err != nil {
 		return AssignProjectTaskOutput{}, err
 	}
-	return AssignProjectTaskOutput{Assigned: true}, nil
+	return AssignProjectTaskOutput{Assigned: true, TaskID: id, RestoreAssigneeUserID: nullableString(previousAssignee), ExpectedAssigneeUserID: input.AssigneeUserID}, nil
+}
+
+func restoreProjectTaskAssignee(ctx context.Context, tx pgx.Tx, orgID string, input RestoreProjectTaskAssigneeInput) (RestoreProjectTaskAssigneeOutput, error) {
+	if err := lockActiveProjectForTask(ctx, tx, orgID, input.TaskID); err != nil {
+		return RestoreProjectTaskAssigneeOutput{}, err
+	}
+	var id string
+	err := tx.QueryRow(ctx, `
+		UPDATE project_tasks SET assignee_user_id=$1::uuid
+		WHERE id=$2::uuid AND org_id=$3::uuid AND assignee_user_id IS NOT DISTINCT FROM $4::uuid
+		RETURNING id::text`, input.RestoreAssigneeUserID, input.TaskID, orgID, input.ExpectedAssigneeUserID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RestoreProjectTaskAssigneeOutput{}, errors.New("task assignment changed since this action")
+	}
+	if err != nil {
+		return RestoreProjectTaskAssigneeOutput{}, err
+	}
+	return RestoreProjectTaskAssigneeOutput{
+		Assigned: true, TaskID: id, AssigneeUserID: input.ExpectedAssigneeUserID, RestoreAssigneeUserID: input.ExpectedAssigneeUserID,
+		ExpectedAssigneeUserID: input.RestoreAssigneeUserID,
+	}, nil
+}
+
+func nullableString(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
 }
 
 func lockActiveProjectForTask(ctx context.Context, tx pgx.Tx, orgID, taskID string) error {

@@ -23,42 +23,47 @@ import (
 )
 
 const (
-	createCustomerCapabilityID            = "crm.createCustomer"
-	saveCustomerViewCapabilityID          = "crm.saveCustomerView"
-	restoreCustomerViewCapabilityID       = "crm.restoreCustomerView"
-	deactivateCustomerCapabilityID        = "crm.deactivateCustomer"
-	mergeCustomersCapabilityID            = "crm.mergeCustomers"
-	restoreCustomerMergeCapabilityID      = "crm.restoreCustomerMerge"
-	importCustomersCapabilityID           = "crm.importCustomers"
-	undoCustomerImportCapabilityID        = "crm.undoCustomerImport"
-	restoreImportedCustomersCapabilityID  = "crm.restoreImportedCustomers"
-	updateCustomerProfilesCapabilityID    = "crm.updateCustomerProfiles"
-	restoreCustomerProfilesCapabilityID   = "crm.restoreCustomerProfiles"
-	reapplyCustomerProfilesCapabilityID   = "crm.reapplyCustomerProfiles"
-	listCustomersCapabilityID             = "crm.listCustomers"
-	listCRMCustomerCollectionCapabilityID = "crm.listCustomerCollection"
-	listCustomerViewsCapabilityID         = "crm.listCustomerViews"
-	listDealsCapabilityID                 = "crm.listDeals"
-	pipelineReportCapabilityID            = "crm.pipelineReport"
-	listTasksCapabilityID                 = "crm.listTasks"
-	customerTimelineCapabilityID          = "crm.customerTimeline"
-	createInvoiceCapabilityID             = "accounting.createInvoice"
-	recordFxRateCapabilityID              = "accounting.recordFxRate"
-	recordPaymentCapabilityID             = "accounting.recordPayment"
-	reversePaymentCapabilityID            = "accounting.reversePayment"
-	trialBalanceCapabilityID              = "accounting.trialBalance"
-	createProjectCapabilityID             = "projects.createProject"
-	archiveProjectCapabilityID            = "projects.archiveProject"
-	createProjectTaskCapabilityID         = "projects.createTask"
-	moveProjectTaskCapabilityID           = "projects.moveTask"
-	assignProjectTaskCapabilityID         = "projects.assignTask"
-	iamListMembersCapabilityID            = "iam.listMembers"
-	scimProvisionUserCapabilityID         = "iam.scimProvisionUser"
-	iamCreateRoleCapabilityID             = "iam.createRole"
-	iamUpdateRolePermissionsCapabilityID  = "iam.updateRolePermissions"
-	iamAssignRoleCapabilityID             = "iam.assignRole"
-	iamInviteMemberCapabilityID           = "iam.inviteMember"
-	iamBootstrapOrganizationCapabilityID  = "iam.bootstrapOrganization"
+	createCustomerCapabilityID              = "crm.createCustomer"
+	saveCustomerViewCapabilityID            = "crm.saveCustomerView"
+	restoreCustomerViewCapabilityID         = "crm.restoreCustomerView"
+	deactivateCustomerCapabilityID          = "crm.deactivateCustomer"
+	mergeCustomersCapabilityID              = "crm.mergeCustomers"
+	restoreCustomerMergeCapabilityID        = "crm.restoreCustomerMerge"
+	importCustomersCapabilityID             = "crm.importCustomers"
+	undoCustomerImportCapabilityID          = "crm.undoCustomerImport"
+	restoreImportedCustomersCapabilityID    = "crm.restoreImportedCustomers"
+	updateCustomerProfilesCapabilityID      = "crm.updateCustomerProfiles"
+	restoreCustomerProfilesCapabilityID     = "crm.restoreCustomerProfiles"
+	reapplyCustomerProfilesCapabilityID     = "crm.reapplyCustomerProfiles"
+	listCustomersCapabilityID               = "crm.listCustomers"
+	listCRMCustomerCollectionCapabilityID   = "crm.listCustomerCollection"
+	listCustomerViewsCapabilityID           = "crm.listCustomerViews"
+	listDealsCapabilityID                   = "crm.listDeals"
+	pipelineReportCapabilityID              = "crm.pipelineReport"
+	listTasksCapabilityID                   = "crm.listTasks"
+	customerTimelineCapabilityID            = "crm.customerTimeline"
+	createInvoiceCapabilityID               = "accounting.createInvoice"
+	recordFxRateCapabilityID                = "accounting.recordFxRate"
+	recordPaymentCapabilityID               = "accounting.recordPayment"
+	reversePaymentCapabilityID              = "accounting.reversePayment"
+	trialBalanceCapabilityID                = "accounting.trialBalance"
+	createProjectCapabilityID               = "projects.createProject"
+	archiveProjectCapabilityID              = "projects.archiveProject"
+	createProjectTaskCapabilityID           = "projects.createTask"
+	moveProjectTaskCapabilityID             = "projects.moveTask"
+	assignProjectTaskCapabilityID           = "projects.assignTask"
+	restoreProjectCapabilityID              = "projects.restoreProject"
+	deleteProjectTaskCapabilityID           = "projects.deleteTask"
+	restoreProjectTaskCapabilityID          = "projects.restoreTask"
+	restoreProjectTaskPlacementCapabilityID = "projects.restoreTaskPlacement"
+	restoreProjectTaskAssigneeCapabilityID  = "projects.restoreTaskAssignment"
+	iamListMembersCapabilityID              = "iam.listMembers"
+	scimProvisionUserCapabilityID           = "iam.scimProvisionUser"
+	iamCreateRoleCapabilityID               = "iam.createRole"
+	iamUpdateRolePermissionsCapabilityID    = "iam.updateRolePermissions"
+	iamAssignRoleCapabilityID               = "iam.assignRole"
+	iamInviteMemberCapabilityID             = "iam.inviteMember"
+	iamBootstrapOrganizationCapabilityID    = "iam.bootstrapOrganization"
 )
 const approvalTTL = 7 * 24 * time.Hour
 
@@ -339,12 +344,17 @@ var capabilitySpecs = map[string]capabilitySpec{
 	supportSuggestCategoryCapabilityID:                  {module: "support", permission: "support.read", risk: "read"},
 	supportCreateCannedResponseCapabilityID:             {module: "support", permission: "support.write", risk: "write"},
 	supportCreateKbArticleCapabilityID:                  {module: "support", permission: "support.write", risk: "write"},
-	createProjectCapabilityID:                           {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: "projects.archiveProject"},
+	createProjectCapabilityID:                           {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: archiveProjectCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
 	ProjectBoardReadCapabilityID:                        {module: "projects", permission: "projects.read", risk: "read"},
-	archiveProjectCapabilityID:                          {module: "projects", permission: "projects.write", risk: "write"},
-	createProjectTaskCapabilityID:                       {module: "projects", permission: "projects.write", risk: "write"},
-	moveProjectTaskCapabilityID:                         {module: "projects", permission: "projects.write", risk: "write"},
-	assignProjectTaskCapabilityID:                       {module: "projects", permission: "projects.write", risk: "write"},
+	archiveProjectCapabilityID:                          {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: projectRestoreCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
+	projectRestoreCapabilityID:                          {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: archiveProjectCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
+	createProjectTaskCapabilityID:                       {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: deleteProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
+	deleteProjectTaskCapabilityID:                       {module: "projects", permission: "projects.write", risk: "destructive", inverseCapabilityID: restoreProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
+	restoreProjectTaskCapabilityID:                      {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: deleteProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
+	moveProjectTaskCapabilityID:                         {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: restoreProjectTaskPlacementCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "restoreStatus", "restorePosition", "expectedStatus", "expectedPosition"}},
+	restoreProjectTaskPlacementCapabilityID:             {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: moveProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "status", "position"}},
+	assignProjectTaskCapabilityID:                       {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: restoreProjectTaskAssigneeCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "restoreAssigneeUserId", "expectedAssigneeUserId"}},
+	restoreProjectTaskAssigneeCapabilityID:              {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: assignProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "assigneeUserId"}},
 	iamListMembersCapabilityID:                          {module: "iam", permission: "iam.read", risk: "read"},
 	// SCIM deprovisioning removes role grants and revokes pending invitations.
 	// It deliberately has no inverse because an IdP re-provision must not
@@ -505,6 +515,7 @@ func supportedCapability(capabilityID string) bool {
 		supportUpdateTicketCapabilityID, supportSuggestCategoryCapabilityID,
 		supportCreateCannedResponseCapabilityID, supportCreateKbArticleCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID,
+		projectRestoreCapabilityID, deleteProjectTaskCapabilityID, restoreProjectTaskCapabilityID, restoreProjectTaskPlacementCapabilityID, restoreProjectTaskAssigneeCapabilityID,
 		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID,
 		scimProvisionUserCapabilityID, SCIMTokenCreateCapabilityID, SCIMTokenRevokeCapabilityID,
 		settingsConfigureAiProviderCapabilityID, settingsRestoreAiProviderCapabilityID, harnessApproveCompositionCapabilityID:
@@ -990,8 +1001,26 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case projectRestoreCapabilityID:
+			parsed, err := ParseRestoreProjectInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
 		case createProjectTaskCapabilityID:
 			parsed, err := ParseCreateProjectTaskInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case deleteProjectTaskCapabilityID:
+			parsed, err := ParseDeleteProjectTaskInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case restoreProjectTaskCapabilityID:
+			parsed, err := ParseRestoreProjectTaskInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -1002,8 +1031,20 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case restoreProjectTaskPlacementCapabilityID:
+			parsed, err := ParseRestoreProjectTaskPlacementInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
 		case assignProjectTaskCapabilityID:
 			parsed, err := ParseAssignProjectTaskInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case restoreProjectTaskAssigneeCapabilityID:
+			parsed, err := ParseRestoreProjectTaskAssigneeInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -2269,8 +2310,26 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case RestoreProjectInput:
+			output, err := restoreProject(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case CreateProjectTaskInput:
 			output, err := createProjectTask(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case DeleteProjectTaskInput:
+			output, err := deleteProjectTask(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case RestoreProjectTaskInput:
+			output, err := restoreProjectTask(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -2281,8 +2340,20 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case RestoreProjectTaskPlacementInput:
+			output, err := restoreProjectTaskPlacement(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case AssignProjectTaskInput:
 			output, err := assignProjectTask(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case RestoreProjectTaskAssigneeInput:
+			output, err := restoreProjectTaskAssignee(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3419,6 +3490,10 @@ func canonicalInputHash(input any) (string, error) {
 		ManufacturingDefineBomInput, ManufacturingDeleteBomInput, ManufacturingBomTreeInput, ManufacturingBomReportInput,
 		ManufacturingCostPreviewInput, ManufacturingLotTraceInput, ManufacturingProductionRunsInput,
 		MarketingCreateSegmentInput, MarketingCreateCampaignInput, MarketingSendCampaignInput, MarketingCampaignAnalyticsInput,
+		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, RestoreProjectInput,
+		CreateProjectTaskInput, DeleteProjectTaskInput, RestoreProjectTaskInput,
+		MoveProjectTaskInput, RestoreProjectTaskPlacementInput,
+		AssignProjectTaskInput, RestoreProjectTaskAssigneeInput,
 		HRCreateOpeningInput, HRCloseOpeningInput,
 		IAMModulesInput, IAMSetModuleConfigInput, IAMSetOrgPolicyInput, IAMSetOrgBrandingInput,
 		PurchasingSupplierPerformanceInput, PurchasingPriceHistoryInput, PurchasingSupplierStatementInput,
@@ -3432,7 +3507,6 @@ func canonicalInputHash(input any) (string, error) {
 		SupportEscalateConversationInput, SupportStatusInput, SupportCreateTicketInput,
 		SupportUpdateTicketInput, SupportSuggestCategoryInput, SupportCreateCannedResponseInput,
 		SupportCreateKbArticleInput,
-		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput,
 		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput,
 		SettingsConfigureAiProviderInput, SettingsRestoreAiProviderInput, HarnessApproveCompositionInput,
 		DocumentsInput,

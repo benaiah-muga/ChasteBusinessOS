@@ -4,6 +4,7 @@ import {
   fetchProjectMembers,
   fetchProjectsEnabled,
   fetchProjects,
+  readPendingProjectActions,
   ProjectsApiError,
   submitProjectAction,
 } from "./projects";
@@ -13,6 +14,8 @@ const taskId = "9b73995f-15a4-49d1-94fd-ef35e2276104";
 const memberId = "a9d822e7-5518-4a0f-9850-607e4a226668";
 
 afterEach(() => vi.unstubAllGlobals());
+
+const retryScope = { actorId: "c0f4707d-1e6c-4627-9ce5-a80b7b95a16e", organizationId: "3196834e-9b90-4a20-9263-a3391fdc4329" };
 
 function boardResponse() {
   return Response.json({
@@ -178,5 +181,63 @@ describe("projects API client", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden" }, { status: 403 })));
 
     await expect(fetchProjects()).rejects.toEqual(new ProjectsApiError(403, "You do not have permission to view or change projects."));
+  });
+
+  it("dispatches all five write contracts directly to Go when the paired selector is active", async () => {
+    localStorage.clear();
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    const cases = [
+      [{ action: "createProject", name: "Website relaunch", dueAt: "2026-10-10T00:00:00.000Z" }, "projects.createProject", { name: "Website relaunch", dueAt: "2026-10-10T00:00:00.000Z" }, { projectId }],
+      [{ action: "archiveProject", projectId }, "projects.archiveProject", { projectId }, { archived: true }],
+      [{ action: "createTask", projectId, title: "Write the brief", parentTaskId: taskId, assigneeUserId: memberId, dueAt: "2026-10-10T00:00:00.000Z", priority: "high" }, "projects.createTask", { projectId, title: "Write the brief", parentTaskId: taskId, assigneeUserId: memberId, dueAt: "2026-10-10T00:00:00.000Z", priority: "high" }, { taskId }],
+      [{ action: "moveTask", taskId, status: "doing", position: 4 }, "projects.moveTask", { taskId, status: "doing", position: 4 }, { moved: true, status: "doing" }],
+      [{ action: "assignTask", taskId, assigneeUserId: memberId }, "projects.assignTask", { taskId, assigneeUserId: memberId }, { assigned: true }],
+    ] as const;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: cases[0][3] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const [action, capabilityId, input, output] of cases) {
+      fetchMock.mockResolvedValueOnce(Response.json({ ok: true, data: output }));
+      await expect(submitProjectAction(action, retryScope)).resolves.toEqual({ kind: "completed", data: output });
+      const [url, init] = fetchMock.mock.calls.at(-1)!;
+      expect(url).toBe("/api/capabilities/execute");
+      expect(JSON.parse(String(init?.body))).toEqual({ capabilityId, input, intentId: expect.any(String) });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it("recovers the exact pending project action after reload and clears its marker on success", async () => {
+    localStorage.clear();
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    const action = { action: "createProject", name: "Website relaunch" } as const;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Manager review required." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { projectId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await submitProjectAction(action, retryScope);
+    expect(first.kind).toBe("pending");
+    const saved = await readPendingProjectActions(retryScope);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.action).toEqual(action);
+
+    await expect(submitProjectAction(action, retryScope, saved[0])).resolves.toEqual({ kind: "completed", data: { projectId } });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId).toBe(saved[0]?.intentId);
+    await expect(readPendingProjectActions(retryScope)).resolves.toEqual([]);
+  });
+
+  it("retains a Go 404 attempt and refuses legacy dispatch while its result is unresolved", async () => {
+    localStorage.clear();
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    const fetchMock = vi.fn(async () => Response.json({ error: "route unavailable" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "archiveProject", projectId } as const;
+
+    await expect(submitProjectAction(action, retryScope)).rejects.toMatchObject({ status: 404, mayHaveReachedServer: true });
+    expect(await readPendingProjectActions(retryScope)).toHaveLength(1);
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", false);
+    await expect(submitProjectAction({ action: "assignTask", taskId }, retryScope)).rejects.toMatchObject({ mayHaveReachedServer: true });
+    await expect(submitProjectAction({ action: "assignTask", taskId }, { actorId: null, organizationId: null })).rejects.toMatchObject({ mayHaveReachedServer: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

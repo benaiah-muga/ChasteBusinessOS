@@ -13,6 +13,17 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Projects can route create, archive, task creation, task movement, and task
+  assignment through Go capabilities behind paired `CHASTE_GO_PROJECTS_WRITES=1`
+  and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go derives actor and
+  organization from the authenticated session. Exact action intents are retained
+  per actor and organization across approvals and uncertain results, with a
+  recovery control after reload and no legacy fallback while a Go result is
+  unresolved. Project and board reads remain on their existing path.
+  Capability receipts now retain exact project-task snapshots for guarded
+  delete and restore, and task move/assignment compensations refuse to overwrite
+  later edits.
+
 - Vite's Accounting budgets screen loads budget scenarios and the 13-week cash
   forecast directly through Go's `accounting.listBudgetScenarios` and
   `accounting.cashForecast` capabilities. Scenario rows and IDs are validated

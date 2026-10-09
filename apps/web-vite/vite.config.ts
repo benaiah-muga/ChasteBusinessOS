@@ -1,12 +1,13 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingCustomerStatementReadsFromEnv, goAccountingPeriodCloseReadsFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReportsFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmTaskWritesFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrLeaveFromEnv, goHrPayrollFromEnv, goHrTimeFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goManufacturingPlanningReadsFromEnv, goManufacturingProductionWritesFromEnv, goManufacturingWorkOrderWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderReadsFromEnv, goSalesOrderWritesFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingCustomerStatementReadsFromEnv, goAccountingPeriodCloseReadsFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReportsFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmTaskWritesFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrLeaveFromEnv, goHrPayrollFromEnv, goHrTimeFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goManufacturingPlanningReadsFromEnv, goManufacturingProductionWritesFromEnv, goManufacturingWorkOrderWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goProjectsWritesFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderReadsFromEnv, goSalesOrderWritesFromEnv, goSessionCapabilityRouteFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "CHASTE_");
   const legacyWebOrigin = env.CHASTE_LEGACY_WEB_ORIGIN || "http://localhost:3001";
   const goApiOrigin = env.CHASTE_GO_API_ORIGIN || "http://127.0.0.1:8080";
   const goRouteProxy = createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv(env), goApiOrigin);
+  const goSessionCapabilityRoute = goSessionCapabilityRouteFromEnv(env);
   const goInventoryItemSlice = env.CHASTE_GO_INVENTORY_ITEM_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goInventoryImportSlice = env.CHASTE_GO_INVENTORY_IMPORT_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goInventoryCycleCountWrites = env.CHASTE_GO_INVENTORY_CYCLE_COUNT_WRITES === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
@@ -42,6 +43,7 @@ export default defineConfig(({ mode }) => {
   const goHrLeave = goHrLeaveFromEnv(env);
   const goHrTime = goHrTimeFromEnv(env);
   const goHrPayroll = goHrPayrollFromEnv(env);
+  const goProjectsWrites = goProjectsWritesFromEnv(env);
   const goHrHiring = goHrHiringFromEnv(env);
   const goHrEmployeeWrites = goHrEmployeeWritesFromEnv(env);
   const goAccountingRecordPayment = goAccountingRecordPaymentFromEnv(env);
@@ -102,6 +104,7 @@ export default defineConfig(({ mode }) => {
       __GO_HR_LEAVE__: JSON.stringify(goHrLeave),
       __GO_HR_TIME__: JSON.stringify(goHrTime),
       __GO_HR_PAYROLL__: JSON.stringify(goHrPayroll),
+      __GO_PROJECTS_WRITES__: JSON.stringify(goProjectsWrites),
       __GO_HR_HIRING__: JSON.stringify(goHrHiring),
       __GO_HR_EMPLOYEE_WRITES__: JSON.stringify(goHrEmployeeWrites),
       __GO_ACCOUNTING_RECORD_PAYMENT__: JSON.stringify(goAccountingRecordPayment),
@@ -133,7 +136,7 @@ export default defineConfig(({ mode }) => {
         "/api/health": {
           target: goApiOrigin,
         },
-        ...(env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" ? {
+        ...(goSessionCapabilityRoute ? {
           "/api/capabilities/execute": { target: goApiOrigin, changeOrigin: false },
         } : {}),
         "/api": {

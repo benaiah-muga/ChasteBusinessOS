@@ -51,6 +51,7 @@ function projectModules(enabled = true) {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -77,6 +78,42 @@ describe("Vite projects page", () => {
     expect(screen.getByRole("button", { name: "Archive project" })).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/projects", expect.objectContaining({ credentials: "same-origin" }));
     expect(fetchMock).toHaveBeenCalledWith(`/api/projects?projectId=${projectId}`, expect.objectContaining({ credentials: "same-origin" }));
+  });
+
+  it("restores a saved Go project create after reload and clears the matching form after success", async () => {
+    const createdProject = { ...activeProject, id: secondProjectId, name: "Q4 rollout" };
+    let writes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return projectModules();
+      if (path === "/api/projects" && init?.method !== "POST") return Response.json({ projects: writes > 1 ? [createdProject] : [] });
+      if (path.startsWith("/api/projects?projectId=")) return Response.json(board());
+      if (path === "/api/team") return team();
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        writes += 1;
+        return writes === 1
+          ? Response.json({ error: "temporary outage" }, { status: 503 })
+          : Response.json({ ok: true, data: { projectId: secondProjectId } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId: "c0f4707d-1e6c-4627-9ce5-a80b7b95a16e", organizationId: "3196834e-9b90-4a20-9263-a3391fdc4329" };
+
+    const firstPage = render(<ProjectsPage {...props} />);
+    await screen.findByRole("heading", { name: "Projects", level: 1 });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Q4 rollout" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    await screen.findByText("The projects service is unavailable. Try again.");
+    expect(await screen.findByRole("button", { name: "Retry saved createProject action" })).not.toBeNull();
+    firstPage.unmount();
+
+    render(<ProjectsPage {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry saved createProject action" }));
+    expect(await screen.findByRole("heading", { name: "Board · Q4 rollout" })).not.toBeNull();
+    await waitFor(() => expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""));
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/capabilities/execute")).toHaveLength(2);
   });
 
   it("ignores an already-started board response after switching projects", async () => {

@@ -4,6 +4,7 @@ import {
   fetchProjectMembers,
   fetchProjectsEnabled,
   fetchProjects,
+  readPendingProjectActions,
   ProjectsApiError,
   submitProjectAction,
   type BoardColumn,
@@ -13,6 +14,8 @@ import {
   type ProjectActionOutcome,
   type ProjectActionOutput,
   type ProjectMember,
+  type PendingProjectAction,
+  type ProjectsRetryScope,
 } from "../api/projects";
 import "./ProjectsPage.css";
 
@@ -54,7 +57,8 @@ function statusClass(status: string): string {
   return "project-status-other";
 }
 
-export function ProjectsPage() {
+export function ProjectsPage({ actorId = null, organizationId = null }: Partial<ProjectsRetryScope>) {
+  const retryScope = { actorId, organizationId };
   const [moduleState, setModuleState] = useState<ModuleState>({ status: "loading" });
   const [projectState, setProjectState] = useState<ProjectListState>({ status: "loading" });
   const [boardState, setBoardState] = useState<BoardState>({ status: "idle" });
@@ -62,6 +66,7 @@ export function ProjectsPage() {
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingActions, setPendingActions] = useState<PendingProjectAction[]>([]);
   const [projectForm, setProjectForm] = useState({ name: "", due: "" });
   const [taskForm, setTaskForm] = useState({ title: "", assignee: "", due: "", priority: "medium" as "low" | "medium" | "high" });
   const [archiveTarget, setArchiveTarget] = useState<Project | null>(null);
@@ -130,6 +135,13 @@ export function ProjectsPage() {
     return () => controller.abort();
   }, [loadModules]);
 
+  const refreshPendingActions = useCallback(async () => {
+    try { setPendingActions(await readPendingProjectActions(retryScope)); }
+    catch (error) { setNotice({ tone: "error", message: errorMessage(error) }); }
+  }, [actorId, organizationId]);
+
+  useEffect(() => { void refreshPendingActions(); }, [refreshPendingActions]);
+
   useEffect(() => {
     if (moduleState.status !== "ready" || !moduleState.enabled || !selectedId) {
       setBoardState({ status: "idle" });
@@ -161,22 +173,56 @@ export function ProjectsPage() {
   async function postAction<Action extends ProjectAction>(
     action: Action,
     label: string,
+    retry?: PendingProjectAction,
   ): Promise<ProjectActionOutcome<ProjectActionOutput<Action>> | null> {
     if (busy) return null;
     setBusy(true);
     try {
-      const result = await submitProjectAction(action);
+      const result = await submitProjectAction(action, retryScope, retry);
       if (result.kind === "pending") {
         setNotice({ tone: "pending", message: `${label} needs human approval. It is in the Approvals inbox.` });
       } else {
         setNotice({ tone: "success", message: `${label} done.` });
       }
+      await refreshPendingActions();
       return result;
     } catch (error) {
       setNotice({ tone: "error", message: errorMessage(error) });
+      await refreshPendingActions();
       return null;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function retryPendingAction(pending: PendingProjectAction): Promise<void> {
+    const action = pending.action;
+    const label = action.action === "createProject" ? `Create ${action.name}`
+      : action.action === "createTask" ? `Add “${action.title}”`
+        : action.action === "archiveProject" ? "Archive project"
+          : action.action === "moveTask" ? `Move task to ${action.status}` : "Assign task";
+    const result = await postAction(action, label, pending);
+    if (result?.kind !== "completed") return;
+    if (action.action === "createProject") {
+      if (projectForm.name.trim() === action.name && isoFromInput(projectForm.due) === action.dueAt) {
+        setProjectForm({ name: "", due: "" });
+      }
+      await loadProjects();
+      if ("projectId" in result.data && typeof result.data.projectId === "string") setSelectedId(result.data.projectId);
+    } else if (action.action === "createTask") {
+      if (selectedId === action.projectId
+        && taskForm.title.trim() === action.title
+        && (taskForm.assignee || undefined) === action.assigneeUserId
+        && isoFromInput(taskForm.due) === action.dueAt
+        && taskForm.priority === (action.priority ?? "medium")) {
+        setTaskForm({ title: "", assignee: "", due: "", priority: "medium" });
+      }
+      await loadBoard(action.projectId);
+    } else if (action.action === "archiveProject") {
+      setArchiveTarget(null);
+      await loadProjects();
+    } else if (selectedId) {
+      await loadBoard(selectedId);
     }
   }
 
@@ -300,6 +346,21 @@ export function ProjectsPage() {
           <span>{notice.message}</span>
           <button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}>Dismiss</button>
         </div>
+      )}
+
+      {pendingActions.length > 0 && (
+        <section className="projects-notice projects-notice-pending" aria-label="Unresolved project actions">
+          <span>Some project actions have an unresolved result. Retry the exact saved action before submitting it again.</span>
+          <ul>
+            {pendingActions.map((pending) => (
+              <li key={pending.intentId}>
+                <button type="button" disabled={busy} onClick={() => void retryPendingAction(pending)}>
+                  Retry saved {pending.action.action} action
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {projectState.status === "loading" && <p className="projects-loading" role="status">Loading projects…</p>}

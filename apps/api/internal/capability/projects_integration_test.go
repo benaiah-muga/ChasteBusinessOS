@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -149,11 +150,13 @@ func TestGoProjectsLifecyclePreservesDefaultsAttributionAuditAndReceiptReplay(t 
 	}
 
 	assignResult, err := executeProjectCapability(fx, assignProjectTaskCapabilityID, `{"taskId":"`+firstTask.TaskID+`","assigneeUserId":"`+fx.userID+`"}`, "projects-assign-task")
-	if err != nil || !assignResult.OK || string(assignResult.Data) != `{"assigned":true}` {
+	var assignment AssignProjectTaskOutput
+	if err := json.Unmarshal(assignResult.Data, &assignment); err != nil || !assignResult.OK || !assignment.Assigned || assignment.TaskID != firstTask.TaskID || assignment.RestoreAssigneeUserID != nil || assignment.ExpectedAssigneeUserID == nil || *assignment.ExpectedAssigneeUserID != fx.userID {
 		t.Fatalf("assign result=%+v err=%v", assignResult, err)
 	}
 	moveResult, err := executeProjectCapability(fx, moveProjectTaskCapabilityID, `{"taskId":"`+firstTask.TaskID+`","status":"doing","position":0}`, "projects-move-task")
-	if err != nil || !moveResult.OK || string(moveResult.Data) != `{"moved":true,"status":"doing"}` {
+	var moved MoveProjectTaskOutput
+	if err := json.Unmarshal(moveResult.Data, &moved); err != nil || !moveResult.OK || !moved.Moved || moved.Status != "doing" || moved.RestoreStatus != "todo" || moved.ExpectedStatus != "doing" {
 		t.Fatalf("move result=%+v err=%v", moveResult, err)
 	}
 	if got := fx.count(`SELECT count(*) FROM project_tasks WHERE id=$1::uuid AND org_id=$2::uuid AND status='doing' AND position=0 AND assignee_user_id=$3::uuid`, firstTask.TaskID, fx.orgID, fx.userID); got != 1 {
@@ -167,14 +170,16 @@ func TestGoProjectsLifecyclePreservesDefaultsAttributionAuditAndReceiptReplay(t 
 		t.Fatalf("move without position changed the task's position, matching rows=%d", got)
 	}
 	clearAssignee, err := executeProjectCapability(fx, assignProjectTaskCapabilityID, `{"taskId":"`+secondTask.TaskID+`"}`, "projects-clear-assignee")
-	if err != nil || !clearAssignee.OK || string(clearAssignee.Data) != `{"assigned":true}` {
+	var cleared AssignProjectTaskOutput
+	if err := json.Unmarshal(clearAssignee.Data, &cleared); err != nil || !clearAssignee.OK || !cleared.Assigned || cleared.ExpectedAssigneeUserID != nil {
 		t.Fatalf("clear assignee result=%+v err=%v", clearAssignee, err)
 	}
 	if got := fx.count(`SELECT count(*) FROM project_tasks WHERE id=$1::uuid AND org_id=$2::uuid AND assignee_user_id IS NULL`, secondTask.TaskID, fx.orgID); got != 1 {
 		t.Fatalf("omitted assignment did not clear the assignee, matching rows=%d", got)
 	}
 	archiveResult, err := executeProjectCapability(fx, archiveProjectCapabilityID, `{"projectId":"`+created.ProjectID+`"}`, "projects-archive")
-	if err != nil || !archiveResult.OK || string(archiveResult.Data) != `{"archived":true}` {
+	var archived ArchiveProjectOutput
+	if err := json.Unmarshal(archiveResult.Data, &archived); err != nil || !archiveResult.OK || !archived.Archived || archived.ProjectID != created.ProjectID {
 		t.Fatalf("archive result=%+v err=%v", archiveResult, err)
 	}
 	if got := fx.count(`SELECT count(*) FROM projects WHERE id=$1::uuid AND org_id=$2::uuid AND status='archived'`, created.ProjectID, fx.orgID); got != 1 {
@@ -205,6 +210,191 @@ func TestGoProjectsLifecyclePreservesDefaultsAttributionAuditAndReceiptReplay(t 
 		SELECT count(*) FROM ledger_events
 		WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='human' AND actor_id=$2::uuid`, fx.orgID, fx.userID); got != 8 {
 		t.Fatalf("human attributed execution events=%d, want 8", got)
+	}
+}
+
+func TestGoProjectsReciprocalInverseReceiptsAndSnapshotGuards(t *testing.T) {
+	fx := newProjectsFixture(t)
+	projectResult, err := executeProjectCapability(fx, createProjectCapabilityID, `{"name":"Inverse coverage"}`, "inverse-project-create")
+	if err != nil || !projectResult.OK {
+		t.Fatalf("create project result=%+v err=%v", projectResult, err)
+	}
+	var createdProject CreateProjectOutput
+	if err := json.Unmarshal(projectResult.Data, &createdProject); err != nil {
+		t.Fatal(err)
+	}
+	archived, err := executeProjectCapability(fx, archiveProjectCapabilityID, string(projectResult.Data), "inverse-project-archive")
+	if err != nil || !archived.OK {
+		t.Fatalf("archive from create receipt result=%+v err=%v", archived, err)
+	}
+	restored, err := executeProjectCapability(fx, projectRestoreCapabilityID, string(archived.Data), "inverse-project-restore")
+	if err != nil || !restored.OK {
+		t.Fatalf("restore project from archive receipt result=%+v err=%v", restored, err)
+	}
+	replayedRestore, err := executeProjectCapability(fx, projectRestoreCapabilityID, string(archived.Data), "inverse-project-restore")
+	if err != nil || !replayedRestore.OK || !replayedRestore.Replayed {
+		t.Fatalf("restore project receipt replay=%+v err=%v", replayedRestore, err)
+	}
+	var restoredOutput, replayedOutput RestoreProjectOutput
+	if err := json.Unmarshal(restored.Data, &restoredOutput); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(replayedRestore.Data, &replayedOutput); err != nil {
+		t.Fatal(err)
+	}
+	if restoredOutput != replayedOutput {
+		t.Fatalf("restore project receipt replay=%+v err=%v", replayedRestore, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM projects WHERE org_id=$1::uuid AND id=$2::uuid AND status='active'`, fx.orgID, createdProject.ProjectID); got != 1 {
+		t.Fatalf("restored project count=%d, want active project", got)
+	}
+
+	taskCreated, err := executeProjectCapability(fx, createProjectTaskCapabilityID, `{"projectId":"`+createdProject.ProjectID+`","title":"Parent work"}`, "inverse-task-create")
+	if err != nil || !taskCreated.OK {
+		t.Fatalf("create task result=%+v err=%v", taskCreated, err)
+	}
+	var taskSnapshot CreateProjectTaskOutput
+	if err := json.Unmarshal(taskCreated.Data, &taskSnapshot); err != nil || taskSnapshot.TaskID == "" || taskSnapshot.CreatedAt == "" {
+		t.Fatalf("create task snapshot=%+v err=%v", taskSnapshot, err)
+	}
+	childCreated, err := executeProjectCapability(fx, createProjectTaskCapabilityID, `{"projectId":"`+createdProject.ProjectID+`","title":"Child work","parentTaskId":"`+taskSnapshot.TaskID+`"}`, "inverse-child-create")
+	if err != nil || !childCreated.OK {
+		t.Fatalf("create child task result=%+v err=%v", childCreated, err)
+	}
+	var childSnapshot CreateProjectTaskOutput
+	if err := json.Unmarshal(childCreated.Data, &childSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executeProjectCapability(fx, restoreProjectTaskCapabilityID, string(childCreated.Data), "inverse-child-fabricated-restore"); err == nil || err.Error() != "task restore requires a matching successful delete receipt" {
+		t.Fatalf("restore from a fabricated create snapshot error=%v, want receipt proof rejection", err)
+	}
+	if _, err := executeProjectCapability(fx, deleteProjectTaskCapabilityID, string(taskCreated.Data), "inverse-parent-delete-blocked"); err == nil || err.Error() != "task changed or has child tasks" {
+		t.Fatalf("parent delete error=%v, want child guard", err)
+	}
+	deletedChild, err := executeProjectCapability(fx, deleteProjectTaskCapabilityID, string(childCreated.Data), "inverse-child-delete")
+	if err != nil || !deletedChild.OK {
+		t.Fatalf("delete exact child snapshot result=%+v err=%v", deletedChild, err)
+	}
+	deleteReplay, err := executeProjectCapability(fx, deleteProjectTaskCapabilityID, string(childCreated.Data), "inverse-child-delete")
+	if err != nil || !deleteReplay.OK || !deleteReplay.Replayed {
+		t.Fatalf("delete receipt replay=%+v err=%v", deleteReplay, err)
+	}
+	var deletedSnapshot, replayedDeleteSnapshot ProjectTaskSnapshot
+	if err := json.Unmarshal(deletedChild.Data, &deletedSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(deleteReplay.Data, &replayedDeleteSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(replayedDeleteSnapshot, deletedSnapshot) {
+		t.Fatalf("delete receipt replay=%+v err=%v", deleteReplay, err)
+	}
+	var tampered ProjectTaskSnapshot
+	if err := json.Unmarshal(childCreated.Data, &tampered); err != nil {
+		t.Fatal(err)
+	}
+	tampered.Title = "Modified snapshot"
+	tamperedJSON, _ := json.Marshal(tampered)
+	if _, err := executeProjectCapability(fx, deleteProjectTaskCapabilityID, string(tamperedJSON), "inverse-child-delete-tampered"); err == nil || err.Error() != "task changed or has child tasks" {
+		t.Fatalf("tampered snapshot delete error=%v, want mismatch guard", err)
+	}
+	restoredChild, err := executeProjectCapability(fx, restoreProjectTaskCapabilityID, string(deletedChild.Data), "inverse-child-restore")
+	if err != nil || !restoredChild.OK {
+		t.Fatalf("restore task from delete receipt result=%+v err=%v", restoredChild, err)
+	}
+	var restoredSnapshot ProjectTaskSnapshot
+	if err := json.Unmarshal(restoredChild.Data, &restoredSnapshot); err != nil || !reflect.DeepEqual(restoredSnapshot, childSnapshot.ProjectTaskSnapshot) {
+		t.Fatalf("restored task snapshot=%+v, want original=%+v err=%v", restoredSnapshot, childSnapshot.ProjectTaskSnapshot, err)
+	}
+	restoredChildReplay, err := executeProjectCapability(fx, restoreProjectTaskCapabilityID, string(deletedChild.Data), "inverse-child-restore")
+	if err != nil || !restoredChildReplay.OK || !restoredChildReplay.Replayed {
+		t.Fatalf("restore task receipt replay=%+v err=%v", restoredChildReplay, err)
+	}
+	deletedAgain, err := executeProjectCapability(fx, deleteProjectTaskCapabilityID, string(restoredChild.Data), "inverse-child-delete-again")
+	if err != nil || !deletedAgain.OK {
+		t.Fatalf("reciprocal task delete result=%+v err=%v", deletedAgain, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM project_tasks WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, taskSnapshot.TaskID); got != 1 {
+		t.Fatalf("parent task remains=%d, want unchanged parent", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM project_tasks WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, childSnapshot.TaskID); got != 0 {
+		t.Fatalf("task count after inverse chain=%d, want deleted child", got)
+	}
+	deletedParent, err := executeProjectCapability(fx, deleteProjectTaskCapabilityID, string(taskCreated.Data), "inverse-parent-delete")
+	if err != nil || !deletedParent.OK {
+		t.Fatalf("createTask declared inverse from stored output result=%+v err=%v", deletedParent, err)
+	}
+	restoredParent, err := executeProjectCapability(fx, restoreProjectTaskCapabilityID, string(deletedParent.Data), "inverse-parent-restore")
+	if err != nil || !restoredParent.OK {
+		t.Fatalf("restore parent from delete receipt result=%+v err=%v", restoredParent, err)
+	}
+	var restoredParentSnapshot ProjectTaskSnapshot
+	if err := json.Unmarshal(restoredParent.Data, &restoredParentSnapshot); err != nil || !reflect.DeepEqual(restoredParentSnapshot, taskSnapshot.ProjectTaskSnapshot) {
+		t.Fatalf("restored parent snapshot=%+v want=%+v err=%v", restoredParentSnapshot, taskSnapshot.ProjectTaskSnapshot, err)
+	}
+
+	placementTask, err := executeProjectCapability(fx, createProjectTaskCapabilityID, `{"projectId":"`+createdProject.ProjectID+`","title":"Move me"}`, "inverse-placement-create")
+	if err != nil || !placementTask.OK {
+		t.Fatalf("placement task create=%+v err=%v", placementTask, err)
+	}
+	var placementSnapshot CreateProjectTaskOutput
+	if err := json.Unmarshal(placementTask.Data, &placementSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	moveReceipt, err := executeProjectCapability(fx, moveProjectTaskCapabilityID, `{"taskId":"`+placementSnapshot.TaskID+`","status":"doing","position":7}`, "inverse-placement-move")
+	if err != nil || !moveReceipt.OK {
+		t.Fatalf("move task result=%+v err=%v", moveReceipt, err)
+	}
+	placementUndo, err := executeProjectCapability(fx, restoreProjectTaskPlacementCapabilityID, string(moveReceipt.Data), "inverse-placement-restore")
+	if err != nil || !placementUndo.OK {
+		t.Fatalf("restore task placement result=%+v err=%v", placementUndo, err)
+	}
+	placementUndoReplay, err := executeProjectCapability(fx, restoreProjectTaskPlacementCapabilityID, string(moveReceipt.Data), "inverse-placement-restore")
+	if err != nil || !placementUndoReplay.OK || !placementUndoReplay.Replayed {
+		t.Fatalf("restore placement receipt replay=%+v err=%v", placementUndoReplay, err)
+	}
+	if _, err := executeProjectCapability(fx, moveProjectTaskCapabilityID, string(placementUndo.Data), "inverse-placement-redo"); err != nil {
+		t.Fatalf("reciprocal placement restore result=%v", err)
+	}
+	if got := fx.count(`SELECT count(*) FROM project_tasks WHERE org_id=$1::uuid AND id=$2::uuid AND status='doing' AND position=7`, fx.orgID, placementSnapshot.TaskID); got != 1 {
+		t.Fatalf("placement reciprocal restore count=%d, want moved state", got)
+	}
+	_, err = executeProjectCapability(fx, restoreProjectTaskPlacementCapabilityID, `{"taskId":"`+placementSnapshot.TaskID+`","restoreStatus":"todo","restorePosition":0,"expectedStatus":"todo","expectedPosition":0}`, "inverse-placement-stale")
+	if err == nil || err.Error() != "task placement changed since this action" {
+		t.Fatalf("stale placement restore error=%v, want concurrency guard", err)
+	}
+
+	assignReceipt, err := executeProjectCapability(fx, assignProjectTaskCapabilityID, `{"taskId":"`+placementSnapshot.TaskID+`","assigneeUserId":"`+fx.userID+`"}`, "inverse-assignment-set")
+	if err != nil || !assignReceipt.OK {
+		t.Fatalf("assign task result=%+v err=%v", assignReceipt, err)
+	}
+	assignmentUndo, err := executeProjectCapability(fx, restoreProjectTaskAssigneeCapabilityID, string(assignReceipt.Data), "inverse-assignment-restore")
+	if err != nil || !assignmentUndo.OK {
+		t.Fatalf("restore assignment result=%+v err=%v", assignmentUndo, err)
+	}
+	if _, err := executeProjectCapability(fx, assignProjectTaskCapabilityID, string(assignmentUndo.Data), "inverse-assignment-redo"); err != nil {
+		t.Fatalf("reciprocal assignment restore result=%v", err)
+	}
+	if got := fx.count(`SELECT count(*) FROM project_tasks WHERE org_id=$1::uuid AND id=$2::uuid AND assignee_user_id=$3::uuid`, fx.orgID, placementSnapshot.TaskID, fx.userID); got != 1 {
+		t.Fatalf("assignment reciprocal restore count=%d, want assigned state", got)
+	}
+
+	var foreignProjectID string
+	if err := fx.owner.QueryRow(fx.ctx, `INSERT INTO projects (org_id, name) VALUES ($1::uuid, 'Foreign project') RETURNING id::text`, fx.otherOrgID).Scan(&foreignProjectID); err != nil {
+		t.Fatal(err)
+	}
+	foreignSnapshot := taskSnapshot
+	foreignSnapshot.TaskID = "55555555-5555-4555-8555-555555555555"
+	foreignSnapshot.ProjectID = foreignProjectID
+	foreignJSON, _ := json.Marshal(foreignSnapshot)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO action_receipts (org_id, intent_key, capability_id, input_hash, ok, outcome, data)
+		VALUES ($1::uuid, $2, $3, 'test-hash', true, 'known', $4::jsonb)`,
+		fx.otherOrgID, fx.otherOrgID+":foreign-delete-proof", deleteProjectTaskCapabilityID, foreignJSON); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executeProjectCapability(fx, restoreProjectTaskCapabilityID, string(foreignJSON), "inverse-foreign-task-restore"); err == nil || err.Error() != "task restore requires a matching successful delete receipt" {
+		t.Fatalf("cross-organization receipt restore error=%v, want scoped receipt rejection", err)
 	}
 }
 
