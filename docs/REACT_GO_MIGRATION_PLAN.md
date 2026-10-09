@@ -2160,3 +2160,13 @@ new owners and the manifest shows zero legacy runtime paths.
      restore inputs and applies the inventory write permission and per-org
      import rate limit. Focused Vite API/UI and Go route/capability tests pass;
      browser proof remains open.
+211. (Implemented) Route Vite Marketing campaign analytics through the
+     session-authenticated `marketing.campaignAnalytics` capability when
+     `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. When Go is selected, segment
+     creation, campaign creation, send, and analytics fail closed on a missing
+     Go route rather than retrying through `/api/marketing`. Preserve campaign
+     actor/org scoped intent receipts across pending approvals, 404s, malformed
+     responses, and uncertain send results. Keep the Marketing snapshot read
+     separate on its existing path. Add focused Vite contract and retry tests;
+     browser proof remains open.

@@ -153,26 +153,17 @@ describe("marketing governed writes", () => {
       .resolves.toEqual({ kind: "pending", reason: "Marketing writes need approval." });
   });
 
-  it("falls back to the legacy marketing action only when the Go route is absent", async () => {
+  it("fails closed instead of falling back when the Go segment route is absent", async () => {
     const intentId = "marketing-segment-intent";
     vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { segmentId } }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "not found" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }, intentId))
-      .resolves.toEqual({ kind: "completed", data: { segmentId } });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+      .rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/marketing");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ intentId });
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
-      action: "createSegment",
-      name: "Big spenders",
-      minSpendMinor: 250_000,
-      intentId,
-    });
   });
 
   it("keeps legacy marketing actions as the default when the Go slice flag is off", async () => {
@@ -255,6 +246,42 @@ describe("marketing campaign Go routing", () => {
     expect(window.localStorage.length).toBe(0);
   });
 
+  it("routes campaign analytics through the Go capability and validates its output envelope", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn(async () => Response.json({
+      ok: true,
+      data: { campaignName: "Spring renewal", sentCount: 2, queuedAt: "2026-09-20T09:30:00.000Z" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "campaignAnalytics", campaignId })).resolves.toEqual({
+      kind: "completed",
+      data: { campaignName: "Spring renewal", sentCount: 2, queuedAt: "2026-09-20T09:30:00.000Z" },
+    });
+    const [path, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      capabilityId: "marketing.campaignAnalytics",
+      input: { campaignId },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("rejects malformed queued timestamps in a Go analytics result without a legacy retry", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      ok: true,
+      data: { campaignName: "Spring renewal", sentCount: 2, queuedAt: "soon" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "campaignAnalytics", campaignId })).rejects.toMatchObject({
+      message: "The marketing service returned an unexpected action result.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
   it("reuses the exact send intent through pending and uncertain outcomes", async () => {
     vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
     const fetchMock = vi.fn()
@@ -308,21 +335,58 @@ describe("marketing campaign Go routing", () => {
     expect(JSON.parse(String(first[1].body)).intentId).not.toBe(JSON.parse(String(second[1].body)).intentId);
   });
 
-  it("uses the same ID for Go 404 fallback and legacy completion", async () => {
+  it("retains the exact send intent after Go 404 and retries only Go", async () => {
     vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { recipients: 3, skippedOptOut: 1, skippedNoAddress: 0, alreadySent: 2 } }));
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Needs review" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).resolves.toEqual({
-      kind: "completed", data: { recipients: 3, skippedOptOut: 1, skippedNoAddress: 0, alreadySent: 2 },
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).rejects.toMatchObject({
+      status: 404,
+      requestMayHaveReachedServer: true,
     });
-    const first = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    const second = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
-    expect(first[0]).toBe("/api/capabilities/execute");
-    expect(second[0]).toBe("/api/marketing");
-    expect(JSON.parse(String(second[1].body))).toMatchObject({ action: "sendCampaign", campaignId, intentId: JSON.parse(String(first[1].body)).intentId });
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).resolves.toMatchObject({ kind: "pending" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([path]) => path)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(JSON.parse(String(calls[0]?.[1].body)).intentId).toBe(JSON.parse(String(calls[1]?.[1].body)).intentId);
+  });
+
+  it.each([
+    {
+      label: "segment creation",
+      selector: "__GO_MARKETING_SEGMENT_SLICE__",
+      action: { action: "createSegment" as const, name: "Big spenders", minSpendMinor: 25_000 },
+    },
+    { label: "campaign creation", selector: "__GO_MARKETING_CAMPAIGN_WRITES__", action: createCampaignAction },
+    { label: "campaign send", selector: "__GO_MARKETING_CAMPAIGN_WRITES__", action: { action: "sendCampaign" as const, campaignId } },
+  ])("does not fall back to legacy after Go 404 for $label", async ({ selector, action }) => {
+    vi.stubGlobal(selector, true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction(action, undefined, retryScope)).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("retains the exact send attempt after a malformed Go success envelope", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { recipients: "three" } }))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Needs review" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).rejects.toMatchObject({
+      requestMayHaveReachedServer: true,
+      message: "The marketing service returned an unexpected action result.",
+    });
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).resolves.toMatchObject({ kind: "pending" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
   });
 
   it.each([401, 403, 500])("does not fall back to legacy after Go returns %s", async (status) => {

@@ -99,7 +99,7 @@ const MarketingActionOutputSchemas = {
   campaignAnalytics: z.object({
     campaignName: z.string(),
     sentCount: count,
-    queuedAt: z.string().nullable(),
+    queuedAt: instant.nullable(),
   }).strict(),
 } as const;
 
@@ -151,13 +151,13 @@ function errorMessage(status: number, raw: unknown): string {
   return "The marketing request could not be completed. Check the details and try again.";
 }
 
-async function readJson(response: Response): Promise<unknown> {
+async function readJson(response: Response, requestMayHaveReachedServer = false): Promise<unknown> {
   try {
     return await response.json();
   } catch {
     const retryableClientStatus = response.status === 408 || response.status === 429;
     const terminalClientError = response.status >= 400 && response.status < 500 && response.status !== 202 && !retryableClientStatus;
-    throw new MarketingApiError(response.status, "The marketing service returned an unreadable response.", response.status > 0 && !terminalClientError);
+    throw new MarketingApiError(response.status, "The marketing service returned an unreadable response.", requestMayHaveReachedServer || (response.status > 0 && !terminalClientError));
   }
 }
 
@@ -216,8 +216,10 @@ export async function submitMarketingAction<Action extends MarketingAction>(
     && typeof __GO_MARKETING_SEGMENT_SLICE__ !== "undefined"
     && __GO_MARKETING_SEGMENT_SLICE__;
   const campaignWritesEnabled = typeof __GO_MARKETING_CAMPAIGN_WRITES__ !== "undefined" && __GO_MARKETING_CAMPAIGN_WRITES__;
-  const useGoCampaign = campaignWritesEnabled && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign");
-  const useGo = useGoSegment || useGoCampaign;
+  const useGoCampaign = campaignWritesEnabled
+    && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign");
+  const useGoAnalytics = campaignWritesEnabled && parsedAction.data.action === "campaignAnalytics";
+  const useGo = useGoSegment || useGoCampaign || useGoAnalytics;
   let attempt: MarketingAttempt | null = null;
   if (useGoCampaign && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign")) {
     attempt = await getMarketingAttempt(parsedAction.data, retryScope);
@@ -233,7 +235,9 @@ export async function submitMarketingAction<Action extends MarketingAction>(
       ? { capabilityId: "marketing.createCampaign", input: { segmentId: parsedAction.data.segmentId, name: parsedAction.data.name, subject: parsedAction.data.subject, body: parsedAction.data.body }, intentId: activeIntentId }
       : useGoCampaign && parsedAction.data.action === "sendCampaign"
         ? { capabilityId: "marketing.sendCampaign", input: { campaignId: parsedAction.data.campaignId }, intentId: activeIntentId }
-        : legacyBody;
+        : useGoAnalytics && parsedAction.data.action === "campaignAnalytics"
+          ? { capabilityId: "marketing.campaignAnalytics", input: { campaignId: parsedAction.data.campaignId }, intentId: activeIntentId }
+          : legacyBody;
 
   const send = (path: string, body: Record<string, unknown>) => fetch(path, {
     method: "POST",
@@ -247,9 +251,6 @@ export async function submitMarketingAction<Action extends MarketingAction>(
   let response: Response;
   try {
     response = await send(requestPath, requestBody);
-    // The proxy and API mount flags are paired, but keep local development
-    // usable when only the Go proxy is configured and that API mount is absent.
-    if (useGo && response.status === 404) response = await send("/api/marketing", legacyBody);
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new MarketingApiError(0, "The marketing action took too long. Check the send log before trying again.", true);
@@ -258,16 +259,17 @@ export async function submitMarketingAction<Action extends MarketingAction>(
   }
 
   const retryableStatus = response.status === 408 || response.status === 429;
-  const terminalClientError = response.status >= 400 && response.status < 500 && response.status !== 202 && !retryableStatus;
+  const missingGoRoute = useGo && response.status === 404;
+  const terminalClientError = response.status >= 400 && response.status < 500 && response.status !== 202 && !retryableStatus && !missingGoRoute;
   if (attempt && terminalClientError) clearMarketingAttempt(attempt);
-  const raw = await readJson(response);
+  const raw = await readJson(response, Boolean(attempt && missingGoRoute));
   if (response.status === 202) {
     const pending = PendingSchema.safeParse(raw);
     if (!pending.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected approval response.", true);
     return { kind: "pending", reason: pending.data.reason ?? "This action is waiting for human approval. It is in the Approvals inbox." };
   }
   if (!response.ok) {
-    throw new MarketingApiError(response.status, errorMessage(response.status, raw), Boolean(attempt && !terminalClientError));
+    throw new MarketingApiError(response.status, errorMessage(response.status, raw), Boolean(attempt && (!terminalClientError || missingGoRoute)));
   }
 
   const envelope = SuccessSchema.safeParse(raw);
