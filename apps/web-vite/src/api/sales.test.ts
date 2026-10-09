@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchSalesOrders, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite } from "./sales";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearRouteLessSalesOrderAttempt, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite } from "./sales";
 
 const scope = { actorId: "actor-1", organizationId: "org-1" };
 const orderId = "10000000-0000-4000-8000-000000000001";
@@ -13,12 +13,38 @@ function success(data: unknown) {
   return Response.json({ ok: true, data });
 }
 
+function stubWebLocks() {
+  const testNavigator = Object.create(navigator) as Navigator;
+  Object.defineProperty(testNavigator, "locks", {
+    configurable: true,
+    value: {
+      request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback(),
+    },
+  });
+  vi.stubGlobal("navigator", testNavigator);
+}
+
+beforeEach(() => {
+  stubWebLocks();
+});
+
 afterEach(() => {
   window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
 describe("sales order writes", () => {
+  const goWrite404Cases: Array<[string, Parameters<typeof submitSalesOrderWrite>[0], unknown]> = [
+    ["create", { action: "create", customerId, lines: [{ description: "Coffee", quantity: 1000, unitPriceMinor: 1250 }] }, { orderId, orderNumber: 46 }],
+    ["deliver", { action: "deliver", orderId }, { invoiceId: orderId, invoiceNumber: 901, invoiceTotalMinor: 5000, orderStatus: "delivered" }],
+    ["cancel", { action: "cancel", orderId }, { status: "cancelled", releasedThousandths: 1000 }],
+  ];
+  const routeLessActionCases: Array<[string, Parameters<typeof submitSalesOrderWrite>[0]]> = [
+    ["create", { action: "create", customerId, lines: [{ description: "Coffee", quantity: 1000, unitPriceMinor: 1250 }] }],
+    ["deliver", { action: "deliver", orderId }],
+    ["cancel", { action: "cancel", orderId }],
+  ];
+
   it("fails closed without actor and organization scope", async () => {
     goWrites();
     const fetchMock = vi.fn();
@@ -109,17 +135,163 @@ describe("sales order writes", () => {
     expect(requests[1]).toMatchObject({ capabilityId: "sales.cancelOrder", input: { orderId } });
   });
 
-  it("falls back to the legacy action only on a missing Go route and keeps the intent", async () => {
+  it.each(goWrite404Cases)("fails closed on Go 404 for %s and retries the exact action through Go", async (_name, action, output) => {
     goWrites();
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
-      .mockResolvedValueOnce(success({ status: "cancelled", releasedThousandths: 0 }));
+      .mockResolvedValueOnce(Response.json({ error: "capability not found" }, { status: 404 }))
+      .mockResolvedValueOnce(success(output));
     vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSalesOrderWrite(action, scope)).rejects.toMatchObject({ status: 404 });
+    await expect(submitSalesOrderWrite(action, scope)).resolves.toMatchObject({ kind: "completed" });
+
+    const requests = fetchMock.mock.calls.map(([url, init]) => ({
+      url,
+      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+    }));
+    expect(requests).toHaveLength(2);
+    expect(requests.map(({ url }) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(requests[1]?.body).toEqual(requests[0]?.body);
+  });
+
+  it("uses the legacy action only when the Go write selector is off", async () => {
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", false);
+    const fetchMock = vi.fn().mockResolvedValue(success({ status: "cancelled", releasedThousandths: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
     await expect(submitSalesOrderWrite({ action: "cancel", orderId }, scope)).resolves.toMatchObject({ kind: "completed" });
-    const goBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
-    const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { action: string; orderId: string; intentId: string };
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/sales"]);
-    expect(legacyBody).toMatchObject({ action: "cancel", orderId, intentId: goBody.intentId });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/sales");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ action: "cancel", orderId });
+  });
+
+  it("pins an unresolved Go 404 to Go when the selector is rolled back", async () => {
+    goWrites();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "capability not found" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "cancel" as const, orderId };
+
+    await expect(submitSalesOrderWrite(action, scope)).rejects.toMatchObject({ status: 404 });
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", false);
+    await expect(submitSalesOrderWrite(action, scope)).rejects.toThrow("unresolved on the Go route");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("rejects selector changes while a legacy write result is unresolved", async () => {
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", false);
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network"));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "cancel" as const, orderId };
+
+    await expect(submitSalesOrderWrite(action, scope)).rejects.toBeInstanceOf(SalesApiError);
+    goWrites();
+    await expect(submitSalesOrderWrite(action, scope)).rejects.toThrow("unresolved on the legacy route");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/sales");
+  });
+
+  it("blocks route-less pre-upgrade markers with history and cleanup guidance", async () => {
+    goWrites();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "create" as const, customerId, lines: [{ description: "Coffee", quantity: 1000, unitPriceMinor: 1250 }] };
+    await submitSalesOrderWrite(action, scope);
+    const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith("chaste:sales-order-write-attempt:"));
+    expect(key).toBeDefined();
+    const stored = JSON.parse(window.localStorage.getItem(key!) ?? "null") as Record<string, unknown>;
+    delete stored.route;
+    window.localStorage.setItem(key!, JSON.stringify(stored));
+
+    await expect(submitSalesOrderWrite(action, scope)).rejects.toThrow("predates route tracking");
+    await expect(restorePendingSalesOrderCreate(scope)).rejects.toThrow("predates route tracking");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(routeLessActionCases)("discovers and clears only a valid route-less %s marker", async (_name, action) => {
+    goWrites();
+    stubWebLocks();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await submitSalesOrderWrite(action, scope);
+    const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith("chaste:sales-order-write-attempt:"));
+    expect(key).toBeDefined();
+    const stored = JSON.parse(window.localStorage.getItem(key!) ?? "null") as Record<string, unknown>;
+    delete stored.route;
+    window.localStorage.setItem(key!, JSON.stringify(stored));
+
+    const marker = await findRouteLessSalesOrderAction(scope);
+    expect(marker).toMatchObject({ action: action.action });
+    await expect(clearRouteLessSalesOrderAttempt({ ...scope, organizationId: "org-2" }, marker!)).resolves.toBe(false);
+    expect(window.localStorage.getItem(key!)).not.toBeNull();
+    await expect(clearRouteLessSalesOrderAttempt(scope, marker!)).resolves.toBe(true);
+    await expect(findRouteLessSalesOrderAction(scope)).resolves.toBeNull();
+    expect(window.localStorage.getItem(key!)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("never clears valid route-pinned or damaged markers through route-less recovery", async () => {
+    goWrites();
+    stubWebLocks();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "cancel" as const, orderId };
+    await submitSalesOrderWrite(action, scope);
+    const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith("chaste:sales-order-write-attempt:"));
+    expect(key).toBeDefined();
+    const stored = JSON.parse(window.localStorage.getItem(key!) ?? "null") as { fingerprint: string; intentId: string; action: { action: "cancel" } };
+    const marker = { action: stored.action.action, fingerprint: stored.fingerprint, intentId: stored.intentId };
+
+    await expect(findRouteLessSalesOrderAction(scope)).resolves.toBeNull();
+    await expect(clearRouteLessSalesOrderAttempt(scope, marker)).resolves.toBe(false);
+    expect(window.localStorage.getItem(key!)).not.toBeNull();
+
+    window.localStorage.setItem(key!, "{");
+    await expect(clearRouteLessSalesOrderAttempt(scope, marker)).rejects.toThrow("saved sales order retry marker is damaged");
+    expect(window.localStorage.getItem(key!)).toBe("{");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears only the exact route-less marker that was reviewed", async () => {
+    goWrites();
+    stubWebLocks();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "cancel" as const, orderId };
+    await submitSalesOrderWrite(action, scope);
+    const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith("chaste:sales-order-write-attempt:"));
+    expect(key).toBeDefined();
+    const stored = JSON.parse(window.localStorage.getItem(key!) ?? "null") as { fingerprint: string; intentId: string; action: typeof action; route?: string };
+    delete stored.route;
+    window.localStorage.setItem(key!, JSON.stringify(stored));
+    const reviewed = await findRouteLessSalesOrderAction(scope);
+    expect(reviewed).not.toBeNull();
+
+    window.localStorage.setItem(key!, JSON.stringify({ ...stored, intentId: crypto.randomUUID() }));
+    await expect(clearRouteLessSalesOrderAttempt(scope, reviewed!)).resolves.toBe(false);
+    expect(window.localStorage.getItem(key!)).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when Web Locks is unavailable for marker cleanup", async () => {
+    goWrites();
+    stubWebLocks();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "cancel" as const, orderId };
+    await submitSalesOrderWrite(action, scope);
+    const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith("chaste:sales-order-write-attempt:"));
+    expect(key).toBeDefined();
+    const stored = JSON.parse(window.localStorage.getItem(key!) ?? "null") as { fingerprint: string; intentId: string; action: { action: "cancel" } };
+    const marker = { action: stored.action.action, fingerprint: stored.fingerprint, intentId: stored.intentId };
+    const unsupportedNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(unsupportedNavigator, "locks", { configurable: true, value: undefined });
+    vi.stubGlobal("navigator", unsupportedNavigator);
+
+    await expect(clearRouteLessSalesOrderAttempt(scope, marker)).rejects.toThrow("Web Locks support");
+    expect(window.localStorage.getItem(key!)).not.toBeNull();
   });
 });
 

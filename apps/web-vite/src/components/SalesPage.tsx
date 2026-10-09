@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite, type SalesOrder } from "../api/sales";
+import { clearRouteLessSalesOrderAttempt, confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite, type RouteLessSalesOrderMarker, type SalesOrder } from "../api/sales";
 import { PosApiError } from "../api/pos";
 import { fetchPosCustomers, type PosCustomer } from "../api/pos-session";
 import { legacyUrl } from "../legacy";
@@ -136,6 +136,10 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const [writeBusy, setWriteBusy] = useState(false);
   const [createAttemptPending, setCreateAttemptPending] = useState(false);
   const [createAttemptRestoredScope, setCreateAttemptRestoredScope] = useState<string | null>(null);
+  const [scopedWriteRecoveryLocked, setScopedWriteRecoveryLocked] = useState(false);
+  const [routeLessAttempt, setRouteLessAttempt] = useState<{ scopeIdentity: string; marker: RouteLessSalesOrderMarker } | null>(null);
+  const [routeLessReviewConfirmed, setRouteLessReviewConfirmed] = useState(false);
+  const [routeLessRecoveryBusy, setRouteLessRecoveryBusy] = useState(false);
   const [orderActionTarget, setOrderActionTarget] = useState<OrderActionTarget | null>(null);
   const confirmIntents = useRef(new Map<string, string>());
   const previousCreateScope = useRef<string | null>(null);
@@ -153,7 +157,8 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     confirmationGeneration.current += 1;
   }
   const createScopeReady = createScopeIdentity !== null && createAttemptRestoredScope === createScopeIdentity;
-  const createWriteLocked = !createScopeReady || createAttemptPending;
+  const routeLessAttemptCurrent = routeLessAttempt?.scopeIdentity === createScopeIdentity;
+  const createWriteLocked = !createScopeReady || createAttemptPending || routeLessAttemptCurrent || scopedWriteRecoveryLocked;
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
@@ -191,6 +196,10 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     previousCreateScope.current = createScopeIdentity;
     setCreateAttemptRestoredScope(null);
     setCreateAttemptPending(false);
+    setScopedWriteRecoveryLocked(false);
+    setRouteLessAttempt(null);
+    setRouteLessReviewConfirmed(false);
+    setRouteLessRecoveryBusy(false);
     if (scopeChanged) {
       setWriteBusy(false);
       setConfirmingOrderId(null);
@@ -204,7 +213,19 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       setActionNotice(null);
     }
     if (!actorId || !organizationId || !createScopeIdentity) return () => { current = false; };
-    void restorePendingSalesOrderCreate({ actorId, organizationId }).then((action) => {
+    void (async () => {
+      const routeLessAction = await findRouteLessSalesOrderAction({ actorId, organizationId });
+      if (!current) return;
+      if (routeLessAction) {
+        setRouteLessAttempt({ scopeIdentity: createScopeIdentity, marker: routeLessAction });
+        setCreateAttemptRestoredScope(createScopeIdentity);
+        setCreateAttemptPending(true);
+        setSearch("");
+        setFilter("all");
+        setActionNotice({ tone: "error", message: "A saved sales order retry marker has no known backend. Review sales order history before choosing whether to clear it." });
+        return;
+      }
+      const action = await restorePendingSalesOrderCreate({ actorId, organizationId });
       if (!current) return;
       setCreateAttemptRestoredScope(createScopeIdentity);
       if (!action) return;
@@ -222,14 +243,39 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       setShowCreateForm(true);
       setCreateAttemptPending(true);
       setActionNotice({ tone: "pending", message: "An earlier sales order submission is unresolved. Retry the restored draft to check its result." });
-    }).catch((error: unknown) => {
+    })().catch((error: unknown) => {
       if (!current) return;
+      setScopedWriteRecoveryLocked(true);
       setCreateAttemptPending(true);
       setShowCreateForm(true);
       setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The saved sales order draft could not be restored." });
     });
     return () => { current = false; };
   }, [actorId, createScopeIdentity, currency.minorUnits, organizationId]);
+
+  async function clearReviewedRouteLessAttempt(): Promise<void> {
+    if (!routeLessAttemptCurrent || !routeLessReviewConfirmed || routeLessRecoveryBusy || !actorId || !organizationId || !createScopeIdentity) return;
+    const submittedScope = createScopeIdentity;
+    setRouteLessRecoveryBusy(true);
+    try {
+      const cleared = await clearRouteLessSalesOrderAttempt({ actorId, organizationId }, routeLessAttempt.marker);
+      if (currentCreateScope.current !== submittedScope) return;
+      if (!cleared) {
+        setActionNotice({ tone: "error", message: "The route-less sales marker changed before it could be cleared. Review sales order history again." });
+        return;
+      }
+      setRouteLessAttempt(null);
+      setRouteLessReviewConfirmed(false);
+      setCreateAttemptPending(false);
+      setScopedWriteRecoveryLocked(false);
+      setActionNotice({ tone: "success", message: "The reviewed ambiguous retry marker was cleared. No Sales action was sent." });
+    } catch (error) {
+      if (currentCreateScope.current !== submittedScope) return;
+      setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The reviewed sales retry marker could not be cleared." });
+    } finally {
+      if (currentCreateScope.current === submittedScope) setRouteLessRecoveryBusy(false);
+    }
+  }
 
   useEffect(() => {
     function onShortcut(event: KeyboardEvent) {
@@ -260,6 +306,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   }, [customerNames, filter, search, state]);
 
   async function handleConfirm(order: SalesOrder) {
+    if (!createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked) return;
     const submittedScope = createScopeIdentity;
     const submittedGeneration = confirmationGeneration.current;
     const isCurrentScope = () => currentCreateScope.current === submittedScope
@@ -327,7 +374,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   }
 
   async function handleCreateOrder(): Promise<void> {
-    if (!createScopeReady) return;
+    if (!createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked) return;
     const submittedScope = createScopeIdentity;
     const described = createForm.lines.filter((line) => line.description.trim().length > 0);
     if (!createForm.customerId || described.length === 0) {
@@ -384,7 +431,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   }
 
   async function handleOrderAction(): Promise<void> {
-    if (!orderActionTarget || !createScopeReady || !createScopeIdentity) return;
+    if (!orderActionTarget || routeLessAttemptCurrent || scopedWriteRecoveryLocked || !createScopeReady || !createScopeIdentity) return;
     const target = orderActionTarget;
     const submittedScope = createScopeIdentity;
     setWriteBusy(true);
@@ -443,6 +490,24 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
 
       {actionNotice && <p className={`sales-action-notice sales-action-notice-${actionNotice.tone}`} role={actionNotice.tone === "error" ? "alert" : "status"}>{actionNotice.message}</p>}
 
+      {routeLessAttemptCurrent && state.status === "ready" && (
+        <section className="sales-write-card" aria-labelledby="sales-route-less-title" role="alert">
+          <div className="sales-write-heading">
+            <div><p className="sales-eyebrow">Manual review required</p><h2 id="sales-route-less-title">Resolve an older retry marker</h2></div>
+            <p>The saved {routeLessAttempt.marker.action} action has no recorded backend. Review the Sales order history below to decide whether it completed. Clearing this marker will not send a request or retry the action.</p>
+          </div>
+          <label>
+            <input type="checkbox" checked={routeLessReviewConfirmed} onChange={(event) => setRouteLessReviewConfirmed(event.currentTarget.checked)} disabled={routeLessRecoveryBusy || state.status !== "ready"} />
+            I reviewed the Sales order history and understand this only clears the ambiguous retry marker.
+          </label>
+          <div className="sales-write-actions">
+            <button type="button" className="sales-write-primary" disabled={!routeLessReviewConfirmed || routeLessRecoveryBusy || state.status !== "ready"} onClick={() => void clearReviewedRouteLessAttempt()}>
+              {routeLessRecoveryBusy ? "Clearing marker…" : "Clear reviewed retry marker"}
+            </button>
+          </div>
+        </section>
+      )}
+
       {showCreateForm && state.status === "ready" && (
         <section className="sales-write-card" aria-labelledby="sales-create-title">
           <div className="sales-write-heading">
@@ -474,7 +539,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
             ))}
             <div className="sales-write-actions">
               <button type="button" className="sales-write-secondary" disabled={writeBusy || createWriteLocked} onClick={() => setCreateForm((current) => ({ ...current, lines: [...current.lines, emptyOrderDraftLine()] }))}>Add line</button>
-              <button type="button" className="sales-write-primary" disabled={writeBusy || !createScopeReady} onClick={() => void handleCreateOrder()}>{writeBusy ? "Saving…" : "Create draft"}</button>
+              <button type="button" className="sales-write-primary" disabled={writeBusy || !createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked} onClick={() => void handleCreateOrder()}>{writeBusy ? "Saving…" : "Create draft"}</button>
             </div>
             {createError && <p className="sales-write-error" role="alert">{createError}</p>}
           </div>
@@ -565,15 +630,15 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
                           const checked = event.currentTarget.checked;
                           setAllowBackorder((current) => ({ ...current, [order.id]: checked }));
                         }}
-                        disabled={confirmingOrderId === order.id || approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) || savedConfirmIntent(order.id) !== null || confirmIntents.current.has(order.id)}
+                        disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || confirmingOrderId === order.id || approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) || savedConfirmIntent(order.id) !== null || confirmIntents.current.has(order.id)}
                       />
                       Allow backorder
                     </label>
-                    <button type="button" disabled={confirmingOrderId !== null} onClick={() => void handleConfirm(order)}>{confirmingOrderId === order.id ? "Checking…" : approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) ? `Check approval #${order.number}` : `Confirm #${order.number}`}</button>
-                    <button type="button" className="sales-row-action" disabled={writeBusy || !createScopeReady || confirmingOrderId !== null} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
+                    <button type="button" disabled={!createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked || confirmingOrderId !== null} onClick={() => void handleConfirm(order)}>{confirmingOrderId === order.id ? "Checking…" : approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) ? `Check approval #${order.number}` : `Confirm #${order.number}`}</button>
+                    <button type="button" className="sales-row-action" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady || confirmingOrderId !== null} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
                   </>}{order.status === "confirmed" && <>
-                    <button type="button" disabled={writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "deliver", order })}>Deliver #{order.number}</button>
-                    <button type="button" className="sales-row-action" disabled={writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
+                    <button type="button" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "deliver", order })}>Deliver #{order.number}</button>
+                    <button type="button" className="sales-row-action" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
                   </>}</td>
                 </tr>
               ))}</tbody>
@@ -590,8 +655,8 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
               ? "This delivers all remaining reserved quantities, including service lines, and creates an invoice for those delivered lines."
               : "This withdraws the order and releases its remaining stock reservations. Delivered or partially delivered orders must be reversed through the invoice."}</p>
             <div className="sales-write-actions">
-              <button type="button" className="sales-write-secondary" disabled={writeBusy || !createScopeReady} onClick={() => setOrderActionTarget(null)}>Keep order</button>
-              <button type="button" className="sales-write-primary" disabled={writeBusy || !createScopeReady} onClick={() => void handleOrderAction()}>{writeBusy ? "Working…" : orderActionTarget.action === "deliver" ? "Deliver all and invoice" : "Cancel order"}</button>
+              <button type="button" className="sales-write-secondary" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady} onClick={() => setOrderActionTarget(null)}>Keep order</button>
+              <button type="button" className="sales-write-primary" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady} onClick={() => void handleOrderAction()}>{writeBusy ? "Working…" : orderActionTarget.action === "deliver" ? "Deliver all and invoice" : "Cancel order"}</button>
             </div>
           </section>
         </div>

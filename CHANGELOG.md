@@ -13,6 +13,15 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Sales order create, deliver, and cancel writes fail closed when the
+  selected Go capability route returns 404. They keep the exact actor- and
+  organization-scoped retry intent, pinned to the route that created it, and
+  never retry through legacy `/api/sales`; the legacy route is used only when
+  the Go write selector is off. Pre-upgrade route-less retry markers fail
+  closed until the user reviews Sales order history and explicitly confirms
+  clearing that scoped marker in the Vite page. Recovery sends no Sales write;
+  valid route-pinned or malformed markers cannot be cleared through this flow.
+
 - Vite's authored-document editor can use Go for its primary detail and version
   history behind paired `CHASTE_GO_DOCUMENTS_EDITOR_READS=1`,
   `CHASTE_GO_DOCUMENTS_VERSION_READS=1`, and

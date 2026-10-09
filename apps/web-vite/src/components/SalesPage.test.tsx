@@ -41,15 +41,28 @@ const customers = {
 };
 
 function salesFetch() {
-  return vi.fn(async (input: RequestInfo | URL) => {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    void init;
     if (input === "/api/modules") return Response.json(switchboard);
     if (input === "/api/pos/customers") return Response.json(customers);
     return Response.json({ orders });
   });
 }
 
+function stubWebLocks() {
+  const testNavigator = Object.create(navigator) as Navigator;
+  Object.defineProperty(testNavigator, "locks", {
+    configurable: true,
+    value: {
+      request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback(),
+    },
+  });
+  vi.stubGlobal("navigator", testNavigator);
+}
+
 beforeEach(() => {
   vi.stubGlobal("__GO_POS_CUSTOMERS_SLICE__", true);
+  stubWebLocks();
 });
 
 afterEach(() => {
@@ -79,6 +92,7 @@ describe("Vite sales page", () => {
 
     expect(await screen.findByRole("cell", { name: "Draft" })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Create sales order" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Coffee beans" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2.5" } });
@@ -153,9 +167,10 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
-    render(<SalesPage />);
+    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Allow backorder" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
 
     expect(await screen.findByRole("status")).not.toBeNull();
@@ -168,6 +183,46 @@ describe("Vite sales page", () => {
       input: { orderId: orders[2]!.id, allowBackorder: true },
       intentId: expect.any(String),
     });
+  });
+
+  it("blocks confirmation until the scoped retry-marker scan finishes", async () => {
+    const actorId = "actor-1";
+    const organizationId = "org-1";
+    let releaseMarkerScan: (() => void) | undefined;
+    let markerScanStarted = false;
+    let blockScopeDigest = true;
+    const markerScanGate = new Promise<void>((resolve) => { releaseMarkerScan = resolve; });
+    const originalDigest = crypto.subtle.digest.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, data) => {
+      if (blockScopeDigest && new TextDecoder().decode(data) === JSON.stringify({ actorId, organizationId })) {
+        blockScopeDigest = false;
+        markerScanStarted = true;
+        await markerScanGate;
+      }
+      return originalDigest(algorithm, data);
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/pos/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { confirmed: true, backordered: false, reservedThousandths: 0 } });
+      return Response.json({ error: `unexpected route ${String(input)} ${String(init?.method)}` }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(<SalesPage actorId={actorId} organizationId={organizationId} />);
+
+    const confirmButton = await screen.findByRole("button", { name: "Confirm #43" }) as HTMLButtonElement;
+    await waitFor(() => expect(markerScanStarted).toBe(true));
+    expect(confirmButton.disabled).toBe(true);
+    fireEvent.click(confirmButton);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+
+    releaseMarkerScan?.();
+    await waitFor(() => expect(confirmButton.disabled).toBe(false));
+    fireEvent.click(confirmButton);
+    expect(await screen.findByText("Order #43 confirmed.")).not.toBeNull();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
   it("ignores a confirmation response from the prior organization", async () => {
@@ -196,11 +251,13 @@ describe("Vite sales page", () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
     const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
 
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
     await waitFor(() => expect(writes).toBe(1));
 
     activeOrganization = "org-2";
     view.rerender(<SalesPage actorId="actor-1" organizationId="org-2" />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #99" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #99" }));
     await waitFor(() => expect(writes).toBe(2));
     expect(screen.getByRole("button", { name: "Checking…" })).not.toBeNull();
@@ -241,6 +298,7 @@ describe("Vite sales page", () => {
     render(<SalesPage actorId="actor-1" organizationId="org-1" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Coffee beans" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2.5" } });
@@ -285,6 +343,7 @@ describe("Vite sales page", () => {
     const firstMount = render(<SalesPage {...props} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Coffee beans" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2.5" } });
@@ -453,13 +512,51 @@ describe("Vite sales page", () => {
     const scopeDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
     const digestHex = Array.from(new Uint8Array(scopeDigest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     localStorage.setItem(`chaste:sales-order-write-attempt:${digestHex}`, "{");
-    vi.stubGlobal("fetch", salesFetch());
+    const fetchMock = salesFetch();
+    vi.stubGlobal("fetch", fetchMock);
     render(<SalesPage actorId={actorId} organizationId={organizationId} />);
 
     expect(await screen.findByText(/saved sales order retry marker is damaged/i)).not.toBeNull();
     expect((await screen.findByLabelText("Description") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Deliver #41" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
     expect(localStorage.getItem(`chaste:sales-order-write-attempt:${digestHex}`)).toBe("{");
+  });
+
+  it("requires history review before clearing a route-less action and sends no write", async () => {
+    const actorId = "actor-1";
+    const organizationId = "org-1";
+    const action = { action: "deliver" as const, orderId: orders[0]!.id };
+    const digest = async (value: string) => {
+      const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+      return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    };
+    const scope = { actorId, organizationId };
+    const scopeDigest = await digest(JSON.stringify(scope));
+    const fingerprint = await digest(JSON.stringify({ ...scope, action }));
+    const markerKey = `chaste:sales-order-write-attempt:${scopeDigest}`;
+    localStorage.setItem(markerKey, JSON.stringify({ fingerprint, intentId: crypto.randomUUID(), action }));
+    const fetchMock = salesFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    stubWebLocks();
+
+    render(<SalesPage actorId={actorId} organizationId={organizationId} />);
+    expect(await screen.findByRole("heading", { name: "Resolve an older retry marker" })).not.toBeNull();
+    const clearButton = screen.getByRole("button", { name: "Clear reviewed retry marker" }) as HTMLButtonElement;
+    expect(clearButton.disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Deliver #41" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+
+    fireEvent.click(screen.getByLabelText("I reviewed the Sales order history and understand this only clears the ambiguous retry marker."));
+    expect(clearButton.disabled).toBe(false);
+    fireEvent.click(clearButton);
+
+    expect(await screen.findByText("The reviewed ambiguous retry marker was cleared. No Sales action was sent.")).not.toBeNull();
+    expect(localStorage.getItem(markerKey)).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 
   it("unlocks a pending create after a terminal error and submits corrected input with a new intent", async () => {
@@ -479,6 +576,7 @@ describe("Vite sales page", () => {
     render(<SalesPage actorId="actor-1" organizationId="org-1" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Coffee beans" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2.5" } });
@@ -620,9 +718,11 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
-    const firstMount = render(<SalesPage />);
+    const scopeProps = { actorId: "actor-1", organizationId: "org-1" };
+    const firstMount = render(<SalesPage {...scopeProps} />);
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Allow backorder" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
     expect(await screen.findByText("Manager approval required")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Delivered" }));
@@ -638,9 +738,10 @@ describe("Vite sales page", () => {
     expect(sessionStorage.getItem(`chaste:sales-confirm-backorder:${orders[2]!.id}`)).toBe("1");
 
     firstMount.unmount();
-    render(<SalesPage />);
+    render(<SalesPage {...scopeProps} />);
     const resumedBackorderChoice = await screen.findByRole("checkbox", { name: "Allow backorder" });
     expect((resumedBackorderChoice as HTMLInputElement).checked).toBe(true);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Check approval #43" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Check approval #43" }));
 
     expect(await screen.findByText("Order #43 confirmed.")).not.toBeNull();
@@ -653,7 +754,8 @@ describe("Vite sales page", () => {
     expect(sessionStorage.getItem(`chaste:sales-confirm-backorder:${orders[2]!.id}`)).toBeNull();
 
     cleanup();
-    render(<SalesPage />);
+    render(<SalesPage {...scopeProps} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
     expect(await screen.findByText("Order #43 confirmed.")).not.toBeNull();
     expect(capabilityCalls()).toHaveLength(3);
@@ -670,9 +772,10 @@ describe("Vite sales page", () => {
       return Response.json({ error: "The sales service is unavailable. Check the order status before trying again." }, { status: 503 });
     }));
     vi.stubGlobal("confirm", vi.fn(() => true));
-    render(<SalesPage />);
+    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Allow backorder" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
     expect(await screen.findByRole("alert")).not.toBeNull();
     expect((screen.getByRole("checkbox", { name: "Allow backorder" }) as HTMLInputElement).disabled).toBe(true);

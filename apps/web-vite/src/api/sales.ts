@@ -80,10 +80,12 @@ const SalesOrderAttemptPrefix = "chaste:sales-order-write-attempt:";
 
 type SalesRetryScope = { actorId: string | null; organizationId: string | null };
 type SalesOrderWrite = z.infer<typeof SalesOrderWriteSchema>;
+export type RouteLessSalesOrderMarker = { action: SalesOrderWrite["action"]; intentId: string; fingerprint: string };
 const StoredSalesOrderAttemptSchema = z.object({
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
   intentId: z.string().uuid(),
   action: SalesOrderWriteSchema,
+  route: z.enum(["go", "legacy"]).optional(),
 }).strict();
 type StoredSalesOrderAttempt = z.infer<typeof StoredSalesOrderAttemptSchema>;
 export type SalesOrderWriteOutcome =
@@ -92,7 +94,11 @@ export type SalesOrderWriteOutcome =
   | { kind: "completed"; action: "deliver"; data: z.infer<typeof DeliverOrderOutputSchema> }
   | { kind: "completed"; action: "cancel"; data: z.infer<typeof CancelOrderOutputSchema> };
 
-type SalesOrderAttempt = { storageKey: string; fingerprint: string; intentId: string };
+type SalesOrderAttempt = { storageKey: string; fingerprint: string; intentId: string; route: "go" | "legacy" };
+
+function routeLessAttemptError(): SalesApiError {
+  return new SalesApiError(0, "A saved sales order retry marker predates route tracking, so its backend is unknown. Review Sales order history, then use the in-page recovery confirmation to clear that marker before submitting again.");
+}
 
 function parseSalesOrderAttempt(value: string | null): StoredSalesOrderAttempt | null {
   if (value === null) return null;
@@ -120,7 +126,21 @@ async function salesOrderDigest(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function createSalesOrderAttempt(action: SalesOrderWrite, retryScope: SalesRetryScope): Promise<SalesOrderAttempt> {
+async function withSalesOrderMarkerLock<T>(storageKey: string, operation: () => Promise<T>, requireLock = false): Promise<T> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!locks) {
+    if (requireLock) throw new SalesApiError(0, "Safe sales order retry protection is unavailable in this browser. Use a browser with Web Locks support before changing sales orders.");
+    return operation();
+  }
+  try {
+    return await locks.request(`chaste:sales-order-write-marker-lock:${storageKey}`, { mode: "exclusive" }, operation);
+  } catch (error) {
+    if (error instanceof SalesApiError) throw error;
+    throw new SalesApiError(0, "Could not safely coordinate the sales order retry marker across browser tabs. Close other Sales tabs and try again.");
+  }
+}
+
+async function createSalesOrderAttempt(action: SalesOrderWrite, retryScope: SalesRetryScope, route: "go" | "legacy"): Promise<SalesOrderAttempt> {
   const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
   if (!scope.actorId || !scope.organizationId) {
     throw new SalesApiError(0, "Wait for your account and organization to finish loading before changing a sales order.");
@@ -134,38 +154,103 @@ async function createSalesOrderAttempt(action: SalesOrderWrite, retryScope: Sale
     throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again.");
   }
   const storageKey = `${SalesOrderAttemptPrefix}${scopeDigest}`;
-  const stored = readSalesOrderAttempt(storageKey);
-  if (stored) {
-    let storedFingerprint: string;
-    try { storedFingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action })); }
-    catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
-    if (storedFingerprint !== stored.fingerprint) {
-      throw new SalesApiError(0, "A saved sales order retry marker does not match its action. Verify order history before submitting another change.");
+  return withSalesOrderMarkerLock(storageKey, async () => {
+    const stored = readSalesOrderAttempt(storageKey);
+    if (stored) {
+      let storedFingerprint: string;
+      try { storedFingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action })); }
+      catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
+      if (storedFingerprint !== stored.fingerprint) {
+        throw new SalesApiError(0, "A saved sales order retry marker does not match its action. Verify order history before submitting another change.");
+      }
+      if (stored.route === undefined) throw routeLessAttemptError();
+      if (stored.route !== route) {
+        const original = stored.route === "go" ? "Go" : "legacy";
+        throw new SalesApiError(0, `A previous sales order result is unresolved on the ${original} route. Restore that route to retry the exact action, or check order history before clearing its saved retry marker.`);
+      }
     }
-  }
-  if (stored && stored.fingerprint !== fingerprint) {
-    throw new SalesApiError(0, "A previous sales order result is unresolved. Retry that exact action or check order history before changing it.");
-  }
-  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
-  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, action }));
-    const persisted = parseSalesOrderAttempt(window.localStorage.getItem(storageKey));
-    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
-    return { ...attempt, intentId: persisted.intentId };
-  } catch {
-    throw new SalesApiError(0, "Enable browser storage before changing a sales order so an uncertain action can be retried safely.");
-  }
+    if (stored && stored.fingerprint !== fingerprint) {
+      throw new SalesApiError(0, "A previous sales order result is unresolved. Retry that exact action or check order history before changing it.");
+    }
+    if (stored) return { storageKey, fingerprint, intentId: stored.intentId, route };
+    const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID(), route };
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, action, route }));
+      const persisted = parseSalesOrderAttempt(window.localStorage.getItem(storageKey));
+      if (!persisted || persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId || persisted.route !== route) throw new Error("saved attempt did not persist");
+      return attempt;
+    } catch {
+      throw new SalesApiError(0, "Enable browser storage before changing a sales order so an uncertain action can be retried safely.");
+    }
+  }, true);
 }
 
-function clearSalesOrderAttempt(attempt: SalesOrderAttempt): void {
+async function clearSalesOrderAttempt(attempt: SalesOrderAttempt): Promise<void> {
   try {
-    const stored = readSalesOrderAttempt(attempt.storageKey);
-    if (stored?.fingerprint === attempt.fingerprint && stored.intentId === attempt.intentId) window.localStorage.removeItem(attempt.storageKey);
-  } catch { /* Keep the unresolved intent if storage cannot verify it. */ }
+    await withSalesOrderMarkerLock(attempt.storageKey, async () => {
+      const stored = readSalesOrderAttempt(attempt.storageKey);
+      if (stored?.fingerprint === attempt.fingerprint && stored.intentId === attempt.intentId && stored.route === attempt.route) {
+        window.localStorage.removeItem(attempt.storageKey);
+      }
+    }, true);
+  } catch { /* Keep the unresolved intent if storage or cross-tab coordination fails. */ }
 }
 
 export type SalesOrder = z.infer<typeof OrderSchema>;
+
+async function salesRetryStorageKey(retryScope: SalesRetryScope): Promise<{ scope: { actorId: string; organizationId: string }; storageKey: string } | null> {
+  const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
+  if (!scope.actorId || !scope.organizationId) return null;
+  try {
+    const scopeDigest = await salesOrderDigest(JSON.stringify(scope));
+    return { scope, storageKey: `${SalesOrderAttemptPrefix}${scopeDigest}` };
+  } catch {
+    throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again.");
+  }
+}
+
+async function verifySalesOrderAttemptScope(scope: { actorId: string; organizationId: string }, stored: StoredSalesOrderAttempt): Promise<void> {
+  let fingerprint: string;
+  try { fingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action })); }
+  catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
+  if (fingerprint !== stored.fingerprint) {
+    throw new SalesApiError(0, "A saved sales order retry marker does not match its action. Verify order history before changing it.");
+  }
+}
+
+export async function findRouteLessSalesOrderAction(retryScope: SalesRetryScope): Promise<RouteLessSalesOrderMarker | null> {
+  const scopedKey = await salesRetryStorageKey(retryScope);
+  if (!scopedKey) return null;
+  const stored = readSalesOrderAttempt(scopedKey.storageKey);
+  if (!stored) return null;
+  await verifySalesOrderAttemptScope(scopedKey.scope, stored);
+  return stored.route === undefined ? { action: stored.action.action, intentId: stored.intentId, fingerprint: stored.fingerprint } : null;
+}
+
+export async function clearRouteLessSalesOrderAttempt(retryScope: SalesRetryScope, expected: RouteLessSalesOrderMarker): Promise<boolean> {
+  const scopedKey = await salesRetryStorageKey(retryScope);
+  if (!scopedKey) return false;
+  return withSalesOrderMarkerLock(scopedKey.storageKey, async () => {
+    const stored = readSalesOrderAttempt(scopedKey.storageKey);
+    if (!stored || stored.route !== undefined
+      || stored.intentId !== expected.intentId
+      || stored.fingerprint !== expected.fingerprint
+      || stored.action.action !== expected.action) return false;
+    await verifySalesOrderAttemptScope(scopedKey.scope, stored);
+
+    const current = readSalesOrderAttempt(scopedKey.storageKey);
+    if (!current || current.route !== undefined
+      || current.intentId !== expected.intentId
+      || current.fingerprint !== expected.fingerprint
+      || current.action.action !== expected.action) return false;
+    try {
+      window.localStorage.removeItem(scopedKey.storageKey);
+      return true;
+    } catch {
+      throw new SalesApiError(0, "Browser storage could not clear the reviewed route-less sales marker. Check storage settings and try again.");
+    }
+  }, true);
+}
 
 export async function restorePendingSalesOrderCreate(retryScope: SalesRetryScope): Promise<Extract<SalesOrderWrite, { action: "create" }> | null> {
   const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
@@ -175,6 +260,7 @@ export async function restorePendingSalesOrderCreate(retryScope: SalesRetryScope
   catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
   const stored = readSalesOrderAttempt(storageKey);
   if (!stored || stored.action.action !== "create") return null;
+  if (stored.route === undefined) throw routeLessAttemptError();
   let fingerprint: string;
   try { fingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action })); }
   catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
@@ -328,9 +414,9 @@ export async function submitSalesOrderWrite(
 ): Promise<SalesOrderWriteOutcome> {
   const parsedAction = SalesOrderWriteSchema.safeParse(action);
   if (!parsedAction.success) throw new SalesApiError(0, "Check the sales order details and try again.");
-  const attempt = await createSalesOrderAttempt(parsedAction.data, retryScope);
   const useGo = typeof __GO_SALES_ORDER_WRITES__ !== "undefined" && __GO_SALES_ORDER_WRITES__;
-  let route = salesOrderWriteRequest(parsedAction.data, attempt.intentId, useGo);
+  const attempt = await createSalesOrderAttempt(parsedAction.data, retryScope, useGo ? "go" : "legacy");
+  const route = salesOrderWriteRequest(parsedAction.data, attempt.intentId, useGo);
   let response: Response;
   let body: unknown;
   try {
@@ -343,18 +429,6 @@ export async function submitSalesOrderWrite(
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
     });
     body = await response.json().catch(() => null);
-    if (useGo && response.status === 404) {
-      route = salesOrderWriteRequest(parsedAction.data, attempt.intentId, false);
-      response = await fetch(route.url, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify(route.body),
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
-      });
-      body = await response.json().catch(() => null);
-    }
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new SalesApiError(0, "The sales order result is unknown. Retry the same details or check order history before changing them.");
@@ -367,7 +441,9 @@ export async function submitSalesOrderWrite(
   if (!response.ok) {
     const error = ErrorSchema.safeParse(body);
     const failure = new SalesApiError(response.status, error.success ? error.data.error : "The sales order action could not be completed.");
-    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) clearSalesOrderAttempt(attempt);
+    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429 && !(useGo && response.status === 404)) {
+      await clearSalesOrderAttempt(attempt);
+    }
     throw failure;
   }
   const envelope = SalesWriteEnvelopeSchema.safeParse(body);
@@ -376,19 +452,19 @@ export async function submitSalesOrderWrite(
     case "create": {
       const output = CreateOrderOutputSchema.safeParse(envelope.data.data);
       if (!output.success) throw new SalesApiError(response.status, "The sales service returned an unexpected order response.");
-      clearSalesOrderAttempt(attempt);
+      await clearSalesOrderAttempt(attempt);
       return { kind: "completed", action: "create", data: output.data };
     }
     case "deliver": {
       const output = DeliverOrderOutputSchema.safeParse(envelope.data.data);
       if (!output.success) throw new SalesApiError(response.status, "The sales service returned an unexpected order response.");
-      clearSalesOrderAttempt(attempt);
+      await clearSalesOrderAttempt(attempt);
       return { kind: "completed", action: "deliver", data: output.data };
     }
     case "cancel": {
       const output = CancelOrderOutputSchema.safeParse(envelope.data.data);
       if (!output.success) throw new SalesApiError(response.status, "The sales service returned an unexpected order response.");
-      clearSalesOrderAttempt(attempt);
+      await clearSalesOrderAttempt(attempt);
       return { kind: "completed", action: "cancel", data: output.data };
     }
   }

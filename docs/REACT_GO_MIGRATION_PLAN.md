@@ -1673,6 +1673,16 @@ new owners and the manifest shows zero legacy runtime paths.
      session. Selected Go reads fail closed on missing capabilities, pending
      responses, or malformed output. Focused checks pass; browser proof remains
      open.
+166b. (Implemented) Make selected-Go Vite Sales create, deliver, and cancel
+     writes fail closed on 404 and pin unresolved actor- and organization-
+     scoped intents to their original Go or legacy route. Reject selector
+     changes until the original route is restored; route-less pre-upgrade
+     markers require review of Sales order history and explicit confirmation
+     before the scoped marker can be cleared. Recovery does not send a Sales
+     write, and valid or malformed markers cannot use this cleanup action. Use
+     legacy `/api/sales` only when `CHASTE_GO_SALES_ORDER_WRITES` is off.
+     Focused API and page tests cover all three actions, route changes, and
+     reviewed route-less recovery; browser proof remains open.
 167. (Implemented; local Go/Vite default-on) Route Vite vendor returns and
      purchase order closing through Go's session-authenticated `purchasing.returnGoods` and
      `purchasing.closePurchaseOrder` capabilities when
