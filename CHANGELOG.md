@@ -40,14 +40,16 @@ The full v1 changelog is preserved at the bottom of this file.
   clearing that scoped marker in the Vite page. Recovery sends no Sales write;
   valid route-pinned or malformed markers cannot be cleared through this flow.
 
-- Vite's authored-document editor can use Go for its primary detail and version
-  history behind paired `CHASTE_GO_DOCUMENTS_EDITOR_READS=1`,
+- Vite's authored-document editor now uses Go by default for its primary detail
+  and version history behind paired `CHASTE_GO_DOCUMENTS_EDITOR_READS=1`,
   `CHASTE_GO_DOCUMENTS_VERSION_READS=1`, and
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. The API gates
-  `documents.getDoc` and `documents.listDocVersions` with their default-off
-  `GO_DOCUMENTS_EDITOR_READS=1` and `GO_DOCUMENTS_VERSION_READS=1` flags. The
-  selected Go path does not fetch legacy detail for version rows or fall back
-  after a Go failure. Workspace and write routes remain unchanged.
+  `documents.getDoc` and `documents.listDocVersions` with
+  `GO_DOCUMENTS_EDITOR_READS=1` and `GO_DOCUMENTS_VERSION_READS=1`. For full
+  legacy rollback, set all four Vite and API editor/version selectors to `0`.
+  The selected Go path does not fetch legacy detail for version rows or fall back after a Go
+  failure. Workspace, collaboration, compare-owned routes, and writes remain
+  unchanged.
 
 - Vite mention and add-member people lookup can use the authenticated Go
   `messaging.listPeople` capability behind paired

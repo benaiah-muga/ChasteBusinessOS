@@ -2261,15 +2261,18 @@ new owners and the manifest shows zero legacy runtime paths.
      80-character query bound, and the Vite person/agent alias shape. Keep
      conversation, thread, presence, and message-search reads unchanged; show
      selected-Go errors without legacy fallback. Browser proof remains open.
-220. (Implemented) Route Vite authored-document editor detail through
-     `documents.getDoc` when `CHASTE_GO_DOCUMENTS_EDITOR_READS=1` and
+220. (Implemented, default-on) Route Vite authored-document editor detail
+     through `documents.getDoc` when `CHASTE_GO_DOCUMENTS_EDITOR_READS=1` and
      `CHASTE_GO_DOCUMENTS_VERSION_READS=1` are paired with the session route.
      The API independently gates `documents.getDoc` and
-     `documents.listDocVersions` behind their default-off Go flags. Selected Go
-     mode reads both document detail and version rows from Go with strict
-     output validation; failed Go detail never retries through legacy. Keep
-     workspace, presence, autosave, collaboration, content writes, archive
-     reads, and the Documents library unchanged. Browser proof remains open.
+     `documents.listDocVersions` with default-on `GO_DOCUMENTS_EDITOR_READS=1`
+     and `GO_DOCUMENTS_VERSION_READS=1`. Selected Go mode reads both document
+     detail and version rows from Go with strict output validation; failed Go
+     detail never retries through legacy. For full legacy rollback, set all
+     four Vite and API editor/version selectors to `0`. Keep workspace,
+     presence, autosave, collaboration, content writes, archive reads,
+     compare-owned routes, and the
+     Documents library unchanged. Browser proof remains open.
 221. Route only the Vite HR Overview report through the existing Go `hr.report`
      capability behind paired `CHASTE_GO_HR_OVERVIEW_REPORT_READS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other HR tabs on
