@@ -2139,19 +2139,24 @@ new owners and the manifest shows zero legacy runtime paths.
      surface pending, malformed, and unavailable responses without falling
      back to `/api/accounting`. Keep other Accounting routes unchanged; add
      focused Vite API, page, proxy selector, and Go contract checks.
-208. Route the existing Vite Projects create, archive, task create, move, and
-     assignment actions through Go's session-authenticated capabilities when
+208. (Implemented; default-on for Vite direct capability actions) Route the
+     existing Vite Projects create, archive, task create, move, and assignment
+     actions through Go's session-authenticated capabilities when
      `CHASTE_GO_PROJECTS_WRITES=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep Projects list and board reads
-     on their current path. Persist exact actor- and organization-scoped action
-     intents through pending approvals and uncertain results; while Go is
-     selected, do not fall back on a missing route or unresolved outcome.
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. With the write selector set to
+     `0`, Vite uses `POST /api/projects`, which remains Go-backed while
+     `CHASTE_GO_PROJECTS_ROUTE=1`. Keep Projects list and board reads on their
+     current path. Persist exact actor- and organization-scoped action intents
+     through pending approvals and uncertain results; while Go is selected, do
+     not fall back on a missing route or unresolved outcome.
      Provide reciprocal archive/restore and task create/delete/restore
      capability receipts. Task deletion requires an unchanged full snapshot
      and no children; placement and assignment restores require the expected
      current value. Fail closed while actor or organization scope is loading.
-     Add focused API, proxy, page, parser, receipt replay, guard, and tenant
-     tests. Browser proof remains open.
+     The Go capability pipeline enforces authenticated active organization
+     membership and `projects.write`. Existing focused API, proxy, page, parser,
+     receipt replay, guard, and tenant tests cover the behavior; browser proof
+     remains open.
 209. (Implemented) Route Vite cycle-count create, record, post, and cancel
      through Go's session-authenticated `inventory.createCycleCount`,
      `inventory.recordCycleCounts`, `inventory.postCycleCount`, and

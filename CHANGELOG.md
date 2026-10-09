@@ -19,6 +19,13 @@ The full v1 changelog is preserved at the bottom of this file.
   blocked while the Go attempt is unresolved. Selector-off sales remain on
   legacy.
 
+- Vite Projects create, archive, and task writes now use direct Go capabilities
+  by default. Set `CHASTE_GO_PROJECTS_WRITES=0` to send them through the
+  existing `POST /api/projects` route, which remains Go-backed while
+  `CHASTE_GO_PROJECTS_ROUTE=1`. Actor/org-scoped exact retries stay pinned
+  while unresolved, and Go enforces authenticated
+  organization membership and `projects.write`.
+
 - Selected Go Manufacturing writes for BOM definition, work orders, and
   production fail closed on 404 without retrying through `/api/manufacturing`.
   Their actor/org-scoped exact intent stays pending for same-action Go retry;
