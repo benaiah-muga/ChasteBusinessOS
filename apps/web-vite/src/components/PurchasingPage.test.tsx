@@ -91,7 +91,7 @@ function purchasingFetch(overrides: Overrides = {}) {
         input?: Record<string, unknown>;
         intentId?: string;
       };
-      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote" && body.capabilityId !== "purchasing.supplierStatement") || !body.input) {
+      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote" && body.capabilityId !== "purchasing.supplierStatement" && body.capabilityId !== "purchasing.priceHistory" && body.capabilityId !== "purchasing.supplierPerformance") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
       const action = body.capabilityId === "purchasing.createVendor" ? "createVendor"
@@ -105,7 +105,9 @@ function purchasingFetch(overrides: Overrides = {}) {
                       : body.capabilityId === "purchasing.createRfq" ? "createRfq"
                         : body.capabilityId === "purchasing.recordQuote" ? "recordQuote"
                           : body.capabilityId === "purchasing.selectWinningQuote" ? "selectWinningQuote"
-                            : body.capabilityId === "purchasing.supplierStatement" ? "supplierStatement" : "payBill";
+                          : body.capabilityId === "purchasing.supplierStatement" ? "supplierStatement"
+                            : body.capabilityId === "purchasing.priceHistory" ? "priceHistory"
+                              : body.capabilityId === "purchasing.supplierPerformance" ? "supplierPerformance" : "payBill";
       return post({ ...body.input, action, intentId: body.intentId });
     }
     throw new TypeError(`unrouted ${method} ${url}`);
@@ -277,6 +279,71 @@ describe("receiving prefills from the aggregated rollup", () => {
 /* --------------------------------------------------------------- PurchasingPage --- */
 
 describe("PurchasingPage", () => {
+  it("loads Intel analytics directly from Go and does not use workspace analytics in Go mode", async () => {
+    vi.stubGlobal("__GO_PURCHASING_INTEL_READS__", true);
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({
+        priceHistory: { rows: [{ vendorName: "Legacy value", itemSku: null, itemDescription: "Legacy item", unitPriceMinor: 100, orderedAt: null }] },
+        supplierPerformance: { vendors: [{ vendorId: vendor.id, vendorName: "Legacy vendor", orders: 1, avgLeadTimeDays: null, onTimeRate: null, fillRate: null, backorderedOrders: 0 }] },
+      }),
+      post: (body) => body.action === "priceHistory"
+        ? { ok: true, data: { rows: [{ vendorName: "Go value", itemSku: "SKU-1", itemDescription: "Go item", unitPriceMinor: 3500, orderedAt: null }] } }
+        : body.action === "supplierPerformance"
+          ? { ok: true, data: { vendors: [{ vendorId: vendor.id, vendorName: "Go vendor", orders: 3, avgLeadTimeDays: 2, onTimeRate: 100, fillRate: 90, backorderedOrders: 0 }] } }
+          : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /^Prices & statements/ }));
+    expect(await screen.findByText("Go item")).toBeTruthy();
+    expect(await screen.findByText("Go vendor")).toBeTruthy();
+    expect(screen.queryByText("Legacy item")).toBeNull();
+    expect(screen.queryByText("Legacy vendor")).toBeNull();
+    expect(capabilityPosts(fetchMock).map((post) => post.capabilityId)).toEqual([
+      "purchasing.priceHistory",
+      "purchasing.supplierPerformance",
+    ]);
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/purchasing" && init?.method === "POST")).toBe(false);
+  });
+
+  it("shows Go Intel read failures instead of empty analytics", async () => {
+    vi.stubGlobal("__GO_PURCHASING_INTEL_READS__", true);
+    const fetchMock = purchasingFetch({
+      post: (body) => body.action === "priceHistory"
+        ? Response.json({ pendingApproval: true }, { status: 202 })
+        : Response.json({ error: "unavailable" }, { status: 404 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /^Prices & statements/ }));
+    expect(await screen.findByText(/pending and did not return analytics/)).toBeTruthy();
+    expect(await screen.findByText("unavailable")).toBeTruthy();
+    expect(screen.queryByText("No purchase prices recorded.")).toBeNull();
+    expect(screen.queryByText(/No vendor history yet/)).toBeNull();
+  });
+
+  it("shows a loading state before the first Go price history response resolves", async () => {
+    vi.stubGlobal("__GO_PURCHASING_INTEL_READS__", true);
+    let resolveHistory: ((response: Response) => void) | undefined;
+    const history = new Promise<Response>((resolve) => { resolveHistory = resolve; });
+    const fetchMock = purchasingFetch({
+      post: (body) => body.action === "priceHistory"
+        ? history
+        : { ok: true, data: { vendors: [] } },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /^Prices & statements/ }));
+    expect(screen.getByText("Loading price history…")).toBeTruthy();
+    expect(screen.queryByText(/No purchase prices recorded/)).toBeNull();
+
+    resolveHistory?.(Response.json({ ok: true, data: { rows: [] } }));
+    expect(await screen.findByText(/No purchase prices recorded/)).toBeTruthy();
+  });
+
   it("loads the selected supplier statement through the Go capability", async () => {
     vi.stubGlobal("__GO_PURCHASING_SUPPLIER_STATEMENT_READS__", true);
     const fetchMock = purchasingFetch({

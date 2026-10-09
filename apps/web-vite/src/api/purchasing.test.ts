@@ -11,6 +11,7 @@ import {
   fetchPurchasingInputTaxCodes,
   fetchPurchasingPriceHistory,
   fetchPurchasingProducts,
+  fetchPurchasingSupplierPerformance,
   fetchPurchasingSupplierStatement,
   fetchPurchasingWorkspace,
   payPurchasingBill,
@@ -684,6 +685,46 @@ describe("purchasing intel reads", () => {
   it("does not treat a pending legacy supplier statement as an empty statement", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ pendingApproval: true }, { status: 202 })));
     await expect(fetchPurchasingSupplierStatement(workspace.vendors[0]!.id)).rejects.toMatchObject({ status: 202 });
+  });
+
+  it("loads price history and supplier performance through the paired Go read selector", async () => {
+    vi.stubGlobal("__GO_PURCHASING_INTEL_READS__", true);
+    const history = [{ vendorName: "Harbor", itemSku: "WIRE", itemDescription: "Copper wire", unitPriceMinor: 45000, orderedAt: null }];
+    const performance = [{ vendorId: workspace.vendors[0]!.id, vendorName: "Harbor", orders: 2, avgLeadTimeDays: 4, onTimeRate: 100, fillRate: 70, backorderedOrders: 0 }];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { rows: history } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { vendors: performance } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPurchasingPriceHistory(" WIRE ")).resolves.toEqual(history);
+    await expect(fetchPurchasingSupplierPerformance()).resolves.toEqual(performance);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "purchasing.priceHistory",
+      input: { sku: "WIRE" },
+      intentId: expect.any(String),
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      capabilityId: "purchasing.supplierPerformance",
+      input: {},
+      intentId: expect.any(String),
+    });
+  });
+
+  it("rejects pending, unavailable, and malformed Go analytics instead of returning empty data", async () => {
+    vi.stubGlobal("__GO_PURCHASING_INTEL_READS__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ error: "capability unavailable" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { vendors: [{ vendorId: "x" }] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPurchasingPriceHistory(undefined)).rejects.toThrow(/pending and did not return analytics/);
+    await expect(fetchPurchasingPriceHistory(undefined)).rejects.toMatchObject({ status: 404 });
+    await expect(fetchPurchasingSupplierPerformance()).rejects.toMatchObject({ status: 200, message: expect.stringContaining("unexpected result") });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
   it("returns the statement rows when the read completes", async () => {

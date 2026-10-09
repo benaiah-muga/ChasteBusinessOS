@@ -2071,3 +2071,12 @@ new owners and the manifest shows zero legacy runtime paths.
      closed on Go 404. Reset the form after recovered success. Keep other HR
      actions unchanged; add focused Vite API, page, proxy selector, and Go
      parser/executor contract tests.
+204. Route only the existing Vite Purchasing Intel price-history and supplier-
+     performance reads through `purchasing.priceHistory` and
+     `purchasing.supplierPerformance` behind paired
+     `CHASTE_GO_PURCHASING_INTEL_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go derives organization
+     scope from the session and enforces `purchasing.read`. Validate exact Go
+     output contracts and render pending, malformed, or unavailable results as
+     errors rather than empty analytics. Keep other Purchasing flows unchanged;
+     add focused Vite API, page, proxy selector, and Go executor contract tests.

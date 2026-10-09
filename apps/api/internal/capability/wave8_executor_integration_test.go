@@ -97,6 +97,19 @@ func TestGoWave8PurchasingReadsGovernedExecutorPath(t *testing.T) {
 		t.Fatalf("supplierStatement output=%+v, want an empty statement for a vendor with no bills", statementOut)
 	}
 
+	historyInput := json.RawMessage(`{"sku":"WIRE"}`)
+	history, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, purchasingPriceHistoryCapabilityID, "purchasing.read", historyInput, "human", "", "wave8-history"), purchasingPriceHistoryCapabilityID, historyInput)
+	if err != nil || !history.OK {
+		t.Fatalf("priceHistory result=%+v err=%v", history, err)
+	}
+	var historyOut PurchasingPriceHistoryOutput
+	if err := json.Unmarshal(history.Data, &historyOut); err != nil {
+		t.Fatal(err)
+	}
+	if len(historyOut.Rows) != 0 {
+		t.Fatalf("priceHistory output=%+v, want no rows in empty fixture", historyOut)
+	}
+
 	denied, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, purchasingPriceHistoryCapabilityID, "crm.write", json.RawMessage(`{}`), "human", "", "wave8-history-denied"), purchasingPriceHistoryCapabilityID, json.RawMessage(`{}`))
 	if err != nil || denied.OK || !strings.Contains(denied.Error, "forbidden: missing permission: purchasing.read") {
 		t.Fatalf("priceHistory denied result=%+v err=%v, want permission failure", denied, err)

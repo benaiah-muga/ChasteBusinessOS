@@ -22,6 +22,7 @@ import {
   goPurchasingFinanceWritesFromEnv,
   goPurchasingPaymentRunsFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
+  goPurchasingIntelReadsFromEnv,
   goPurchasingSourcingWritesFromEnv,
   goManufacturingWorkOrderWritesFromEnv,
   goManufacturingProductionWritesFromEnv,
@@ -304,6 +305,15 @@ describe("purchasing supplier statement read Go selector", () => {
     expect(goPurchasingSupplierStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingSupplierStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS: "0" })).toBe(false);
     expect(goPurchasingSupplierStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS: "1" })).toBe(false);
+  });
+});
+
+describe("purchasing intel read Go selector", () => {
+  it("requires the Intel selector and session capability route", () => {
+    expect(goPurchasingIntelReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_INTEL_READS: "1" })).toBe(true);
+    expect(goPurchasingIntelReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goPurchasingIntelReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_INTEL_READS: "0" })).toBe(false);
+    expect(goPurchasingIntelReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_INTEL_READS: "1" })).toBe(false);
   });
 });
 

@@ -400,6 +400,7 @@ const BillCreditNoteOutputSchema = z.object({
 }).strict();
 
 const PriceHistoryOutputSchema = z.object({ rows: z.array(PriceHistoryRowSchema) }).strict();
+const SupplierPerformanceOutputSchema = z.object({ vendors: z.array(SupplierPerformanceRowSchema) }).strict();
 /** Writes whose result the page does not read still have to come back as an object. */
 const OpaqueOutputSchema = z.object({}).passthrough();
 
@@ -436,6 +437,10 @@ export function goPurchasingFinanceWritesUseGo(): boolean {
 
 export function goPurchasingSupplierStatementReadsUseGo(): boolean {
   return typeof __GO_PURCHASING_SUPPLIER_STATEMENT_READS__ !== "undefined" && __GO_PURCHASING_SUPPLIER_STATEMENT_READS__;
+}
+
+export function goPurchasingIntelReadsUseGo(): boolean {
+  return typeof __GO_PURCHASING_INTEL_READS__ !== "undefined" && __GO_PURCHASING_INTEL_READS__;
 }
 
 function requestSignal(signal?: AbortSignal, timeoutMs = 15_000): AbortSignal {
@@ -1145,9 +1150,57 @@ export async function fetchPurchasingPriceHistory(
   sku: string | undefined,
   signal?: AbortSignal,
 ): Promise<PurchasingPriceHistoryRow[]> {
+  if (goPurchasingIntelReadsUseGo()) {
+    const input = sku?.trim() ? { sku: sku.trim() } : {};
+    const result = await executePurchasingIntelRead("purchasing.priceHistory", input, PriceHistoryOutputSchema, "price history", signal);
+    return result.rows;
+  }
   const action: z.infer<typeof PriceHistorySchema> = sku?.trim() ? { action: "priceHistory", sku: sku.trim() } : { action: "priceHistory" };
   const outcome = await submit(action, PriceHistoryOutputSchema, "loading price history", signal);
-  return outcome.kind === "completed" ? outcome.data.rows : [];
+  if (outcome.kind === "pending") throw new PurchasingApiError(202, "The price history read did not complete.");
+  return outcome.data.rows;
+}
+
+export async function fetchPurchasingSupplierPerformance(signal?: AbortSignal): Promise<PurchasingSupplierPerformance[]> {
+  if (!goPurchasingIntelReadsUseGo()) {
+    throw new PurchasingApiError(0, "Supplier performance Go reads are not enabled.");
+  }
+  const result = await executePurchasingIntelRead("purchasing.supplierPerformance", {}, SupplierPerformanceOutputSchema, "supplier performance", signal);
+  return result.vendors;
+}
+
+async function executePurchasingIntelRead<T>(
+  capabilityId: "purchasing.priceHistory" | "purchasing.supplierPerformance",
+  input: { sku?: string },
+  output: z.ZodType<T>,
+  subject: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
+    }, `load ${subject}`, signal));
+  } catch (error) {
+    if (error instanceof PurchasingApiError && error.status === 202) {
+      throw new PurchasingApiError(202, `The ${subject} read is pending and did not return analytics.`);
+    }
+    throw error;
+  }
+  if (response.status === 202) {
+    throw new PurchasingApiError(202, `The ${subject} read is pending and did not return analytics.`);
+  }
+  if (response.status !== 200) {
+    throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not load ${subject}.`);
+  }
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not load ${subject}.`);
+  const parsed = output.safeParse(envelope.data.data);
+  if (!parsed.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not load ${subject}.`);
+  return parsed.data;
 }
 
 export async function fetchPurchasingSupplierStatement(

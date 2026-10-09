@@ -14,8 +14,10 @@ import {
   fetchPurchasingInputTaxCodes,
   fetchPurchasingPriceHistory,
   fetchPurchasingProducts,
+  fetchPurchasingSupplierPerformance,
   fetchPurchasingSupplierStatement,
   fetchPurchasingWorkspace,
+  goPurchasingIntelReadsUseGo,
   payPurchasingBill,
   PurchasingApiError,
   receivePurchasingGoods,
@@ -30,6 +32,7 @@ import {
   type PurchasingProduct,
   type PurchasingRequest,
   type PurchasingSupplierStatement,
+  type PurchasingSupplierPerformance,
   type PurchasingTaxCode,
   type PurchasingVendor,
   type PurchasingWorkspace,
@@ -2159,17 +2162,49 @@ function VendorsTab({ vendors, orders, bills, currency, busy, form, setForm, sel
 function IntelTab({ vendors, initialRows, performance, currency }: {
   vendors: PurchasingVendor[];
   initialRows: PurchasingPriceHistoryRow[];
-  performance: { vendorId: string; vendorName: string; orders: number; avgLeadTimeDays: number | null; onTimeRate: number | null; fillRate: number | null; backorderedOrders: number }[];
+  performance: PurchasingSupplierPerformance[];
   currency: string;
 }) {
-  const [rows, setRows] = useState(initialRows);
+  const goIntelReads = goPurchasingIntelReadsUseGo();
+  const [rows, setRows] = useState(goIntelReads ? [] : initialRows);
   const [sku, setSku] = useState("");
-  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyBusy, setHistoryBusy] = useState(goIntelReads);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [performanceRows, setPerformanceRows] = useState(goIntelReads ? [] : performance);
+  const [performanceBusy, setPerformanceBusy] = useState(goIntelReads);
+  const [performanceError, setPerformanceError] = useState<string | null>(null);
   const [vendorId, setVendorId] = useState("");
   const [statement, setStatement] = useState<PurchasingSupplierStatement | null>(null);
   const [statementBusy, setStatementBusy] = useState(false);
   const [statementError, setStatementError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!goIntelReads) return;
+    const controller = new AbortController();
+    let active = true;
+    setHistoryBusy(true);
+    setHistoryError(null);
+    void fetchPurchasingPriceHistory(undefined, controller.signal).then((result) => {
+      if (active) setRows(result);
+    }).catch((error: unknown) => {
+      if (active) setHistoryError(error instanceof PurchasingApiError ? error.message : "Could not load price history.");
+    }).finally(() => {
+      if (active) setHistoryBusy(false);
+    });
+    setPerformanceBusy(true);
+    setPerformanceError(null);
+    void fetchPurchasingSupplierPerformance(controller.signal).then((result) => {
+      if (active) setPerformanceRows(result);
+    }).catch((error: unknown) => {
+      if (active) setPerformanceError(error instanceof PurchasingApiError ? error.message : "Could not load supplier performance.");
+    }).finally(() => {
+      if (active) setPerformanceBusy(false);
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [goIntelReads]);
 
   async function loadHistory(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -2219,6 +2254,8 @@ function IntelTab({ vendors, initialRows, performance, currency }: {
         </div>
         {historyError ? (
           <p className="purchasing-inline-error" role="alert">{historyError}</p>
+        ) : historyBusy && rows.length === 0 ? (
+          <p className="purchasing-card-hint">Loading price history…</p>
         ) : rows.length === 0 ? (
           <p className="purchasing-card-hint">No purchase prices recorded. Prices fill in as purchase orders are raised.</p>
         ) : (
@@ -2254,7 +2291,11 @@ function IntelTab({ vendors, initialRows, performance, currency }: {
         <div className="purchasing-card-head">
           <h2 className="purchasing-card-title" id="purchasing-performance-title">Supplier performance</h2>
         </div>
-        {performance.length === 0 ? (
+        {performanceError ? (
+          <p className="purchasing-inline-error" role="alert">{performanceError}</p>
+        ) : performanceBusy && performanceRows.length === 0 ? (
+          <p className="purchasing-card-hint">Loading supplier performance…</p>
+        ) : performanceRows.length === 0 ? (
           <p className="purchasing-card-hint">No vendor history yet. Lead times, fill rates, and on-time arrivals appear once orders are received.</p>
         ) : (
           <div className="purchasing-table-wrap">
@@ -2271,7 +2312,7 @@ function IntelTab({ vendors, initialRows, performance, currency }: {
                 </tr>
               </thead>
               <tbody>
-                {performance.map((row) => (
+                {performanceRows.map((row) => (
                   <tr key={row.vendorId}>
                     <th scope="row">{row.vendorName}</th>
                     <td className="is-numeric">{row.orders}</td>

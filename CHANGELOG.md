@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Purchasing Intel can load price history and supplier performance through
+  Go's `purchasing.priceHistory` and `purchasing.supplierPerformance` read
+  capabilities behind paired `CHASTE_GO_PURCHASING_INTEL_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go enforces
+  `purchasing.read` and derives organization scope from the session. Pending,
+  malformed, and unavailable results display errors instead of empty analytics.
+  Other Purchasing flows retain their current routes.
 - Vite employee creation can use Go's session-authenticated `hr.hireEmployee`
   capability behind paired `CHASTE_GO_HR_EMPLOYEE_WRITES=1` and
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Salary remains integer
