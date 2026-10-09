@@ -79,11 +79,12 @@ The full v1 changelog is preserved at the bottom of this file.
   contract and strict movement validation; selected Go errors do not retry via
   the legacy handler.
 
-- Vite analytics report generation can route only `POST /api/analytics` to the
-  existing authenticated Go Analytics handler behind paired default-off
-  `GO_ANALYTICS_REPORT_ROUTE=1` and
-  `CHASTE_GO_ANALYTICS_REPORT_ROUTE=1` selectors. Dataset discovery and previews
-  keep their existing GET routing and report response/download behavior.
+- Vite analytics report generation now routes only `POST /api/analytics` to
+  the existing authenticated Go Analytics handler by default in `.env.example`.
+  Set both `GO_ANALYTICS_REPORT_ROUTE=0` and
+  `CHASTE_GO_ANALYTICS_REPORT_ROUTE=0` for explicit legacy rollback. Dataset
+  discovery and previews keep their existing GET routing, and report response
+  and download behavior remain unchanged.
 
 - Vite Purchasing A/P aging can read through Go's authenticated
   `purchasing.apAging` capability behind paired

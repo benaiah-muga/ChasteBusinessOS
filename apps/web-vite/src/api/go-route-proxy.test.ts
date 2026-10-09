@@ -696,6 +696,10 @@ describe("Vite Go route proxy selection", () => {
     const readDisabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_ANALYTICS_ROUTE: "0", CHASTE_GO_ANALYTICS_REPORT_ROUTE: "1" });
     expect(isGoRouteRequest(readDisabled, "GET", "/api/analytics")).toBe(false);
     expect(isGoRouteRequest(readDisabled, "POST", "/api/analytics")).toBe(true);
+
+    const rollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_ANALYTICS_REPORT_ROUTE: "0" });
+    expect(isGoRouteRequest(rollback, "POST", "/api/analytics")).toBe(false);
+    expect(isGoRouteRequest(rollback, "GET", "/api/analytics")).toBe(true);
   });
 
   it("keeps the whole auth namespace on Go when auth is enabled", () => {
