@@ -261,6 +261,7 @@ type ManufacturingRetryScope = { actorId: string | null; organizationId: string 
 type ManufacturingAttempt = { storageKey: string; fingerprint: string; intentId: string };
 const workOrderActions = new Set(["createWorkOrder", "releaseWorkOrder", "completeWorkOrder", "cancelWorkOrder"]);
 const productionActions = new Set(["produceFromBom", "reverseProductionRun"]);
+const exactGoWriteActions = new Set(["defineBom", ...workOrderActions, ...productionActions]);
 const manufacturingAttemptPrefix = "chaste:manufacturing-work-order-attempt:";
 
 function parseManufacturingAttempt(value: string | null): { fingerprint: string; intentId: string } | null {
@@ -418,30 +419,23 @@ export async function submitManufacturingAction(
   const useGoWorkOrders = (options.useGoWorkOrders ?? configuredWorkOrders) && workOrderActions.has(parsed.data.action);
   const configuredProductionActions = typeof __GO_MANUFACTURING_PRODUCTION_WRITES__ !== "undefined" && __GO_MANUFACTURING_PRODUCTION_WRITES__;
   const useGoProductionActions = (options.useGoProductionActions ?? configuredProductionActions) && productionActions.has(parsed.data.action);
-  if (!useGoWorkOrders && !useGoProductionActions && (workOrderActions.has(parsed.data.action) || productionActions.has(parsed.data.action))) {
+  const useGoExactWrite = useGoDefineBom || useGoWorkOrders || useGoProductionActions;
+  if (!useGoExactWrite && exactGoWriteActions.has(parsed.data.action)) {
     await assertNoUnresolvedManufacturingAttempt(options.retryScope);
   }
   if (useGoProductionActions && parsed.data.action === "reverseProductionRun" && !z.string().uuid().safeParse(parsed.data.runId).success) {
     throw new ManufacturingApiError(0, "Select a production run with a valid ID before reversing it.");
   }
-  const attempt = useGoWorkOrders || useGoProductionActions
+  const attempt = useGoExactWrite
     ? await createManufacturingAttempt(parsed.data, options.retryScope ?? { actorId: null, organizationId: null })
     : null;
   const intentId = attempt?.intentId ?? crypto.randomUUID();
   const route = manufacturingActionRequest(parsed.data, intentId, useGoDefineBom, useGoWorkOrders, useGoProductionActions);
-  let { response, body } = await request(route.url, {
+  const { response, body } = await request(route.url, {
     method: "POST",
     body: JSON.stringify(route.body),
   }, signal);
-  let goResponse = useGoDefineBom || useGoWorkOrders || useGoProductionActions;
-  if (goResponse && response.status === 404) {
-    const fallback = manufacturingActionRequest(parsed.data, intentId, false);
-    ({ response, body } = await request(fallback.url, {
-      method: "POST",
-      body: JSON.stringify(fallback.body),
-    }, signal));
-    goResponse = false;
-  }
+  const goResponse = useGoExactWrite;
   if (response.status === 202) {
     const pending = PendingSchema.safeParse(body);
     if (!pending.success) throw new ManufacturingApiError(202, "The manufacturing service returned an unexpected approval response.");
@@ -449,7 +443,7 @@ export async function submitManufacturingAction(
   }
   if (!response.ok) {
     const error = new ManufacturingApiError(response.status, messageFor(response.status, body, "The production action could not be completed."));
-    if (attempt && response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) clearManufacturingAttempt(attempt);
+    if (attempt && response.status >= 400 && response.status < 500 && response.status !== 404 && response.status !== 408 && response.status !== 429) clearManufacturingAttempt(attempt);
     throw error;
   }
   const envelope = EnvelopeSchema.safeParse(body);

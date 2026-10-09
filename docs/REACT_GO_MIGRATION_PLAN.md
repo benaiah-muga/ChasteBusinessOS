@@ -1631,9 +1631,9 @@ new owners and the manifest shows zero legacy runtime paths.
      `manufacturing.releaseWorkOrder`, `manufacturing.completeWorkOrder`, and
      `manufacturing.cancelWorkOrder` capabilities when
      `CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. A missing capability route falls
-     back to `/api/manufacturing` with the same intent; other manufacturing
-     writes remain unchanged. Persist exact-action retry identity by actor and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. A missing capability route fails
+     closed and retries only through Go; other manufacturing writes remain
+     unchanged. Persist exact-action retry identity by actor and
      organization through pending and uncertain results, require scope before
      Go requests, and validate UUIDs, quantities, yield, work center, note, and
      lot code against the capability contract. Selector rollback blocks while
@@ -1643,11 +1643,11 @@ new owners and the manifest shows zero legacy runtime paths.
 165. (Implemented) Route Vite BOM production and production-run reversal through Go's
      `manufacturing.produceFromBom` and `manufacturing.reverseProductionRun`
      capabilities when `CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep the legacy manufacturing
-     route as a 404-only fallback with the same intent, persist exact-action
-     retries by actor and organization through pending or uncertain outcomes,
-     and validate capability output schemas. Go reversals lock affected stock
-     before checking prior reversals or available finished stock. Selector
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Selected Go 404s fail closed and
+     retain exact-action retries by actor and organization through pending or
+     uncertain outcomes; capability output schemas are validated. Go reversals
+     lock affected stock before checking prior reversals or available finished
+     stock. Selector
      rollback blocks unresolved Go writes; stale reads and writes are ignored
      after scope changes. Focused Vite checks pass; browser proof remains open.
 166. (Implemented) Add Vite Sales order creation, deliver-all, and cancellation through Go's
@@ -2270,3 +2270,9 @@ new owners and the manifest shows zero legacy runtime paths.
      their current route selections; set the new selector to `0` for legacy
      rollback. A selected Go error must fail closed without retrying the legacy
      `/api/hr` route.
+222. Remove the selected-Go 404 retry to legacy for Vite Manufacturing writes:
+     BOM definition, work-order create/release/complete/cancel, BOM production,
+     and production reversal. Preserve actor/org-scoped exact action and intent
+     on a Go 404, allow retry only through Go, and block selector rollback until
+     resolution. Keep legacy requests when their corresponding Go selector is
+     off. Focused Vite API tests cover the affected actions.
