@@ -29,6 +29,7 @@ import {
   goAccountingRecordPaymentFromEnv,
   goAccountingCreateInvoiceFromEnv,
   goAccountingCreditNoteFromEnv,
+  goAccountingReverseEntryFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -184,6 +185,15 @@ describe("accounting credit note Go selector", () => {
     expect(goAccountingCreditNoteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goAccountingCreditNoteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_CREDIT_NOTE: "0" })).toBe(false);
     expect(goAccountingCreditNoteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_CREDIT_NOTE: "1" })).toBe(false);
+  });
+});
+
+describe("accounting reverse entry Go selector", () => {
+  it("requires both the reversal selector and session capability route", () => {
+    expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_REVERSE_ENTRY: "1" })).toBe(true);
+    expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_REVERSE_ENTRY: "0" })).toBe(false);
+    expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_REVERSE_ENTRY: "1" })).toBe(false);
   });
 });
 

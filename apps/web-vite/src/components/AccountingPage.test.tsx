@@ -28,7 +28,7 @@ afterEach(() => {
 /* ------------------------------------------------------------- fixtures -- */
 
 const invoiceEntry: AccountingEntry = {
-  id: "entry-1",
+  id: "77777777-7777-4777-8777-777777777777",
   memo: "Invoice 1042 posted",
   sourceType: "invoice",
   reversalOfId: null,
@@ -40,10 +40,10 @@ const invoiceEntry: AccountingEntry = {
 };
 
 const reversalEntry: AccountingEntry = {
-  id: "entry-2",
+  id: "66666666-6666-4666-8666-666666666666",
   memo: "Reversal of invoice 1042",
   sourceType: "reversal",
-  reversalOfId: "entry-1",
+  reversalOfId: "77777777-7777-4777-8777-777777777777",
   postedAt: "2026-09-21T10:30:00.000Z",
   actorType: "human",
   currency: "USD",
@@ -128,6 +128,7 @@ interface StubOptions {
   goPaymentResponse?: () => Response;
   goCreateInvoiceResponse?: () => Response;
   goCreditNoteResponse?: () => Response;
+  goReverseEntryResponse?: () => Response;
 }
 
 function stubAccounting(options: StubOptions = {}) {
@@ -151,6 +152,9 @@ function stubAccounting(options: StubOptions = {}) {
           creditedMinor: 2500,
           invoiceBalanceMinor: 7500,
         } });
+      }
+      if (capabilityId === "accounting.reverseEntry") {
+        return options.goReverseEntryResponse?.() ?? Response.json({ ok: true, data: { reversalEntryId: "88888888-8888-4888-8888-888888888888" } });
       }
       if (capabilityId === "accounting.createInvoice") {
         return options.goCreateInvoiceResponse?.() ?? Response.json({ ok: true, data: {
@@ -721,6 +725,45 @@ describe("AccountingPage governed writes", () => {
     expect(screen.getByText("credit 9000 exceeds the open balance 5000")).toBeTruthy();
     expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.creditNote"))).toBe(true);
     expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("creditNote"))).toBe(false);
+  });
+
+  it("routes manual entry reversal to Go and restores the exact pending action after reload", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    let attempt = 0;
+    const { calls } = stubAccounting({
+      accounting: { ...overview, entries: [{ ...invoiceEntry, sourceType: "manual" }] },
+      goReverseEntryResponse: () => {
+        const body = JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        sent.push(body);
+        attempt += 1;
+        return attempt === 1
+          ? Response.json({ pendingApproval: true, reason: "Reversal approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { reversalEntryId: "88888888-8888-4888-8888-888888888888" } });
+      },
+    });
+    const first = render(<AccountingPage {...ids} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+    fireEvent.click(screen.getByRole("button", { name: "Journal" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reverse" }));
+    fireEvent.click(screen.getByRole("button", { name: "Post reversal" }));
+
+    expect(await screen.findByRole("button", { name: "Retry exact reversal" })).not.toBeNull();
+    expect((screen.getByRole("button", { name: "Post reversal" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(sent[0]).toMatchObject({ capabilityId: "accounting.reverseEntry", input: { entryId: invoiceEntry.id } });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes('"action":"reverse"'))).toBe(false);
+
+    first.unmount();
+    render(<AccountingPage {...ids} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact reversal" }));
+    expect(await screen.findByText(/^Reversal done\.$/)).not.toBeNull();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.input).toEqual(sent[0]?.input);
+    expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
   });
 });
 

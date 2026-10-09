@@ -14,6 +14,7 @@ import {
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
+  readPendingAccountingReverseEntry,
   submitAccountingAction,
 } from "./accounting";
 
@@ -329,7 +330,7 @@ describe("accounting API: governed writes", () => {
 
   it("rejects a 202 that is missing its pending marker", async () => {
     stubFetch(() => Response.json({ ok: true, data: {} }, { status: 202 }));
-    await expect(submitAccountingAction("/api/accounting", { action: "reverse" })).rejects.toMatchObject({
+    await expect(submitAccountingAction("/api/accounting", { action: "closeYear", year: 2025 })).rejects.toMatchObject({
       status: 202,
       message: "This action is waiting for approval but the Accounting service returned an invalid approval response.",
     });
@@ -563,6 +564,54 @@ describe("accounting API: Go credit notes", () => {
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
     await expect(readPendingAccountingCreditNote(paymentRetryScope)).resolves.toEqual(action);
     expect(mock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("accounting API: Go journal reversals", () => {
+  const action = { action: "reverse", entryId: "99999999-9999-4999-8999-999999999999" };
+  const output = { reversalEntryId: "88888888-8888-4888-8888-888888888888" };
+
+  it("routes only the manual reverse action to Go and validates the output", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: output }));
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    const payload = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
+    expect(payload).toMatchObject({ capabilityId: "accounting.reverseEntry", input: { entryId: action.entryId }, intentId: expect.any(String) });
+    expect((payload.input as Record<string, unknown>).action).toBeUndefined();
+    expect(payload).not.toHaveProperty("actorId");
+    expect(payload).not.toHaveProperty("organizationId");
+    await expect(readPendingAccountingReverseEntry(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("keeps other Accounting actions on their existing route", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
+    await expect(submitAccountingAction("/api/accounting", { action: "reversePayment", paymentId: "33333333-3333-4333-8333-333333333333", reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("retains the exact attempt through pending, 404, and rollback", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
+    const mock = stubFetch(() => mock.mock.calls.length === 1
+      ? Response.json({ pendingApproval: true, reason: "Reversal approval required" }, { status: 202 })
+      : Response.json({ error: "capability not found" }, { status: 404 }));
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingAccountingReverseEntry(paymentRetryScope)).resolves.toEqual(action);
+    const calls = mock.mock.calls;
+    expect(JSON.parse(String(calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(calls[1]?.[1]?.body)).intentId);
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", false);
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(mock).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces Go domain eligibility rejections without legacy fallback", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
+    const mock = stubFetch(() => Response.json({ error: "a invoice entry is undone by its domain workflow: use accounting.creditNote against the invoice" }, { status: 422 }));
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 422, message: expect.stringContaining("domain workflow") });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
   });
 });
 

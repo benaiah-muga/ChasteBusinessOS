@@ -16,9 +16,11 @@ import {
   goAccountingRecordPaymentUseGo,
   goAccountingCreateInvoiceUseGo,
   goAccountingCreditNoteUseGo,
+  goAccountingReverseEntryUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
+  readPendingAccountingReverseEntry,
   submitAccountingAction,
   type AccountingAging,
   type AccountingBill,
@@ -34,6 +36,7 @@ import {
   type AccountingRecordPaymentAction,
   type AccountingCreateInvoiceAction,
   type AccountingCreditNoteAction,
+  type AccountingReverseEntryAction,
   type AccountingReminder,
   type AccountingReports,
   type AccountingStatement,
@@ -350,6 +353,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
   const [pendingRecordPayment, setPendingRecordPayment] = useState<AccountingRecordPaymentAction | null>(null);
   const [pendingCreateInvoice, setPendingCreateInvoice] = useState<AccountingCreateInvoiceAction | null>(null);
   const [pendingCreditNote, setPendingCreditNote] = useState<AccountingCreditNoteAction | null>(null);
+  const [pendingReverseEntry, setPendingReverseEntry] = useState<AccountingReverseEntryAction | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentRetryScope: AccountingPaymentRetryScope = { actorId, organizationId };
 
@@ -404,6 +408,23 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     }).catch((error) => {
       if (active && goAccountingRecordPaymentUseGo()) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved invoice payment." });
+      }
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    let active = true;
+    void readPendingAccountingReverseEntry(paymentRetryScope).then((action) => {
+      if (!active) return;
+      setPendingReverseEntry(action);
+      if (action) setNotice({ tone: "pending", text: goAccountingReverseEntryUseGo()
+        ? "A journal reversal is unresolved. Retry the exact entry to recover its result."
+        : "A Go journal reversal is unresolved. Restore the Go reversal route and retry that exact entry before using the legacy route." });
+    }).catch((error) => {
+      if (active && goAccountingReverseEntryUseGo()) {
+        setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved journal reversal." });
       }
     });
     return () => { active = false; };
@@ -474,6 +495,8 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const goCreateInvoice = isCreateInvoice && goAccountingCreateInvoiceUseGo();
       const isCreditNote = path === "/api/accounting" && payload.action === "creditNote";
       const goCreditNote = isCreditNote && goAccountingCreditNoteUseGo();
+      const isReverseEntry = path === "/api/accounting" && payload.action === "reverse";
+      const goReverseEntry = isReverseEntry && goAccountingReverseEntryUseGo();
       setBusy(true);
       try {
         const outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
@@ -492,6 +515,12 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             ? await readPendingAccountingCreditNote(paymentRetryScope)
             : null);
         }
+        if (goReverseEntry) {
+          setPendingReverseEntry(outcome.kind === "pending"
+            ? await readPendingAccountingReverseEntry(paymentRetryScope)
+            : null);
+          if (outcome.kind === "completed") setReverseTarget(null);
+        }
         // A 202 is a queued approval, never a completed write: say so plainly.
         setNotice(
           outcome.kind === "pending"
@@ -499,7 +528,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : { tone: "success", text: `${label} done.` },
         );
         void load();
-        return !((goRecordPayment || goCreateInvoice || goCreditNote) && outcome.kind === "pending");
+        return !((goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry) && outcome.kind === "pending");
       } catch (error) {
         if (goRecordPayment) {
           try { setPendingRecordPayment(await readPendingAccountingRecordPayment(paymentRetryScope)); }
@@ -512,6 +541,10 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
         if (goCreditNote) {
           try { setPendingCreditNote(await readPendingAccountingCreditNote(paymentRetryScope)); }
           catch { setPendingCreditNote(payload as unknown as AccountingCreditNoteAction); }
+        }
+        if (goReverseEntry) {
+          try { setPendingReverseEntry(await readPendingAccountingReverseEntry(paymentRetryScope)); }
+          catch { setPendingReverseEntry(payload as unknown as AccountingReverseEntryAction); }
         }
         setNotice({
           tone: "error",
@@ -614,6 +647,12 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
                 disabled={busy || !goAccountingCreditNoteUseGo()}
                 onClick={() => void runAction("/api/accounting", { ...pendingCreditNote }, `Credit on invoice`)}
               >{goAccountingCreditNoteUseGo() ? "Retry exact credit" : "Enable Go credit route to retry"}</button>}
+              {pendingReverseEntry && <button
+                type="button"
+                className="accounting-button accounting-button-small"
+                disabled={busy || !goAccountingReverseEntryUseGo()}
+                onClick={() => void runAction("/api/accounting", { ...pendingReverseEntry }, "Reversal")}
+              >{goAccountingReverseEntryUseGo() ? "Retry exact reversal" : "Enable Go reversal route to retry"}</button>}
               {pendingRecordPayment && <button
                 type="button"
                 className="accounting-button accounting-button-small"
@@ -777,7 +816,8 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
           <ReverseEntryDialog
             entry={reverseTarget}
             busy={busy}
-            onClose={() => setReverseTarget(null)}
+            pending={pendingReverseEntry?.entryId === reverseTarget?.id}
+            onClose={() => { if (pendingReverseEntry?.entryId !== reverseTarget?.id) setReverseTarget(null); }}
             onConfirm={async () => {
               if (!reverseTarget) return;
               const accepted = await runAction(
@@ -1224,11 +1264,13 @@ function PayBillDialog({
 function ReverseEntryDialog({
   entry,
   busy,
+  pending,
   onClose,
   onConfirm,
 }: {
   entry: AccountingEntry | null;
   busy: boolean;
+  pending: boolean;
   onClose: () => void;
   onConfirm: () => Promise<void>;
 }) {
@@ -1240,13 +1282,13 @@ function ReverseEntryDialog({
       onClose={onClose}
       footer={
         <>
-          <button type="button" disabled={busy} onClick={onClose}>
+            <button type="button" disabled={busy || pending} onClick={onClose}>
             Cancel
           </button>
           <button
             type="button"
             className="accounting-button-danger"
-            disabled={busy || !entry}
+            disabled={busy || pending || !entry}
             onClick={() => void onConfirm()}
           >
             Post reversal
