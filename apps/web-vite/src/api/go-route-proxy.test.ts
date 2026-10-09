@@ -466,6 +466,7 @@ describe("manufacturing production Go selector", () => {
 describe("manufacturing planning read Go selector", () => {
   it("requires both planning reads and the session capability route", () => {
     expect(goManufacturingPlanningReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_PLANNING_READS: "1" })).toBe(true);
+    expect(goManufacturingPlanningReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_PLANNING_READS: "0" })).toBe(false);
     expect(goManufacturingPlanningReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goManufacturingPlanningReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_PLANNING_READS: "1" })).toBe(false);
   });
