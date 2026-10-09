@@ -21,6 +21,7 @@ import {
   goCrmTaskWritesFromEnv,
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
+  goPurchasingReceiptHistoryReadsFromEnv,
   goPurchasingReturnCloseFromEnv,
   goPurchasingFinanceWritesFromEnv,
   goPurchasingPaymentRunsFromEnv,
@@ -337,6 +338,15 @@ describe("purchase receipt Go selector", () => {
     expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_RECEIVE_GOODS: "1" })).toBe(true);
     expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_RECEIVE_GOODS: "1" })).toBe(false);
+  });
+});
+
+describe("purchase receipt history Go selector", () => {
+  it("requires the receipt history selector and session capability route", () => {
+    expect(goPurchasingReceiptHistoryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_RECEIPT_HISTORY_READS: "1" })).toBe(true);
+    expect(goPurchasingReceiptHistoryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_RECEIPT_HISTORY_READS: "0" })).toBe(false);
+    expect(goPurchasingReceiptHistoryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goPurchasingReceiptHistoryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_RECEIPT_HISTORY_READS: "1" })).toBe(false);
   });
 });
 

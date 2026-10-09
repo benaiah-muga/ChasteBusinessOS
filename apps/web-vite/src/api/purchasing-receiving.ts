@@ -199,10 +199,19 @@ export async function fetchReceivingOrders(signal?: AbortSignal): Promise<{ base
 }
 
 export async function fetchReceivingDetail(poNumber: number, signal?: AbortSignal): Promise<ReceivingDetail> {
-  const { body } = await request("/api/purchasing", {
+  const parsedPONumber = PositiveGoIntegerSchema.safeParse(poNumber);
+  if (!parsedPONumber.success) {
+    throw new ReceivingApiError(0, "Enter a valid purchase order number before loading receipt history.");
+  }
+  const useGo = typeof __GO_PURCHASING_RECEIPT_HISTORY_READS__ !== "undefined" && __GO_PURCHASING_RECEIPT_HISTORY_READS__;
+  const path = useGo ? "/api/capabilities/execute" : "/api/purchasing";
+  const payload = useGo
+    ? { capabilityId: "purchasing.listReceipts", input: { poNumber: parsedPONumber.data }, intentId: crypto.randomUUID() }
+    : { action: "receiptDetail", poNumber: parsedPONumber.data };
+  const { body } = await request(path, {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ action: "receiptDetail", poNumber }),
+    body: JSON.stringify(payload),
   }, "load receipt history", signal);
   const parsed = ReceiptDetailSchema.safeParse(body);
   if (!parsed.success) throw new ReceivingApiError(200, "The Purchasing service returned receipt history in an unexpected format.");

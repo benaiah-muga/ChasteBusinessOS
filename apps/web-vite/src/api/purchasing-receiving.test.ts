@@ -119,6 +119,47 @@ describe("receiving detail rollup", () => {
     }));
   });
 
+  it("routes receipt history through purchasing.listReceipts and preserves the detail shape", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: detail }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReceivingDetail(42)).resolves.toEqual(detail);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: expect.stringMatching(/^\{"capabilityId":"purchasing\.listReceipts","input":\{"poNumber":42\},"intentId":"[0-9a-f-]+"\}$/),
+    }));
+  });
+
+  it.each([0, -1, 1.5, 2_147_483_648, Number.NaN])("rejects invalid purchase order number %s before dispatch", async (poNumber) => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReceivingDetail(poNumber)).rejects.toMatchObject({
+      status: 0,
+      message: "Enter a valid purchase order number before loading receipt history.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [404, { error: "capability unavailable" }],
+    [200, { ok: true, data: { ...detail, unexpected: true } }],
+  ])("fails closed on selected Go receipt history response %i", async (status, body) => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(body, { status }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReceivingDetail(42)).rejects.toBeInstanceOf(ReceivingApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
+
   it("keeps rejected, returned, and remaining quantities distinct", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: detail })));
     const result = await fetchReceivingDetail(42);

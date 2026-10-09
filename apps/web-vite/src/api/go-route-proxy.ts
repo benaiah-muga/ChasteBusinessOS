@@ -116,6 +116,10 @@ export function goPurchasingReceiveGoodsFromEnv(env: Record<string, string | und
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_RECEIVE_GOODS === "1";
 }
 
+export function goPurchasingReceiptHistoryReadsFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_RECEIPT_HISTORY_READS === "1";
+}
+
 export function goPurchasingReturnCloseFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_RETURN_CLOSE === "1";
 }

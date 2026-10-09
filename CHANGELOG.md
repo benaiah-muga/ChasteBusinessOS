@@ -93,6 +93,13 @@ The full v1 changelog is preserved at the bottom of this file.
   bucket response and uses the workspace currency; selected-Go failures do not
   retry through `/api/purchasing`.
 
+- Vite receiving-desk receipt history can use Go's `purchasing.listReceipts`
+  capability by default in `.env.example`, paired with
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
+  `CHASTE_GO_PURCHASING_RECEIPT_HISTORY_READS=0` for legacy rollback. Order
+  listing and receipt submission keep their existing routes, and selected Go
+  errors do not retry the legacy receipt-detail action.
+
 - Vite Purchasing requests and RFQs can use the direct authenticated Go
   `purchasing.listPurchaseWorkflow` capability behind paired
   `CHASTE_GO_PURCHASING_WORKFLOW_READS=1` and

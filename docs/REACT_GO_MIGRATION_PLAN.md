@@ -2283,3 +2283,15 @@ new owners and the manifest shows zero legacy runtime paths.
      rollback. Retry the same payload and intent through Go only; explicit
      selector-off sales continue to use `/api/pos`. Treat pre-upgrade
      route-less sale markers as Go-pinned, matching their historical writer.
+224. (Implemented; default-on in `.env.example`) Route only Vite
+     receiving-desk receipt history through Go's
+     session-authenticated `purchasing.listReceipts` capability behind paired
+     `CHASTE_GO_PURCHASING_RECEIPT_HISTORY_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Enable the read selector
+     by default in `.env.example`; set it to `0` for legacy rollback. Validate
+     the positive Go-range purchase order number and strict capability envelope
+     and output, preserve the existing `{receipts, orderLines}` page shape, and
+     fail closed on selected Go errors. Keep order listing and receipt
+     submission unchanged. Focused Vite API, proxy, and page tests cover the
+     read path; the existing Go receipt integration test proves permission and
+     tenant behavior.

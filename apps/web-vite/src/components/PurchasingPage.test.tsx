@@ -1215,7 +1215,10 @@ describe("PurchasingReceivingPage", () => {
     ],
   };
 
-  function receivingFetch(post?: (body: Record<string, unknown>) => unknown) {
+  function receivingFetch(
+    post?: (body: Record<string, unknown>) => unknown,
+    receiptHistory?: (input: Record<string, unknown>) => unknown,
+  ) {
     let latestRollup = rollup;
     return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -1223,6 +1226,9 @@ describe("PurchasingReceivingPage", () => {
       if (url === "/api/purchasing" && (init?.method ?? "GET") === "GET") return Response.json(receivingOrders);
       if (url === "/api/capabilities/execute" && init?.method === "POST") {
         const body = JSON.parse(String(init.body ?? "{}")) as { capabilityId?: string; input?: Record<string, unknown>; intentId?: string };
+        if (body.capabilityId === "purchasing.listReceipts" && body.input) {
+          return resolve(receiptHistory ? receiptHistory(body.input) : { ok: true, data: latestRollup });
+        }
         if (body.capabilityId !== "purchasing.receiveGoods" || !body.input) throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
         return resolve(post ? post({ ...body.input, action: "receiveGoods", intentId: body.intentId }) : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 4 } });
       }
@@ -1264,6 +1270,33 @@ describe("PurchasingReceivingPage", () => {
     expect(screen.getByLabelText("accepted on line 2")).toHaveProperty("value", "1000");
     expect(screen.getByText(/accepted so far 2/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "No receipts yet" })).toBeTruthy();
+  });
+
+  it("loads receipt history from Go while keeping the order list on its existing read", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
+    const fetchMock = receivingFetch();
+    await openOrder(fetchMock);
+
+    expect(await screen.findByRole("heading", { name: "No receipts yet" })).toBeTruthy();
+    const goHistory = fetchMock.mock.calls.find(([input, init]) => input === "/api/capabilities/execute"
+      && JSON.parse(String(init?.body ?? "{}")).capabilityId === "purchasing.listReceipts");
+    expect(goHistory).toBeDefined();
+    expect(JSON.parse(String(goHistory?.[1]?.body))).toMatchObject({
+      capabilityId: "purchasing.listReceipts",
+      input: { poNumber: 42 },
+    });
+    expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/purchasing" && init?.method === "POST")).toBe(false);
+    expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/purchasing" && init?.method === "GET")).toBe(true);
+  });
+
+  it("shows a selected Go receipt history error without retrying the legacy detail action", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
+    const fetchMock = receivingFetch(undefined, () => Response.json({ error: "receipt history unavailable" }, { status: 404 }));
+    await openOrder(fetchMock);
+
+    expect(await screen.findByText("receipt history unavailable")).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/purchasing" && init?.method === "POST")).toBe(false);
   });
 
   it("refuses to send a receipt with nothing entered", async () => {
