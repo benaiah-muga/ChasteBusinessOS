@@ -101,14 +101,13 @@ The full v1 changelog is preserved at the bottom of this file.
   listing and receipt submission keep their existing routes, and selected Go
   errors do not retry the legacy receipt-detail action.
 
-- Vite Purchasing requests and RFQs can use the direct authenticated Go
-  `purchasing.listPurchaseWorkflow` capability behind paired
-  `CHASTE_GO_PURCHASING_WORKFLOW_READS=1` and
-  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors, with the API's
-  `GO_PURCHASING_WORKFLOW_READS=1` gate also required. Only `workspace.requests`
-  is replaced; the aggregate remains the source for other workspace data.
-  Strict output validation strips the Go-only RFQ `vendorId`, and selected-Go
-  errors do not retry through the aggregate request.
+- Vite Purchasing requests and RFQs now use the direct authenticated Go
+  `purchasing.listPurchaseWorkflow` capability by default in `.env.example`.
+  Set both `CHASTE_GO_PURCHASING_WORKFLOW_READS=0` and
+  `GO_PURCHASING_WORKFLOW_READS=0` for explicit legacy rollback. Only
+  `workspace.requests` is replaced; the aggregate remains the source for other
+  workspace data. Strict output validation strips the Go-only RFQ `vendorId`,
+  and selected-Go errors do not retry through the aggregate request.
 
 - Vite inventory transfer create and confirm writes no longer fall back to the
   legacy inventory route when a selected Go capability returns 404. The exact

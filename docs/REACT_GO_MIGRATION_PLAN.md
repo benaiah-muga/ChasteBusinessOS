@@ -2230,13 +2230,14 @@ new owners and the manifest shows zero legacy runtime paths.
      organization-scoped permission checks, order, preview redaction, and the
      existing content link and editor routes. Selected-Go errors fail closed.
      Focused Go/Vite tests pass; browser proof remains open.
-217. (Implemented) Route only Vite Purchasing requests and RFQs through the
+217. (Implemented; default-on in `.env.example`) Route only Vite Purchasing requests and RFQs through the
      direct session-authenticated `purchasing.listPurchaseWorkflow` capability
      behind paired `CHASTE_GO_PURCHASING_WORKFLOW_READS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors, with the API's
      `GO_PURCHASING_WORKFLOW_READS=1` capability gate enabled. Preserve the
      aggregate workspace for vendors, orders, bills, currency, aging, and
-     analytics, replacing only `workspace.requests`. Validate the full Go
+     analytics, replacing only `workspace.requests`. Set both workflow flags
+     to `0` for explicit legacy rollback. Validate the full Go
      request/RFQ output and strip its additional RFQ `vendorId` field for the
      existing Vite contract. Selected-Go errors do not retry through the
      aggregate request. Focused Vite and Go route tests pass; browser proof
