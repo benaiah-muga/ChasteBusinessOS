@@ -96,7 +96,7 @@ func (limiter *inventoryImportRateLimiter) allow(orgID string) (bool, time.Durat
 }
 
 func isInventoryImportCapability(capabilityID string) bool {
-	return capabilityID == "inventory.importItems" || capabilityID == "inventory.undoItemImport"
+	return capabilityID == "inventory.importItems" || capabilityID == "inventory.undoItemImport" || capabilityID == "inventory.restoreItemImport"
 }
 
 type sessionCapabilityInput struct {
@@ -174,6 +174,8 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			_, parseErr = capability.ParseInventoryImportItemsInput(body.Input)
 		case "inventory.undoItemImport":
 			_, parseErr = capability.ParseInventoryUndoItemImportInput(body.Input)
+		case "inventory.restoreItemImport":
+			_, parseErr = capability.ParseInventoryRestoreItemImportInput(body.Input)
 		}
 		if parseErr != nil {
 			writeJSON(w, http.StatusUnprocessableEntity, capability.Result{OK: false, Error: parseErr.Error()})

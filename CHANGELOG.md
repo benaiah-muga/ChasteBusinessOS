@@ -13,6 +13,15 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite product CSV imports, undo, and restore can use Go's authenticated
+  `inventory.importItems`, `inventory.undoItemImport`, and
+  `inventory.restoreItemImport` capabilities. Exact pending intent inputs and
+  created item IDs are recoverable within the active actor and organization
+  session; retries preserve the same intent through approvals and uncertain
+  results. The Go route never falls back to `/api/import`. Imports exceeding the
+  64 KiB capability request limit or Go row constraints are rejected before
+  dispatch, and undo/restore retain the exact affected item IDs.
+
 - Vite cycle-count create, record, post, and cancel use Go's session capability
   route when paired Vite and API selectors are enabled. Exact retry markers are
   scoped to the active actor and organization and retained through pending

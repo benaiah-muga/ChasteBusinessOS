@@ -280,7 +280,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                       : accountingClosePage
                                         ? <AccountingCloseReadinessPage key={organizationRevision} />
                                         : productsPage
-                                          ? <ProductsPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                          ? <ProductsPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                         : purchasingPaymentRunsPage
                                         ? <PurchasingPaymentRunsPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                                         : purchasingAgingPage

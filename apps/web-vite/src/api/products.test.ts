@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchProductDefaults, fetchProducts, fetchProductsEnabled, importProducts, productActionRequest, productImportRequest, productUndoImportRequest, ProductsApiError, submitProductAction, undoProductImport, type ProductAction } from "./products";
+import { fetchProductDefaults, fetchProducts, fetchProductsEnabled, importProducts, productActionRequest, productImportRequest, productUndoImportRequest, ProductsApiError, recoverProductImport, restoreProductImport, submitProductAction, undoProductImport, type ProductAction } from "./products";
+
+const retryScope = { actorId: "10000000-0000-4000-8000-000000000010", organizationId: "10000000-0000-4000-8000-000000000011" };
+const otherRetryScope = { actorId: "10000000-0000-4000-8000-000000000012", organizationId: "10000000-0000-4000-8000-000000000013" };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -83,7 +86,7 @@ describe("products API", () => {
       .mockResolvedValueOnce(Response.json({ inserted: 0, skippedDuplicates: 0, errors: [] }));
     vi.stubGlobal("fetch", fetchMock);
     await fetchProductDefaults();
-    await importProducts([{ rowNumber: 2, name: "Tea", type: "goods", salePrice: "3.25", tags: [] }]);
+    await importProducts([{ rowNumber: 2, name: "Tea", type: "goods", salePrice: "3.25", tags: [] }], undefined, retryScope);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/module-settings?module=inventory", "/api/import"]);
   });
 
@@ -95,7 +98,7 @@ describe("products API", () => {
     vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(importProducts([{ rowNumber: 4, name: " Tea ", sku: " TEA-1 ", type: "goods", unit: " box ", salePrice: "3.25", barcode: "4000000000006", tags: [" Pantry "] }])).resolves.toEqual({
+    await expect(importProducts([{ rowNumber: 4, name: " Tea ", sku: " TEA-1 ", type: "goods", unit: " box ", salePrice: "3.25", barcode: "4000000000006", tags: [" Pantry "] }], undefined, retryScope)).resolves.toEqual({
       inserted: 1, skippedDuplicates: 1, skippedDuplicateRows: [5], errors: [], createdIds: [createdID],
     });
     const [path, options] = fetchMock.mock.calls[0]!;
@@ -115,35 +118,143 @@ describe("products API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const rows = [{ rowNumber: 2, name: "Install", type: "service" as const, salePrice: "12.00", tags: [] }];
 
-    await expect(importProducts(rows)).rejects.toBeInstanceOf(ProductsApiError);
-    await importProducts(rows);
+    await expect(importProducts(rows, undefined, retryScope)).rejects.toBeInstanceOf(ProductsApiError);
+    await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ pendingRows: rows });
+    await expect(recoverProductImport(otherRetryScope)).resolves.toMatchObject({ pendingRows: null });
+    await importProducts(rows, undefined, retryScope);
     const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string; input: { rows: Array<{ sku: string }> } };
     const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string; input: { rows: Array<{ sku: string }> } };
     expect(second.intentId).toBe(first.intentId);
     expect(second.input.rows[0]?.sku).toBe(first.input.rows[0]?.sku);
   });
 
+  it("blocks the legacy route while a scoped Go import result is unresolved", async () => {
+    const rows = [{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods" as const, salePrice: "3.25", tags: [] }];
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network lost"));
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(importProducts(rows, undefined, retryScope)).rejects.toBeInstanceOf(ProductsApiError);
+
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", false);
+    await expect(importProducts([{ ...rows[0]!, sku: "TEA-2" }], undefined, retryScope)).rejects.toThrow(/unresolved for this account and organization/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it.each([
+    ["import", async (fetchMock: ReturnType<typeof vi.fn>) => {
+      const rows = [{ rowNumber: 2, name: "Tea", sku: "TEA-404", type: "goods" as const, salePrice: "3.25", tags: [] }];
+      vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(importProducts(rows, undefined, retryScope)).rejects.toMatchObject({ status: 404 });
+      await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ pendingRows: rows });
+      await importProducts(rows, undefined, retryScope);
+      return [fetchMock.mock.calls[0]?.[1]?.body, fetchMock.mock.calls[1]?.[1]?.body];
+    }],
+    ["undo", async (fetchMock: ReturnType<typeof vi.fn>) => {
+      const ids = ["10000000-0000-4000-8000-000000000041"];
+      vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(undoProductImport(ids, undefined, retryScope)).rejects.toMatchObject({ status: 404 });
+      await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ pendingUndoIds: ids });
+      await undoProductImport(ids, undefined, retryScope);
+      return [fetchMock.mock.calls[0]?.[1]?.body, fetchMock.mock.calls[1]?.[1]?.body];
+    }],
+    ["restore", async (fetchMock: ReturnType<typeof vi.fn>) => {
+      const ids = ["10000000-0000-4000-8000-000000000042"];
+      vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(restoreProductImport(ids, undefined, retryScope)).rejects.toMatchObject({ status: 404 });
+      await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ pendingRestoreIds: ids });
+      await restoreProductImport(ids, undefined, retryScope);
+      return [fetchMock.mock.calls[0]?.[1]?.body, fetchMock.mock.calls[1]?.[1]?.body];
+    }],
+  ])("retains the exact %s intent after a missing Go route", async (_operation, exercise) => {
+    const itemId = "10000000-0000-4000-8000-000000000041";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockImplementation(async (_url: RequestInfo | URL, options?: RequestInit) => {
+        const body = JSON.parse(String(options?.body)) as { capabilityId: string; input?: { itemIds?: string[] } };
+        const requestedID = body.input?.itemIds?.[0] ?? itemId;
+        if (body.capabilityId === "inventory.importItems") return Response.json({ ok: true, data: { createdIds: [itemId], imported: 1, skippedDuplicateRows: [] } });
+        if (body.capabilityId === "inventory.undoItemImport") return Response.json({ ok: true, data: { itemIds: [requestedID], archived: 1 } });
+        return Response.json({ ok: true, data: { itemIds: [requestedID], restored: 1 } });
+      });
+    const bodies = await exercise(fetchMock);
+    const first = JSON.parse(String(bodies[0])) as { intentId: string };
+    const second = JSON.parse(String(bodies[1])) as { intentId: string };
+    expect(second.intentId).toBe(first.intentId);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+  });
+
+  it.each([
+    [{ createdIds: ["not-a-uuid"], imported: 1, skippedDuplicateRows: [] }],
+    [{ createdIds: ["10000000-0000-4000-8000-000000000051"], imported: 2, skippedDuplicateRows: [] }],
+    [{ createdIds: ["10000000-0000-4000-8000-000000000051", "10000000-0000-4000-8000-000000000051"], imported: 2, skippedDuplicateRows: [] }],
+  ])("keeps an import marker when Go returns an inconsistent or duplicated created ID set", async (data) => {
+    const rows = [{ rowNumber: 2, name: "Tea", sku: "TEA-BAD-IMPORT", type: "goods" as const, salePrice: "3.25", tags: [] }];
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data })));
+    await expect(importProducts(rows, undefined, retryScope)).rejects.toThrow(/unexpected format|inconsistent or duplicate item IDs/);
+    await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ pendingRows: rows, recovery: null });
+  });
+
+  it.each([
+    [{ itemIds: ["not-a-uuid"], archived: 1 }],
+    [{ itemIds: ["10000000-0000-4000-8000-000000000061", "10000000-0000-4000-8000-000000000062"], archived: 1 }],
+    [{ itemIds: ["10000000-0000-4000-8000-000000000061", "10000000-0000-4000-8000-000000000061"], archived: 2 }],
+    [{ itemIds: ["10000000-0000-4000-8000-000000000063"], archived: 1 }],
+  ])("rejects malformed Go undo IDs without updating recovery or clearing the marker", async (data) => {
+    const ids = ["10000000-0000-4000-8000-000000000061", "10000000-0000-4000-8000-000000000062"];
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data })));
+    await expect(undoProductImport(ids, undefined, retryScope)).rejects.toThrow(/unexpected format|invalid or inconsistent item IDs/);
+    await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ pendingUndoIds: ids, recovery: null });
+  });
+
+  it.each([
+    [{ itemIds: ["not-a-uuid"], restored: 1 }],
+    [{ itemIds: ["10000000-0000-4000-8000-000000000071", "10000000-0000-4000-8000-000000000072"], restored: 1 }],
+    [{ itemIds: ["10000000-0000-4000-8000-000000000071", "10000000-0000-4000-8000-000000000071"], restored: 2 }],
+    [{ itemIds: ["10000000-0000-4000-8000-000000000073"], restored: 1 }],
+  ])("rejects malformed Go restore IDs without updating recovery or clearing the marker", async (data) => {
+    const ids = ["10000000-0000-4000-8000-000000000071", "10000000-0000-4000-8000-000000000072"];
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data })));
+    await expect(restoreProductImport(ids, undefined, retryScope)).rejects.toThrow(/unexpected format|invalid or inconsistent item IDs/);
+    await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ pendingRestoreIds: ids, recovery: null });
+  });
+
   it("keeps Go import approval responses visible to the caller", async () => {
     vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true, reason: "Owner review", approvalId: "approval-123" }, { status: 202 })));
-    await expect(importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", salePrice: "3.25", tags: [] }]))
+    await expect(importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", salePrice: "3.25", tags: [] }], undefined, retryScope))
       .rejects.toMatchObject({ status: 202, message: "Owner review" });
   });
 
-  it("keeps Go import requests that exceed its body and tag limits on the legacy route", () => {
+  it("rejects Go import requests that exceed its body and row limits without dispatching to legacy", async () => {
     const id = "intent-12345678901234567890";
     const tooManyTags = [{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods" as const, salePrice: "3.25", tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`) }];
-    expect(productImportRequest(tooManyTags, id, true).url).toBe("/api/import");
-    const oversized = [{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods" as const, salePrice: "3.25", tags: [], unit: "x".repeat(70_000) }];
-    expect(productImportRequest(oversized, id, true).url).toBe("/api/import");
+    expect(productImportRequest(tooManyTags, id, true).url).toBe("/api/capabilities/execute");
+    expect(productImportRequest(tooManyTags, id, true).unsupportedReason).toMatch(/20 tags/);
+    const oversized = Array.from({ length: 200 }, (_, index) => ({ rowNumber: index + 2, name: "Tea", sku: `TEA-${index}`, type: "goods" as const, salePrice: "3.25", tags: Array.from({ length: 20 }, () => "x".repeat(30)) }));
+    expect(productImportRequest(oversized, id, true).url).toBe("/api/capabilities/execute");
+    expect(productImportRequest(oversized, id, true).unsupportedReason).toMatch(/64 KiB/);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(importProducts(tooManyTags, undefined, retryScope)).rejects.toThrow(/20 tags/);
+    await expect(importProducts(oversized, undefined, retryScope)).rejects.toThrow(/64 KiB/);
+    await expect(importProducts(Array.from({ length: 5001 }, (_, index) => ({ rowNumber: index + 2, name: "Tea", sku: `TEA-${index}`, type: "goods" as const, salePrice: "3.25", tags: [] })), undefined, retryScope)).rejects.toThrow(/5,000 rows/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses the Go undo capability and maps archived counts and approval responses", async () => {
     const ids = ["10000000-0000-4000-8000-000000000001", "10000000-0000-4000-8000-000000000002"];
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { archived: 1 } }));
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { itemIds: [ids[0]], archived: 1 } }));
     vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
     vi.stubGlobal("fetch", fetchMock);
-    await expect(undoProductImport(ids)).resolves.toEqual({ kind: "completed", undone: 1, remaining: 1 });
+    await expect(undoProductImport(ids, undefined, retryScope)).resolves.toEqual({ kind: "completed", undone: 1, remaining: 1, itemIds: [ids[0]] });
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       body: expect.stringContaining('"capabilityId":"inventory.undoItemImport"'),
     }));
@@ -153,13 +264,18 @@ describe("products API", () => {
   it("returns the Go undo approval reason without losing the pending state", async () => {
     vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true, reason: "Owner review", approvalId: "approval-456" }, { status: 202 })));
-    await expect(undoProductImport(["10000000-0000-4000-8000-000000000001"]))
+    await expect(undoProductImport(["10000000-0000-4000-8000-000000000001"], undefined, retryScope))
       .resolves.toEqual({ kind: "pending", reason: "Owner review" });
   });
 
-  it("keeps product undo batches beyond the legacy 5,000 ID cap on the legacy route", () => {
+  it("rejects product undo batches beyond the Go ID cap without legacy fallback", async () => {
     const ids = Array.from({ length: 5001 }, (_, index) => `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`);
-    expect(productUndoImportRequest(ids, "intent-12345678901234567890", true).url).toBe("/api/import");
+    expect(productUndoImportRequest(ids, "intent-12345678901234567890", true).url).toBe("/api/capabilities/execute");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(undoProductImport(ids, undefined, retryScope)).rejects.toThrow(/1 and 5,000/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects malformed successful payloads and invalid action inputs", async () => {
@@ -173,9 +289,34 @@ describe("products API", () => {
       .mockResolvedValueOnce(Response.json({ inserted: 1, skippedDuplicates: 0, errors: [], createdIds: ["10000000-0000-4000-8000-000000000001"] }))
       .mockResolvedValueOnce(Response.json({ error: "Owner review" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
-    const imported = await importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", unit: "box", salePrice: "3.25", tags: ["Pantry"] }]);
+    const imported = await importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", unit: "box", salePrice: "3.25", tags: ["Pantry"] }], undefined, retryScope);
     expect(imported.inserted).toBe(1);
-    await expect(undoProductImport(imported.createdIds ?? [])).resolves.toEqual({ kind: "pending", reason: "Owner review" });
+    await expect(undoProductImport(imported.createdIds ?? [], undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Owner review" });
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ entity: "products", rows: [{ sku: "TEA-1" }] });
+  });
+
+  it("recovers exact import IDs only inside their actor and organization scope", async () => {
+    const createdID = "10000000-0000-4000-8000-000000000021";
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { createdIds: [createdID], imported: 1, skippedDuplicateRows: [] } })));
+    await importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", salePrice: "3.25", tags: [] }], undefined, retryScope);
+    await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ recovery: { activeIds: [createdID], archivedIds: [], result: { createdIds: [createdID] } } });
+    await expect(recoverProductImport(otherRetryScope)).resolves.toMatchObject({ recovery: null, pendingRows: null });
+  });
+
+  it("routes restore through Go and retains the exact IDs returned by undo and restore", async () => {
+    const id = "10000000-0000-4000-8000-000000000031";
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { createdIds: [id], imported: 1, skippedDuplicateRows: [] } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { itemIds: [id], archived: 1 } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { itemIds: [id], restored: 1 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const imported = await importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", salePrice: "3.25", tags: [] }], undefined, retryScope);
+    await expect(undoProductImport(imported.createdIds ?? [], undefined, retryScope)).resolves.toMatchObject({ itemIds: [id], undone: 1 });
+    await expect(restoreProductImport([id], undefined, retryScope)).resolves.toEqual({ kind: "completed", restored: 1, itemIds: [id] });
+    await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ recovery: { activeIds: [id], archivedIds: [] } });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({ capabilityId: "inventory.restoreItemImport", input: { itemIds: [id] } });
   });
 });

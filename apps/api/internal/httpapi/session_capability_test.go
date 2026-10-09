@@ -199,6 +199,25 @@ func TestSessionCapabilityHandlerRateLimitsInventoryImportsPerOrganization(t *te
 	}
 }
 
+func TestSessionCapabilityHandlerRoutesInventoryRestoreItemImport(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["inventory.write"] = true
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"itemIds":["10000000-0000-4000-8000-000000000001"],"restored":1}`)}}
+	handler := NewSessionCapabilityHandler(&fakeDirectSessionResolver{resolved: identity}, executor, nil)
+	request := directCapabilityRequest(http.MethodPost, `{"capabilityId":"inventory.restoreItemImport","input":{"itemIds":["10000000-0000-4000-8000-000000000001"]},"intentId":"restore-intent-123456789"}`)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != "inventory.restoreItemImport" {
+		t.Fatalf("restore status=%d body=%s executor calls=%d capability=%q, want one governed restore dispatch", response.Code, response.Body.String(), executor.calls, executor.capID)
+	}
+
+	malformed := httptest.NewRecorder()
+	handler.ServeHTTP(malformed, directCapabilityRequest(http.MethodPost, `{"capabilityId":"inventory.restoreItemImport","input":{"itemIds":["bad-id"]},"intentId":"restore-intent-123456789"}`))
+	if malformed.Code != http.StatusUnprocessableEntity || executor.calls != 1 {
+		t.Fatalf("malformed restore status=%d body=%s executor calls=%d, want parser rejection before dispatch", malformed.Code, malformed.Body.String(), executor.calls)
+	}
+}
+
 func TestSessionCapabilityHandlerSupportsBearerClientsWithoutTrustingClaims(t *testing.T) {
 	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
 	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}

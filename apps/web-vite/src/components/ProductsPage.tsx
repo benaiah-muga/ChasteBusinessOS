@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchProductDefaults, fetchProducts, fetchProductsEnabled, importProducts, ProductsApiError, submitProductAction, undoProductImport, type Product, type ProductAction, type ProductImportResult, type ProductImportRow } from "../api/products";
+import { fetchProductDefaults, fetchProducts, fetchProductsEnabled, goProductImportEnabled, importProducts, ProductsApiError, recoverProductImport, restoreProductImport, submitProductAction, undoProductImport, type Product, type ProductAction, type ProductImportResult, type ProductImportRetryScope, type ProductImportRow } from "../api/products";
 import "./ProductsPage.css";
 
 type Tab = "overview" | "catalog" | "new";
@@ -61,7 +61,7 @@ function guessCsvMapping(headers: string[]): Record<string, number | null> {
   return mapping;
 }
 
-export function ProductsPage({ baseCurrency = "USD" }: { baseCurrency?: string | null }) {
+export function ProductsPage({ baseCurrency = "USD", actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const currency = baseCurrency || "USD";
   const [items, setItems] = useState<Product[]>([]);
   const [totalValueMinor, setTotalValueMinor] = useState(0);
@@ -85,7 +85,15 @@ export function ProductsPage({ baseCurrency = "USD" }: { baseCurrency?: string |
   const [csvMapping, setCsvMapping] = useState<Record<string, number | null>>({});
   const [csvServicePrefix, setCsvServicePrefix] = useState("");
   const [csvResult, setCsvResult] = useState<ProductImportResult | null>(null);
+  const [csvActiveIds, setCsvActiveIds] = useState<string[]>([]);
+  const [csvArchivedIds, setCsvArchivedIds] = useState<string[]>([]);
+  const [pendingCsvImportRows, setPendingCsvImportRows] = useState<ProductImportRow[] | null>(null);
+  const [pendingCsvUndoIds, setPendingCsvUndoIds] = useState<string[] | null>(null);
+  const [pendingCsvRestoreIds, setPendingCsvRestoreIds] = useState<string[] | null>(null);
+  const [recoveryLoaded, setRecoveryLoaded] = useState(false);
   const [csvError, setCsvError] = useState<string | null>(null);
+  const retryScope = useMemo<ProductImportRetryScope>(() => ({ actorId, organizationId }), [actorId, organizationId]);
+  const retryScopeIdentity = actorId?.trim() && organizationId?.trim() ? JSON.stringify([actorId.trim(), organizationId.trim()]) : "";
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoadError(null);
@@ -110,6 +118,33 @@ export function ProductsPage({ baseCurrency = "USD" }: { baseCurrency?: string |
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  useEffect(() => {
+    let current = true;
+    setRecoveryLoaded(false);
+    setCsvResult(null);
+    setCsvActiveIds([]);
+    setCsvArchivedIds([]);
+    setPendingCsvImportRows(null);
+    setPendingCsvUndoIds(null);
+    setPendingCsvRestoreIds(null);
+    if (!retryScopeIdentity) {
+      setRecoveryLoaded(true);
+      return () => { current = false; };
+    }
+    void recoverProductImport(retryScope).then(({ pendingRows, pendingUndoIds, pendingRestoreIds, recovery }) => {
+      if (!current) return;
+      setPendingCsvImportRows(pendingRows);
+      setPendingCsvUndoIds(pendingUndoIds);
+      setPendingCsvRestoreIds(pendingRestoreIds);
+      setCsvResult(recovery?.result ?? null);
+      setCsvActiveIds(recovery?.activeIds ?? []);
+      setCsvArchivedIds(recovery?.archivedIds ?? []);
+    }).catch((error) => {
+      if (current) setCsvError(error instanceof Error ? error.message : "Could not recover the last product import.");
+    }).finally(() => { if (current) setRecoveryLoaded(true); });
+    return () => { current = false; };
+  }, [retryScopeIdentity]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -227,6 +262,10 @@ export function ProductsPage({ baseCurrency = "USD" }: { baseCurrency?: string |
   }
 
   async function importCsv() {
+    if (goProductImportEnabled() && (!retryScopeIdentity || !recoveryLoaded)) {
+      setNotice({ kind: "error", text: "Product imports are paused until your account and organization finish loading." });
+      return;
+    }
     if (preparedCsv.rows.length === 0) {
       setNotice({ kind: "error", text: preparedCsv.errors[0]?.message ?? "Map at least one row with a name and SKU before importing." });
       return;
@@ -234,8 +273,11 @@ export function ProductsPage({ baseCurrency = "USD" }: { baseCurrency?: string |
     setBusy(true);
     setNotice(null);
     try {
-      const result = await importProducts(preparedCsv.rows);
+      const result = await importProducts(preparedCsv.rows, undefined, retryScope);
       setCsvResult(result);
+      setCsvActiveIds(result.createdIds ?? []);
+      setCsvArchivedIds([]);
+      setPendingCsvImportRows(null);
       await load();
       setNotice({ kind: result.errors.length ? "error" : "success", text: `${result.inserted} item${result.inserted === 1 ? "" : "s"} imported, ${result.skippedDuplicates} duplicate${result.skippedDuplicates === 1 ? "" : "s"} skipped, ${result.errors.length} row error${result.errors.length === 1 ? "" : "s"}.` });
     } catch (error) {
@@ -245,22 +287,70 @@ export function ProductsPage({ baseCurrency = "USD" }: { baseCurrency?: string |
     }
   }
 
+  async function retryRecoveredCsvImport() {
+    if (!pendingCsvImportRows?.length || !recoveryLoaded) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await importProducts(pendingCsvImportRows, undefined, retryScope);
+      setCsvResult(result);
+      setCsvActiveIds(result.createdIds ?? []);
+      setCsvArchivedIds([]);
+      setPendingCsvImportRows(null);
+      await load();
+      setNotice({ kind: result.errors.length ? "error" : "success", text: `${result.inserted} item${result.inserted === 1 ? "" : "s"} imported, ${result.skippedDuplicates} duplicates skipped, ${result.errors.length} row errors.` });
+    } catch (error) {
+      setNotice({ kind: error instanceof ProductsApiError && error.status === 202 ? "pending" : "error", text: error instanceof Error ? error.message : "The product import could not be completed." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function undoCsvImport() {
-    const ids = csvResult?.createdIds;
+    const ids = pendingCsvUndoIds ?? csvActiveIds;
     if (!ids?.length) return;
     setBusy(true);
     setNotice(null);
     try {
-      const result = await undoProductImport(ids);
+      const result = await undoProductImport(ids, undefined, retryScope);
       if (result.kind === "pending") {
+        setPendingCsvUndoIds(ids);
         setNotice({ kind: "pending", text: result.reason });
         return;
       }
-      setCsvResult((current) => current ? { ...current, inserted: Math.max(0, current.inserted - result.undone), createdIds: result.remaining > 0 ? ids : [], undone: result.remaining === 0 } : current);
+      setPendingCsvUndoIds(null);
+      setCsvActiveIds((current) => current.filter((id) => !result.itemIds.includes(id)));
+      setCsvArchivedIds((current) => [...new Set([...current, ...result.itemIds])]);
+      setCsvResult((current) => current ? { ...current, inserted: Math.max(0, current.inserted - result.undone), undone: result.remaining === 0 } : current);
       setNotice({ kind: "success", text: result.remaining > 0 ? `${result.undone} items archived. ${result.remaining} changed items remain active.` : `Undid the import. ${result.undone} items were archived.` });
       await load();
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "The import could not be undone." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreCsvImport() {
+    if (!csvArchivedIds.length) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const ids = pendingCsvRestoreIds ?? csvArchivedIds;
+      const result = await restoreProductImport(ids, undefined, retryScope);
+      if (result.kind === "pending") {
+        setPendingCsvRestoreIds(ids);
+        setNotice({ kind: "pending", text: result.reason });
+        return;
+      }
+      setPendingCsvRestoreIds(null);
+      setCsvArchivedIds((current) => current.filter((id) => !result.itemIds.includes(id)));
+      setCsvActiveIds((current) => [...new Set([...current, ...result.itemIds])]);
+      setCsvResult((current) => current ? { ...current, undone: false } : current);
+      setNotice({ kind: "success", text: `Restored ${result.restored} imported items.` });
+      await load();
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "The import could not be restored." });
     } finally {
       setBusy(false);
     }
@@ -311,7 +401,10 @@ export function ProductsPage({ baseCurrency = "USD" }: { baseCurrency?: string |
       {tab === "catalog" && <section className="products-panel">
         <div className="products-controls"><label>Search catalog<input type="search" aria-label="Search catalog" placeholder="SKU, name, barcode, or tag" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label>Type<select aria-label="Filter by item type" value={kind} onChange={(event) => setKind(event.target.value)}><option value="all">All types</option><option value="goods">Products</option><option value="service">Services</option></select></label><label>Category<select aria-label="Filter by category" value={category} onChange={(event) => setCategory(event.target.value)}><option value="all">All categories</option>{categories.map((tag) => <option key={tag}>{tag}</option>)}</select></label><label>Stock<select aria-label="Filter by stock status" value={stock} onChange={(event) => setStock(event.target.value)}><option value="all">Any stock level</option><option value="reorder">Needs reorder</option><option value="in-stock">In stock</option></select></label><button type="button" onClick={() => { setCsvError(null); document.getElementById("products-csv")?.click(); }}>Import CSV</button></div>
         {csvError && <p className="products-error" role="alert">{csvError}</p>}
-        {csvRows.length > 0 && <div className="products-import"><p>CSV preview: {csvRows.length} data rows. Map columns, review validation, and import the valid rows. Service SKUs can be generated automatically.</p><div className="products-controls">{importFields.map((field) => <label key={field.id}>Map {field.label}<select aria-label={`Map ${field.label} column`} value={csvMapping[field.id] ?? ""} onChange={(event) => setCsvMapping((current) => ({ ...current, [field.id]: event.target.value === "" ? null : Number(event.target.value) }))}><option value="">Not mapped</option>{csvHeaders.map((header, index) => <option key={`${index}-${header}`} value={index}>{header || `Column ${index + 1}`}</option>)}</select></label>)}</div><div className="products-preview"><table><thead><tr>{csvHeaders.map((header, index) => <th key={`${index}-${header}`}>{header || `Column ${index + 1}`}</th>)}</tr></thead><tbody>{csvRows.slice(0, 5).map((row, index) => <tr key={index}>{csvHeaders.map((header, column) => <td key={`${column}-${header}`}>{row[column] ?? ""}</td>)}</tr>)}</tbody></table></div><p>{preparedCsv.rows.length} valid rows, {preparedCsv.errors.length} row errors</p>{preparedCsv.errors.length > 0 && <ul>{preparedCsv.errors.slice(0, 10).map((error) => <li key={`${error.row}-${error.message}`}>Row {error.row}: {error.message}</li>)}</ul>}<button type="button" disabled={busy || preparedCsv.rows.length === 0 || csvResult !== null} onClick={() => void importCsv()}>Import rows</button>{csvResult?.createdIds?.length ? <button type="button" disabled={busy} onClick={() => void undoCsvImport()}>Undo import</button> : null}<button type="button" onClick={() => { setCsvRows([]); setCsvHeaders([]); setCsvResult(null); }}>Cancel import</button>{csvResult && <p role="status">{csvResult.inserted} imported · {csvResult.skippedDuplicates} duplicates skipped · {csvResult.errors.length} errors</p>}</div>}
+        {goProductImportEnabled() && !retryScopeIdentity && <p className="products-error" role="alert">Product imports are paused until your account and organization finish loading.</p>}
+        {pendingCsvImportRows && <div className="products-import" role="status"><p>An import for this account and organization has an unresolved result. Retry the exact saved {pendingCsvImportRows.length}-row request to recover its outcome.</p><button type="button" disabled={busy || !recoveryLoaded} onClick={() => void retryRecoveredCsvImport()}>Retry pending import</button></div>}
+        {csvResult && <div className="products-import" aria-label="Product import recovery"><p>{csvResult.inserted} imported · {csvResult.skippedDuplicates} duplicates skipped · {csvResult.errors.length} errors. {csvActiveIds.length} active and {csvArchivedIds.length} archived imported items are tracked for recovery.</p>{pendingCsvUndoIds && <p role="status">An undo result is unresolved. Retry the exact saved {pendingCsvUndoIds.length}-item action.</p>}{pendingCsvRestoreIds && <p role="status">A restore result is unresolved. Retry the exact saved {pendingCsvRestoreIds.length}-item action.</p>}<button type="button" disabled={busy || !(pendingCsvUndoIds?.length || csvActiveIds.length) || (goProductImportEnabled() && !recoveryLoaded)} onClick={() => void undoCsvImport()}>{pendingCsvUndoIds ? "Retry pending undo" : "Undo import"}</button><button type="button" disabled={busy || !(pendingCsvRestoreIds?.length || csvArchivedIds.length) || (goProductImportEnabled() && !recoveryLoaded)} onClick={() => void restoreCsvImport()}>{pendingCsvRestoreIds ? "Retry pending restore" : "Restore import"}</button></div>}
+        {csvRows.length > 0 && <div className="products-import"><p>CSV preview: {csvRows.length} data rows. Map columns, review validation, and import the valid rows. Service SKUs can be generated automatically.</p><div className="products-controls">{importFields.map((field) => <label key={field.id}>Map {field.label}<select aria-label={`Map ${field.label} column`} value={csvMapping[field.id] ?? ""} onChange={(event) => setCsvMapping((current) => ({ ...current, [field.id]: event.target.value === "" ? null : Number(event.target.value) }))}><option value="">Not mapped</option>{csvHeaders.map((header, index) => <option key={`${index}-${header}`} value={index}>{header || `Column ${index + 1}`}</option>)}</select></label>)}</div><div className="products-preview"><table><thead><tr>{csvHeaders.map((header, index) => <th key={`${index}-${header}`}>{header || `Column ${index + 1}`}</th>)}</tr></thead><tbody>{csvRows.slice(0, 5).map((row, index) => <tr key={index}>{csvHeaders.map((header, column) => <td key={`${column}-${header}`}>{row[column] ?? ""}</td>)}</tr>)}</tbody></table></div><p>{preparedCsv.rows.length} valid rows, {preparedCsv.errors.length} row errors</p>{preparedCsv.errors.length > 0 && <ul>{preparedCsv.errors.slice(0, 10).map((error) => <li key={`${error.row}-${error.message}`}>Row {error.row}: {error.message}</li>)}</ul>}<button type="button" disabled={busy || preparedCsv.rows.length === 0 || csvResult !== null || (goProductImportEnabled() && (!retryScopeIdentity || !recoveryLoaded))} onClick={() => void importCsv()}>Import rows</button><button type="button" onClick={() => { setCsvRows([]); setCsvHeaders([]); }}>Cancel import</button></div>}
         <p className="products-count" role="status">{visible.length} shown</p>
         {visible.length ? <div className="products-table-wrap"><table><thead><tr><th>SKU</th><th>Name</th><th>Sale price</th><th>On hand</th><th>Avg cost</th><th>Value</th><th>Barcode</th><th>Reorder</th><th>Actions</th></tr></thead><tbody>{visible.map((item) => <tr key={item.sku}><td><code>{item.sku}</code></td><td>{item.imageUrl && <img src={item.imageUrl} alt="" width="28" height="28" />} {item.name}<small>{item.kind === "service" ? `Service / ${item.unitLabel}` : item.tags.join(", ")}</small></td><td>{moneyMinor(item.salePriceMinor, currency)}</td><td>{quantity(item.onHandThousandths)} {item.unitLabel}</td><td>{moneyMinor(item.avgUnitCostMinor, currency)}</td><td>{moneyMinor(item.valueMinor, currency)}</td><td>{item.barcode ?? "-"}</td><td>{item.reorderNeeded ? "Needs reorder" : "OK"}</td><td><button type="button" onClick={() => openEdit(item)}>Edit</button><button type="button" disabled={busy} onClick={() => { if (window.confirm(`Archive ${item.sku}? Past quotes and invoices keep their history.`)) void run({ action: "archiveItem", sku: item.sku, archive: true }, `Archive ${item.sku}`); }}>Archive</button></td></tr>)}</tbody></table></div> : <p className="products-empty">{items.length ? "No items match these filters." : "No products or services yet."}</p>}
       </section>}

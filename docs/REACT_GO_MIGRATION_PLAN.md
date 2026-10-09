@@ -2147,3 +2147,16 @@ new owners and the manifest shows zero legacy runtime paths.
      selector for rollback when no Go action is unresolved, and pass the active
      workspace scope from InventoryPage. Focused Vite API/UI and Go capability
      tests pass; browser proof remains open.
+210. (Implemented) Route Vite Product Catalog CSV import, undo, and restore
+     through Go's session-authenticated `inventory.importItems`,
+     `inventory.undoItemImport`, and `inventory.restoreItemImport` capabilities
+     behind paired `CHASTE_GO_INVENTORY_IMPORT_SLICE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Scope exact pending
+     request payloads and imported IDs by actor and organization, recover them
+     after reload, and expose retry controls through pending and uncertain
+     results. Go-selected requests never fall back to `/api/import`; reject
+     unsupported rows and payloads above the Vite 64 KiB capability limit
+     before dispatch. The authenticated Go route validates import, undo, and
+     restore inputs and applies the inventory write permission and per-org
+     import rate limit. Focused Vite API/UI and Go route/capability tests pass;
+     browser proof remains open.

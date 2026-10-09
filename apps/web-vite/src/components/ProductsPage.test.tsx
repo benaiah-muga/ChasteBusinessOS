@@ -7,8 +7,11 @@ const api = vi.hoisted(() => ({
   fetchProductsEnabled: vi.fn(),
   fetchProductDefaults: vi.fn(),
   importProducts: vi.fn(),
+  goProductImportEnabled: vi.fn(),
+  recoverProductImport: vi.fn(),
   submitProductAction: vi.fn(),
   undoProductImport: vi.fn(),
+  restoreProductImport: vi.fn(),
 }));
 
 vi.mock("../api/products", () => ({
@@ -16,8 +19,11 @@ vi.mock("../api/products", () => ({
   fetchProductsEnabled: api.fetchProductsEnabled,
   fetchProductDefaults: api.fetchProductDefaults,
   importProducts: api.importProducts,
+  goProductImportEnabled: api.goProductImportEnabled,
+  recoverProductImport: api.recoverProductImport,
   submitProductAction: api.submitProductAction,
   undoProductImport: api.undoProductImport,
+  restoreProductImport: api.restoreProductImport,
   ProductsApiError: class ProductsApiError extends Error {},
 }));
 
@@ -30,12 +36,15 @@ const product = {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 beforeEach(() => {
   api.fetchProductsEnabled.mockResolvedValue(true);
   api.fetchProductDefaults.mockResolvedValue({});
+  api.goProductImportEnabled.mockReturnValue(false);
+  api.recoverProductImport.mockResolvedValue({ pendingRows: null, pendingUndoIds: null, pendingRestoreIds: null, recovery: null });
   if (!HTMLDialogElement.prototype.showModal) {
     HTMLDialogElement.prototype.showModal = function showModal() { this.setAttribute("open", ""); };
   }
@@ -135,6 +144,35 @@ describe("ProductsPage", () => {
     expect(await screen.findByText("1 valid rows, 1 row errors")).toBeTruthy();
     expect(screen.getByText(/Row 2: Unit labels must be 20 characters or fewer/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "Import rows" }));
-    await waitFor(() => expect(api.importProducts).toHaveBeenCalledWith([expect.objectContaining({ sku: "SOAP-2", salePrice: "3.25", tags: ["Home"] })]));
+    await waitFor(() => expect(api.importProducts).toHaveBeenCalledWith([expect.objectContaining({ sku: "SOAP-2", salePrice: "3.25", tags: ["Home"] })], undefined, expect.objectContaining({ actorId: null, organizationId: null })));
+  });
+
+  it("shows scoped import, undo, and restore recovery controls after remount", async () => {
+    const actorId = "10000000-0000-4000-8000-000000000010";
+    const organizationId = "10000000-0000-4000-8000-000000000011";
+    const itemId = "10000000-0000-4000-8000-000000000021";
+    api.goProductImportEnabled.mockReturnValue(true);
+    api.fetchProducts.mockResolvedValue({ items: [], reorderAlerts: [], totalValueMinor: 0 });
+    api.recoverProductImport.mockResolvedValue({
+      pendingRows: [{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", salePrice: "3.25", tags: [] }],
+      pendingUndoIds: [itemId],
+      pendingRestoreIds: null,
+      recovery: { result: { inserted: 1, skippedDuplicates: 0, errors: [], createdIds: [itemId] }, activeIds: [itemId], archivedIds: [] },
+    });
+    api.importProducts.mockResolvedValue({ inserted: 1, skippedDuplicates: 0, errors: [], createdIds: [itemId] });
+    api.undoProductImport.mockResolvedValue({ kind: "completed", undone: 1, remaining: 0, itemIds: [itemId] });
+    render(<ProductsPage actorId={actorId} organizationId={organizationId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Products & Services" }));
+
+    expect(await screen.findByRole("button", { name: "Retry pending import" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry pending undo" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry pending import" }));
+    await waitFor(() => expect(api.importProducts).toHaveBeenCalledWith(
+      [{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", salePrice: "3.25", tags: [] }],
+      undefined,
+      { actorId, organizationId },
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Retry pending undo" }));
+    await waitFor(() => expect(api.undoProductImport).toHaveBeenCalledWith([itemId], undefined, { actorId, organizationId }));
   });
 });
