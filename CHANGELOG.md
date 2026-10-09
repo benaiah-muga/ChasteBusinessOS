@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite CRM customer deactivation now uses Go's session-authenticated
+  `crm.deactivateCustomer` capability by default in local setups. The scoped
+  retry marker preserves the exact customer action and intent through pending
+  approvals and uncertain results; a Go 404 never retries through the legacy
+  writer, and rolling the selector back blocks while that Go result is
+  unresolved. Set `CHASTE_GO_CRM_CUSTOMER_DEACTIVATE=0` to use `/api/customers`.
 - Go now owns the exact `/api/auth` root and every nested auth path when the
   Vite Go auth proxy is enabled. Unsupported paths and methods fail closed in
   Go instead of reaching the legacy Better Auth handler; `CHASTE_GO_AUTH_ROUTE=0`

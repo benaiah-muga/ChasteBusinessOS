@@ -11,6 +11,7 @@ import {
   goCrmDealStageMoveFromEnv,
   goCrmDealCreateFromEnv,
   goCrmCustomerCreateFromEnv,
+  goCrmCustomerDeactivateFromEnv,
   goCrmCustomerProfileUpdateFromEnv,
   goCrmTaskWritesFromEnv,
   goPurchasingCreateOrderFromEnv,
@@ -99,6 +100,14 @@ describe("CRM customer create Go selector", () => {
     expect(goCrmCustomerCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_CUSTOMER_CREATE: "1" })).toBe(true);
     expect(goCrmCustomerCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goCrmCustomerCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_CUSTOMER_CREATE: "1" })).toBe(false);
+  });
+});
+
+describe("CRM customer deactivation Go selector", () => {
+  it("requires both the deactivation selector and session capability route", () => {
+    expect(goCrmCustomerDeactivateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_CUSTOMER_DEACTIVATE: "1" })).toBe(true);
+    expect(goCrmCustomerDeactivateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goCrmCustomerDeactivateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_CUSTOMER_DEACTIVATE: "1" })).toBe(false);
   });
 });
 

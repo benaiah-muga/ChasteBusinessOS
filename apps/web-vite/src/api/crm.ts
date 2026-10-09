@@ -227,6 +227,7 @@ export async function submitCrmDealStageMove(
 
 const CRM_TASK_INTENT_PREFIX = "chaste.crm.task-intent.v1:";
 const CRM_CUSTOMER_CREATE_INTENT_PREFIX = "chaste.crm.customer-create-intent.v1:";
+const CRM_CUSTOMER_DEACTIVATE_INTENT_PREFIX = "chaste.crm.customer-deactivate-intent.v1:";
 const CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX = "chaste.crm.customer-profile-update-intent.v1:";
 const CRM_DEAL_CREATE_INTENT_PREFIX = "chaste.crm.deal-create-intent.v1:";
 const CrmTaskAttemptSchema = z.object({
@@ -261,7 +262,8 @@ export type CrmCustomerProfileUpdateMutation = {
 export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
 type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string };
 export type CrmDealCreateInput = Omit<CrmDealCreateMutation, "action">;
-type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation;
+type CrmCustomerDeactivateMutation = { action: "deactivateCustomer"; customerId: string };
+type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation;
 
 const CrmTaskMutationSchema = z.discriminatedUnion("action", [
   z.object({
@@ -562,6 +564,58 @@ export async function submitCrmCustomerCreate(
     }
     throw error;
   }
+}
+
+export async function submitCrmCustomerDeactivate(
+  customerId: string,
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<{ deactivated: boolean }>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_DEACTIVATE__ !== "undefined" && __GO_CRM_CUSTOMER_DEACTIVATE__);
+  const input = { customerId };
+  if (!uuid.safeParse(customerId).success) throw new CrmApiError(0, "Choose a valid customer before deactivating it.");
+  const scope = await crmTaskScope(retryScope);
+  if (!useGo) {
+    const unresolved = await readPendingCrmCustomerDeactivate({ actorId: scope.actorId, organizationId: scope.organizationId }, customerId);
+    if (unresolved) throw new CrmApiError(0, "A Go customer deactivation is unresolved. Restore the Go customer route and retry the same customer before using the legacy route.", true);
+    return submitCrmAction("/api/customers", { action: "deactivate", ...input }, signal);
+  }
+  const action: CrmCustomerDeactivateMutation = { action: "deactivateCustomer", customerId };
+  const attempt = await crmTaskAttempt(action, scope, `deactivate:${customerId}`, CRM_CUSTOMER_DEACTIVATE_INTENT_PREFIX);
+  try {
+    const { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.deactivateCustomer", input, intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const parsed = z.object({ deactivated: z.literal(true) }).strict().safeParse(outcome.data);
+    if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected deactivation result.", true);
+    await clearCrmTaskAttempt(attempt.storageKey);
+    return { kind: "completed", data: parsed.data };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+      await clearCrmTaskAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+export async function readPendingCrmCustomerDeactivate(scope: CrmTaskRetryScope, customerId: string): Promise<boolean> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_CUSTOMER_DEACTIVATE_INTENT_PREFIX}${scopeHash}:deactivate:${customerId}`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to check an unresolved customer deactivation."); }
+  if (raw === null) return false;
+  const stored = parseCrmTaskAttempt(raw);
+  const parsed = z.object({ action: z.literal("deactivateCustomer"), customerId: uuid }).strict().safeParse(stored.action);
+  if (!parsed.success || parsed.data.customerId !== customerId || await crmTaskFingerprint(parsed.data) !== stored.fingerprint) {
+    throw new CrmApiError(0, "An unresolved customer deactivation could not be verified. Contact an administrator before retrying.");
+  }
+  return true;
 }
 
 export async function readPendingCrmCustomerProfileUpdate(scope: CrmTaskRetryScope): Promise<CrmCustomerProfileUpdateMutation | null> {

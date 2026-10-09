@@ -1497,7 +1497,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     const row = await screen.findByRole("row", { name: /Northwind/ });
@@ -1521,5 +1521,42 @@ describe("Vite CRM page", () => {
     fireEvent.click(within(profile).getByRole("button", { name: "Activity" }));
     expect(await within(profile).findByText("Invoice #42 (sent, UGX 120,000)")).not.toBeNull();
     expect(within(inactiveRow).queryByRole("button", { name: "Deactivate" })).toBeNull();
+  });
+
+  it("routes confirmed deactivation through Go and leaves a pending approval available for exact retry", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_DEACTIVATE__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        if (fetchMock.mock.calls.filter(([url]) => String(url) === path).length === 1) {
+          return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
+        }
+        return Response.json({ ok: true, data: { deactivated: true } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    const row = await screen.findByRole("row", { name: /Northwind/ });
+    fireEvent.click(within(row).getByRole("button", { name: "Deactivate" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate Northwind?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deactivate customer" }));
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "Deactivate Northwind?" })).not.toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deactivate customer" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute")).toHaveLength(2));
+    const posts = fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute");
+    const first = JSON.parse(String(posts[0]?.[1]?.body));
+    const second = JSON.parse(String(posts[1]?.[1]?.body));
+    expect(first).toMatchObject({ capabilityId: "crm.deactivateCustomer", input: { customerId }, intentId: expect.any(String) });
+    expect(second).toEqual(first);
+    expect(await screen.findByText("CRM changes saved.")).not.toBeNull();
   });
 });

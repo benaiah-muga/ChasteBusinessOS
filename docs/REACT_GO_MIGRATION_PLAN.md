@@ -1871,3 +1871,14 @@ new owners and the manifest shows zero legacy runtime paths.
      on Next to mint CRM read assertions. CRM writes and AI follow-up drafting
      remain on their existing routes. Authenticated browser proof remains
      open.
+186. (Implemented) Route only Vite CRM customer deactivation through Go's
+     session-authenticated `crm.deactivateCustomer` capability under the
+     paired `CHASTE_GO_CRM_CUSTOMER_DEACTIVATE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` flags. The local template enables
+     the selector; set it to `0` to use `/api/customers`. Persist the exact
+     customer action and scoped intent across pending approvals and uncertain
+     results, and fail closed on Go 404 without calling the legacy writer.
+     Selector rollback is blocked while a Go attempt remains unresolved.
+     Customer merge and import routes remain unchanged. Go's existing
+     capability enforces CRM write permission, organization scope, and approval
+     policy. Authenticated browser proof remains open.

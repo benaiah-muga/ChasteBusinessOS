@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -443,6 +443,49 @@ describe("CRM API client", () => {
       ...input,
       intentId: expect.any(String),
     });
+  });
+
+  it("retries Go customer deactivation with its exact scoped intent and never falls back after a 404", async () => {
+    const scope = { actorId: dealId, organizationId: customerId };
+    const pending = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 }))
+      .mockRejectedValueOnce(new TypeError("connection reset"));
+    vi.stubGlobal("fetch", pending);
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    const firstIntent = JSON.parse(String(pending.mock.calls[0]?.[1]?.body)).intentId;
+
+    const unavailable = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { deactivated: true } }));
+    vi.stubGlobal("fetch", unavailable);
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(unavailable.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
+    const noScopeLegacy = vi.fn();
+    vi.stubGlobal("fetch", noScopeLegacy);
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, false)).rejects.toMatchObject({ status: 0 });
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, false, { actorId: "not-a-uuid", organizationId: customerId })).rejects.toMatchObject({ status: 0 });
+    expect(noScopeLegacy).not.toHaveBeenCalled();
+    vi.stubGlobal("fetch", unavailable);
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(unavailable.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, true, scope)).resolves.toEqual({ kind: "completed", data: { deactivated: true } });
+    expect(unavailable.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    for (const [, init] of unavailable.mock.calls) {
+      expect(JSON.parse(String(init?.body))).toMatchObject({ capabilityId: "crm.deactivateCustomer", input: { customerId }, intentId: firstIntent });
+    }
+
+    const legacy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { deactivated: true } }));
+    vi.stubGlobal("fetch", legacy);
+    await submitCrmCustomerDeactivate(customerId, undefined, false, scope);
+    expect(legacy.mock.calls[0]?.[0]).toBe("/api/customers");
+  });
+
+  it("requires resolved actor and organization scope before Go customer deactivation", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, true)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("fails closed for customer creation without actor and organization scope", async () => {
