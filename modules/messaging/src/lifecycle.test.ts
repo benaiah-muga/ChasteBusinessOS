@@ -98,6 +98,49 @@ afterAll(async () => {
 });
 
 describe("messaging conversation lifecycle", () => {
+  it("lists latest message previews and unread counts only for joined members", async () => {
+    const channel = await makeChannel("list-preview", creatorId);
+    await db.db.insert(conversationMembers).values({ conversationId: channel, userId: memberId });
+    const firstMessageAt = new Date(Date.now() + 60_000);
+    const latestMessageAt = new Date(firstMessageAt.getTime() + 60_000);
+    await db.db.insert(messages).values([
+      {
+        orgId,
+        conversationId: channel,
+        senderType: "human",
+        senderUserId: creatorId,
+        body: "Unread for the member",
+        createdAt: firstMessageAt,
+      },
+      {
+        orgId,
+        conversationId: channel,
+        senderType: "human",
+        senderUserId: memberId,
+        body: "Latest reply",
+        createdAt: latestMessageAt,
+      },
+    ]);
+
+    const memberList = await run("messaging.listConversations", ctx(memberId, ["messaging.read"]), {});
+    expect(memberList).toMatchObject({
+      ok: true,
+      data: {
+        me: memberId,
+        conversations: [
+          {
+            id: channel,
+            unreadCount: 1,
+            lastMessage: { at: latestMessageAt.toISOString(), body: "Latest reply" },
+          },
+        ],
+      },
+    });
+
+    const outsiderList = await run("messaging.listConversations", ctx(outsiderId, ["messaging.read"]), {});
+    expect(outsiderList).toMatchObject({ ok: true, data: { me: outsiderId, conversations: [] } });
+  });
+
   it("renames and archives for members; refuses non-members and DMs", async () => {
     const channel = await makeChannel("rename-me", creatorId);
 

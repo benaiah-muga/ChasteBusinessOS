@@ -3,6 +3,7 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -881,6 +882,9 @@ func TestMessagingAgentSendAndMentionNotifications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if listed.Me != fx.userID {
+		t.Fatalf("listConversations me=%q, want authenticated actor %q", listed.Me, fx.userID)
+	}
 	if len(listed.Conversations) != 2 {
 		t.Fatalf("listConversations returned %d rows, want the two membership-scoped channels", len(listed.Conversations))
 	}
@@ -889,11 +893,24 @@ func TestMessagingAgentSendAndMentionNotifications(t *testing.T) {
 		byID[item.ID] = item
 	}
 	if !byID[channel].CreatedByMe || byID[channel].Kind != messagingConversationKindChannl ||
-		byID[channel].Title != "mentions" || byID[channel].ArchivedAt != nil || byID[channel].LastMessageAt == nil {
+		byID[channel].Title != "mentions" || byID[channel].ArchivedAt != nil || byID[channel].LastMessage == nil ||
+		byID[channel].LastMessage.Body != "A threaded reply" || byID[channel].UnreadCount != 2 {
 		t.Fatalf("listed channel=%+v, want the creator's channel with latest activity", byID[channel])
 	}
-	if _, parseErr := time.Parse("2006-01-02T15:04:05.000Z", *byID[channel].LastMessageAt); parseErr != nil {
-		t.Fatalf("lastMessageAt=%q is not millisecond ISO with a Z suffix", *byID[channel].LastMessageAt)
+	for index := 0; index < 51; index++ {
+		fx.createChannel(t, fx.userID, fmt.Sprintf("list window %02d", index))
+	}
+	listedPastFifty, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingListConversationsOutput, error) {
+		return messagingListConversations(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listedPastFifty.Conversations) != 53 {
+		t.Fatalf("listConversations returned %d rows after adding 51 memberships, want all 53", len(listedPastFifty.Conversations))
+	}
+	if _, parseErr := time.Parse(time.RFC3339Nano, byID[channel].LastMessage.At); parseErr != nil {
+		t.Fatalf("lastMessage.at=%q is not an ISO timestamp", byID[channel].LastMessage.At)
 	}
 
 	people, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingListPeopleOutput, error) {
@@ -1127,16 +1144,16 @@ func TestMessagingRefusesCrossOrganizationConversations(t *testing.T) {
 		foreignList.Conversations[0].Title != "Foreign channel" || foreignList.Conversations[0].CreatedByMe {
 		t.Fatalf("foreign organization list=%+v, want only the foreign channel it created", foreignList.Conversations)
 	}
-	if foreignList.Conversations[0].LastMessageAt == nil {
-		t.Fatal("foreign organization list did not resolve lastMessageAt")
+	if foreignList.Conversations[0].LastMessage == nil || foreignList.Conversations[0].LastMessage.Body != "Foreign message" {
+		t.Fatal("foreign organization list did not resolve its latest message body")
 	}
-	if _, err := time.Parse("2006-01-02T15:04:05.000Z", *foreignList.Conversations[0].LastMessageAt); err != nil {
-		t.Fatalf("foreign lastMessageAt=%q is not millisecond ISO with a Z suffix", *foreignList.Conversations[0].LastMessageAt)
+	if _, err := time.Parse(time.RFC3339Nano, foreignList.Conversations[0].LastMessage.At); err != nil {
+		t.Fatalf("foreign lastMessage.at=%q is not an ISO timestamp", foreignList.Conversations[0].LastMessage.At)
 	}
 	anonymous, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingListConversationsOutput, error) {
 		return messagingListConversations(fx.ctx, tx, fx.orgID, nil)
 	})
-	if err != nil || len(anonymous.Conversations) != 0 {
+	if err != nil || len(anonymous.Conversations) != 0 || anonymous.Me != "" {
 		t.Fatalf("actor-less listConversations=%+v err=%v, want an empty list", anonymous, err)
 	}
 }

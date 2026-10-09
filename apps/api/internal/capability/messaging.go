@@ -52,7 +52,7 @@ const (
 	messagingAttachmentCountMax     = 5
 	messagingAttachmentBytesMax     = 5 * 1024 * 1024
 	messagingNotificationBodyMax    = 200
-	messagingConversationListLimit  = 50
+	messagingConversationListLimit  = 100
 	messagingPeopleListLimit        = 50
 	messagingReadMessagesDefLimit   = 30
 	messagingListItemLimitMax       = 100
@@ -148,17 +148,24 @@ type MessagingListConversationsInput struct {
 }
 
 type MessagingConversationListItem struct {
-	ID            string  `json:"id"`
-	Kind          string  `json:"kind"`
-	Title         string  `json:"title"`
-	AgentEnabled  bool    `json:"agentEnabled"`
-	ArchivedAt    *string `json:"archivedAt"`
-	CreatedByMe   bool    `json:"createdByMe"`
-	LastMessageAt *string `json:"lastMessageAt"`
+	ID           string                            `json:"id"`
+	Kind         string                            `json:"kind"`
+	Title        string                            `json:"title"`
+	AgentEnabled bool                              `json:"agentEnabled"`
+	ArchivedAt   *string                           `json:"archivedAt"`
+	CreatedByMe  bool                              `json:"createdByMe"`
+	UnreadCount  int64                             `json:"unreadCount"`
+	LastMessage  *MessagingConversationLastMessage `json:"lastMessage"`
+}
+
+type MessagingConversationLastMessage struct {
+	At   string `json:"at"`
+	Body string `json:"body"`
 }
 
 type MessagingListConversationsOutput struct {
 	Conversations []MessagingConversationListItem `json:"conversations"`
+	Me            string                          `json:"me"`
 }
 
 type MessagingReadMessagesInput struct {
@@ -1297,22 +1304,30 @@ func messagingNotifyMentions(
 func messagingListConversations(
 	ctx context.Context, tx pgx.Tx, orgID string, userID *string,
 ) (MessagingListConversationsOutput, error) {
-	// The TypeScript handler validates query and limit but always lists the
-	// newest 50 memberships, so the parsed values stay wire-compatible without
-	// narrowing the window.
+	// The capability accepts query and limit for wire compatibility. This
+	// response lists the newest 100 memberships so Vite sees the full window.
 	output := MessagingListConversationsOutput{Conversations: []MessagingConversationListItem{}}
 	if userID == nil {
 		return output, nil
 	}
+	output.Me = *userID
 	rows, err := tx.Query(ctx, `
-		SELECT c.id::text, c.kind, c.title, c.agent_enabled, c.archived_at, c.created_by_user_id::text, last.created_at
+		SELECT c.id::text, c.kind, c.title, c.agent_enabled, c.archived_at,
+		       c.created_by_user_id::text, last.created_at, last.body,
+		       COALESCE(unread.count, 0)
 		FROM conversations c
 		JOIN conversation_members m ON m.conversation_id = c.id AND m.user_id = $2::uuid
 		LEFT JOIN LATERAL (
-			SELECT msg.created_at FROM messages msg
-			WHERE msg.conversation_id = c.id AND msg.org_id = $1::uuid
-			ORDER BY msg.created_at DESC LIMIT 1
+			SELECT msg.created_at, msg.body FROM messages msg
+			WHERE msg.conversation_id = c.id AND msg.org_id = $1::uuid AND msg.deleted_at IS NULL
+			ORDER BY msg.created_at DESC, msg.id DESC LIMIT 1
 		) last ON true
+		LEFT JOIN LATERAL (
+			SELECT count(*) AS count FROM messages msg
+			WHERE msg.conversation_id = c.id AND msg.org_id = $1::uuid AND msg.deleted_at IS NULL
+			  AND msg.created_at > COALESCE(m.last_read_at, m.joined_at)
+			  AND (msg.sender_user_id IS NULL OR msg.sender_user_id <> $2::uuid)
+		) unread ON true
 		WHERE c.org_id = $1::uuid AND c.deleted_at IS NULL
 		ORDER BY c.created_at DESC
 		LIMIT $3`, orgID, *userID, messagingConversationListLimit)
@@ -1323,12 +1338,23 @@ func messagingListConversations(
 	for rows.Next() {
 		var item MessagingConversationListItem
 		var archivedAt, lastMessageAt *time.Time
+		var lastMessageBody *string
 		var createdByUserID *string
-		if err := rows.Scan(&item.ID, &item.Kind, &item.Title, &item.AgentEnabled, &archivedAt, &createdByUserID, &lastMessageAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Kind, &item.Title, &item.AgentEnabled, &archivedAt, &createdByUserID, &lastMessageAt, &lastMessageBody, &item.UnreadCount); err != nil {
 			return MessagingListConversationsOutput{}, err
 		}
 		item.ArchivedAt = messagingFormatOptionalTime(archivedAt)
-		item.LastMessageAt = messagingFormatOptionalTime(lastMessageAt)
+		if lastMessageAt != nil {
+			body := "📎 Shared a file"
+			if lastMessageBody != nil && *lastMessageBody != "" {
+				body = *lastMessageBody
+			}
+			bodyRunes := []rune(body)
+			if len(bodyRunes) > 80 {
+				body = string(bodyRunes[:80])
+			}
+			item.LastMessage = &MessagingConversationLastMessage{At: messagingFormatTime(*lastMessageAt), Body: body}
+		}
 		item.CreatedByMe = createdByUserID != nil && userID != nil && *createdByUserID == *userID
 		output.Conversations = append(output.Conversations, item)
 	}

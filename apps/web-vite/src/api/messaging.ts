@@ -98,6 +98,7 @@ const ConversationsResponseSchema = z.object({
   conversations: z.array(ConversationSchema),
   me: z.string().min(1),
 }).strict();
+const GoConversationsEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
 
 const ConversationThreadSchema = z.object({
   conversation: z.unknown(),
@@ -295,7 +296,27 @@ export async function fetchMessagingEnabled(signal?: AbortSignal): Promise<boole
 }
 
 export function fetchConversations(signal?: AbortSignal): Promise<{ conversations: Conversation[]; me: string }> {
+  if (typeof __GO_MESSAGING_CONVERSATION_LIST__ !== "undefined" && __GO_MESSAGING_CONVERSATION_LIST__) {
+    return fetchGoConversations(signal);
+  }
   return getJson("/api/conversations", "your conversations", ConversationsResponseSchema, signal);
+}
+
+async function fetchGoConversations(signal?: AbortSignal): Promise<{ conversations: Conversation[]; me: string }> {
+  const { response, body } = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      capabilityId: "messaging.listConversations",
+      input: { limit: 100 },
+      intentId: newIntentId(),
+    }),
+  }, "your conversations", signal);
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "your conversations"));
+  const envelope = GoConversationsEnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new MessagingApiError(response.status, "The messaging service returned conversations in an unexpected format.");
+  const parsed = ConversationsResponseSchema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned conversations in an unexpected format.");
+  return parsed.data;
 }
 
 export function createConversation(

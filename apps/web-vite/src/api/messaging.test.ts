@@ -115,6 +115,33 @@ describe("messaging API client", () => {
     await expect(fetchConversations()).rejects.toBeInstanceOf(MessagingApiError);
   });
 
+  it("routes the conversation list through Go and validates the complete list contract", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LIST__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { conversations: [conversation], me: "user-1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchConversations()).resolves.toEqual({ conversations: [conversation], me: "user-1" });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({
+      capabilityId: "messaging.listConversations",
+      input: { limit: 100 },
+      intentId: expect.any(String),
+    });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { conversations: [{ ...conversation, unreadCount: "2" }], me: "user-1" } })));
+    await expect(fetchConversations()).rejects.toBeInstanceOf(MessagingApiError);
+  });
+
+  it("fails closed when selected Go conversation-list routing fails", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LIST__", true);
+    const fetchMock = vi.fn(async () => Response.json({ error: "capability unavailable" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchConversations()).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+  });
+
   it("rejects a message list that is not a strict match for the legacy shape", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(thread({ messages: [message({ extra: true })] }))));
     await expect(fetchConversationThread(conversationId)).rejects.toBeInstanceOf(MessagingApiError);

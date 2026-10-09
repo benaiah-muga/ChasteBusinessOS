@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   actionReceipts,
@@ -183,13 +183,15 @@ const listConversations = (deps: ModuleDeps) =>
           agentEnabled: z.boolean(),
           archivedAt: z.string().nullable(),
           createdByMe: z.boolean(),
-          lastMessageAt: z.string().nullable(),
+          unreadCount: z.number().int().nonnegative(),
+          lastMessage: z.object({ at: z.string(), body: z.string() }).strict().nullable(),
         }),
       ),
+      me: z.string(),
     }),
     execute: async (ctx) => {
       // The system actor has no user identity and thus no conversations.
-      if (!ctx.actor.id) return { conversations: [] };
+      if (!ctx.actor.id) return { conversations: [], me: "" };
       // Membership-scoped (N06): the module boundary must agree with the
       // message-read boundary - a nonmember lists neither DMs nor channels
       // they have not joined. Deleted conversations vanish; archived ones
@@ -202,6 +204,8 @@ const listConversations = (deps: ModuleDeps) =>
           agentEnabled: conversations.agentEnabled,
           archivedAt: conversations.archivedAt,
           createdByUserId: conversations.createdByUserId,
+          joinedAt: conversationMembers.joinedAt,
+          lastReadAt: conversationMembers.lastReadAt,
         })
         .from(conversations)
         .innerJoin(
@@ -216,12 +220,26 @@ const listConversations = (deps: ModuleDeps) =>
         .limit(50);
       const out = [];
       for (const c of rows) {
-        const last = await deps.db
-          .select({ createdAt: messages.createdAt })
+        const [last] = await deps.db
+          .select({ createdAt: messages.createdAt, body: messages.body })
           .from(messages)
-          .where(eq(messages.conversationId, c.id))
-          .orderBy(desc(messages.createdAt))
+          .where(and(eq(messages.orgId, ctx.actor.orgId), eq(messages.conversationId, c.id), isNull(messages.deletedAt)))
+          .orderBy(desc(messages.createdAt), desc(messages.id))
           .limit(1);
+        const [unread] = await deps.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.orgId, ctx.actor.orgId),
+              eq(messages.conversationId, c.id),
+              isNull(messages.deletedAt),
+              gt(messages.createdAt, c.lastReadAt ?? c.joinedAt),
+              or(isNull(messages.senderUserId), sql`${messages.senderUserId} <> ${ctx.actor.id}::uuid`),
+            ),
+          );
+        let lastBody = last?.body || "📎 Shared a file";
+        if (Array.from(lastBody).length > 80) lastBody = Array.from(lastBody).slice(0, 80).join("");
         out.push({
           id: c.id,
           kind: c.kind,
@@ -229,10 +247,11 @@ const listConversations = (deps: ModuleDeps) =>
           agentEnabled: c.agentEnabled,
           archivedAt: c.archivedAt?.toISOString() ?? null,
           createdByMe: c.createdByUserId === ctx.actor.id,
-          lastMessageAt: last[0]?.createdAt?.toISOString() ?? null,
+          unreadCount: Number(unread?.count ?? 0),
+          lastMessage: last ? { at: last.createdAt.toISOString(), body: lastBody } : null,
         });
       }
-      return { conversations: out.filter((c) => c !== undefined) };
+      return { conversations: out.filter((c) => c !== undefined), me: ctx.actor.id };
     },
   });
 

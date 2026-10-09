@@ -58,6 +58,7 @@ declare const __GO_MESSAGING_SEND_SLICE__: boolean;
 declare const __GO_MESSAGING_EDIT_SLICE__: boolean;
 declare const __GO_MESSAGING_DELETE_SLICE__: boolean;
 declare const __GO_MESSAGING_PEOPLE_READS__: boolean;
+declare const __GO_MESSAGING_CONVERSATION_LIST__: boolean;
 declare const __GO_POS_OPEN_SESSION_SLICE__: boolean;
 declare const __GO_POS_CLOSE_SESSION_SLICE__: boolean;
 declare const __GO_POS_COMPLETE_SALE_SLICE__: boolean;

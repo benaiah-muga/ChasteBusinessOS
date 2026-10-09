@@ -2326,3 +2326,12 @@ new owners and the manifest shows zero legacy runtime paths.
      through legacy. Other Manufacturing routes remain unchanged. The Vite
      selector test covers explicit rollback, and the Go session handler test
      covers disabled and enabled capability behavior.
+226. (Go/Vite implementation complete; browser proof pending) Route the Vite Messaging conversation
+     list and refresh through the session-authenticated
+     `messaging.listConversations` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Enable the Vite selector by default
+     and set `CHASTE_GO_MESSAGING_CONVERSATION_LIST=0` for explicit legacy
+     rollback. Validate the strict Go envelope and preserve the page's list
+     fields, including up to 100 conversations, unread counts, last-message previews, and the current
+     user ID. Selected Go failures fail closed; thread reads and message search
+     remain outside this slice.

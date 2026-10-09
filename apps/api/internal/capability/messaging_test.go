@@ -85,9 +85,9 @@ func TestMessagingParsersAcceptEveryValidManifestPayload(t *testing.T) {
 		{messagingSendMessageCapabilityID,
 			`{"conversationId":"conv-1","body":"","mentions":[{"type":"user","id":"u1"},{"type":"agent","id":"workmate"}],"parentMessageId":"` + messageID + `","attachmentIds":["` + attachmentID + `"]}`,
 			`{"conversationId":"conv-1","body":"","mentions":[{"type":"user","id":"u1"},{"type":"agent","id":"workmate"}],"parentMessageId":"` + messageID + `","attachmentIds":["` + attachmentID + `"]}`},
-		{messagingListConversationsCapabilityID, `{}`, `{"limit":50}`},
+		{messagingListConversationsCapabilityID, `{}`, `{"limit":100}`},
 		{messagingListConversationsCapabilityID, `{"query":"  ops  ","limit":10}`, `{"query":"ops","limit":10}`},
-		{messagingListConversationsCapabilityID, `{"query":""}`, `{"query":"","limit":50}`},
+		{messagingListConversationsCapabilityID, `{"query":""}`, `{"query":"","limit":100}`},
 		{messagingReadMessagesCapabilityID, `{"conversationId":"conv-1"}`, `{"conversationId":"conv-1","limit":30}`},
 		{messagingReadMessagesCapabilityID, `{"conversationId":"conv-1","limit":100}`, `{"conversationId":"conv-1","limit":100}`},
 		{messagingListPeopleCapabilityID, `{}`, `{}`},
@@ -396,7 +396,7 @@ func TestMessagingOutputShapesMatchTheManifest(t *testing.T) {
 		{messagingUploadAttachmentCapabilityID, MessagingUploadMessageAttachmentOutput{AttachmentID: "a"}, []string{"attachmentId"}},
 		{messagingDeletePendingAttachmentCapabilityID, MessagingDeletePendingAttachmentOutput{Removed: true}, []string{"removed"}},
 		{messagingListConversationsCapabilityID, MessagingListConversationsOutput{Conversations: []MessagingConversationListItem{{}}},
-			[]string{"conversations"}},
+			[]string{"conversations", "me"}},
 		{messagingReadMessagesCapabilityID, MessagingReadMessagesOutput{Messages: []MessagingMessageSnapshot{{}}},
 			[]string{"messages"}},
 		{messagingListPeopleCapabilityID, MessagingListPeopleOutput{People: []MessagingPerson{{}}},
@@ -427,7 +427,7 @@ func TestMessagingOutputShapesMatchTheManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) != `{"conversations":[{"id":"c","kind":"","title":"","agentEnabled":false,"archivedAt":null,"createdByMe":false,"lastMessageAt":null}]}` {
+	if string(encoded) != `{"conversations":[{"id":"c","kind":"","title":"","agentEnabled":false,"archivedAt":null,"createdByMe":false,"unreadCount":0,"lastMessage":null}],"me":""}` {
 		t.Errorf("listConversations wire shape=%s", encoded)
 	}
 	encoded, err = marshalJS(MessagingReadMessagesOutput{Messages: []MessagingMessageSnapshot{{SenderType: "human"}}})

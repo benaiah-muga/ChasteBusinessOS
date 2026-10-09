@@ -170,6 +170,10 @@ export function goMessagingPeopleReadsFromEnv(env: Record<string, string | undef
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_PEOPLE_READS === "1";
 }
 
+export function goMessagingConversationListFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_CONVERSATION_LIST !== "0";
+}
+
 export function goPurchasingSourcingWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_SOURCING_WRITES === "1";
 }
