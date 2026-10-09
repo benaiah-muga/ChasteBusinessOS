@@ -480,6 +480,7 @@ describe("manufacturing production Go selector", () => {
   it("requires both the production selector and session capability route", () => {
     expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES: "1" })).toBe(true);
     expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES: "0" })).toBe(false);
     expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES: "1" })).toBe(false);
   });
 });

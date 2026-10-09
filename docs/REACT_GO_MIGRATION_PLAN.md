@@ -2276,12 +2276,12 @@ new owners and the manifest shows zero legacy runtime paths.
      their current route selections; set the new selector to `0` for legacy
      rollback. A selected Go error must fail closed without retrying the legacy
      `/api/hr` route.
-222. Remove the selected-Go 404 retry to legacy for Vite Manufacturing writes:
+222. (Implemented) Remove the selected-Go 404 retry to legacy for Vite Manufacturing writes:
      BOM definition, work-order create/release/complete/cancel, BOM production,
      and production reversal. Preserve actor/org-scoped exact action and intent
      on a Go 404, allow retry only through Go, and block selector rollback until
      resolution. Keep legacy requests when their corresponding Go selector is
-     off. Focused Vite API tests cover the affected actions.
+     off. Focused Vite API tests cover all listed action families.
 223. Remove selected-Go 404 fallback for Vite POS sale submission through
      `pos.completeSale`. Persist the route alongside its exact sale intent,
      preserve the marker on 404, and block retry through legacy after selector
