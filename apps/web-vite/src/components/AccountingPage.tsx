@@ -14,7 +14,9 @@ import {
   fetchCustomerStatement,
   fetchPaymentReminders,
   goAccountingRecordPaymentUseGo,
+  goAccountingCreateInvoiceUseGo,
   readPendingAccountingRecordPayment,
+  readPendingAccountingCreateInvoice,
   submitAccountingAction,
   type AccountingAging,
   type AccountingBill,
@@ -28,6 +30,7 @@ import {
   type AccountingPayment,
   type AccountingPaymentRetryScope,
   type AccountingRecordPaymentAction,
+  type AccountingCreateInvoiceAction,
   type AccountingReminder,
   type AccountingReports,
   type AccountingStatement,
@@ -342,6 +345,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
   const [payTarget, setPayTarget] = useState<AccountingBill | null>(null);
   const [reverseTarget, setReverseTarget] = useState<AccountingEntry | null>(null);
   const [pendingRecordPayment, setPendingRecordPayment] = useState<AccountingRecordPaymentAction | null>(null);
+  const [pendingCreateInvoice, setPendingCreateInvoice] = useState<AccountingCreateInvoiceAction | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentRetryScope: AccountingPaymentRetryScope = { actorId, organizationId };
 
@@ -401,6 +405,23 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     return () => { active = false; };
   }, [actorId, organizationId]);
 
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    let active = true;
+    void readPendingAccountingCreateInvoice(paymentRetryScope).then((action) => {
+      if (!active) return;
+      setPendingCreateInvoice(action);
+      if (action) setNotice({ tone: "pending", text: goAccountingCreateInvoiceUseGo()
+        ? "An invoice creation is unresolved. Retry the exact invoice to recover its result."
+        : "A Go invoice creation is unresolved. Restore the Go invoice route and retry that exact invoice before using legacy invoice creation." });
+    }).catch((error) => {
+      if (active && goAccountingCreateInvoiceUseGo()) {
+        setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved invoice creation." });
+      }
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
   const changeTab = useCallback((next: string) => {
     const resolved = readTabParam(`?tab=${next}`);
     setTab(resolved);
@@ -428,12 +449,19 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     ): Promise<boolean> => {
       const isRecordPayment = path === "/api/accounting" && payload.action === "recordPayment";
       const goRecordPayment = isRecordPayment && goAccountingRecordPaymentUseGo();
+      const isCreateInvoice = path === "/api/accounting" && payload.action === "createInvoice";
+      const goCreateInvoice = isCreateInvoice && goAccountingCreateInvoiceUseGo();
       setBusy(true);
       try {
         const outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
         if (goRecordPayment) {
           setPendingRecordPayment(outcome.kind === "pending"
             ? await readPendingAccountingRecordPayment(paymentRetryScope)
+            : null);
+        }
+        if (goCreateInvoice) {
+          setPendingCreateInvoice(outcome.kind === "pending"
+            ? await readPendingAccountingCreateInvoice(paymentRetryScope)
             : null);
         }
         // A 202 is a queued approval, never a completed write: say so plainly.
@@ -443,11 +471,15 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : { tone: "success", text: `${label} done.` },
         );
         void load();
-        return !(goRecordPayment && outcome.kind === "pending");
+        return !((goRecordPayment || goCreateInvoice) && outcome.kind === "pending");
       } catch (error) {
         if (goRecordPayment) {
           try { setPendingRecordPayment(await readPendingAccountingRecordPayment(paymentRetryScope)); }
           catch { setPendingRecordPayment(payload as unknown as AccountingRecordPaymentAction); }
+        }
+        if (goCreateInvoice) {
+          try { setPendingCreateInvoice(await readPendingAccountingCreateInvoice(paymentRetryScope)); }
+          catch { setPendingCreateInvoice(payload as unknown as AccountingCreateInvoiceAction); }
         }
         setNotice({
           tone: "error",
@@ -538,6 +570,12 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               role={notice.tone === "error" ? "alert" : "status"}
             >
               <span>{notice.text}</span>
+              {pendingCreateInvoice && <button
+                type="button"
+                className="accounting-button accounting-button-small"
+                disabled={busy || !goAccountingCreateInvoiceUseGo()}
+                onClick={() => void runAction("/api/accounting", { ...pendingCreateInvoice }, "Invoice creation")}
+              >{goAccountingCreateInvoiceUseGo() ? "Retry exact invoice" : "Enable Go invoice route to retry"}</button>}
               {pendingRecordPayment && <button
                 type="button"
                 className="accounting-button accounting-button-small"
@@ -613,6 +651,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               customers={state.data.customers}
               busy={busy}
               pendingPayment={pendingRecordPayment}
+              pendingCreateInvoice={pendingCreateInvoice}
               onAction={runAction}
             />
           )}
@@ -1203,6 +1242,7 @@ function ReceivablesSection({
   customers,
   busy,
   pendingPayment,
+  pendingCreateInvoice,
   onAction,
 }: {
   aging: AccountingAging;
@@ -1213,6 +1253,7 @@ function ReceivablesSection({
   customers: AccountingCustomer[];
   busy: boolean;
   pendingPayment: AccountingRecordPaymentAction | null;
+  pendingCreateInvoice: AccountingCreateInvoiceAction | null;
   onAction: (
     path: "/api/accounting" | "/api/banking",
     payload: Record<string, unknown>,
@@ -1305,7 +1346,7 @@ function ReceivablesSection({
   }
 
   function createInvoice() {
-    if (!preview) return;
+    if (!preview || pendingCreateInvoice) return;
     const lines = invoiceForm.lines
       .map((line) => {
         const base = {
@@ -1365,7 +1406,7 @@ function ReceivablesSection({
       )}
 
       <div className="accounting-button-row">
-        <button type="button" className="accounting-button-primary" onClick={() => setInvoiceOpen(true)}>
+        <button type="button" className="accounting-button-primary" disabled={pendingCreateInvoice !== null} onClick={() => setInvoiceOpen(true)}>
           New invoice
         </button>
       </div>
@@ -1596,7 +1637,7 @@ function ReceivablesSection({
             <button
               type="button"
               className="accounting-button-primary"
-              disabled={busy || !invoiceForm.customerId || !preview}
+              disabled={busy || pendingCreateInvoice !== null || !invoiceForm.customerId || !preview}
               onClick={createInvoice}
             >
               Post invoice
@@ -1608,6 +1649,7 @@ function ReceivablesSection({
           <label className="accounting-label">
             Customer
             <select
+              disabled={pendingCreateInvoice !== null}
               value={invoiceForm.customerId}
               onChange={(event) => setInvoiceForm({ ...invoiceForm, customerId: event.target.value })}
             >
@@ -1623,6 +1665,7 @@ function ReceivablesSection({
             Memo
             <input
               placeholder="Memo (optional)"
+              disabled={pendingCreateInvoice !== null}
               value={invoiceForm.memo}
               onChange={(event) => setInvoiceForm({ ...invoiceForm, memo: event.target.value })}
             />
@@ -1633,6 +1676,7 @@ function ReceivablesSection({
               className="accounting-currency-input"
               placeholder={baseCurrency}
               maxLength={3}
+              disabled={pendingCreateInvoice !== null}
               value={invoiceForm.currency}
               onChange={(event) =>
                 setInvoiceForm({ ...invoiceForm, currency: event.target.value.toUpperCase() })
@@ -1643,6 +1687,7 @@ function ReceivablesSection({
             Due date
             <input
               type="date"
+              disabled={pendingCreateInvoice !== null}
               value={invoiceForm.dueAt}
               onChange={(event) => setInvoiceForm({ ...invoiceForm, dueAt: event.target.value })}
             />
@@ -1667,12 +1712,14 @@ function ReceivablesSection({
           return (
             <div key={index} className="accounting-line-row">
               <input
+                disabled={pendingCreateInvoice !== null}
                 placeholder={`Line ${index + 1} description`}
                 aria-label={`Line ${index + 1} description`}
                 value={line.description}
                 onChange={(event) => setLine({ description: event.target.value })}
               />
               <input
+                disabled={pendingCreateInvoice !== null}
                 className="accounting-line-narrow"
                 placeholder="Qty"
                 aria-label={`Line ${index + 1} quantity`}
@@ -1680,6 +1727,7 @@ function ReceivablesSection({
                 onChange={(event) => setLine({ quantity: event.target.value })}
               />
               <input
+                disabled={pendingCreateInvoice !== null}
                 className="accounting-line-narrow"
                 placeholder={amountPlaceholder}
                 aria-label={`Line ${index + 1} unit price`}
@@ -1688,6 +1736,7 @@ function ReceivablesSection({
               />
               {taxCodes.length > 0 ? (
                 <select
+                  disabled={pendingCreateInvoice !== null}
                   aria-label={`Line ${index + 1} tax code`}
                   value={line.taxCodeId ?? ""}
                   onChange={(event) => setLine({ taxCodeId: event.target.value })}
@@ -1704,6 +1753,7 @@ function ReceivablesSection({
                 <span className="accounting-hint">Code applied</span>
               ) : (
                 <input
+                  disabled={pendingCreateInvoice !== null}
                   className="accounting-line-narrow"
                   placeholder={amountPlaceholder}
                   aria-label={`Line ${index + 1} tax`}
@@ -1714,6 +1764,7 @@ function ReceivablesSection({
               <button
                 type="button"
                 className="accounting-button accounting-button-ghost accounting-button-small"
+                disabled={pendingCreateInvoice !== null}
                 aria-label={`Remove line ${index + 1}`}
                 onClick={() =>
                   setInvoiceForm({
@@ -1730,6 +1781,7 @@ function ReceivablesSection({
         <button
           type="button"
           className="accounting-button accounting-button-ghost accounting-button-small"
+          disabled={pendingCreateInvoice !== null}
           onClick={() => setInvoiceForm({ ...invoiceForm, lines: [...invoiceForm.lines, EMPTY_LINE] })}
         >
           Add line

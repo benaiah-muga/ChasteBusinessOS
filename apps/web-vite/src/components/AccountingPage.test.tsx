@@ -54,7 +54,7 @@ const reversalEntry: AccountingEntry = {
 const openInvoice: AccountingInvoice = {
   id: "invoice-1",
   number: 1042,
-  customerId: "customer-1",
+  customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   customerName: "Kampala Coffee",
   status: "partially_paid",
   currency: "USD",
@@ -97,7 +97,7 @@ const overview = {
     },
   ],
   filings: [{ id: "filing-1", periodFrom: "2026-01-01", periodTo: "2026-03-31", taxMinor: 1_800, filedAt: "2026-04-20T00:00:00.000Z" }],
-  customers: [{ id: "customer-1", name: "Kampala Coffee", paymentTermDays: 30 }],
+  customers: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Kampala Coffee", paymentTermDays: 30 }],
   invoices: [openInvoice, voidInvoice],
   payments: [
     { id: "payment-1", invoiceNumber: 1042, amountMinor: 2_500, method: "bank_transfer", receivedAt: "2026-09-21T08:00:00.000Z", currency: "USD" },
@@ -126,6 +126,7 @@ interface StubOptions {
   taxCodes?: unknown;
   actionResponse?: Response | (() => Response);
   goPaymentResponse?: () => Response;
+  goCreateInvoiceResponse?: () => Response;
 }
 
 function stubAccounting(options: StubOptions = {}) {
@@ -142,6 +143,16 @@ function stubAccounting(options: StubOptions = {}) {
       });
     }
     if (url === "/api/capabilities/execute") {
+      const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
+      if (capabilityId === "accounting.createInvoice") {
+        return options.goCreateInvoiceResponse?.() ?? Response.json({ ok: true, data: {
+          invoiceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          invoiceNumber: 2048,
+          totalMinor: 2500,
+          entryId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          currency: "USD",
+        } });
+      }
       return options.goPaymentResponse?.() ?? Response.json({ ok: true, data: {
         paymentId: "33333333-3333-4333-8333-333333333333",
         entryId: "44444444-4444-4444-8444-444444444444",
@@ -532,6 +543,48 @@ describe("AccountingPage governed writes", () => {
     expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("recordPayment"))).toBe(false);
   });
 
+  it("routes invoice creation to Go and restores an exact pending attempt after reload", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    let attempt = 0;
+    const { calls } = stubAccounting({
+      accounting: { ...overview, invoices: [] },
+      goCreateInvoiceResponse: () => {
+        const body = JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        sent.push(body);
+        attempt += 1;
+        return attempt === 1
+          ? Response.json({ pendingApproval: true, reason: "Invoice approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { invoiceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", invoiceNumber: 2048, totalMinor: 2500, entryId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", currency: "USD" } });
+      },
+    });
+    const first = render(<AccountingPage {...ids} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+    fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
+    fireEvent.click(screen.getByRole("button", { name: "New invoice" }));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    fireEvent.change(screen.getByLabelText("Line 1 description"), { target: { value: "Advisory" } });
+    fireEvent.change(screen.getByLabelText("Line 1 unit price"), { target: { value: "25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Post invoice" }));
+
+    expect(await screen.findByRole("button", { name: "Retry exact invoice" })).not.toBeNull();
+    expect((screen.getByLabelText("Line 1 description") as HTMLInputElement).disabled).toBe(true);
+    expect(sent[0]).toMatchObject({ capabilityId: "accounting.createInvoice", input: { customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", lines: [{ description: "Advisory", quantity: 1000, unitPriceMinor: 2500 }] } });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("createInvoice"))).toBe(false);
+
+    first.unmount();
+    render(<AccountingPage {...ids} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact invoice" }));
+    expect(await screen.findByText(/^Invoice creation done\.$/)).not.toBeNull();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.input).toEqual(sent[0]?.input);
+    expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
+  });
+
   it("guards a credit note behind a positive amount and a real reason", async () => {
     const { calls } = stubAccounting();
     await renderReady();
@@ -728,7 +781,7 @@ describe("AccountingPage tabs", () => {
     fireEvent.click(screen.getByRole("button", { name: /Cash & collections/ }));
     await screen.findByRole("table", { name: "Weekly cash forecast" });
 
-    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "customer-1" } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
     fireEvent.click(screen.getByRole("button", { name: "Load statement" }));
     expect(await screen.findByText("No activity on this account yet.")).toBeTruthy();
   });

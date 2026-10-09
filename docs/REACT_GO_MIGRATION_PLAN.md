@@ -1943,3 +1943,14 @@ new owners and the manifest shows zero legacy runtime paths.
      API, proxy selector, and AccountingPage tests; the existing Go payment
      executor integration test remains the contract proof. Authenticated
      browser proof remains open.
+192. Route only Vite `createInvoice` writes through Go's session-authenticated
+     `accounting.createInvoice` capability behind paired
+     `CHASTE_GO_ACCOUNTING_CREATE_INVOICE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the invoice selector
+     to `0` for explicit legacy rollback. Scope durable exact intents by actor
+     and organization, recover pending approvals and uncertain writes after
+     reload, block legacy fallback while unresolved, and fail closed on Go 404.
+     Keep other Accounting operations on their current route. Add focused API,
+     proxy selector, and AccountingPage tests; the existing Go invoice creation
+     executor integration test remains the contract proof. Authenticated
+     browser proof remains open.

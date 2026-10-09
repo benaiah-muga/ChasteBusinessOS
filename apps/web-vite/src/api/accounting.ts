@@ -324,6 +324,34 @@ const RecordPaymentOutputSchema = z.object({
   foreignEntryId: z.string().uuid().optional(),
 }).strict();
 const RECORD_PAYMENT_ATTEMPT_PREFIX = "chaste:accounting:record-payment:go:attempt:v1:";
+const CreateInvoiceActionSchema = z.object({
+  action: z.literal("createInvoice"),
+  customerId: z.string().uuid(),
+  memo: z.string().optional(),
+  lines: z.array(z.object({
+    description: z.string().min(1),
+    quantity: z.number().int().positive().safe(),
+    unitPriceMinor: z.number().int().nonnegative().safe(),
+    taxMinor: z.number().int().nonnegative().safe().optional(),
+    taxCodeId: z.string().uuid().optional(),
+  }).strict().refine((line) => !(line.taxMinor !== undefined && line.taxCodeId !== undefined), "Choose a tax amount or a tax code.")).min(1),
+  currency: z.string().optional(),
+  fxRate: z.string().optional(),
+  dueAt: z.string().datetime().optional(),
+}).strict();
+const StoredCreateInvoiceSchema = z.object({
+  action: CreateInvoiceActionSchema,
+  intentId: z.string().uuid(),
+  fingerprint: z.string().length(64),
+}).strict();
+const CreateInvoiceOutputSchema = z.object({
+  invoiceId: z.string().uuid(),
+  invoiceNumber: z.number().int().positive().safe(),
+  totalMinor: minor,
+  entryId: z.string().uuid(),
+  currency: z.string().min(3).max(3),
+}).strict();
+const CREATE_INVOICE_ATTEMPT_PREFIX = "chaste:accounting:create-invoice:go:attempt:v1:";
 
 export type AccountingEntry = z.infer<typeof EntrySchema>;
 export type AccountingAging = z.infer<typeof AgingSchema>;
@@ -356,9 +384,24 @@ export type AccountingActionOutcome =
 
 export type AccountingRecordPaymentAction = z.infer<typeof RecordPaymentActionSchema>;
 export type AccountingPaymentRetryScope = { actorId: string | null; organizationId: string | null };
+export type AccountingCreateInvoiceAction = z.infer<typeof CreateInvoiceActionSchema>;
 
 export function goAccountingRecordPaymentUseGo(): boolean {
   return typeof __GO_ACCOUNTING_RECORD_PAYMENT__ !== "undefined" && __GO_ACCOUNTING_RECORD_PAYMENT__;
+}
+
+export function goAccountingCreateInvoiceUseGo(): boolean {
+  return typeof __GO_ACCOUNTING_CREATE_INVOICE__ !== "undefined" && __GO_ACCOUNTING_CREATE_INVOICE__;
+}
+
+export async function readPendingAccountingCreateInvoice(scope: AccountingPaymentRetryScope): Promise<AccountingCreateInvoiceAction | null> {
+  const { scopeHash } = await accountingPaymentScope(scope);
+  const storageKey = `${CREATE_INVOICE_ATTEMPT_PREFIX}${scopeHash}`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new AccountingApiError(0, "Enable browser storage to recover an unresolved invoice creation.", true); }
+  if (raw === null) return null;
+  return parseStoredCreateInvoice(raw).action;
 }
 
 export async function readPendingAccountingRecordPayment(scope: AccountingPaymentRetryScope): Promise<AccountingRecordPaymentAction | null> {
@@ -518,6 +561,15 @@ export async function submitAccountingAction(
   signal?: AbortSignal,
   retryScope?: AccountingPaymentRetryScope,
 ): Promise<AccountingActionOutcome> {
+  if (path === "/api/accounting" && payload.action === "createInvoice") {
+    const action = CreateInvoiceActionSchema.safeParse(payload);
+    if (!action.success) throw new AccountingApiError(400, "Enter a valid invoice before submitting.");
+    const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
+    if (goAccountingCreateInvoiceUseGo()) return submitGoAccountingCreateInvoice(action.data, scoped, signal);
+    if (await readPendingAccountingCreateInvoice(retryScope ?? { actorId: null, organizationId: null })) {
+      throw new AccountingApiError(0, "A Go invoice creation is unresolved. Restore the Go invoice route and retry that exact invoice before using the legacy route.", true);
+    }
+  }
   if (path === "/api/accounting" && payload.action === "recordPayment") {
     const action = RecordPaymentActionSchema.safeParse(payload);
     if (!action.success) throw new AccountingApiError(400, "Enter a valid invoice payment before submitting.");
@@ -537,6 +589,47 @@ export async function submitAccountingAction(
   const envelope = EnvelopeSchema.safeParse(body);
   if (!envelope.success) throw new AccountingApiError(response.status, "The Accounting service returned an unexpected action response.");
   return { kind: "completed" };
+}
+
+async function submitGoAccountingCreateInvoice(
+  action: AccountingCreateInvoiceAction,
+  scope: { actorId: string; organizationId: string; scopeHash: string },
+  signal?: AbortSignal,
+): Promise<AccountingActionOutcome> {
+  const attempt = await accountingCreateInvoiceAttempt(action, scope.scopeHash);
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await getJson("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "accounting.createInvoice", input: createInvoiceCapabilityInput(action), intentId: attempt.intentId }),
+    }, signal));
+  } catch (error) {
+    if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
+    throw new AccountingApiError(0, "The Go Accounting service could not confirm this invoice. Retry the same invoice to recover its result.", true);
+  }
+  if (response.status === 202) {
+    const parsed = PendingSchema.safeParse(body);
+    if (!parsed.success) throw new AccountingApiError(202, "The Go Accounting service returned an invalid invoice approval response.", true);
+    return { kind: "pending", reason: parsed.data.reason ?? parsed.data.error ?? "This invoice is waiting for approval." };
+  }
+  if (!response.ok) {
+    const uncertain = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
+    if (!uncertain) await clearAccountingCreateInvoiceAttempt(attempt.storageKey);
+    throw new AccountingApiError(response.status, errorMessage(response.status, body, "create this invoice"), uncertain);
+  }
+  const envelope = EnvelopeSchema.safeParse(body);
+  const output = envelope.success ? CreateInvoiceOutputSchema.safeParse(envelope.data.data) : null;
+  if (response.status !== 200 || !output?.success) {
+    throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected invoice response.", true);
+  }
+  await clearAccountingCreateInvoiceAttempt(attempt.storageKey);
+  return { kind: "completed" };
+}
+
+function createInvoiceCapabilityInput(action: AccountingCreateInvoiceAction): Record<string, unknown> {
+  const { action: _action, ...input } = action;
+  return input;
 }
 
 async function submitGoAccountingRecordPayment(
@@ -584,7 +677,7 @@ async function accountingPaymentScope(scope: AccountingPaymentRetryScope): Promi
   const actorId = scope.actorId?.trim() ?? "";
   const organizationId = scope.organizationId?.trim() ?? "";
   if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
-    throw new AccountingApiError(0, "Invoice payments are waiting for your account and organization details. Wait for your organization to finish loading, then try again.");
+    throw new AccountingApiError(0, "Accounting writes are waiting for your account and organization details. Wait for your organization to finish loading, then try again.");
   }
   try {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
@@ -616,7 +709,29 @@ async function accountingRecordPaymentAttempt(action: AccountingRecordPaymentAct
   return { storageKey, intentId: stored.intentId };
 }
 
-async function accountingPaymentFingerprint(action: AccountingRecordPaymentAction): Promise<string> {
+async function accountingCreateInvoiceAttempt(action: AccountingCreateInvoiceAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
+  const storageKey = `${CREATE_INVOICE_ATTEMPT_PREFIX}${scopeHash}`;
+  const fingerprint = await accountingPaymentFingerprint(action);
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new AccountingApiError(0, "Enable browser storage before creating an invoice so it can be retried safely."); }
+  if (raw !== null) {
+    const stored = parseStoredCreateInvoice(raw);
+    if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous invoice creation is unresolved. Retry its exact details before creating another invoice.", true);
+    return { storageKey, intentId: stored.intentId };
+  }
+  const stored = { action, intentId: crypto.randomUUID(), fingerprint };
+  const serialized = JSON.stringify(stored);
+  try {
+    window.localStorage.setItem(storageKey, serialized);
+    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("invoice retry marker did not persist");
+  } catch {
+    throw new AccountingApiError(0, "Enable browser storage before creating an invoice so it can be retried safely.");
+  }
+  return { storageKey, intentId: stored.intentId };
+}
+
+async function accountingPaymentFingerprint(action: unknown): Promise<string> {
   try {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(action)));
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -634,9 +749,23 @@ function parseStoredRecordPayment(raw: string): z.infer<typeof StoredRecordPayme
   return parsed.data;
 }
 
+function parseStoredCreateInvoice(raw: string): z.infer<typeof StoredCreateInvoiceSchema> {
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new AccountingApiError(0, "An unresolved invoice creation marker is malformed. Contact an administrator before retrying.", true); }
+  const parsed = StoredCreateInvoiceSchema.safeParse(decoded);
+  if (!parsed.success) throw new AccountingApiError(0, "An unresolved invoice creation marker is malformed. Contact an administrator before retrying.", true);
+  return parsed.data;
+}
+
 async function clearAccountingRecordPaymentAttempt(storageKey: string): Promise<void> {
   try { window.localStorage.removeItem(storageKey); }
   catch { throw new AccountingApiError(0, "The payment completed, but its retry marker could not be cleared. Reload before recording another payment.", true); }
+}
+
+async function clearAccountingCreateInvoiceAttempt(storageKey: string): Promise<void> {
+  try { window.localStorage.removeItem(storageKey); }
+  catch { throw new AccountingApiError(0, "The invoice completed, but its retry marker could not be cleared. Reload before creating another invoice.", true); }
 }
 
 export async function emailInvoice(invoiceNumber: number, to: string, signal?: AbortSignal): Promise<{ urlPath: string | null }> {

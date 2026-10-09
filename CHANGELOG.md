@@ -23,6 +23,13 @@ The full v1 changelog is preserved at the bottom of this file.
   even if the invoice is absent from the refreshed list. Other Accounting
   operations keep their existing routes. Set the selector to `0` for explicit
   legacy rollback.
+- Vite invoice creation can use Go's session-authenticated
+  `accounting.createInvoice` capability behind the paired
+  `CHASTE_GO_ACCOUNTING_CREATE_INVOICE=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Actor/org scoped exact
+  attempts and pending approvals survive reload. Go 404 and uncertain results
+  never fall back to the legacy writer, and an unresolved attempt blocks legacy
+  rollback. Other Accounting actions retain their existing routes.
 - Go leave requests now verify that the employee belongs to the caller's
   organization before inserting a request. Missing and cross-organization
   employee IDs are rejected without creating leave records.
