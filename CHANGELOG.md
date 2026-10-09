@@ -13,6 +13,15 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite authored-document version history and archived compare previews can use
+  the authenticated Go `documents.listDocVersions` and
+  `documents.getDocVersion` capabilities behind paired
+  `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. The API enforces
+  `GO_DOCUMENTS_VERSION_READS=1` for every caller. Document content, editor,
+  collaboration, and writes retain their existing routes; selected-Go errors
+  do not retry through legacy.
+
 - Vite Documents library list and preview detail can use Go's authenticated
   `documents.listIngestedDocuments` capability behind
   `CHASTE_GO_DOCUMENT_INGESTED_READS=1` and

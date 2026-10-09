@@ -467,3 +467,38 @@ func TestSessionCapabilityHandlerCanGateIngestedDocumentsRead(t *testing.T) {
 		}
 	})
 }
+
+func TestSessionCapabilityHandlerCanGateAuthoredDocumentVersionReads(t *testing.T) {
+	cases := []struct {
+		capabilityID string
+		input        string
+		output       string
+	}{
+		{"documents.listDocVersions", `{"documentId":"6f1b2c3d-0000-4000-8000-000000000001"}`, `{"versions":[]}`},
+		{"documents.getDocVersion", `{"documentId":"6f1b2c3d-0000-4000-8000-000000000001","version":1}`, `{"version":1,"content":{},"html":"<p>Version</p>","note":null,"createdAt":"2026-09-29T08:00:00.000Z"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.capabilityID+" default off", func(t *testing.T) {
+			resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+			executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(tc.output)}}
+			handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, DocumentsVersionDisabledCapabilities(false))
+			body := `{"capabilityId":"` + tc.capabilityID + `","input":` + tc.input + `,"intentId":"document-version-read"}`
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+			if response.Code != http.StatusServiceUnavailable || executor.calls != 0 {
+				t.Fatalf("status=%d executor=%d body=%s", response.Code, executor.calls, response.Body.String())
+			}
+		})
+		t.Run(tc.capabilityID+" opted in", func(t *testing.T) {
+			resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+			executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(tc.output)}}
+			handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, DocumentsVersionDisabledCapabilities(true))
+			body := `{"capabilityId":"` + tc.capabilityID + `","input":` + tc.input + `,"intentId":"document-version-read"}`
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+			if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != tc.capabilityID {
+				t.Fatalf("status=%d capability=%q executor=%d body=%s", response.Code, executor.capID, executor.calls, response.Body.String())
+			}
+		})
+	}
+}

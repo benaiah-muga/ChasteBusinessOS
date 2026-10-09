@@ -2226,3 +2226,13 @@ new owners and the manifest shows zero legacy runtime paths.
      existing Vite contract. Selected-Go errors do not retry through the
      aggregate request. Focused Vite and Go route tests pass; browser proof
      remains open.
+218. (Implemented) Route Vite authored-document version history and archived
+     compare previews through `documents.listDocVersions` and
+     `documents.getDocVersion` behind paired
+     `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Enforce
+     `GO_DOCUMENTS_VERSION_READS=1` on the Go session capability route for all
+     callers, validate the full Go output, and project archived previews to the
+     existing sanitized shape. Keep document content, collaboration, writes,
+     and the Vite library read path unchanged. Selected Go errors fail closed;
+     browser proof remains open.

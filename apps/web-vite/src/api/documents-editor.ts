@@ -4,8 +4,8 @@ import { z } from "zod";
  * Client for the authored-document editor surface: the one document read,
  * the draft workspace (autosave, presence, soft lock), governed writes
  * (publish, restore, rename, save as template) and the read-shaped AI
- * assist calls. The endpoints stay owned by the legacy app; this module is
- * the only place that knows their shapes.
+ * assist calls. Editor content and writes retain their existing routes;
+ * authored-version reads can use the signed Go capability route.
  *
  * Document content crosses this boundary in two forms: the ProseMirror JSON
  * tree the editor works in, and the HTML that tree renders to. Every HTML
@@ -63,6 +63,17 @@ const ArchivedVersionSchema = z.object({
   createdAt: z.string().datetime().optional(),
 }).strict();
 export type ArchivedVersion = z.infer<typeof ArchivedVersionSchema>;
+
+const CapabilitySuccessSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const GoDocumentVersionsSchema = z.object({ versions: z.array(VersionRowSchema) }).strict();
+const GoArchivedDocumentVersionSchema = z.object({
+  version: z.number().int().positive(),
+  content: z.record(z.string(), z.unknown()),
+  html: z.string(),
+  note: z.string().nullable(),
+  createdAt: z.string().datetime(),
+}).strict();
+const documentUUID = z.string().uuid();
 
 const PresenceUserSchema = z.object({ userId: z.string().min(1), name: z.string() }).strict();
 export type PresenceUser = z.infer<typeof PresenceUserSchema>;
@@ -224,11 +235,50 @@ function governed<T>(url: string, body: Record<string, unknown>, schema: z.ZodTy
 
 const documentPath = (id: string): string => `/api/docs/${encodeURIComponent(id)}`;
 
+export function documentsVersionReadsGoSelected(): boolean {
+  return typeof __GO_DOCUMENTS_VERSION_READS__ !== "undefined" && __GO_DOCUMENTS_VERSION_READS__;
+}
+
+function validateDocumentVersionInput(id: string, version?: number): void {
+  if (!documentUUID.safeParse(id).success || (version !== undefined && (!Number.isSafeInteger(version) || version < 1))) {
+    throw new DocumentsEditorApiError(400, "The document version request is invalid. Reopen the document and try again.");
+  }
+}
+
+async function postDocumentVersionCapability<T>(capabilityId: string, input: Record<string, unknown>, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
+  const { status, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (status < 200 || status >= 300) throw new DocumentsEditorApiError(status, messageFor(status, body));
+  const envelope = CapabilitySuccessSchema.safeParse(body);
+  if (!envelope.success) throw new DocumentsEditorApiError(status, "The document service returned an unexpected capability response.");
+  const parsed = schema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new DocumentsEditorApiError(status, "The document service returned data in an unexpected format.");
+  return parsed.data;
+}
+
+export async function fetchDocumentVersionHistoryFromGo(id: string, signal?: AbortSignal): Promise<VersionRow[]> {
+  validateDocumentVersionInput(id);
+  const output = await postDocumentVersionCapability("documents.listDocVersions", { documentId: id }, GoDocumentVersionsSchema, signal);
+  return output.versions;
+}
+
 export async function fetchEditorDocument(id: string, signal?: AbortSignal): Promise<DocumentPayload> {
   return get(documentPath(id), DocumentPayloadSchema, signal);
 }
 
 export async function fetchArchivedVersion(id: string, version: number, signal?: AbortSignal): Promise<ArchivedVersion> {
+  if (documentsVersionReadsGoSelected()) {
+    validateDocumentVersionInput(id, version);
+    const output = await postDocumentVersionCapability("documents.getDocVersion", { documentId: id, version }, GoArchivedDocumentVersionSchema, signal);
+    if (output.version !== version) throw new DocumentsEditorApiError(200, "The document service returned data in an unexpected format.");
+    const projected = { version: output.version, html: output.html, note: output.note, createdAt: output.createdAt };
+    const parsed = ArchivedVersionSchema.safeParse(projected);
+    if (!parsed.success) throw new DocumentsEditorApiError(200, "The document service returned data in an unexpected format.");
+    return parsed.data;
+  }
   return get(`${documentPath(id)}?version=${version}`, ArchivedVersionSchema, signal);
 }
 

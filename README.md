@@ -319,6 +319,12 @@ The Vite library can select the direct session-capability route by setting
 `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API feature flag above is enforced
 inside the capability route for all callers. List and preview detail keep the
 same projections, and uploaded-content links remain on their existing path.
+The Vite authored-document editor can separately select Go for version history
+and archived compare previews with `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
+`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API must also set
+`GO_DOCUMENTS_VERSION_READS=1`; Go enforces that gate for both capabilities and
+all callers. Document content, collaboration, and editor writes retain their
+existing routes.
 `GO_DOCUMENTS_VERSION_READS=1` opts authored document version history and
 single-version reads on `GET /api/docs/:id` into the signed Go
 `documents.listDocVersions` and `documents.getDocVersion` capabilities. It

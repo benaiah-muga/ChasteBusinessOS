@@ -8,6 +8,7 @@ import {
   documentJsonToHtml,
   documentsEditorIdFromPath,
   fetchArchivedVersion,
+  fetchDocumentVersionHistoryFromGo,
   fetchEditorDocument,
   postEditorWorkspace,
   publishDocumentVersion,
@@ -108,6 +109,81 @@ describe("authored document reads", () => {
 
     await expect(fetchArchivedVersion("doc-1", 2)).resolves.toEqual({ version: 2, html: "<p>Newer</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" });
     expect(calls[0]?.url).toBe("/api/docs/doc-1?version=2");
+  });
+
+  it("lists authored versions through Go with the full strict summary shape", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    const { calls } = recorder(() => Response.json({ ok: true, data: { versions: versionRows } }));
+
+    await expect(fetchDocumentVersionHistoryFromGo(documentId)).resolves.toEqual(versionRows);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(calls[0]?.init).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store" });
+    expect(bodyOf(calls[0]!)).toMatchObject({
+      capabilityId: "documents.listDocVersions",
+      input: { documentId },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("uses Go for archived previews, validates full content, and returns only the legacy preview projection", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    const { calls } = recorder(() => Response.json({ ok: true, data: {
+      version: 2,
+      content: { type: "doc", content: [] },
+      html: "<p>Newer</p>",
+      note: null,
+      createdAt: "2026-09-28T09:30:00.000Z",
+    } }));
+
+    await expect(fetchArchivedVersion(documentId, 2)).resolves.toEqual({
+      version: 2, html: "<p>Newer</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[0]!)).toMatchObject({
+      capabilityId: "documents.getDocVersion",
+      input: { documentId, version: 2 },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("rejects invalid Go version inputs before dispatch", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+    const { calls } = recorder(() => Response.json({ ok: true, data: {} }));
+
+    await expect(fetchDocumentVersionHistoryFromGo("doc-1")).rejects.toMatchObject({ status: 400 });
+    await expect(fetchArchivedVersion("6f1b2c3d-0000-4000-8000-000000000001", 0)).rejects.toMatchObject({ status: 400 });
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }) },
+    { label: "malformed archived content", response: () => Response.json({ ok: true, data: { version: 2, content: "not-json-object", html: "<p>Bad</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" } }) },
+    { label: "mismatched archived version", response: () => Response.json({ ok: true, data: { version: 3, content: { type: "doc" }, html: "<p>Wrong</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" } }) },
+  ])("fails closed on $label Go version responses without legacy retry", async ({ response }) => {
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+    const { calls } = recorder(() => response());
+
+    await expect(fetchArchivedVersion("6f1b2c3d-0000-4000-8000-000000000001", 2)).rejects.toBeInstanceOf(DocumentsEditorApiError);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+  });
+
+  it("fails closed on unavailable or malformed Go history without legacy retry", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    for (const response of [
+      () => Response.json({ error: "not found" }, { status: 404 }),
+      () => Response.json({ ok: true, data: { versions: [{ version: 0, note: null, createdBy: null, createdAt: "bad" }] } }),
+    ]) {
+      const { calls } = recorder(() => response());
+      await expect(fetchDocumentVersionHistoryFromGo(documentId)).rejects.toBeInstanceOf(DocumentsEditorApiError);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    }
   });
 
   it("defaults absent page settings instead of failing the whole document", async () => {

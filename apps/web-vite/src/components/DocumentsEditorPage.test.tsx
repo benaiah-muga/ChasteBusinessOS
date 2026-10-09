@@ -298,6 +298,62 @@ describe("authored document editor", () => {
     expect(calls.filter((call) => call.body?.action === "restore")[0]?.body).toMatchObject({ sourceVersion: 2 });
   }, TIMEOUT);
 
+  it("keeps document content on its existing route while Go supplies version history and archived previews", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    window.history.replaceState(null, "", `/documents/editor/${documentId}`);
+    const calls: RecordedCall[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const method = init.method ?? "GET";
+      const call: RecordedCall = {
+        url: String(input), method,
+        body: init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null,
+      };
+      calls.push(call);
+      if (call.url === "/api/docs/" + documentId && method === "GET") {
+        return Response.json({ document: { ...authoredDocument, id: documentId }, versions: [] });
+      }
+      if (call.url === `/api/docs/${documentId}/workspace`) {
+        return Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] });
+      }
+      if (call.url === "/api/capabilities/execute") {
+        if (call.body?.capabilityId === "documents.listDocVersions") {
+          return Response.json({ ok: true, data: { versions: [
+            { version: 1, note: "Go first", createdBy: "ada", createdAt: "2026-09-20T08:00:00.000Z" },
+            { version: 2, note: "Go second", createdBy: null, createdAt: "2026-09-28T09:30:00.000Z" },
+          ] } });
+        }
+        if (call.body?.capabilityId === "documents.getDocVersion") {
+          const input = call.body.input as { version: number };
+          return Response.json({ ok: true, data: {
+            version: input.version,
+            content: { type: "doc", content: [] },
+            html: `<p>Go archived body ${input.version}</p>`,
+            note: null,
+            createdAt: "2026-09-28T09:30:00.000Z",
+          } });
+        }
+      }
+      if (call.method === "DELETE") return new Response(null, { status: 200 });
+      return Response.json({ error: "unexpected" }, { status: 500 });
+    }));
+
+    render(<DocumentsEditorPage documentId={documentId} />);
+    await screen.findByDisplayValue("Service quote", undefined, BOOT);
+    fireEvent.click(screen.getByRole("button", { name: /Versions/ }));
+    const history = await screen.findByRole("dialog", { name: "Version history" }, BOOT);
+    expect(within(history).getByText("Go first")).not.toBeNull();
+    fireEvent.click(within(history).getByRole("button", { name: "Compare" }));
+    const compare = await screen.findByRole("dialog", { name: /Compare v1 vs v2/ }, BOOT);
+    expect(within(compare).getByText("Go archived body 1")).not.toBeNull();
+    expect(within(compare).getByText("Go archived body 2")).not.toBeNull();
+    expect(calls.some((call) => call.url === `/api/docs/${documentId}` && call.method === "GET")).toBe(true);
+    expect(calls.some((call) => call.url.includes("?version=") && call.method === "GET")).toBe(false);
+    expect(calls.map((call) => call.body?.capabilityId).filter(Boolean)).toEqual([
+      "documents.listDocVersions", "documents.getDocVersion", "documents.getDocVersion",
+    ]);
+  }, TIMEOUT);
+
   it("keeps the print surface on the chosen paper geometry", async () => {
     editorFetch();
     render(<DocumentsEditorPage documentId="doc-1" />);
