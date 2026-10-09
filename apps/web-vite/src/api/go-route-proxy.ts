@@ -143,6 +143,10 @@ export function goSalesOrderWritesFromEnv(env: Record<string, string | undefined
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_SALES_ORDER_WRITES === "1";
 }
 
+export function goSalesOrderReadsFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_SALES_ORDER_READS === "1";
+}
+
 export function goHrExpensesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_HR_EXPENSES === "1";
 }

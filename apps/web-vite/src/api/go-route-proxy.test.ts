@@ -27,6 +27,7 @@ import {
   goManufacturingWorkOrderWritesFromEnv,
   goManufacturingProductionWritesFromEnv,
   goManufacturingPlanningReadsFromEnv,
+  goSalesOrderReadsFromEnv,
   goSalesOrderWritesFromEnv,
   goHrExpensesFromEnv,
   goHrHiringFromEnv,
@@ -375,6 +376,14 @@ describe("sales order write Go selector", () => {
     expect(goSalesOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SALES_ORDER_WRITES: "1" })).toBe(true);
     expect(goSalesOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goSalesOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SALES_ORDER_WRITES: "1" })).toBe(false);
+  });
+});
+
+describe("sales order read Go selector", () => {
+  it("requires both the sales read selector and session capability route", () => {
+    expect(goSalesOrderReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SALES_ORDER_READS: "1" })).toBe(true);
+    expect(goSalesOrderReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goSalesOrderReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SALES_ORDER_READS: "1" })).toBe(false);
   });
 });
 

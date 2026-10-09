@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite } from "./sales";
+import { fetchSalesOrders, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite } from "./sales";
 
 const scope = { actorId: "actor-1", organizationId: "org-1" };
 const orderId = "10000000-0000-4000-8000-000000000001";
@@ -120,5 +120,68 @@ describe("sales order writes", () => {
     const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { action: string; orderId: string; intentId: string };
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/sales"]);
     expect(legacyBody).toMatchObject({ action: "cancel", orderId, intentId: goBody.intentId });
+  });
+});
+
+describe("sales order reads", () => {
+  const goOrders = {
+    orders: [{
+      id: "10000000-0000-4000-8000-000000000001",
+      number: 41,
+      customerId: "20000000-0000-4000-8000-000000000001",
+      status: "draft",
+      backordered: false,
+      totalMinor: 3250,
+      createdAt: "2026-09-27T10:15:00.000Z",
+    }],
+  };
+
+  it("loads through sales.listOrders when the Go read selector is enabled", async () => {
+    vi.stubGlobal("__GO_SALES_ORDER_READS__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: goOrders }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSalesOrders()).resolves.toEqual(goOrders.orders);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      body: expect.any(String),
+    }));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "sales.listOrders",
+      input: {},
+      intentId: expect.any(String),
+    });
+  });
+
+  it("fails closed on Go 404 and does not fall back to the legacy sales route", async () => {
+    vi.stubGlobal("__GO_SALES_ORDER_READS__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "missing capability" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSalesOrders()).rejects.toBeInstanceOf(SalesApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it.each([
+    ["pending response", Response.json({ ok: false, pendingApproval: true }, { status: 202 })],
+    ["malformed envelope", Response.json({ ok: true, data: goOrders, extra: true })],
+    ["malformed order output", Response.json({ ok: true, data: { orders: [{ ...goOrders.orders[0], unexpected: true }] } })],
+  ])("rejects a %s from Go", async (_name, response) => {
+    vi.stubGlobal("__GO_SALES_ORDER_READS__", true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    await expect(fetchSalesOrders()).rejects.toBeInstanceOf(SalesApiError);
+  });
+
+  it("keeps the legacy sales route when the Go read selector is off", async () => {
+    vi.stubGlobal("__GO_SALES_ORDER_READS__", false);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ orders: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSalesOrders()).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/sales", expect.objectContaining({ method: "GET" }));
   });
 });

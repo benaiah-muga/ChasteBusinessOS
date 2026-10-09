@@ -61,6 +61,39 @@ afterEach(() => {
 });
 
 describe("Vite sales page", () => {
+  it("uses Go for the initial order list and the post-create refresh", async () => {
+    vi.stubGlobal("__GO_SALES_ORDER_READS__", true);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/pos/customers") return Response.json(customers);
+      if (input === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (body.capabilityId === "sales.listOrders") return Response.json({ ok: true, data: { orders } });
+        if (body.capabilityId === "sales.createOrder") return Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } });
+      }
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+
+    expect(await screen.findByRole("cell", { name: "Draft" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create sales order" }));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Coffee beans" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2.5" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "12.50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+
+    expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
+    const orderReads = fetchMock.mock.calls.filter(([input, init]) => {
+      if (input !== "/api/capabilities/execute") return false;
+      return JSON.parse(String(init?.body)).capabilityId === "sales.listOrders";
+    });
+    expect(orderReads).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input]) => input === "/api/sales")).toBe(false);
+  });
+
   it("shows sales order status, totals, backorder context, searchable rows, and status filters", async () => {
     const fetchMock = salesFetch();
     vi.stubGlobal("fetch", fetchMock);

@@ -1,6 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingCustomerStatementReadsFromEnv, goAccountingPeriodCloseReadsFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReportsFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmTaskWritesFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrLeaveFromEnv, goHrPayrollFromEnv, goHrTimeFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goManufacturingPlanningReadsFromEnv, goManufacturingProductionWritesFromEnv, goManufacturingWorkOrderWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderWritesFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingCustomerStatementReadsFromEnv, goAccountingPeriodCloseReadsFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReportsFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmTaskWritesFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrLeaveFromEnv, goHrPayrollFromEnv, goHrTimeFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goManufacturingPlanningReadsFromEnv, goManufacturingProductionWritesFromEnv, goManufacturingWorkOrderWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderReadsFromEnv, goSalesOrderWritesFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "CHASTE_");
@@ -37,6 +37,7 @@ export default defineConfig(({ mode }) => {
   const goManufacturingProductionWrites = goManufacturingProductionWritesFromEnv(env);
   const goManufacturingPlanningReads = goManufacturingPlanningReadsFromEnv(env);
   const goSalesOrderWrites = goSalesOrderWritesFromEnv(env);
+  const goSalesOrderReads = goSalesOrderReadsFromEnv(env);
   const goHrExpenses = goHrExpensesFromEnv(env);
   const goHrLeave = goHrLeaveFromEnv(env);
   const goHrTime = goHrTimeFromEnv(env);
@@ -96,6 +97,7 @@ export default defineConfig(({ mode }) => {
       __GO_MANUFACTURING_PRODUCTION_WRITES__: JSON.stringify(goManufacturingProductionWrites),
       __GO_MANUFACTURING_PLANNING_READS__: JSON.stringify(goManufacturingPlanningReads),
       __GO_SALES_ORDER_WRITES__: JSON.stringify(goSalesOrderWrites),
+      __GO_SALES_ORDER_READS__: JSON.stringify(goSalesOrderReads),
       __GO_HR_EXPENSES__: JSON.stringify(goHrExpenses),
       __GO_HR_LEAVE__: JSON.stringify(goHrLeave),
       __GO_HR_TIME__: JSON.stringify(goHrTime),

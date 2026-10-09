@@ -1655,6 +1655,14 @@ new owners and the manifest shows zero legacy runtime paths.
      internal deliver-all sentinel as explicit quantities. Confirmation and
      delivery/cancellation results are ignored after a scope change; stale
      targets are cleared. Focused checks pass; browser proof remains open.
+166a. (Implemented) Route Vite Sales order list and refresh reads through Go's
+     session-authenticated `sales.listOrders` capability when
+     `CHASTE_GO_SALES_ORDER_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep list ordering, fields, and
+     page behavior stable; Go derives organization scope from the authenticated
+     session. Selected Go reads fail closed on missing capabilities, pending
+     responses, or malformed output. Focused checks pass; browser proof remains
+     open.
 167. (Implemented; local Go/Vite default-on) Route Vite vendor returns and
      purchase order closing through Go's session-authenticated `purchasing.returnGoods` and
      `purchasing.closePurchaseOrder` capabilities when

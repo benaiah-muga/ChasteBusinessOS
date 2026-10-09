@@ -11,6 +11,22 @@ const OrderSchema = z.object({
 });
 
 const SalesOrdersSchema = z.object({ orders: z.array(OrderSchema) });
+const GoSalesOrderSchema = z.object({
+  id: z.string().uuid(),
+  number: z.number().int().nonnegative().safe(),
+  customerId: z.string().uuid(),
+  status: z.string().min(1),
+  backordered: z.boolean(),
+  totalMinor: z.number().int().safe(),
+  createdAt: z.string().datetime({ offset: true }),
+}).strict();
+const GoSalesOrdersSchema = z.object({ orders: z.array(GoSalesOrderSchema) }).strict();
+const GoSalesOrdersEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const GoSalesOrdersPendingSchema = z.object({
+  ok: z.literal(false),
+  pendingApproval: z.literal(true),
+  reason: z.string().max(240).optional(),
+}).strict();
 const ModuleSwitchboardSchema = z.object({
   catalog: z.array(z.object({ id: z.string().min(1) })),
   enabledModules: z.array(z.string().min(1)),
@@ -200,11 +216,14 @@ export async function fetchSalesEnabled(signal?: AbortSignal): Promise<boolean> 
 }
 
 export async function fetchSalesOrders(signal?: AbortSignal): Promise<SalesOrder[]> {
+  const useGo = typeof __GO_SALES_ORDER_READS__ !== "undefined" && __GO_SALES_ORDER_READS__;
   let response: Response;
   try {
-    response = await fetch("/api/sales", {
+    response = await fetch(useGo ? "/api/capabilities/execute" : "/api/sales", {
+      method: useGo ? "POST" : "GET",
       credentials: "same-origin",
-      headers: { accept: "application/json" },
+      headers: useGo ? { accept: "application/json", "content-type": "application/json" } : { accept: "application/json" },
+      ...(useGo ? { body: JSON.stringify({ capabilityId: "sales.listOrders", input: {}, intentId: crypto.randomUUID() }) } : {}),
       cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
@@ -220,12 +239,23 @@ export async function fetchSalesOrders(signal?: AbortSignal): Promise<SalesOrder
   if (!response.ok) {
     const parsed = ErrorSchema.safeParse(body);
     if (response.status === 401) throw new SalesApiError(401, "Your session has ended. Sign in again to continue.");
+    if (useGo && (response.status === 202 || GoSalesOrdersPendingSchema.safeParse(body).success)) {
+      throw new SalesApiError(response.status, "The sales service returned an unexpected pending response while loading orders.");
+    }
     if (response.status === 403 || response.status === 422) {
       throw new SalesApiError(response.status, parsed.success ? parsed.data.error : "You do not have permission to view sales orders.");
     }
     throw new SalesApiError(response.status, response.status >= 500
       ? "The sales service is unavailable. Try again."
       : parsed.success ? parsed.data.error : "The sales request could not be completed. Try again.");
+  }
+
+  if (useGo) {
+    const envelope = GoSalesOrdersEnvelopeSchema.safeParse(body);
+    if (!envelope.success) throw new SalesApiError(response.status, "The sales service returned an unexpected response while loading orders.");
+    const parsedGo = GoSalesOrdersSchema.safeParse(envelope.data.data);
+    if (!parsedGo.success) throw new SalesApiError(response.status, "The sales service returned data in an unexpected format.");
+    return parsedGo.data.orders;
   }
 
   const parsed = SalesOrdersSchema.safeParse(body);

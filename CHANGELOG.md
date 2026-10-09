@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Sales order lists and refreshes can read through Go's session-authenticated
+  `sales.listOrders` capability behind paired `CHASTE_GO_SALES_ORDER_READS=1`
+  and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go derives organization
+  scope from the authenticated session; selected Go reads strictly validate the
+  response and fail closed on pending, malformed, or unavailable results.
 - Vite customer statements can read through Go's session-authenticated
   `accounting.customerStatement` capability behind paired
   `CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1` and
