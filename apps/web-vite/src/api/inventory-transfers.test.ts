@@ -130,6 +130,32 @@ describe("inventory transfer API client", () => {
     }
   });
 
+  it("fails closed for a valid pre-route marker even when Go is currently selected", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
+    const input = { fromLocationCode: "MAIN", toLocationCode: "SHOP", sku: "ITEM-1", quantityThousandths: 2500 };
+    const payload = {
+      action: "createTransfer",
+      fromLocationCode: input.fromLocationCode,
+      toLocationCode: input.toLocationCode,
+      lines: [{ sku: input.sku, quantityThousandths: input.quantityThousandths }],
+    };
+    const digest = async (value: string) => {
+      const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+      return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    };
+    const scope = { actorId: retryScope.actorId, organizationId: retryScope.organizationId };
+    const storageKey = `chaste:inventory-transfer-attempt:${await digest(JSON.stringify(scope))}`;
+    const fingerprint = await digest(JSON.stringify({ ...scope, payload }));
+    const oldMarker = JSON.stringify({ fingerprint, intentId: transferId });
+    localStorage.setItem(storageKey, oldMarker);
+
+    await expect(createInventoryTransfer(input, retryScope)).rejects.toThrow("has no recorded route");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(localStorage.getItem(storageKey)).toBe(oldMarker);
+  });
+
   it("keeps pending reasons and terminal errors, and rejects malformed success", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Manager approval required." }, 202))
@@ -145,29 +171,38 @@ describe("inventory transfer API client", () => {
     await expect(createInventoryTransfer(input, retryScope)).rejects.toThrow("unexpected transfer response");
   });
 
-  it("falls back from a missing Go route with the same intent and clears terminal errors", async () => {
+  it("never falls back from a missing Go route and preserves Go-only exact retries", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ error: "route missing" }, 404))
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId, number: 12, status: "pending" } }))
-      .mockResolvedValueOnce(jsonResponse({ error: "invalid transfer" }, 422))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId, number: 12, status: "pending" } }));
+      .mockResolvedValueOnce(jsonResponse({ error: "route missing" }, 404))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId, status: "confirmed", confirmedNowThousandths: 1000 } }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
     const input = { fromLocationCode: "MAIN", toLocationCode: "SHOP", sku: "ITEM-1", quantityThousandths: 2500 };
 
+    await expect(createInventoryTransfer(input, retryScope)).rejects.toMatchObject({ status: 404, message: "route missing" });
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", false);
     await expect(createInventoryTransfer(input, retryScope)).resolves.toEqual({ kind: "completed" });
-    const goBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
-    const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/inventory"]);
-    expect(legacyBody.intentId).toBe(goBody.intentId);
 
-    await expect(createInventoryTransfer(input, retryScope)).rejects.toMatchObject({ status: 422, message: "invalid transfer" });
-    await expect(createInventoryTransfer(input, retryScope)).resolves.toEqual({ kind: "completed" });
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/capabilities/execute", "/api/inventory", "/api/capabilities/execute", "/api/capabilities/execute",
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
+    await expect(confirmInventoryTransfer(transferId, retryScope, [{ lineId, quantityThousandths: 1000 }]))
+      .rejects.toMatchObject({ status: 404, message: "route missing" });
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", false);
+    await expect(confirmInventoryTransfer(transferId, retryScope, [{ lineId, quantityThousandths: 1000 }]))
+      .resolves.toEqual({ kind: "completed" });
+
+    const requests = fetchMock.mock.calls.map(([url, init]) => ({
+      url,
+      body: JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string },
+    }));
+    expect(requests.map(({ url }) => url)).toEqual(Array(4).fill("/api/capabilities/execute"));
+    expect(requests.map(({ body }) => body.capabilityId)).toEqual([
+      "inventory.createTransfer", "inventory.createTransfer", "inventory.confirmTransfer", "inventory.confirmTransfer",
     ]);
-    const terminalRetry = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body)) as { intentId: string };
-    expect(terminalRetry.intentId).not.toBe(goBody.intentId);
+    expect(requests[1]?.body.intentId).toBe(requests[0]?.body.intentId);
+    expect(requests[3]?.body.intentId).toBe(requests[2]?.body.intentId);
+    expect(requests[2]?.body.intentId).not.toBe(requests[0]?.body.intentId);
   });
 
   it("warns about unknown outcomes when a transfer request times out", async () => {

@@ -22,6 +22,7 @@ const legacyFailure = z.object({ error: z.string() }).passthrough();
 const TransferAttemptSchema = z.object({
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/i),
   intentId: z.string().uuid(),
+  route: z.enum(["go", "legacy"]).optional(),
 }).strict();
 
 export class InventoryTransferApiError extends Error {
@@ -63,10 +64,10 @@ export interface InventoryTransferRetryScope {
   organizationId: string | null;
 }
 
-type InventoryTransferAttempt = { storageKey: string; fingerprint: string; intentId: string };
+type InventoryTransferAttempt = { storageKey: string; fingerprint: string; intentId: string; route: "go" | "legacy" };
 const transferAttemptPrefix = "chaste:inventory-transfer-attempt:";
 
-function parseTransferAttempt(value: string | null): { fingerprint: string; intentId: string } | null {
+function parseTransferAttempt(value: string | null): { fingerprint: string; intentId: string; route?: "go" | "legacy" } | null {
   if (value === null) return null;
   try {
     const parsed: unknown = JSON.parse(value);
@@ -83,21 +84,56 @@ async function transferDigest(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function createTransferAttempt(payload: InventoryTransferAction, retryScope: InventoryTransferRetryScope): Promise<InventoryTransferAttempt> {
+async function transferScopeStorageKey(retryScope: InventoryTransferRetryScope): Promise<string> {
   const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
   if (!scope.actorId || !scope.organizationId) {
     throw new InventoryTransferApiError(0, "Wait for your account and organization to finish loading before changing a stock transfer.");
   }
-  let scopeDigest: string;
+  try {
+    return `${transferAttemptPrefix}${await transferDigest(JSON.stringify(scope))}`;
+  } catch {
+    throw new InventoryTransferApiError(0, "Transfer retry protection is unavailable. Check browser security settings and try again.");
+  }
+}
+
+export async function hasUnroutedInventoryTransferAttempt(retryScope: InventoryTransferRetryScope): Promise<boolean> {
+  const storageKey = await transferScopeStorageKey(retryScope);
+  try {
+    const stored = parseTransferAttempt(window.localStorage.getItem(storageKey));
+    return Boolean(stored && !stored.route);
+  } catch (error) {
+    if (error instanceof InventoryTransferApiError) throw error;
+    throw new InventoryTransferApiError(0, "Enable browser storage to check for an unresolved stock transfer.");
+  }
+}
+
+export async function resolveUnroutedInventoryTransferAttempt(retryScope: InventoryTransferRetryScope): Promise<boolean> {
+  const storageKey = await transferScopeStorageKey(retryScope);
+  try {
+    const stored = parseTransferAttempt(window.localStorage.getItem(storageKey));
+    if (!stored || stored.route) return false;
+    window.localStorage.removeItem(storageKey);
+    return true;
+  } catch (error) {
+    if (error instanceof InventoryTransferApiError) throw error;
+    throw new InventoryTransferApiError(0, "The unresolved transfer marker could not be cleared. Keep the history open and try again.");
+  }
+}
+
+async function createTransferAttempt(payload: InventoryTransferAction, retryScope: InventoryTransferRetryScope, selectedGo: boolean): Promise<InventoryTransferAttempt> {
+  const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
+  if (!scope.actorId || !scope.organizationId) {
+    throw new InventoryTransferApiError(0, "Wait for your account and organization to finish loading before changing a stock transfer.");
+  }
+  let storageKey: string;
   let fingerprint: string;
   try {
-    scopeDigest = await transferDigest(JSON.stringify(scope));
+    storageKey = await transferScopeStorageKey(retryScope);
     fingerprint = await transferDigest(JSON.stringify({ ...scope, payload }));
   } catch {
     throw new InventoryTransferApiError(0, "Transfer retry protection is unavailable. Check browser security settings and try again.");
   }
-  const storageKey = `${transferAttemptPrefix}${scopeDigest}`;
-  let stored: { fingerprint: string; intentId: string } | null;
+  let stored: { fingerprint: string; intentId: string; route?: "go" | "legacy" } | null;
   try {
     stored = parseTransferAttempt(window.localStorage.getItem(storageKey));
   } catch (error) {
@@ -107,13 +143,16 @@ async function createTransferAttempt(payload: InventoryTransferAction, retryScop
   if (stored && stored.fingerprint !== fingerprint) {
     throw new InventoryTransferApiError(0, "A previous stock transfer result is unresolved. Retry that exact action or check transfer history before changing it.");
   }
-  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+  if (stored) {
+    if (!stored.route) throw new InventoryTransferApiError(0, "An unresolved stock transfer has no recorded route, so its result cannot be retried safely. Check transfer history and contact an administrator before retrying.");
+    return { storageKey, fingerprint, intentId: stored.intentId, route: stored.route };
+  }
 
-  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID(), route: selectedGo ? "go" as const : "legacy" as const };
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, route: attempt.route }));
     const persisted = parseTransferAttempt(window.localStorage.getItem(storageKey));
-    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
+    if (!persisted || persisted.fingerprint !== fingerprint || persisted.route !== attempt.route) throw new Error("saved attempt did not persist");
     return { ...attempt, intentId: persisted.intentId };
   } catch {
     throw new InventoryTransferApiError(0, "Enable browser storage before changing a stock transfer so an uncertain action can be retried safely.");
@@ -164,8 +203,9 @@ export type InventoryTransferWithLineIds = Omit<InventoryTransfer, "lines"> & {
 };
 
 async function submit(payload: InventoryTransferAction, fallback: string, retryScope: InventoryTransferRetryScope): Promise<InventoryTransferActionResult> {
-  const attempt = await createTransferAttempt(payload, retryScope);
-  const useGo = typeof __GO_INVENTORY_TRANSFER_WRITES__ !== "undefined" && __GO_INVENTORY_TRANSFER_WRITES__;
+  const selectedGo = typeof __GO_INVENTORY_TRANSFER_WRITES__ !== "undefined" && __GO_INVENTORY_TRANSFER_WRITES__;
+  const attempt = await createTransferAttempt(payload, retryScope, selectedGo);
+  const useGo = attempt.route === "go";
   const { action, ...input } = payload;
   const request = !useGo
     ? { url: "/api/inventory", body: { ...payload, intentId: attempt.intentId } }
@@ -188,16 +228,6 @@ async function submit(payload: InventoryTransferAction, fallback: string, retryS
       body: JSON.stringify(request.body),
       signal: AbortSignal.timeout(20_000),
     });
-    if (useGo && response.status === 404) {
-      response = await fetch("/api/inventory", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ ...payload, intentId: attempt.intentId }),
-        signal: AbortSignal.timeout(20_000),
-      });
-    }
   } catch (error) {
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";
     throw new InventoryTransferApiError(0, timedOut
@@ -215,7 +245,7 @@ async function submit(payload: InventoryTransferAction, fallback: string, retryS
     const failure = failureEnvelope.safeParse(body);
     const legacy = legacyFailure.safeParse(body);
     const message = failure.success ? failure.data.error : legacy.success ? legacy.data.error : fallback;
-    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429 && !(useGo && response.status === 404)) {
       clearTransferAttempt(attempt);
     }
     throw new InventoryTransferApiError(response.status, message);

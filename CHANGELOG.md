@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite inventory transfer create and confirm writes no longer fall back to the
+  legacy inventory route when a selected Go capability returns 404. The exact
+  actor/org scoped intent is retained, and retries remain targeted to the
+  route selected when the attempt began. Pre-route markers without a recorded
+  destination are preserved and fail closed; the transfer panel exposes an
+  explicit confirmation to resolve one after review of transfer history.
+
 - Vite CRM saved-view create, pin, and share writes can use Go's authenticated
   `crm.saveCustomerView` capability behind paired
   `CHASTE_GO_CRM_VIEW_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`

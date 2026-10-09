@@ -1558,9 +1558,12 @@ new owners and the manifest shows zero legacy runtime paths.
      scope persistent retry identities to the active actor and organization,
      retain them through pending or uncertain outcomes, and clear them on
      success or definitive 4xx; 408, 429, and 5xx retain the attempt. Corrupt
-     markers fail closed. A missing Go capability route falls back to the
-     legacy action with the same intent, and selector rollback preserves the
-     scoped attempt. Reject duplicate partial-confirmation
+     markers fail closed. Missing Go capability routes retain the marker and
+     fail closed without legacy fallback; the marker records the selected route
+     so retries continue on Go even if the selector is later disabled. Earlier
+     route-less markers remain preserved and fail closed because their original
+     destination is ambiguous; the transfer panel allows clearing one only
+     after the user explicitly confirms review of the visible history. Reject duplicate partial-confirmation
      line IDs at the Go boundary. Other inventory actions and page ownership
      remain unchanged. Focused Vite and Go parser checks pass; browser proof
      remains open.

@@ -3,7 +3,9 @@ import type { InventoryItem, InventoryLocation, InventoryTransfer } from "../api
 import {
   confirmInventoryTransfer,
   createInventoryTransfer,
+  hasUnroutedInventoryTransferAttempt,
   InventoryTransferApiError,
+  resolveUnroutedInventoryTransferAttempt,
   supportsPartialConfirmation,
   type InventoryTransferRetryScope,
   type InventoryTransferWithLineIds,
@@ -48,10 +50,42 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
   const [note, setNote] = useState("");
   const [partialAmounts, setPartialAmounts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [routeLessAttempt, setRouteLessAttempt] = useState(false);
+  const [routeLessAttemptScope, setRouteLessAttemptScope] = useState<string | null>(null);
+  const [routeLessAttemptResolved, setRouteLessAttemptResolved] = useState(false);
+  const [historyReviewed, setHistoryReviewed] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "pending" | "error"; message: string } | null>(null);
   const partialConfirmationGuards = useRef(new Map<string, string>());
+  const transferScopeIdentity = JSON.stringify([retryScope.actorId?.trim() ?? "", retryScope.organizationId?.trim() ?? ""]);
+  const transferScopeIdentityRef = useRef<string | null>(null);
+  const transferScopeGeneration = useRef(0);
+  if (transferScopeIdentityRef.current !== transferScopeIdentity) {
+    transferScopeIdentityRef.current = transferScopeIdentity;
+    transferScopeGeneration.current += 1;
+  }
   const [guardedTransferIds, setGuardedTransferIds] = useState<ReadonlySet<string>>(() => new Set());
   const activeItems = useMemo(() => items.filter((item) => item.kind !== "service"), [items]);
+  const transferScopeReady = routeLessAttemptScope === transferScopeIdentity;
+  const showRouteLessAttempt = routeLessAttempt && routeLessAttemptScope === transferScopeIdentity;
+
+  useEffect(() => {
+    let active = true;
+    const generation = transferScopeGeneration.current;
+    const scope = { actorId: retryScope.actorId, organizationId: retryScope.organizationId };
+    setRouteLessAttempt(false);
+    setRouteLessAttemptScope(null);
+    setRouteLessAttemptResolved(false);
+    setHistoryReviewed(false);
+    void hasUnroutedInventoryTransferAttempt(scope).then((found) => {
+      if (active && generation === transferScopeGeneration.current) {
+        setRouteLessAttempt(found);
+        setRouteLessAttemptScope(transferScopeIdentity);
+      }
+    }).catch((error: unknown) => {
+      if (active && generation === transferScopeGeneration.current) setNotice({ kind: "error", message: error instanceof InventoryTransferApiError ? error.message : "Could not check stock transfer retry history." });
+    });
+    return () => { active = false; };
+  }, [retryScope.actorId, retryScope.organizationId, transferScopeIdentity]);
 
   useEffect(() => {
     const progressedTransferIds: string[] = [];
@@ -164,6 +198,23 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
     }
   }
 
+  async function resolveRouteLessAttempt() {
+    const scope = { actorId: retryScope.actorId, organizationId: retryScope.organizationId };
+    const generation = transferScopeGeneration.current;
+    setRouteLessAttemptResolved(true);
+    try {
+      const cleared = await resolveUnroutedInventoryTransferAttempt(scope);
+      if (generation !== transferScopeGeneration.current) return;
+      setRouteLessAttempt(false);
+      setHistoryReviewed(false);
+      setNotice({ kind: "success", message: cleared ? "The old retry marker was cleared after your history review. You can now submit a new transfer action." : "The old retry marker is no longer present." });
+    } catch (error) {
+      if (generation === transferScopeGeneration.current) setNotice({ kind: "error", message: error instanceof InventoryTransferApiError ? error.message : "The old retry marker could not be cleared." });
+    } finally {
+      if (generation === transferScopeGeneration.current) setRouteLessAttemptResolved(false);
+    }
+  }
+
   return (
     <section aria-labelledby="inventory-transfers-title" className="inventory-transfer-panel">
       <h2 id="inventory-transfers-title">Stock transfers</h2>
@@ -199,7 +250,7 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
           Transfer note
           <input aria-label="Transfer note" value={note} onChange={(event) => setNote(event.target.value)} />
         </label>
-        <button type="button" disabled={busy || !from || !to || from === to || !sku || parseQuantity(quantity) === null} onClick={() => void draftTransfer()}>
+      <button type="button" disabled={busy || !transferScopeReady || showRouteLessAttempt || !from || !to || from === to || !sku || parseQuantity(quantity) === null} onClick={() => void draftTransfer()}>
           Draft transfer
         </button>
       </div>
@@ -219,7 +270,7 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
                   <div>
                     {confirmationGuarded && <p>Confirmation succeeded. Waiting for refreshed transfer progress before enabling confirmation again.</p>}
                     {supportsPartialConfirmation(transferWithIds) && (
-                      <fieldset disabled={busy || confirmationGuarded}>
+                      <fieldset disabled={busy || !transferScopeReady || showRouteLessAttempt || confirmationGuarded}>
                         <legend>Confirm part of this transfer</legend>
                         <p>Enter a quantity for every remaining line. Leave no line blank because blank lines confirm in full.</p>
                         {transferWithIds.lines.filter((line) => line.confirmedThousandths < line.quantityThousandths).map((line) => {
@@ -242,7 +293,7 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
                         <button type="button" disabled={busy || confirmationGuarded} title={confirmationGuarded ? "Wait for refreshed transfer progress before confirming again" : undefined} onClick={() => void confirmPartial(transferWithIds)}>Confirm entered quantities</button>
                       </fieldset>
                     )}
-                    <button type="button" disabled={busy || confirmationGuarded} title={confirmationGuarded ? "Wait for refreshed transfer progress before confirming again" : "Confirm the remaining quantity and move stock"} onClick={() => void confirmRemaining(transfer)}>
+                    <button type="button" disabled={busy || !transferScopeReady || showRouteLessAttempt || confirmationGuarded} title={confirmationGuarded ? "Wait for refreshed transfer progress before confirming again" : "Confirm the remaining quantity and move stock"} onClick={() => void confirmRemaining(transfer)}>
                       Confirm remaining
                     </button>
                   </div>
@@ -252,6 +303,11 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
           })}
         </ul>
       )}
+      {showRouteLessAttempt && <div role="alert">
+        <p>A saved transfer attempt has no recorded destination route, so it cannot be retried safely. Review the transfer history above and resolve any transfer that may have been created or confirmed before clearing this marker.</p>
+        <label><input type="checkbox" checked={historyReviewed} disabled={busy || routeLessAttemptResolved} onChange={(event) => setHistoryReviewed(event.target.checked)} /> I reviewed the transfer history and resolved any possible duplicate transfer.</label>
+        <button type="button" disabled={busy || routeLessAttemptResolved || !historyReviewed} onClick={() => void resolveRouteLessAttempt()}>{routeLessAttemptResolved ? "Clearing old retry marker…" : "Clear old retry marker"}</button>
+      </div>}
     </section>
   );
 }
