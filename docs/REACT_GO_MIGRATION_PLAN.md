@@ -1723,18 +1723,21 @@ new owners and the manifest shows zero legacy runtime paths.
      drafts and request targets after reload until an action completes. Go serializes decisions and
      quote actions on the parent request and rejects duplicate vendor IDs in
      RFQ creation. Focused Go and Vite checks pass; browser proof remains open.
-170. (Implemented) Route only Vite Marketing campaign creation and sends through Go's
+170. (Implemented; default-on in `.env.example`) Route only Vite Marketing campaign creation and sends through Go's
      session-authenticated `marketing.createCampaign` and `marketing.sendCampaign`
      capabilities when `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Preserve the legacy route as the
-     same-intent fallback only when the Go capability route is absent. Persist
+     explicit rollback path when the campaign selector is set to `0`. Persist
      exact actor and organization scoped intent IDs through pending or uncertain
      outcomes, lock and restore the exact create draft after reload, require the
      resolved current scope and durable browser storage before Go writes, and
      validate the strict campaign and send output shapes. Retain attempts after
      network, 408, 429, and 5xx uncertainty; block changed payloads until the
-     original create is resolved. Segment creation, analytics, and reads remain
-     unchanged.
+     original create is resolved. Campaign analytics uses the same paired
+     selector and is default-on; set the campaign selector to `0` to roll
+     campaign writes and analytics back to the legacy route. Segment creation
+     keeps its separate selector, and snapshot reads remain on their existing
+     route.
      Disable send after the campaign snapshot reports queued. Selector rollback
      blocks unresolved Go attempts, and scoped campaign, send-log, analytics,
      draft, and action state is cleared or hidden while a new scope loads.
@@ -2174,10 +2177,11 @@ new owners and the manifest shows zero legacy runtime paths.
      restore inputs and applies the inventory write permission and per-org
      import rate limit. Focused Vite API/UI and Go route/capability tests pass;
      browser proof remains open.
-211. (Implemented) Route Vite Marketing campaign analytics through the
+211. (Implemented; default-on in `.env.example`) Route Vite Marketing campaign analytics through the
      session-authenticated `marketing.campaignAnalytics` capability when
      `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. When Go is selected, segment
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the campaign selector to `0`
+     for explicit legacy rollback. When Go is selected, segment
      creation, campaign creation, send, and analytics fail closed on a missing
      Go route rather than retrying through `/api/marketing`. Preserve campaign
      actor/org scoped intent receipts across pending approvals, 404s, malformed

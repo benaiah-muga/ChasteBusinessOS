@@ -56,6 +56,10 @@ export function goProjectsWritesFromEnv(env: Record<string, string | undefined>)
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PROJECTS_WRITES === "1";
 }
 
+export function goMarketingCampaignWritesFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MARKETING_CAMPAIGN_WRITES === "1";
+}
+
 export function goSessionCapabilityRouteFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
 }

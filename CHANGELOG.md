@@ -132,12 +132,13 @@ The full v1 changelog is preserved at the bottom of this file.
   64 KiB capability request limit or Go row constraints are rejected before
   dispatch, and undo/restore retain the exact affected item IDs.
 
-- Vite Marketing campaign analytics now uses Go's authenticated
-  `marketing.campaignAnalytics` capability with a validated response envelope.
-  When the Go selectors are enabled, segment creation, campaign creation, send,
-  and analytics fail closed on a missing Go route; campaign send retries retain
-  the exact actor and organization scoped intent through 404, malformed, and
-  uncertain results. The Marketing snapshot remains on its existing route.
+- Vite Marketing campaign creation, send, and analytics use Go's authenticated
+  capabilities by default in `.env.example`, with validated response envelopes.
+  Set `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=0` for explicit legacy rollback.
+  Go-selected writes fail closed on a missing capability route; campaign send
+  retries retain the exact actor and organization scoped intent through 404,
+  malformed, and uncertain results. The Marketing snapshot remains on its
+  existing route.
 
 - Vite cycle-count create, record, post, and cancel use Go's session capability
   route when paired Vite and API selectors are enabled. Exact retry markers are

@@ -5,6 +5,7 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import {
   createGoRouteProxyPlugin,
   goPosCloseSessionSliceFromEnv,
+  goMarketingCampaignWritesFromEnv,
   goProjectsWritesFromEnv,
   goSessionCapabilityRouteFromEnv,
   goInventoryTransferWritesFromEnv,
@@ -68,6 +69,15 @@ describe("Projects write selector", () => {
     expect(goProjectsWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PROJECTS_WRITES: "1" })).toBe(true);
     expect(goProjectsWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PROJECTS_WRITES: "1" })).toBe(false);
     expect(goProjectsWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PROJECTS_WRITES: "0" })).toBe(false);
+  });
+});
+
+describe("Marketing campaign Go selector", () => {
+  it("requires both campaign writes and the session capability route, with legacy rollback", () => {
+    expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_CAMPAIGN_WRITES: "1" })).toBe(true);
+    expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_CAMPAIGN_WRITES: "0" })).toBe(false);
+    expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MARKETING_CAMPAIGN_WRITES: "1" })).toBe(false);
+    expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
   });
 });
 
