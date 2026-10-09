@@ -215,6 +215,9 @@ func run(logger *slog.Logger) error {
 		for capabilityID := range httpapi.DocumentsVersionDisabledCapabilities(os.Getenv("GO_DOCUMENTS_VERSION_READS") == "1") {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}
+		for capabilityID := range httpapi.MessagingPeopleDisabledCapabilities(os.Getenv("GO_MESSAGING_PEOPLE_READS") == "1") {
+			disabledCapabilities[capabilityID] = struct{}{}
+		}
 		sessionCapabilityRoute = httpapi.NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, capabilityExecutor, logger, disabledCapabilities, trustedProxyCIDRs)
 		logger.Info("Go session capability route mounted", "path", "/api/capabilities/execute")
 	}

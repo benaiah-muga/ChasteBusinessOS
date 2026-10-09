@@ -319,6 +319,15 @@ The Vite library can select the direct session-capability route by setting
 `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API feature flag above is enforced
 inside the capability route for all callers. List and preview detail keep the
 same projections, and uploaded-content links remain on their existing path.
+`GO_MESSAGING_PEOPLE_READS=1` opts only the authenticated Go
+`messaging.listPeople` capability into direct session-route execution. The API
+flag defaults off and gates all callers. Vite can select it with
+`CHASTE_GO_MESSAGING_PEOPLE_READS=1` plus
+`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Initial mention lookup requests 100
+people; add-member search requests 30 and trims queries to 80 characters.
+Conversation, thread, presence, and message search reads retain their current
+routes. Selected Go failures are shown in the existing Messages notices and do
+not fall back to legacy.
 The Vite authored-document editor can separately select Go for version history
 and archived compare previews with `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
 `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API must also set

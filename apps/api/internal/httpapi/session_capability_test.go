@@ -502,3 +502,27 @@ func TestSessionCapabilityHandlerCanGateAuthoredDocumentVersionReads(t *testing.
 		})
 	}
 }
+
+func TestSessionCapabilityHandlerCanGateMessagingPeopleRead(t *testing.T) {
+	body := `{"capabilityId":"messaging.listPeople","input":{"limit":100},"intentId":"messaging-people-read"}`
+	t.Run("default off", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"people":[]}`)}}
+		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, MessagingPeopleDisabledCapabilities(false))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+		if response.Code != http.StatusServiceUnavailable || executor.calls != 0 {
+			t.Fatalf("status=%d executor=%d body=%s", response.Code, executor.calls, response.Body.String())
+		}
+	})
+	t.Run("opted in", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"people":[]}`)}}
+		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, MessagingPeopleDisabledCapabilities(true))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+		if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != "messaging.listPeople" {
+			t.Fatalf("status=%d capability=%q executor=%d body=%s", response.Code, executor.capID, executor.calls, response.Body.String())
+		}
+	})
+}

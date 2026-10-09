@@ -13,6 +13,14 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite mention and add-member people lookup can use the authenticated Go
+  `messaging.listPeople` capability behind paired
+  `CHASTE_GO_MESSAGING_PEOPLE_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. The API enforces
+  `GO_MESSAGING_PEOPLE_READS=1` for every caller. Initial lookup retains the
+  100-row limit; add-member search retains 30 rows and an 80-character trimmed
+  query. Selected Go failures are visible and do not retry through legacy.
+
 - Vite authored-document version history and archived compare previews can use
   the authenticated Go `documents.listDocVersions` and
   `documents.getDocVersion` capabilities behind paired

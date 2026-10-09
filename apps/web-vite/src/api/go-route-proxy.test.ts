@@ -27,6 +27,7 @@ import {
   goPurchasingAPAgingReadsFromEnv,
   goDocumentsIngestedReadsFromEnv,
   goDocumentsVersionReadsFromEnv,
+  goMessagingPeopleReadsFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
   goPurchasingWorkflowReadsFromEnv,
   goPurchasingIntelReadsFromEnv,
@@ -375,6 +376,15 @@ describe("authored document versions Go selector", () => {
     expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_VERSION_READS: "0" })).toBe(false);
     expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_DOCUMENTS_VERSION_READS: "1" })).toBe(false);
+  });
+});
+
+describe("messaging people Go selector", () => {
+  it("requires both the people-read selector and session capability route", () => {
+    expect(goMessagingPeopleReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_PEOPLE_READS: "1" })).toBe(true);
+    expect(goMessagingPeopleReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goMessagingPeopleReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_PEOPLE_READS: "0" })).toBe(false);
+    expect(goMessagingPeopleReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_PEOPLE_READS: "1" })).toBe(false);
   });
 });
 

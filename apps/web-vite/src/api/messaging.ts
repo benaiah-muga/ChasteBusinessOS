@@ -111,6 +111,14 @@ const ConversationThreadSchema = z.object({
 export type ConversationThread = z.infer<typeof ConversationThreadSchema>;
 
 const PeopleResponseSchema = z.object({ people: z.array(PersonSchema) }).strict();
+const GoPeopleEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const GoPeopleOutputSchema = z.object({
+  people: z.array(z.object({
+    type: z.enum(["user", "agent"]),
+    id: z.string().min(1).max(80),
+    name: z.string(),
+  }).strict()),
+}).strict();
 const PresenceResponseSchema = z.object({ people: z.array(PresenceSchema) }).strict();
 const SearchResponseSchema = z.object({ results: z.array(SearchResultSchema) }).strict();
 const CreateConversationSchema = z.object({ conversationId: z.string().min(1) }).strict();
@@ -290,9 +298,39 @@ export function createConversation(
 }
 
 export async function fetchConversationPeople(query?: string, signal?: AbortSignal): Promise<Person[]> {
-  const path = query?.trim() ? `/api/conversations/people?q=${encodeURIComponent(query.trim())}` : "/api/conversations/people";
+  const normalizedQuery = query?.trim() ?? "";
+  if (typeof __GO_MESSAGING_PEOPLE_READS__ !== "undefined" && __GO_MESSAGING_PEOPLE_READS__) {
+    if (normalizedQuery.length > 80) {
+      throw new MessagingApiError(400, "Search team members using 80 characters or fewer.");
+    }
+    const input = normalizedQuery
+      ? { query: normalizedQuery, limit: 30 }
+      : { limit: 100 };
+    const { response, body } = await send("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "messaging.listPeople", input, intentId: newIntentId() }),
+    }, "people you can mention", signal);
+    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "people you can mention"));
+    const envelope = GoPeopleEnvelopeSchema.safeParse(body);
+    if (!envelope.success) throw new MessagingApiError(response.status, "The messaging service returned people in an unexpected format.");
+    const output = GoPeopleOutputSchema.safeParse(envelope.data.data);
+    if (!output.success) throw new MessagingApiError(response.status, "The messaging service returned people in an unexpected format.");
+    const projected = output.data.people.map((person) => ({
+      type: person.type === "user" ? "user" as const : "agent" as const,
+      id: person.id,
+      name: person.name,
+    }));
+    const parsedPeople = PeopleResponseSchema.safeParse({ people: projected });
+    if (!parsedPeople.success) throw new MessagingApiError(response.status, "The messaging service returned people in an unexpected format.");
+    return parsedPeople.data.people;
+  }
+  const path = normalizedQuery ? `/api/conversations/people?q=${encodeURIComponent(normalizedQuery)}` : "/api/conversations/people";
   const result = await getJson(path, "the people you can mention", PeopleResponseSchema, signal);
   return result.people;
+}
+
+export function messagingPeopleReadsGoSelected(): boolean {
+  return typeof __GO_MESSAGING_PEOPLE_READS__ !== "undefined" && __GO_MESSAGING_PEOPLE_READS__;
 }
 
 export function fetchConversationThread(

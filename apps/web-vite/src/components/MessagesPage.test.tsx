@@ -239,6 +239,50 @@ describe("messages page states", () => {
     expect(await screen.findByText("Morning all")).not.toBeNull();
   });
 
+  it("shows selected Go mention-people failures instead of silently using an empty list", async () => {
+    vi.stubGlobal("__GO_MESSAGING_PEOPLE_READS__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [], me });
+      if (path === "/api/capabilities/execute") return Response.json({ error: "disabled" }, { status: 503 });
+      return Response.json({ error: "unexpected legacy fallback" }, { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("disabled");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/conversations/people"))).toBe(false);
+  });
+
+  it("shows selected Go add-member lookup failures in the conversation settings dialog", async () => {
+    vi.stubGlobal("__GO_MESSAGING_PEOPLE_READS__", true);
+    let capabilityCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path === "/api/capabilities/execute") {
+        capabilityCalls += 1;
+        if (capabilityCalls === 1) return Response.json({ ok: true, data: { people } });
+        return Response.json({ error: "service unavailable" }, { status: 503 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      return Response.json({ error: "unexpected legacy fallback" }, { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+
+    fireEvent.click(await screen.findByRole("option", { name: /general/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Find a colleague by name" }), { target: { value: "Grace" } });
+
+    const dialog = await screen.findByRole("dialog", { name: /#general/ });
+    expect((await within(dialog).findByRole("alert")).textContent).toContain("service unavailable");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/conversations/people"))).toBe(false);
+  });
+
   it("shows the empty state and creates a channel through the legacy route", async () => {
     const created: Record<string, unknown>[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -10,6 +10,7 @@ import {
   deletePendingAttachment,
   editMessage,
   fetchConversationPeople,
+  messagingPeopleReadsGoSelected,
   fetchConversationPresence,
   fetchConversationThread,
   fetchConversations,
@@ -681,8 +682,13 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
       void loadConversations(controller.signal);
       try {
         setPeople(await fetchConversationPeople(undefined, controller.signal));
-      } catch {
-        if (!controller.signal.aborted) setPeople([]);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setPeople([]);
+          if (messagingPeopleReadsGoSelected()) {
+            setNotice({ tone: "error", text: errorText(error, "Could not load people for mentions.") });
+          }
+        }
       }
     })();
     return () => controller.abort();
@@ -819,7 +825,12 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     const timer = window.setTimeout(() => {
       void fetchConversationPeople(memberQuery.trim())
         .then((found) => setMemberResults(found.filter((person) => person.type === "user")))
-        .catch(() => setMemberResults([]));
+        .catch((error: unknown) => {
+          setMemberResults([]);
+          if (messagingPeopleReadsGoSelected()) {
+            setDialogNotice({ tone: "error", text: errorText(error, "Could not search team members.") });
+          }
+        });
     }, MEMBER_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [memberQuery, settingsOpen]);
@@ -1759,7 +1770,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
                   <input
                     type="text"
                     value={memberQuery}
-                    onChange={(event) => { setMemberQuery(event.target.value); setAddUserId(""); }}
+                    onChange={(event) => { setMemberQuery(event.target.value); setAddUserId(""); setDialogNotice(null); }}
                     placeholder="Search team members"
                     aria-label="Find a colleague by name"
                     autoComplete="off"
