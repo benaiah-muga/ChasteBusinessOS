@@ -213,6 +213,23 @@ describe("Vite People page", () => {
     expect(JSON.parse(String(rejectRequest?.[1]?.body))).toMatchObject({ action: "decide", claimId: expenseClaim.id, decision: "rejected", intentId: expect.any(String) });
   });
 
+  it("matches the Go memo and policy category limits in the expense form", async () => {
+    window.history.replaceState(null, "", "/hr?tab=expenses");
+    const baseFetch = hrFetch();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/expenses") return Response.json({ claims: [], policies: [] });
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HrPage />);
+    await screen.findByRole("heading", { name: "Submit an expense claim" });
+
+    const memo = screen.getByRole("textbox", { name: "Expense explanation" }) as HTMLInputElement;
+    const category = screen.getByRole("textbox", { name: "Policy category" }) as HTMLInputElement;
+    expect([memo.minLength, memo.maxLength]).toEqual([3, 500]);
+    expect([category.minLength, category.maxLength]).toEqual([2, 40]);
+  });
+
   it("keeps expense review data behind the existing expenses permission", async () => {
     window.history.replaceState(null, "", "/hr?tab=expenses");
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
@@ -230,6 +247,53 @@ describe("Vite People page", () => {
     expect(screen.getByText("forbidden: missing expenses.decide")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(screen.queryByText("Taxi to the client kickoff")).toBeNull();
+  });
+
+  it("routes Vite expenses to Go and recovers the exact pending claim action", async () => {
+    window.history.replaceState(null, "", "/hr?tab=expenses");
+    vi.stubGlobal("__GO_HR_EXPENSES__", true);
+    let pendingFirstSubmit = true;
+    const requests: Array<{ capabilityId: string; intentId: string; input: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/hr") return Response.json(report);
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> };
+        if (body.capabilityId === "accounting.listExpenseClaims") return Response.json({ ok: true, data: { claims: [expenseClaim] } });
+        if (body.capabilityId === "accounting.listExpensePolicies") return Response.json({ ok: true, data: { policies: [] } });
+        requests.push(body);
+        if (pendingFirstSubmit) {
+          pendingFirstSubmit = false;
+          return Response.json({ ok: false, pendingApproval: true, reason: "Manager review required" }, { status: 202 });
+        }
+        return Response.json({ ok: true, data: { claimId: "33333333-3333-4333-8333-333333333333", status: "submitted", category: "travel", overPolicyLimit: false, policyLimitMinor: null } });
+      }
+      return Response.json({ rows: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const page = render(<HrPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
+
+    await screen.findByRole("heading", { name: "Submit an expense claim" });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Expense amount" }), { target: { value: "42.50" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Expense explanation" }), { target: { value: "Client travel" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit claim" }));
+    expect(await screen.findByText(/Manager review required/)).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Retry exact expense action" })).not.toBeNull();
+
+    page.unmount();
+    render(<HrPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
+    await screen.findByRole("button", { name: "Retry exact expense action" });
+    fireEvent.click(screen.getByRole("button", { name: "Retry exact expense action" }));
+
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Expense action done."));
+    expect(requests.map(({ capabilityId }) => capabilityId)).toEqual(["accounting.submitExpenseClaim", "accounting.submitExpenseClaim"]);
+    expect(requests[0]?.intentId).toBe(requests[1]?.intentId);
+    expect(requests[0]?.input).toEqual({ amountMinor: 4250, memo: "Client travel" });
+    expect(requests[1]?.input).toEqual(requests[0]?.input);
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/expenses", expect.anything());
   });
 
   it("submits leave through the existing governed HR API and refreshes records", async () => {

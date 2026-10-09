@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { fetchExpenses, ExpensesApiError, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
+import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
 import { fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, HrApiError, submitHrAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrOpening, type HrPendingEntry, type HrReport, type HrTimeReport } from "../api/hr";
 import { legacyUrl } from "../legacy";
 import "./hr-page.css";
@@ -45,7 +45,7 @@ function formatMinutes(minutes: number): string {
   return remainder === 0 ? `${hours}h` : hours === 0 ? `${remainder}m` : `${hours}h ${remainder}m`;
 }
 
-export function HrPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
+export function HrPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [tab, setTab] = useState<TabId>(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
@@ -256,20 +256,22 @@ export function HrPage({ baseCurrency = null }: { baseCurrency?: string | null }
           if (!year || !month) return;
           void runAction("Payroll draft", { action: "createPayrollRun", year, month });
         }} />}
-        {tab === "expenses" && <ExpensesTab currency={currency} />}
+        {tab === "expenses" && <ExpensesTab currency={currency} actorId={actorId} organizationId={organizationId} />}
       </section>
     </main>
   );
 }
 
-function ExpensesTab({ currency }: { currency: string | null }) {
+function ExpensesTab({ currency, actorId, organizationId }: { currency: string | null; actorId: string | null; organizationId: string | null }) {
   const [claims, setClaims] = useState<ExpenseClaim[] | null>(null);
   const [policies, setPolicies] = useState<ExpensePolicy[]>([]);
   const [error, setError] = useState<ExpensesApiError | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  const [recoveryAction, setRecoveryAction] = useState<ExpenseAction | null>(null);
   const [form, setForm] = useState({ amount: "", memo: "", accountCode: "" });
   const [policyForm, setPolicyForm] = useState({ category: "", limit: "" });
+  const retryScope = { actorId, organizationId };
 
   const loadClaims = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     try {
@@ -292,20 +294,38 @@ function ExpensesTab({ currency }: { currency: string | null }) {
     return () => controller.abort();
   }, [loadClaims]);
 
-  async function post(action: ExpenseAction, label: string): Promise<boolean> {
-    if (busy) return false;
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    void readPendingExpenseAction(retryScope).then((action) => {
+      if (action) {
+        setRecoveryAction(action);
+        setNotice({ tone: "pending", text: "An earlier expense action is unresolved. Retry its exact action to recover the saved result." });
+      }
+    }).catch((reason: unknown) => {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not check for an unresolved expense action." });
+    });
+  }, [actorId, organizationId]);
+
+  async function post(action: ExpenseAction, label: string, isRecovery = false): Promise<boolean> {
+    if (busy || recoveryAction && !isRecovery) return false;
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitExpenseAction(action);
+      const result = await submitExpenseAction(action, undefined, retryScope);
       if (result.kind === "pending") {
+        setRecoveryAction(action);
         setNotice({ tone: "pending", text: `${label} is above the payment threshold and is in the Approvals inbox. ${result.reason}` });
         return false;
       }
+      setRecoveryAction(null);
       setNotice({ tone: "success", text: `${label} done.` });
       await loadClaims();
       return true;
     } catch (reason) {
+      if (actorId && organizationId) {
+        try { setRecoveryAction(await readPendingExpenseAction(retryScope)); }
+        catch { setRecoveryAction(action); }
+      }
       setNotice({ tone: "error", text: reason instanceof Error ? reason.message : `${label} failed.` });
       return false;
     } finally {
@@ -317,8 +337,8 @@ function ExpensesTab({ currency }: { currency: string | null }) {
     event.preventDefault();
     const amountMinor = Math.round(Number(form.amount || "0") * 100);
     const memo = form.memo.trim();
-    if (!memo || !Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
-      setNotice({ tone: "error", text: "An amount and a short explanation of the expense are both required." });
+    if (memo.length < 3 || memo.length > 500 || !Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
+      setNotice({ tone: "error", text: "Enter a valid amount and an explanation between 3 and 500 characters." });
       return;
     }
     if (await post({ action: "submit", amountMinor, memo, accountCode: form.accountCode.trim() || undefined }, "Expense claim")) {
@@ -330,8 +350,8 @@ function ExpensesTab({ currency }: { currency: string | null }) {
     event.preventDefault();
     const category = policyForm.category.trim();
     const limitMinor = Math.round(Number(policyForm.limit || "0") * 100);
-    if (!category || !policyForm.limit || !Number.isSafeInteger(limitMinor) || limitMinor < 0) {
-      setNotice({ tone: "error", text: "Enter a category and a valid non-negative scrutiny limit." });
+    if (category.length < 2 || category.length > 40 || !policyForm.limit || !Number.isSafeInteger(limitMinor) || limitMinor < 0) {
+      setNotice({ tone: "error", text: "Enter a category between 2 and 40 characters and a valid non-negative scrutiny limit." });
       return;
     }
     if (await post({ action: "setPolicy", category, limitMinor }, `Set ${category} limit`)) {
@@ -352,14 +372,14 @@ function ExpensesTab({ currency }: { currency: string | null }) {
   const displayCurrency = currency ?? "USD";
 
   return <div className="hr-content hr-expenses">
-    {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}{notice.tone === "pending" && <> <a href={legacyUrl("/approvals")}>Open approvals</a></>}</p>}
+    {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}{notice.tone === "pending" && <> <a href={legacyUrl("/approvals")}>Open approvals</a></>}{recoveryAction && <button type="button" disabled={busy} onClick={() => void post(recoveryAction, "Expense action", true)}>Retry exact expense action</button>}</p>}
     <section className="hr-card">
       <div className="hr-section-heading"><div><p className="hr-eyebrow">Reimbursement</p><h2>Submit an expense claim</h2></div></div>
       <form className="hr-expense-form" onSubmit={(event) => void submitClaim(event)}>
         <label>Amount<input aria-label="Expense amount" inputMode="decimal" type="number" min="0.01" step="0.01" placeholder="120.00" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-        <label className="hr-expense-memo">What &amp; why<input aria-label="Expense explanation" maxLength={500} placeholder="Taxi to the client kickoff" value={form.memo} onChange={(event) => setForm({ ...form, memo: event.target.value })} /></label>
+        <label className="hr-expense-memo">What &amp; why<input aria-label="Expense explanation" minLength={3} maxLength={500} placeholder="Taxi to the client kickoff" value={form.memo} onChange={(event) => setForm({ ...form, memo: event.target.value })} /></label>
         <label>Account <span className="hr-muted">(optional)</span><input aria-label="Expense account code" placeholder="6900" value={form.accountCode} onChange={(event) => setForm({ ...form, accountCode: event.target.value })} /></label>
-        <button className="hr-primary-button" type="submit" disabled={busy || !form.amount || !form.memo.trim()}>{busy ? "Working…" : "Submit claim"}</button>
+        <button className="hr-primary-button" type="submit" disabled={busy || Boolean(recoveryAction) || !form.amount || !form.memo.trim()}>{busy ? "Working…" : "Submit claim"}</button>
       </form>
       <p className="hr-muted hr-expense-help">The spend category is suggested from your explanation. A claim waits for a decision before any money moves, and reimbursements above the policy threshold need a second approval.</p>
     </section>
@@ -367,9 +387,9 @@ function ExpensesTab({ currency }: { currency: string | null }) {
     <section className="hr-card">
       <div className="hr-section-heading"><div><p className="hr-eyebrow">Controls</p><h2>Expense policy limits</h2></div><span className="hr-muted">{policies.length} cap{policies.length === 1 ? "" : "s"} set</span></div>
       <form className="hr-expense-form hr-expense-policy-form" onSubmit={(event) => void setPolicy(event)}>
-        <label>Category<input aria-label="Policy category" maxLength={40} placeholder="e.g. travel" value={policyForm.category} onChange={(event) => setPolicyForm({ ...policyForm, category: event.target.value })} /></label>
+        <label>Category<input aria-label="Policy category" minLength={2} maxLength={40} placeholder="e.g. travel" value={policyForm.category} onChange={(event) => setPolicyForm({ ...policyForm, category: event.target.value })} /></label>
         <label>Scrutiny limit<input aria-label="Policy scrutiny limit" inputMode="decimal" type="number" min="0" step="0.01" placeholder="250.00" value={policyForm.limit} onChange={(event) => setPolicyForm({ ...policyForm, limit: event.target.value })} /></label>
-        <button className="hr-primary-button" type="submit" disabled={busy || !policyForm.category.trim() || !policyForm.limit}>{busy ? "Working…" : "Set limit"}</button>
+        <button className="hr-primary-button" type="submit" disabled={busy || Boolean(recoveryAction) || !policyForm.category.trim() || !policyForm.limit}>{busy ? "Working…" : "Set limit"}</button>
       </form>
       {policies.length > 0 && <ul className="hr-expense-policies">{policies.map((policy) => <li key={policy.category}><span>{policy.category}</span><span>Over {formatMoney(policy.limitMinor, displayCurrency)} gets a harder look</span></li>)}</ul>}
       <p className="hr-muted hr-expense-help">Claims over a category&apos;s limit stay visible as signals until decided. The cap adds scrutiny, it does not block the claim.</p>
@@ -382,8 +402,8 @@ function ExpensesTab({ currency }: { currency: string | null }) {
           : (claims ?? []).length === 0 ? <div className="hr-empty"><h2>No expense claims yet</h2><p>Filed claims appear here with their decision and payment state.</p></div>
             : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Claim</th><th scope="col">Filed by</th><th scope="col" className="hr-expense-number">Amount</th><th scope="col">Status</th><th scope="col"><span className="hr-visually-hidden">Actions</span></th></tr></thead><tbody>
               {(claims ?? []).map((claim) => <tr key={claim.id}><th scope="row" className="hr-expense-claim">{claim.memo}</th><td title={claim.claimantUserId} className="hr-expense-claimant">{claim.claimantUserId.slice(0, 8)}</td><td className="hr-expense-number">{formatMoney(claim.amountMinor, displayCurrency)}</td><td><span className={`hr-pill hr-expense-${claim.status}`}>{claim.status}</span></td><td><div className="hr-row-actions hr-expense-actions">
-                {claim.status === "submitted" && <><button type="button" disabled={busy} onClick={() => void decide(claim, "approved")}>Approve</button><button type="button" disabled={busy} onClick={() => void decide(claim, "rejected")}>Reject</button></>}
-                {claim.status === "approved" && <button type="button" disabled={busy} onClick={() => void pay(claim)}>Pay {formatMoney(claim.amountMinor, displayCurrency)}</button>}
+                {claim.status === "submitted" && <><button type="button" disabled={busy || Boolean(recoveryAction)} onClick={() => void decide(claim, "approved")}>Approve</button><button type="button" disabled={busy || Boolean(recoveryAction)} onClick={() => void decide(claim, "rejected")}>Reject</button></>}
+                {claim.status === "approved" && <button type="button" disabled={busy || Boolean(recoveryAction)} onClick={() => void pay(claim)}>Pay {formatMoney(claim.amountMinor, displayCurrency)}</button>}
               </div></td></tr>)}
             </tbody></table></div>}
       {claims && (pendingCount > 0 || approvedCount > 0) && <p className="hr-muted hr-expense-help">{pendingCount > 0 && `${pendingCount} awaiting decision. `}{approvedCount > 0 && `${approvedCount} approved and awaiting reimbursement.`}</p>}

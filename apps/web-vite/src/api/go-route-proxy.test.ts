@@ -24,6 +24,7 @@ import {
   goManufacturingWorkOrderWritesFromEnv,
   goManufacturingProductionWritesFromEnv,
   goSalesOrderWritesFromEnv,
+  goHrExpensesFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -134,6 +135,15 @@ describe("CRM customer profile update Go selector", () => {
     expect(goCrmCustomerProfileUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE: "1" })).toBe(true);
     expect(goCrmCustomerProfileUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goCrmCustomerProfileUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE: "1" })).toBe(false);
+  });
+});
+
+describe("HR expenses Go selector", () => {
+  it("requires the paired session capability route and explicit expenses selector", () => {
+    expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_EXPENSES: "1" })).toBe(true);
+    expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_EXPENSES: "0" })).toBe(false);
+    expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_EXPENSES: "1" })).toBe(false);
   });
 });
 

@@ -13,6 +13,17 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite HR Expenses now reads claims and policy limits through Go's
+  session-authenticated `accounting.listExpenseClaims` and
+  `accounting.listExpensePolicies` capabilities, and sends submissions,
+  decisions, reimbursements, and policy updates through their matching Go
+  capabilities. The paired `CHASTE_GO_HR_EXPENSES=1` selector is enabled in
+  local setups and requires `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Exact
+  actor/org scoped retries and pending approval recovery survive reload; a Go
+  404 never falls back to the legacy endpoint, and selector rollback blocks
+  unresolved actions. Expense memo and policy category limits match Go at 3 to
+  500 characters and 2 to 40 characters respectively. Set the selector to `0`
+  for explicit legacy rollback.
 - Vite CRM customer CSV import and undo now use Go's session-authenticated
   `crm.importCustomers` and `crm.undoCustomerImport` capabilities by default in
   local setups. Exact rows, created-ID undo state, actor/org scoped intents, and

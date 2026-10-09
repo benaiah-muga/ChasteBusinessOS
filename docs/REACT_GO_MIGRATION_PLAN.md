@@ -1908,3 +1908,17 @@ new owners and the manifest shows zero legacy runtime paths.
      edits. Require durable UUID import intents. Keep CSV mapping and review
      behavior unchanged. Add focused API, proxy, UI, and DB-backed Go tests;
      authenticated browser proof remains open.
+189. (Implemented) Route only Vite HR Expenses reads and writes through Go's
+     session-authenticated `accounting.listExpenseClaims`,
+     `accounting.listExpensePolicies`, `accounting.submitExpenseClaim`,
+     `accounting.decideExpenseClaim`, `accounting.payExpenseClaim`, and
+     `accounting.setExpensePolicy` capabilities. Enable the paired
+     `CHASTE_GO_HR_EXPENSES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`
+     selectors in local setups; set the HR selector to `0` for explicit legacy
+     rollback. Vite scopes durable exact-action retries by authenticated actor
+     and organization, exposes retries for pending approvals after reload, and
+     blocks legacy writes while a Go attempt remains unresolved. A Go 404 never
+     falls back to `/api/expenses`. Preserve the existing claim and policy UI.
+     Focused API, proxy selector, and HrPage tests pass; existing DB-backed Go
+     expense capability tests remain the contract proof. Authenticated browser
+     proof remains open.
