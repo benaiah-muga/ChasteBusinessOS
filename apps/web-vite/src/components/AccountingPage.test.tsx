@@ -52,7 +52,7 @@ const reversalEntry: AccountingEntry = {
 };
 
 const openInvoice: AccountingInvoice = {
-  id: "invoice-1",
+  id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
   number: 1042,
   customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   customerName: "Kampala Coffee",
@@ -67,7 +67,7 @@ const openInvoice: AccountingInvoice = {
 
 const voidInvoice: AccountingInvoice = {
   ...openInvoice,
-  id: "invoice-2",
+  id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
   number: 1043,
   status: "void",
   totalMinor: 5_000,
@@ -127,6 +127,7 @@ interface StubOptions {
   actionResponse?: Response | (() => Response);
   goPaymentResponse?: () => Response;
   goCreateInvoiceResponse?: () => Response;
+  goCreditNoteResponse?: () => Response;
 }
 
 function stubAccounting(options: StubOptions = {}) {
@@ -144,6 +145,13 @@ function stubAccounting(options: StubOptions = {}) {
     }
     if (url === "/api/capabilities/execute") {
       const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
+      if (capabilityId === "accounting.creditNote") {
+        return options.goCreditNoteResponse?.() ?? Response.json({ ok: true, data: {
+          entryId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          creditedMinor: 2500,
+          invoiceBalanceMinor: 7500,
+        } });
+      }
       if (capabilityId === "accounting.createInvoice") {
         return options.goCreateInvoiceResponse?.() ?? Response.json({ ok: true, data: {
           invoiceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -510,6 +518,7 @@ describe("AccountingPage governed writes", () => {
     expect(sent).toHaveLength(2);
     expect(sent[1]?.input).toEqual(sent[0]?.input);
     expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("offers exact recovery from the global notice when the invoice is absent after reload", async () => {
@@ -585,6 +594,33 @@ describe("AccountingPage governed writes", () => {
     expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
   });
 
+  it("closes and resets invoice creation after same-session exact recovery", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
+    let attempt = 0;
+    const { calls } = stubAccounting({
+      goCreateInvoiceResponse: () => {
+        attempt += 1;
+        return attempt === 1
+          ? Response.json({ pendingApproval: true, reason: "Invoice approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { invoiceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", invoiceNumber: 2048, totalMinor: 2500, entryId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", currency: "USD" } });
+      },
+    });
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
+    fireEvent.click(screen.getByRole("button", { name: "New invoice" }));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    fireEvent.change(screen.getByLabelText("Line 1 description"), { target: { value: "Advisory" } });
+    fireEvent.change(screen.getByLabelText("Line 1 unit price"), { target: { value: "25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Post invoice" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact invoice" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Retry exact invoice" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "New invoice" }));
+    expect((screen.getByLabelText("Line 1 description") as HTMLInputElement).value).toBe("");
+    expect(calls.filter((call) => call.url === "/api/capabilities/execute" && call.method === "POST")).toHaveLength(2);
+  });
+
   it("guards a credit note behind a positive amount and a real reason", async () => {
     const { calls } = stubAccounting();
     await renderReady();
@@ -599,6 +635,92 @@ describe("AccountingPage governed writes", () => {
 
     fireEvent.click(apply);
     await waitFor(() => expect(calls.some((call) => call.body?.includes("creditNote"))).toBe(true));
+  });
+
+  it("routes credit notes to Go and restores the exact pending credit after reload", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    let attempt = 0;
+    const { calls } = stubAccounting({
+      goCreditNoteResponse: () => {
+        const body = JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        sent.push(body);
+        attempt += 1;
+        return attempt === 1
+          ? Response.json({ pendingApproval: true, reason: "Credit approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { entryId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", creditedMinor: 2500, invoiceBalanceMinor: 7500 } });
+      },
+    });
+    const first = render(<AccountingPage {...ids} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+    fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Credit" }));
+    fireEvent.change(screen.getByLabelText("Amount to credit"), { target: { value: "25" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Goodwill credit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply credit" }));
+
+    expect(await screen.findByRole("button", { name: "Retry exact credit" })).not.toBeNull();
+    expect((screen.getByLabelText("Amount to credit") as HTMLInputElement).disabled).toBe(true);
+    expect(sent[0]).toMatchObject({ capabilityId: "accounting.creditNote", input: { invoiceId: openInvoice.id, amountMinor: 2500, reason: "Goodwill credit" } });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("creditNote"))).toBe(false);
+
+    first.unmount();
+    render(<AccountingPage {...ids} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact credit" }));
+    expect(await screen.findByText(/^Credit on invoice done\.$/)).not.toBeNull();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.input).toEqual(sent[0]?.input);
+    expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
+  });
+
+  it("closes the credit form after same-session exact recovery", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    let attempt = 0;
+    const { calls } = stubAccounting({
+      goCreditNoteResponse: () => {
+        sent.push(JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string });
+        attempt += 1;
+        return attempt === 1
+          ? Response.json({ pendingApproval: true, reason: "Credit approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { entryId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", creditedMinor: 2500, invoiceBalanceMinor: 7500 } });
+      },
+    });
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Credit" }))[0]!);
+    fireEvent.change(screen.getByLabelText("Amount to credit"), { target: { value: "25" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Goodwill credit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply credit" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact credit" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Retry exact credit" })).toBeNull();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.input).toEqual(sent[0]?.input);
+    expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
+  });
+
+  it("surfaces Go's live balance rejection when the displayed invoice balance is stale", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    const { calls } = stubAccounting({
+      goCreditNoteResponse: () => Response.json({ error: "credit 9000 exceeds the open balance 5000" }, { status: 422 }),
+    });
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Credit" }));
+    fireEvent.change(screen.getByLabelText("Amount to credit"), { target: { value: "90" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Goodwill credit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply credit" }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByText("credit 9000 exceeds the open balance 5000")).toBeTruthy();
+    expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.creditNote"))).toBe(true);
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("creditNote"))).toBe(false);
   });
 });
 

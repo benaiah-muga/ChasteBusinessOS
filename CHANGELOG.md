@@ -30,6 +30,14 @@ The full v1 changelog is preserved at the bottom of this file.
   attempts and pending approvals survive reload. Go 404 and uncertain results
   never fall back to the legacy writer, and an unresolved attempt blocks legacy
   rollback. Other Accounting actions retain their existing routes.
+- Vite invoice credit notes can use Go's session-authenticated
+  `accounting.creditNote` capability behind the paired
+  `CHASTE_GO_ACCOUNTING_CREDIT_NOTE=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
+  attempts and approval recovery survive reload; Go 404 and uncertain outcomes
+  never fall back to the legacy writer. Go checks the locked invoice's live
+  balance before posting, and an unresolved attempt blocks legacy rollback.
+  Other Accounting actions retain their existing routes.
 - Go leave requests now verify that the employee belongs to the caller's
   organization before inserting a request. Missing and cross-organization
   employee IDs are rejected without creating leave records.

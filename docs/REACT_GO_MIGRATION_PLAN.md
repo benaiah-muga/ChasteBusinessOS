@@ -1954,3 +1954,15 @@ new owners and the manifest shows zero legacy runtime paths.
      proxy selector, and AccountingPage tests; the existing Go invoice creation
      executor integration test remains the contract proof. Authenticated
      browser proof remains open.
+193. Route only Vite `creditNote` writes through Go's session-authenticated
+     `accounting.creditNote` capability behind paired
+     `CHASTE_GO_ACCOUNTING_CREDIT_NOTE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the credit-note
+     selector to `0` for explicit legacy rollback. Scope durable exact intents
+     by actor and organization, recover pending approvals and uncertain writes
+     after reload, block legacy fallback while unresolved, and fail closed on
+     Go 404. Keep other Accounting operations on their current route. The Go
+     executor remains authoritative for the locked invoice's current balance.
+     Add focused API, proxy selector, and AccountingPage tests; the existing Go
+     credit-note integration test remains the contract proof. Authenticated
+     browser proof remains open.

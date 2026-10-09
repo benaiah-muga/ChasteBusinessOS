@@ -143,6 +143,10 @@ export function goAccountingCreateInvoiceFromEnv(env: Record<string, string | un
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_CREATE_INVOICE === "1";
 }
 
+export function goAccountingCreditNoteFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_CREDIT_NOTE === "1";
+}
+
 export function goPosCustomersSliceFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_POS_CUSTOMERS_SLICE !== "0";
 }

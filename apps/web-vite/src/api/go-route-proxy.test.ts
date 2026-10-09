@@ -28,6 +28,7 @@ import {
   goHrLeaveFromEnv,
   goAccountingRecordPaymentFromEnv,
   goAccountingCreateInvoiceFromEnv,
+  goAccountingCreditNoteFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -174,6 +175,15 @@ describe("accounting invoice creation Go selector", () => {
     expect(goAccountingCreateInvoiceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goAccountingCreateInvoiceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_CREATE_INVOICE: "0" })).toBe(false);
     expect(goAccountingCreateInvoiceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_CREATE_INVOICE: "1" })).toBe(false);
+  });
+});
+
+describe("accounting credit note Go selector", () => {
+  it("requires both the credit note selector and session capability route", () => {
+    expect(goAccountingCreditNoteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_CREDIT_NOTE: "1" })).toBe(true);
+    expect(goAccountingCreditNoteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goAccountingCreditNoteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_CREDIT_NOTE: "0" })).toBe(false);
+    expect(goAccountingCreditNoteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_CREDIT_NOTE: "1" })).toBe(false);
   });
 });
 

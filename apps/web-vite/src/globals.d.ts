@@ -18,6 +18,7 @@ declare const __GO_HR_EXPENSES__: boolean;
 declare const __GO_HR_LEAVE__: boolean;
 declare const __GO_ACCOUNTING_RECORD_PAYMENT__: boolean;
 declare const __GO_ACCOUNTING_CREATE_INVOICE__: boolean;
+declare const __GO_ACCOUNTING_CREDIT_NOTE__: boolean;
 declare const __GO_PURCHASING_CREATE_ORDER__: boolean;
 declare const __GO_PURCHASING_RECEIVE_GOODS__: boolean;
 declare const __GO_PURCHASING_RETURN_CLOSE__: boolean;

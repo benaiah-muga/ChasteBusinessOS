@@ -13,6 +13,7 @@ import {
   fetchPaymentReminders,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
+  readPendingAccountingCreditNote,
   submitAccountingAction,
 } from "./accounting";
 
@@ -360,7 +361,7 @@ describe("accounting API: Go invoice payments", () => {
   it("leaves unrelated Accounting operations on their existing endpoint", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", true);
     const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
-    await expect(submitAccountingAction("/api/accounting", { action: "creditNote", invoiceNumber: 1042, amountMinor: 100, reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    await expect(submitAccountingAction("/api/accounting", { action: "reversePayment", paymentId: "33333333-3333-4333-8333-333333333333", reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
     expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "POST" }));
   });
 
@@ -439,7 +440,7 @@ describe("accounting API: Go invoice creation", () => {
   it("keeps other Accounting actions on their existing endpoint", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
     const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
-    await expect(submitAccountingAction("/api/accounting", { action: "creditNote", invoiceNumber: 1042, amountMinor: 100, reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    await expect(submitAccountingAction("/api/accounting", { action: "reversePayment", paymentId: "33333333-3333-4333-8333-333333333333", reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
     expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "POST" }));
   });
 
@@ -485,6 +486,82 @@ describe("accounting API: Go invoice creation", () => {
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
     await expect(readPendingAccountingCreateInvoice(paymentRetryScope)).resolves.toEqual(action);
     await expect(submitAccountingAction("/api/accounting", { ...action, memo: "changed" }, undefined, paymentRetryScope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("accounting API: Go credit notes", () => {
+  const action = {
+    action: "creditNote",
+    invoiceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    amountMinor: 2500,
+    reason: "Goodwill credit",
+  };
+  const output = {
+    entryId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    creditedMinor: 2500,
+    invoiceBalanceMinor: 8000,
+  };
+
+  it("keeps other Accounting operations on their existing endpoint", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
+    await expect(submitAccountingAction("/api/accounting", { action: "reversePayment", paymentId: "33333333-3333-4333-8333-333333333333", reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("matches the Go parser bounds and keeps invoice balance authority on the server", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: output }));
+    await expect(submitAccountingAction("/api/accounting", { ...action, reason: "abc" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+    const payload = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(payload).toMatchObject({ capabilityId: "accounting.creditNote", input: { invoiceId: action.invoiceId, amountMinor: 2500, reason: "abc" }, intentId: expect.any(String) });
+    expect((payload.input as Record<string, unknown>).action).toBeUndefined();
+    expect(payload).not.toHaveProperty("actorId");
+    expect(payload).not.toHaveProperty("organizationId");
+
+    for (const invalid of [
+      { ...action, invoiceId: "not-a-uuid" },
+      { ...action, amountMinor: 0 },
+      { ...action, amountMinor: Number.MAX_SAFE_INTEGER + 1 },
+      { ...action, reason: "ab" },
+      { ...action, reason: "r".repeat(501) },
+    ]) {
+      await expect(submitAccountingAction("/api/accounting", invalid, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 400 });
+    }
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses Go's live balance rejection and never falls back to the legacy writer", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    const mock = stubFetch(() => Response.json({ error: "credit 9000 exceeds the open balance 5000" }, { status: 422 }));
+    await expect(submitAccountingAction("/api/accounting", { ...action, amountMinor: 9000 }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 422, message: "credit 9000 exceeds the open balance 5000" });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("retains the exact actor/org intent through pending and 404, blocking rollback", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    const mock = stubFetch(() => mock.mock.calls.length === 1
+      ? Response.json({ pendingApproval: true, reason: "Credit approval required" }, { status: 202 })
+      : Response.json({ error: "capability not found" }, { status: 404 }));
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingAccountingCreditNote(paymentRetryScope)).resolves.toEqual(action);
+    await expect(readPendingAccountingCreditNote({ actorId: "77777777-7777-4777-8777-777777777777", organizationId: paymentRetryScope.organizationId })).resolves.toBeNull();
+    const calls = mock.mock.calls;
+    expect(JSON.parse(String(calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(calls[1]?.[1]?.body)).intentId);
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", false);
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(mock).toHaveBeenCalledTimes(2);
+  });
+
+  it("validates the Go response and keeps malformed success retryable", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: { ...output, entryId: "invalid" } }));
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingAccountingCreditNote(paymentRetryScope)).resolves.toEqual(action);
     expect(mock).toHaveBeenCalledTimes(1);
   });
 });

@@ -15,8 +15,10 @@ import {
   fetchPaymentReminders,
   goAccountingRecordPaymentUseGo,
   goAccountingCreateInvoiceUseGo,
+  goAccountingCreditNoteUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
+  readPendingAccountingCreditNote,
   submitAccountingAction,
   type AccountingAging,
   type AccountingBill,
@@ -31,6 +33,7 @@ import {
   type AccountingPaymentRetryScope,
   type AccountingRecordPaymentAction,
   type AccountingCreateInvoiceAction,
+  type AccountingCreditNoteAction,
   type AccountingReminder,
   type AccountingReports,
   type AccountingStatement,
@@ -346,6 +349,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
   const [reverseTarget, setReverseTarget] = useState<AccountingEntry | null>(null);
   const [pendingRecordPayment, setPendingRecordPayment] = useState<AccountingRecordPaymentAction | null>(null);
   const [pendingCreateInvoice, setPendingCreateInvoice] = useState<AccountingCreateInvoiceAction | null>(null);
+  const [pendingCreditNote, setPendingCreditNote] = useState<AccountingCreditNoteAction | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentRetryScope: AccountingPaymentRetryScope = { actorId, organizationId };
 
@@ -408,6 +412,23 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
   useEffect(() => {
     if (!actorId || !organizationId) return;
     let active = true;
+    void readPendingAccountingCreditNote(paymentRetryScope).then((action) => {
+      if (!active) return;
+      setPendingCreditNote(action);
+      if (action) setNotice({ tone: "pending", text: goAccountingCreditNoteUseGo()
+        ? "A credit note is unresolved. Retry the exact credit to recover its result."
+        : "A Go credit note is unresolved. Restore the Go credit note route and retry that exact credit before using the legacy route." });
+    }).catch((error) => {
+      if (active && goAccountingCreditNoteUseGo()) {
+        setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved credit note." });
+      }
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    let active = true;
     void readPendingAccountingCreateInvoice(paymentRetryScope).then((action) => {
       if (!active) return;
       setPendingCreateInvoice(action);
@@ -451,6 +472,8 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const goRecordPayment = isRecordPayment && goAccountingRecordPaymentUseGo();
       const isCreateInvoice = path === "/api/accounting" && payload.action === "createInvoice";
       const goCreateInvoice = isCreateInvoice && goAccountingCreateInvoiceUseGo();
+      const isCreditNote = path === "/api/accounting" && payload.action === "creditNote";
+      const goCreditNote = isCreditNote && goAccountingCreditNoteUseGo();
       setBusy(true);
       try {
         const outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
@@ -464,6 +487,11 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             ? await readPendingAccountingCreateInvoice(paymentRetryScope)
             : null);
         }
+        if (goCreditNote) {
+          setPendingCreditNote(outcome.kind === "pending"
+            ? await readPendingAccountingCreditNote(paymentRetryScope)
+            : null);
+        }
         // A 202 is a queued approval, never a completed write: say so plainly.
         setNotice(
           outcome.kind === "pending"
@@ -471,7 +499,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : { tone: "success", text: `${label} done.` },
         );
         void load();
-        return !((goRecordPayment || goCreateInvoice) && outcome.kind === "pending");
+        return !((goRecordPayment || goCreateInvoice || goCreditNote) && outcome.kind === "pending");
       } catch (error) {
         if (goRecordPayment) {
           try { setPendingRecordPayment(await readPendingAccountingRecordPayment(paymentRetryScope)); }
@@ -480,6 +508,10 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
         if (goCreateInvoice) {
           try { setPendingCreateInvoice(await readPendingAccountingCreateInvoice(paymentRetryScope)); }
           catch { setPendingCreateInvoice(payload as unknown as AccountingCreateInvoiceAction); }
+        }
+        if (goCreditNote) {
+          try { setPendingCreditNote(await readPendingAccountingCreditNote(paymentRetryScope)); }
+          catch { setPendingCreditNote(payload as unknown as AccountingCreditNoteAction); }
         }
         setNotice({
           tone: "error",
@@ -576,6 +608,12 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
                 disabled={busy || !goAccountingCreateInvoiceUseGo()}
                 onClick={() => void runAction("/api/accounting", { ...pendingCreateInvoice }, "Invoice creation")}
               >{goAccountingCreateInvoiceUseGo() ? "Retry exact invoice" : "Enable Go invoice route to retry"}</button>}
+              {pendingCreditNote && <button
+                type="button"
+                className="accounting-button accounting-button-small"
+                disabled={busy || !goAccountingCreditNoteUseGo()}
+                onClick={() => void runAction("/api/accounting", { ...pendingCreditNote }, `Credit on invoice`)}
+              >{goAccountingCreditNoteUseGo() ? "Retry exact credit" : "Enable Go credit route to retry"}</button>}
               {pendingRecordPayment && <button
                 type="button"
                 className="accounting-button accounting-button-small"
@@ -652,6 +690,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               busy={busy}
               pendingPayment={pendingRecordPayment}
               pendingCreateInvoice={pendingCreateInvoice}
+              pendingCreditNote={pendingCreditNote}
               onAction={runAction}
             />
           )}
@@ -1243,6 +1282,7 @@ function ReceivablesSection({
   busy,
   pendingPayment,
   pendingCreateInvoice,
+  pendingCreditNote,
   onAction,
 }: {
   aging: AccountingAging;
@@ -1254,6 +1294,7 @@ function ReceivablesSection({
   busy: boolean;
   pendingPayment: AccountingRecordPaymentAction | null;
   pendingCreateInvoice: AccountingCreateInvoiceAction | null;
+  pendingCreditNote: AccountingCreditNoteAction | null;
   onAction: (
     path: "/api/accounting" | "/api/banking",
     payload: Record<string, unknown>,
@@ -1277,6 +1318,9 @@ function ReceivablesSection({
   const [reverseFor, setReverseFor] = useState<AccountingPayment | null>(null);
   const [reverseReason, setReverseReason] = useState("");
   const invoiceListRef = useRef<HTMLDivElement>(null);
+  const previousPendingCreditNote = useRef<AccountingCreditNoteAction | null>(null);
+  const previousPendingCreateInvoice = useRef<AccountingCreateInvoiceAction | null>(null);
+  const previousPendingPayment = useRef<AccountingRecordPaymentAction | null>(null);
 
   const invoiceCurrency = invoiceForm.currency.trim().toUpperCase() || baseCurrency;
   const invoiceDigits = currencyMinorUnits(invoiceCurrency) ?? 2;
@@ -1299,6 +1343,29 @@ function ReceivablesSection({
   }, [pendingPayment, invoices]);
 
   const retryingExactPayment = pendingPayment !== null && pendingPayment.invoiceNumber === payFor?.number;
+  const retryingExactCreditNote = pendingCreditNote !== null && pendingCreditNote.invoiceId === creditFor?.id;
+
+  useEffect(() => {
+    if (previousPendingCreditNote.current && pendingCreditNote === null && creditFor?.id === previousPendingCreditNote.current.invoiceId) setCreditFor(null);
+    previousPendingCreditNote.current = pendingCreditNote;
+  }, [creditFor?.id, pendingCreditNote]);
+
+  useEffect(() => {
+    if (previousPendingCreateInvoice.current && pendingCreateInvoice === null) {
+      setInvoiceOpen(false);
+      setInvoiceForm(EMPTY_INVOICE_FORM);
+    }
+    previousPendingCreateInvoice.current = pendingCreateInvoice;
+  }, [pendingCreateInvoice]);
+
+  useEffect(() => {
+    if (previousPendingPayment.current && pendingPayment === null && payFor?.number === previousPendingPayment.current.invoiceNumber) {
+      setPayFor(null);
+      setPayAmount("");
+      setPayMethod("bank_transfer");
+    }
+    previousPendingPayment.current = pendingPayment;
+  }, [payFor?.number, pendingPayment]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1482,7 +1549,7 @@ function ReceivablesSection({
                                 <button
                                   type="button"
                                   className="accounting-button accounting-button-ghost accounting-button-small"
-                                  disabled={busy}
+                                  disabled={busy || pendingCreditNote !== null}
                                   onClick={() => {
                                     setCreditFor(invoice);
                                     setCreditForm({
@@ -1886,10 +1953,10 @@ function ReceivablesSection({
         open={creditFor !== null}
         title={`Credit invoice #${creditFor?.number ?? ""}`}
         description="Concedes part of the invoice through an approved reversing entry. The invoice itself is never edited."
-        onClose={() => setCreditFor(null)}
+        onClose={() => { if (!retryingExactCreditNote) setCreditFor(null); }}
         footer={
           <>
-            <button type="button" disabled={busy} onClick={() => setCreditFor(null)}>
+            <button type="button" disabled={busy || retryingExactCreditNote} onClick={() => setCreditFor(null)}>
               Cancel
             </button>
             <button
@@ -1897,6 +1964,7 @@ function ReceivablesSection({
               className="accounting-button-danger"
               disabled={
                 busy ||
+                retryingExactCreditNote ||
                 !Number.isSafeInteger(enteredCreditMinor) ||
                 enteredCreditMinor <= 0 ||
                 !creditFor ||
@@ -1929,6 +1997,7 @@ function ReceivablesSection({
           <input
             className="accounting-money-input"
             inputMode="decimal"
+            disabled={retryingExactCreditNote}
             value={creditForm.amount}
             onChange={(event) => setCreditForm({ ...creditForm, amount: event.target.value })}
           />
@@ -1937,6 +2006,7 @@ function ReceivablesSection({
           Reason
           <input
             placeholder="For example: goodwill for late delivery"
+            disabled={retryingExactCreditNote}
             value={creditForm.reason}
             onChange={(event) => setCreditForm({ ...creditForm, reason: event.target.value })}
           />
