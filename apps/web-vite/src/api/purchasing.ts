@@ -118,6 +118,31 @@ const PurchasingWorkspaceSchema = z.object({
   requests: z.array(PurchaseRequestSchema).default([]),
 }).strict();
 
+const GoPurchaseWorkflowRfqSchema = z.object({
+  id: z.string().min(1),
+  vendorId: z.string().uuid(),
+  vendorName: z.string(),
+  status: z.string().min(1),
+  quoteAmountMinor: SafeIntegerSchema.nullable(),
+  quoteLeadTimeDays: SafeIntegerSchema.nullable(),
+  quoteNotes: z.string().nullable(),
+}).strict();
+
+const GoPurchaseWorkflowRequestSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  justification: z.string(),
+  estimatedAmountMinor: SafeIntegerSchema.nullable(),
+  status: z.string().min(1),
+  decisionReason: z.string().nullable(),
+  createdAt: TimestampSchema,
+  rfqs: z.array(GoPurchaseWorkflowRfqSchema),
+}).strict();
+
+const GoPurchaseWorkflowOutputSchema = z.object({
+  requests: z.array(GoPurchaseWorkflowRequestSchema),
+}).strict();
+
 const ProductSchema = z.object({
   sku: z.string().min(1),
   name: z.string(),
@@ -443,6 +468,10 @@ export function goPurchasingIntelReadsUseGo(): boolean {
   return typeof __GO_PURCHASING_INTEL_READS__ !== "undefined" && __GO_PURCHASING_INTEL_READS__;
 }
 
+export function goPurchasingWorkflowReadsUseGo(): boolean {
+  return typeof __GO_PURCHASING_WORKFLOW_READS__ !== "undefined" && __GO_PURCHASING_WORKFLOW_READS__;
+}
+
 function requestSignal(signal?: AbortSignal, timeoutMs = 15_000): AbortSignal {
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
 }
@@ -500,6 +529,26 @@ export async function fetchPurchasingEnabled(signal?: AbortSignal): Promise<bool
 
 export async function fetchPurchasingWorkspace(signal?: AbortSignal): Promise<PurchasingWorkspace> {
   return getValidated("/api/purchasing", PurchasingWorkspaceSchema, "the purchasing workspace", signal);
+}
+
+export async function fetchGoPurchasingWorkflowRequests(signal?: AbortSignal): Promise<PurchasingRequest[]> {
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ capabilityId: "purchasing.listPurchaseWorkflow", input: {}, intentId: crypto.randomUUID() }),
+  }, "load purchase requests", signal);
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  if (!envelope.success) {
+    throw new PurchasingApiError(response.status, "The Go Purchasing service returned an unexpected requests response.");
+  }
+  const parsed = GoPurchaseWorkflowOutputSchema.safeParse(envelope.data.data);
+  if (!parsed.success) {
+    throw new PurchasingApiError(response.status, "The Go Purchasing service returned purchase requests in an unexpected format.");
+  }
+  return parsed.data.requests.map(({ rfqs, ...purchaseRequest }) => ({
+    ...purchaseRequest,
+    rfqs: rfqs.map(({ vendorId: _vendorId, ...rfq }) => rfq),
+  }));
 }
 
 export async function fetchPurchasingProducts(signal?: AbortSignal): Promise<PurchasingProduct[]> {

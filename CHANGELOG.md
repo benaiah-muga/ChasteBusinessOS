@@ -40,6 +40,15 @@ The full v1 changelog is preserved at the bottom of this file.
   bucket response and uses the workspace currency; selected-Go failures do not
   retry through `/api/purchasing`.
 
+- Vite Purchasing requests and RFQs can use the direct authenticated Go
+  `purchasing.listPurchaseWorkflow` capability behind paired
+  `CHASTE_GO_PURCHASING_WORKFLOW_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors, with the API's
+  `GO_PURCHASING_WORKFLOW_READS=1` gate also required. Only `workspace.requests`
+  is replaced; the aggregate remains the source for other workspace data.
+  Strict output validation strips the Go-only RFQ `vendorId`, and selected-Go
+  errors do not retry through the aggregate request.
+
 - Vite inventory transfer create and confirm writes no longer fall back to the
   legacy inventory route when a selected Go capability returns 404. The exact
   actor/org scoped intent is retained, and retries remain targeted to the

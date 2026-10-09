@@ -206,6 +206,9 @@ func run(logger *slog.Logger) error {
 		for capabilityID := range httpapi.PurchasingAPAgingDisabledCapabilities(os.Getenv("GO_PURCHASING_AP_AGING_READS") == "1") {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}
+		for capabilityID := range httpapi.PurchasingWorkflowDisabledCapabilities(os.Getenv("GO_PURCHASING_WORKFLOW_READS") == "1") {
+			disabledCapabilities[capabilityID] = struct{}{}
+		}
 		for capabilityID := range httpapi.DocumentsIngestedDisabledCapabilities(os.Getenv("GO_DOCUMENT_INGESTED_READS") == "1") {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}

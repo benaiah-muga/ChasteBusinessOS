@@ -27,6 +27,7 @@ import {
   goPurchasingAPAgingReadsFromEnv,
   goDocumentsIngestedReadsFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
+  goPurchasingWorkflowReadsFromEnv,
   goPurchasingIntelReadsFromEnv,
   goPurchasingSourcingWritesFromEnv,
   goManufacturingWorkOrderWritesFromEnv,
@@ -373,6 +374,14 @@ describe("purchasing supplier statement read Go selector", () => {
     expect(goPurchasingSupplierStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingSupplierStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS: "0" })).toBe(false);
     expect(goPurchasingSupplierStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS: "1" })).toBe(false);
+  });
+});
+
+describe("purchasing workflow read Go selector", () => {
+  it("requires both the workflow selector and the session capability route", () => {
+    expect(goPurchasingWorkflowReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_WORKFLOW_READS: "1" })).toBe(true);
+    expect(goPurchasingWorkflowReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goPurchasingWorkflowReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_WORKFLOW_READS: "1" })).toBe(false);
   });
 });
 

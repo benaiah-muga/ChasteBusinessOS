@@ -407,6 +407,14 @@ read. It requires `pnpm dev:api`, preserves decision reasons, vendor names,
 quote notes, ordering, and timestamps, and fails closed when Go is unavailable
 or returns invalid data. Other purchasing reads stay on their existing paths;
 the TypeScript path remains the default and the flag defaults to `0`.
+The Vite page can separately source only its requests and RFQs from the direct
+authenticated capability route with
+`CHASTE_GO_PURCHASING_WORKFLOW_READS=1` and
+`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep
+`GO_PURCHASING_WORKFLOW_READS=1` enabled on the API as the server-side
+capability gate. Vite keeps the aggregate workspace request for its other data
+and replaces only `workspace.requests`; selected Go failures stop the page
+load without a retry through the aggregate request.
 `GO_PURCHASING_AP_AGING_READS=1` opts the accounts payable aging report in
 `GET /api/purchasing` into the signed Go `purchasing.apAging` read. It requires
 `pnpm dev:api`, preserves the current, 31-60 day, 61-90 day, over-90 day, and

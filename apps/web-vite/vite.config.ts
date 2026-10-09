@@ -1,6 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingCustomerStatementReadsFromEnv, goAccountingPeriodCloseReadsFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReportsFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmTaskWritesFromEnv, goCrmViewWritesFromEnv, goDocumentsIngestedReadsFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrLeaveFromEnv, goHrPayrollFromEnv, goHrTimeFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goManufacturingPlanningReadsFromEnv, goManufacturingProductionWritesFromEnv, goManufacturingWorkOrderWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goProjectsWritesFromEnv, goPurchasingAPAgingReadsFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderReadsFromEnv, goSalesOrderWritesFromEnv, goSessionCapabilityRouteFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingCustomerStatementReadsFromEnv, goAccountingPeriodCloseReadsFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReportsFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmTaskWritesFromEnv, goCrmViewWritesFromEnv, goDocumentsIngestedReadsFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrLeaveFromEnv, goHrPayrollFromEnv, goHrTimeFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goManufacturingPlanningReadsFromEnv, goManufacturingProductionWritesFromEnv, goManufacturingWorkOrderWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goProjectsWritesFromEnv, goPurchasingAPAgingReadsFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingWorkflowReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderReadsFromEnv, goSalesOrderWritesFromEnv, goSessionCapabilityRouteFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "CHASTE_");
@@ -29,6 +29,7 @@ export default defineConfig(({ mode }) => {
   const goPurchasingFinanceWrites = goPurchasingFinanceWritesFromEnv(env);
   const goPurchasingPaymentRuns = goPurchasingPaymentRunsFromEnv(env);
   const goPurchasingSupplierStatementReads = goPurchasingSupplierStatementReadsFromEnv(env);
+  const goPurchasingWorkflowReads = goPurchasingWorkflowReadsFromEnv(env);
   const goPurchasingIntelReads = goPurchasingIntelReadsFromEnv(env);
   const goPurchasingAPAgingReads = goPurchasingAPAgingReadsFromEnv(env);
   const goDocumentsIngestedReads = goDocumentsIngestedReadsFromEnv(env);
@@ -93,6 +94,7 @@ export default defineConfig(({ mode }) => {
       __GO_PURCHASING_FINANCE_WRITES__: JSON.stringify(goPurchasingFinanceWrites),
       __GO_PURCHASING_PAYMENT_RUNS__: JSON.stringify(goPurchasingPaymentRuns),
       __GO_PURCHASING_SUPPLIER_STATEMENT_READS__: JSON.stringify(goPurchasingSupplierStatementReads),
+      __GO_PURCHASING_WORKFLOW_READS__: JSON.stringify(goPurchasingWorkflowReads),
       __GO_PURCHASING_INTEL_READS__: JSON.stringify(goPurchasingIntelReads),
       __GO_PURCHASING_AP_AGING_READS__: JSON.stringify(goPurchasingAPAgingReads),
       __GO_DOCUMENT_INGESTED_READS__: JSON.stringify(goDocumentsIngestedReads),

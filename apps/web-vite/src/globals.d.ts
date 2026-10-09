@@ -36,6 +36,7 @@ declare const __GO_PURCHASING_RETURN_CLOSE__: boolean;
 declare const __GO_PURCHASING_FINANCE_WRITES__: boolean;
 declare const __GO_PURCHASING_PAYMENT_RUNS__: boolean;
 declare const __GO_PURCHASING_SUPPLIER_STATEMENT_READS__: boolean;
+declare const __GO_PURCHASING_WORKFLOW_READS__: boolean;
 declare const __GO_PURCHASING_INTEL_READS__: boolean;
 declare const __GO_PURCHASING_AP_AGING_READS__: boolean;
 declare const __GO_DOCUMENT_INGESTED_READS__: boolean;

@@ -62,6 +62,7 @@ type Overrides = {
   workspace?: unknown;
   inventory?: unknown;
   tax?: unknown;
+  workflow?: unknown;
   post?: (body: Record<string, unknown>) => unknown;
 };
 
@@ -91,6 +92,9 @@ function purchasingFetch(overrides: Overrides = {}) {
         input?: Record<string, unknown>;
         intentId?: string;
       };
+      if (body.capabilityId === "purchasing.listPurchaseWorkflow") {
+        return resolve(overrides.workflow ?? { ok: true, data: { requests: [] } });
+      }
       if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote" && body.capabilityId !== "purchasing.supplierStatement" && body.capabilityId !== "purchasing.priceHistory" && body.capabilityId !== "purchasing.supplierPerformance") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
@@ -279,6 +283,45 @@ describe("receiving prefills from the aggregated rollup", () => {
 /* --------------------------------------------------------------- PurchasingPage --- */
 
 describe("PurchasingPage", () => {
+  it("replaces only the aggregate requests with the direct Go workflow read", async () => {
+    vi.stubGlobal("__GO_PURCHASING_WORKFLOW_READS__", true);
+    const legacyRequest = { id: "legacy-request", title: "Legacy request", justification: "Legacy justification", estimatedAmountMinor: null, status: "pending", decisionReason: null, createdAt: "2026-09-24T12:00:00.000Z", rfqs: [] };
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({ requests: [legacyRequest] }),
+      workflow: { ok: true, data: { requests: [{
+        id: "go-request",
+        title: "Go workflow request",
+        justification: "Purchase additional packaging supplies.",
+        estimatedAmountMinor: 32000,
+        status: "approved",
+        decisionReason: null,
+        createdAt: "2026-09-25T12:15:00.000Z",
+        rfqs: [{ id: "go-rfq", vendorId: vendor.id, vendorName: "Harbor Supplies", status: "quoted", quoteAmountMinor: 30000, quoteLeadTimeDays: 5, quoteNotes: "Ships next week" }],
+      }] } },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    expect(await screen.findByText("Go workflow request")).toBeTruthy();
+    expect(screen.queryByText("Legacy request")).toBeNull();
+    expect(screen.getAllByText("Harbor Supplies").length).toBeGreaterThan(0);
+    expect(capabilityPosts(fetchMock).map((post) => post.capabilityId)).toContain("purchasing.listPurchaseWorkflow");
+    fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
+    expect(await screen.findByText("Canvas bag")).toBeTruthy();
+  });
+
+  it("keeps the workspace failed when the selected Go requests read fails", async () => {
+    vi.stubGlobal("__GO_PURCHASING_WORKFLOW_READS__", true);
+    const fetchMock = purchasingFetch({ workflow: Response.json({ error: "route disabled" }, { status: 404 }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage />);
+
+    expect(await screen.findByText(/route disabled/)).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === "/api/purchasing" && ((init as RequestInit | undefined)?.method ?? "GET") === "GET")).toHaveLength(1);
+    expect(capabilityPosts(fetchMock).map((post) => post.capabilityId)).toEqual(["purchasing.listPurchaseWorkflow"]);
+  });
+
   it("loads Intel analytics directly from Go and does not use workspace analytics in Go mode", async () => {
     vi.stubGlobal("__GO_PURCHASING_INTEL_READS__", true);
     const fetchMock = purchasingFetch({

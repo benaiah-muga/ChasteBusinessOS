@@ -11,6 +11,7 @@ import {
   creditPurchasingBill,
   decidePurchasingRequest,
   fetchPurchasingEnabled,
+  fetchGoPurchasingWorkflowRequests,
   fetchPurchasingInputTaxCodes,
   fetchPurchasingPriceHistory,
   fetchPurchasingProducts,
@@ -18,6 +19,7 @@ import {
   fetchPurchasingSupplierStatement,
   fetchPurchasingWorkspace,
   goPurchasingIntelReadsUseGo,
+  goPurchasingWorkflowReadsUseGo,
   payPurchasingBill,
   PurchasingApiError,
   receivePurchasingGoods,
@@ -411,13 +413,14 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
         if (!signal?.aborted) setState({ status: "disabled" });
         return;
       }
-      const [workspace, products, taxCodes] = await Promise.all([
+      const [workspace, products, taxCodes, goRequests] = await Promise.all([
         fetchPurchasingWorkspace(signal),
         fetchPurchasingProducts(signal).catch(() => [] as PurchasingProduct[]),
         fetchPurchasingInputTaxCodes(signal).catch(() => [] as PurchasingTaxCode[]),
+        goPurchasingWorkflowReadsUseGo() ? fetchGoPurchasingWorkflowRequests(signal) : Promise.resolve(null),
       ]);
       if (signal?.aborted) return;
-      setState({ status: "ready", workspace, products, taxCodes });
+      setState({ status: "ready", workspace: goRequests ? { ...workspace, requests: goRequests } : workspace, products, taxCodes });
     } catch (error) {
       if (signal?.aborted) return;
       setState({

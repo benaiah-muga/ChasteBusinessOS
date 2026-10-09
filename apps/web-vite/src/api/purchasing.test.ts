@@ -8,6 +8,7 @@ import {
   createPurchasingVendor,
   creditPurchasingBill,
   fetchPurchasingEnabled,
+  fetchGoPurchasingWorkflowRequests,
   fetchPurchasingInputTaxCodes,
   fetchPurchasingPriceHistory,
   fetchPurchasingProducts,
@@ -143,6 +144,81 @@ describe("purchasing workspace reads", () => {
       ],
     })));
     await expect(fetchPurchasingInputTaxCodes()).resolves.toHaveLength(1);
+  });
+});
+
+describe("Go purchasing workflow reads", () => {
+  it("validates the Go requests contract and drops only the extra RFQ vendor id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      ok: true,
+      data: {
+        requests: [{
+          id: "request-1",
+          title: "Packaging materials",
+          justification: "Restock the warehouse packaging supplies.",
+          estimatedAmountMinor: 32000,
+          status: "approved",
+          decisionReason: null,
+          createdAt: "2026-09-25T12:15:00.000Z",
+          rfqs: [{
+            id: "rfq-1",
+            vendorId: "0569aacb-58c3-4a30-8afe-3554e38eb2ce",
+            vendorName: "Harbor Supplies",
+            status: "quoted",
+            quoteAmountMinor: 30000,
+            quoteLeadTimeDays: 5,
+            quoteNotes: "Ships next week",
+          }],
+        }],
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchGoPurchasingWorkflowRequests()).resolves.toEqual([{
+      id: "request-1",
+      title: "Packaging materials",
+      justification: "Restock the warehouse packaging supplies.",
+      estimatedAmountMinor: 32000,
+      status: "approved",
+      decisionReason: null,
+      createdAt: "2026-09-25T12:15:00.000Z",
+      rfqs: [{
+        id: "rfq-1",
+        vendorName: "Harbor Supplies",
+        status: "quoted",
+        quoteAmountMinor: 30000,
+        quoteLeadTimeDays: 5,
+        quoteNotes: "Ships next week",
+      }],
+    }]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { accept: "application/json", "content-type": "application/json" },
+    }));
+    expect(postedBody(fetchMock.mock.calls[0]!)).toMatchObject({
+      capabilityId: "purchasing.listPurchaseWorkflow",
+      input: {},
+      intentId: expect.any(String),
+    });
+  });
+
+  it("fails closed on an unavailable Go route without requesting the legacy aggregate", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "route disabled" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchGoPurchasingWorkflowRequests()).rejects.toMatchObject({ name: "PurchasingApiError", status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
+
+  it("rejects malformed workflow output", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { requests: [{ id: "bad" }] } })));
+    await expect(fetchGoPurchasingWorkflowRequests()).rejects.toMatchObject({
+      status: 200,
+      message: "The Go Purchasing service returned purchase requests in an unexpected format.",
+    });
   });
 });
 
