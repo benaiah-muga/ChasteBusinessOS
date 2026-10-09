@@ -13,6 +13,14 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite supplier statements can read through Go's session-authenticated
+  `purchasing.supplierStatement` capability behind paired
+  `CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go enforces
+  `purchasing.read` and derives organization scope from the session. Vendor IDs
+  are validated as UUIDs, and pending, malformed, or unavailable responses
+  surface as errors instead of empty statements. Other Purchasing flows retain
+  their current routes.
 - Vite period-close readiness can read through Go's session-authenticated
   `accounting.periodCloseWorkbench` capability behind paired
   `CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS=1` and

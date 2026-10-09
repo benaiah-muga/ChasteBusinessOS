@@ -320,7 +320,7 @@ const PriceHistorySchema = z.object({
 
 const SupplierStatementActionSchema = z.object({
   action: z.literal("supplierStatement"),
-  vendorId: z.string().min(1),
+  vendorId: z.string().uuid(),
 }).strict();
 
 const PurchasingActionSchema = z.discriminatedUnion("action", [
@@ -432,6 +432,10 @@ export class PurchasingApiError extends Error {
 
 export function goPurchasingFinanceWritesUseGo(): boolean {
   return typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__;
+}
+
+export function goPurchasingSupplierStatementReadsUseGo(): boolean {
+  return typeof __GO_PURCHASING_SUPPLIER_STATEMENT_READS__ !== "undefined" && __GO_PURCHASING_SUPPLIER_STATEMENT_READS__;
 }
 
 function requestSignal(signal?: AbortSignal, timeoutMs = 15_000): AbortSignal {
@@ -1150,7 +1154,32 @@ export async function fetchPurchasingSupplierStatement(
   vendorId: string,
   signal?: AbortSignal,
 ): Promise<PurchasingSupplierStatement> {
-  const outcome = await submit({ action: "supplierStatement", vendorId }, SupplierStatementSchema, "loading the supplier statement", signal);
-  if (outcome.kind === "pending") return { closingBalanceMinor: 0, rows: [] };
+  const action = SupplierStatementActionSchema.safeParse({ action: "supplierStatement", vendorId });
+  if (!action.success) throw new PurchasingApiError(0, "Choose a valid supplier before loading the statement.");
+
+  if (goPurchasingSupplierStatementReadsUseGo()) {
+    const { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        capabilityId: "purchasing.supplierStatement",
+        input: { vendorId: action.data.vendorId },
+        intentId: crypto.randomUUID(),
+      }),
+    }, "load the supplier statement", signal);
+    if (response.status !== 200) {
+      throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not load the supplier statement.");
+    }
+    const envelope = SuccessEnvelopeSchema.safeParse(body);
+    if (!envelope.success) throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not load the supplier statement.");
+    const statement = SupplierStatementSchema.safeParse(envelope.data.data);
+    if (!statement.success) throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not load the supplier statement.");
+    return statement.data;
+  }
+
+  const outcome = await submit(action.data, SupplierStatementSchema, "loading the supplier statement", signal);
+  if (outcome.kind === "pending") {
+    throw new PurchasingApiError(202, "The supplier statement read did not complete.");
+  }
   return outcome.data;
 }

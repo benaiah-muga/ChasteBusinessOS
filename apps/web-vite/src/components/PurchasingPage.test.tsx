@@ -91,7 +91,7 @@ function purchasingFetch(overrides: Overrides = {}) {
         input?: Record<string, unknown>;
         intentId?: string;
       };
-      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote") || !body.input) {
+      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote" && body.capabilityId !== "purchasing.supplierStatement") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
       const action = body.capabilityId === "purchasing.createVendor" ? "createVendor"
@@ -104,7 +104,8 @@ function purchasingFetch(overrides: Overrides = {}) {
                     : body.capabilityId === "purchasing.decidePurchaseRequest" ? "decidePurchaseRequest"
                       : body.capabilityId === "purchasing.createRfq" ? "createRfq"
                         : body.capabilityId === "purchasing.recordQuote" ? "recordQuote"
-                          : body.capabilityId === "purchasing.selectWinningQuote" ? "selectWinningQuote" : "payBill";
+                          : body.capabilityId === "purchasing.selectWinningQuote" ? "selectWinningQuote"
+                            : body.capabilityId === "purchasing.supplierStatement" ? "supplierStatement" : "payBill";
       return post({ ...body.input, action, intentId: body.intentId });
     }
     throw new TypeError(`unrouted ${method} ${url}`);
@@ -276,6 +277,31 @@ describe("receiving prefills from the aggregated rollup", () => {
 /* --------------------------------------------------------------- PurchasingPage --- */
 
 describe("PurchasingPage", () => {
+  it("loads the selected supplier statement through the Go capability", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SUPPLIER_STATEMENT_READS__", true);
+    const fetchMock = purchasingFetch({
+      post: (body) => body.action === "supplierStatement"
+        ? { ok: true, data: {
+          closingBalanceMinor: 12500,
+          rows: [{ date: "2026-08-12T09:30:00.000Z", kind: "bill", ref: "Bill #7", amountMinor: 12500, balanceMinor: 12500 }],
+        } }
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-statement" organizationId="org-statement" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /^Prices & statements/ }));
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: vendor.id } });
+    fireEvent.click(screen.getByRole("button", { name: "Load statement" }));
+    expect(await screen.findByText("Bill #7")).toBeTruthy();
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.supplierStatement",
+      input: { vendorId: vendor.id },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/purchasing" && init?.method === "POST")).toBe(false);
+  });
+
   it("keeps the purchase request draft when Go returns an approval pending response", async () => {
     vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
     const fetchMock = purchasingFetch({

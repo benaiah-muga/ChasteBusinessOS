@@ -2052,3 +2052,12 @@ new owners and the manifest shows zero legacy runtime paths.
      Go derives organization access from the session and enforces
      `accounting.read`; a Go error must not fall back to the legacy readiness
      route. Add focused Vite API, page, proxy selector, and Go contract checks.
+202. Route the existing Vite supplier statement read through the
+     session-authenticated `purchasing.supplierStatement` capability behind
+     paired `CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Require UUID vendor IDs
+     at the Vite boundary, preserve `purchasing.read` authorization and
+     session-derived organization scope, and surface pending, malformed, and
+     unavailable responses as errors rather than empty statements. Keep other
+     Purchasing flows unchanged. Add focused Vite API, page, proxy selector,
+     and Go parser/executor contract tests.

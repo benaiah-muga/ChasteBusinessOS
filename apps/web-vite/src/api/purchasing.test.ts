@@ -681,9 +681,9 @@ describe("purchasing intel reads", () => {
     expect(postedBody(fetchMock.mock.calls[1]!)).toMatchObject({ action: "priceHistory", sku: "RC-BAG" });
   });
 
-  it("returns an empty statement when the kernel parks the read", async () => {
+  it("does not treat a pending legacy supplier statement as an empty statement", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ pendingApproval: true }, { status: 202 })));
-    await expect(fetchPurchasingSupplierStatement("v-1")).resolves.toEqual({ closingBalanceMinor: 0, rows: [] });
+    await expect(fetchPurchasingSupplierStatement(workspace.vendors[0]!.id)).rejects.toMatchObject({ status: 202 });
   });
 
   it("returns the statement rows when the read completes", async () => {
@@ -692,7 +692,41 @@ describe("purchasing intel reads", () => {
       rows: [{ date: "2026-08-12T09:30:00.000Z", kind: "bill", ref: "#7", amountMinor: 12500, balanceMinor: 12500 }],
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: statement })));
-    await expect(fetchPurchasingSupplierStatement("v-1")).resolves.toEqual(statement);
+    await expect(fetchPurchasingSupplierStatement(workspace.vendors[0]!.id)).resolves.toEqual(statement);
+  });
+
+  it("uses the Go supplierStatement capability with the UUID vendor ID", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SUPPLIER_STATEMENT_READS__", true);
+    const statement = { closingBalanceMinor: 12500, rows: [] };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: statement }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPurchasingSupplierStatement(workspace.vendors[0]!.id)).resolves.toEqual(statement);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/capabilities/execute");
+    expect(init).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store" });
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      capabilityId: "purchasing.supplierStatement",
+      input: { vendorId: workspace.vendors[0]!.id },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("rejects invalid vendor IDs, 202s, and malformed Go statement data", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SUPPLIER_STATEMENT_READS__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { closingBalanceMinor: "12500", rows: [] } }))
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPurchasingSupplierStatement("vendor-not-uuid")).rejects.toMatchObject({ status: 0 });
+    await expect(fetchPurchasingSupplierStatement(workspace.vendors[0]!.id)).rejects.toMatchObject({ status: 202 });
+    await expect(fetchPurchasingSupplierStatement(workspace.vendors[0]!.id)).rejects.toMatchObject({ status: 200 });
+    await expect(fetchPurchasingSupplierStatement(workspace.vendors[0]!.id)).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 });
 
