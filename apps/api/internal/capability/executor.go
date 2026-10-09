@@ -233,6 +233,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	hrLeaveBalanceCapabilityID:                          {module: "hr", permission: "hr.read", risk: "read"},
 	hrLeaveCalendarCapabilityID:                         {module: "hr", permission: "hr.read", risk: "read"},
 	hrTimeReportCapabilityID:                            {module: "hr", permission: "hr.read", risk: "read"},
+	hrPendingTimeEntriesCapabilityID:                    {module: "hr", permission: "hr.read", risk: "read"},
 	hrCreatePayrollRunCapabilityID:                      {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.voidPayrollRun"},
 	hrExecutePayrollRunCapabilityID:                     {module: "hr", permission: "hr.write", risk: "money", moneyThresholdMinor: 0, inverseCapabilityID: "hr.reversePayrollPosting"},
 	hrVoidPayrollRunCapabilityID:                        {module: "hr", permission: "hr.write", risk: "destructive"},
@@ -456,7 +457,7 @@ func supportedCapability(capabilityID string) bool {
 		recordTaxReturnAcknowledgmentCapabilityID, fileSalesTaxReturnCapabilityID,
 		hrRequestLeaveCapabilityID, hrCancelLeaveCapabilityID, hrDecideLeaveCapabilityID,
 		hrLogTimeCapabilityID, hrDecideTimeEntryCapabilityID, hrClockInCapabilityID, hrClockOutCapabilityID,
-		hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID,
+		hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID, hrPendingTimeEntriesCapabilityID,
 		hrCreatePayrollRunCapabilityID, hrExecutePayrollRunCapabilityID, hrVoidPayrollRunCapabilityID,
 		hrReversePayrollPostingCapabilityID, hrAddApplicantCapabilityID, hrMoveApplicantCapabilityID,
 		hrHireApplicantCapabilityID, hrListApplicantsCapabilityID,
@@ -1137,7 +1138,7 @@ func (e *Executor) executeWithFinalizer(
 			input = parsed
 		case hrRequestLeaveCapabilityID, hrCancelLeaveCapabilityID, hrDecideLeaveCapabilityID,
 			hrLogTimeCapabilityID, hrDecideTimeEntryCapabilityID, hrClockInCapabilityID, hrClockOutCapabilityID,
-			hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID:
+			hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID, hrPendingTimeEntriesCapabilityID:
 			parsed, err := parseHRLeaveTimeInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -2706,6 +2707,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case HRPendingTimeEntriesInput:
+			output, err := hrPendingTimeEntries(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case HRCreatePayrollRunInput:
 			output, err := hrCreatePayrollRun(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -3389,7 +3396,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreateTaxProfileInput, RemoveTaxProfileInput, CreateTaxCodeInput, ArchiveTaxCodeInput, ActivateTaxCodeInput,
 		CreateTaxReturnInput, TaxReturnIDInput, RecordTaxReturnSubmissionInput, RecordTaxReturnAcknowledgmentInput,
 		HRRequestLeaveInput, HRCancelLeaveInput, HRDecideLeaveInput, HRLogTimeInput, HRDecideTimeEntryInput,
-		HRClockInInput, HRClockOutInput, HRLeaveBalanceInput, HRLeaveCalendarInput, HRTimeReportInput,
+		HRClockInInput, HRClockOutInput, HRLeaveBalanceInput, HRLeaveCalendarInput, HRTimeReportInput, HRPendingTimeEntriesInput,
 		HRCreatePayrollRunInput, HRExecutePayrollRunInput, HRVoidPayrollRunInput, HRReversePayrollPostingInput,
 		HRAddApplicantInput, HRMoveApplicantInput, HRHireApplicantInput, HRListApplicantsInput,
 		BillCreditNoteInput, ClosePurchaseOrderInput, ListReceiptsInput,

@@ -442,7 +442,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 			}
 		case hrRequestLeaveCapabilityID, hrCancelLeaveCapabilityID, hrDecideLeaveCapabilityID,
 			hrLogTimeCapabilityID, hrDecideTimeEntryCapabilityID, hrClockInCapabilityID, hrClockOutCapabilityID,
-			hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID:
+			hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID, hrPendingTimeEntriesCapabilityID:
 			parsed, parseErr := parseHRLeaveTimeInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
@@ -842,7 +842,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		hrReversePayrollPostingCapabilityID, hrAddApplicantCapabilityID, hrMoveApplicantCapabilityID,
 		hrHireApplicantCapabilityID:
 		return "hr.write", true
-	case hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID, hrListApplicantsCapabilityID:
+	case hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID, hrPendingTimeEntriesCapabilityID, hrListApplicantsCapabilityID:
 		return "hr.read", true
 	case billCreditNoteCapabilityID, closePurchaseOrderCapabilityID:
 		return "purchasing.write", true

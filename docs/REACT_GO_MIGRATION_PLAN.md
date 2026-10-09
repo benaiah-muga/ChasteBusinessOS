@@ -2000,3 +2000,15 @@ new owners and the manifest shows zero legacy runtime paths.
      Accounting page can recover an exact 202 or uncertain action after
      reload, and test the same stable intent through API and UI. Keep other
      Accounting actions unchanged.
+197. Route Vite HR Time report and pending-entry reads, time logging, and
+     submitted-entry decisions through Go's session-authenticated
+     `hr.timeReport`, `hr.pendingTimeEntries`, `hr.logTime`, and
+     `hr.decideTimeEntry` capabilities behind paired `CHASTE_GO_HR_TIME=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other HR tabs on
+     their current routes. Pending time reads require a dedicated `hr.read`
+     capability because the aggregate report lacks decision IDs and employee
+     display details; preserve the legacy queue's 100-row date-descending
+     behavior. Scope durable exact write attempts by actor and organization,
+     recover approvals and uncertain results after reload, block legacy rollback
+     while unresolved, and fail closed on Go 404. Add focused Go parser,
+     executor, org-scope, Vite API, proxy selector, and HR page tests.

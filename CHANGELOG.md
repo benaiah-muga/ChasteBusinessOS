@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite HR Time reports, submitted-entry approvals, time logging, and decisions can
+  use the Go `hr.*` capabilities behind the paired `CHASTE_GO_HR_TIME=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. A new org-scoped
+  `hr.pendingTimeEntries` read provides decision IDs and employee details. Exact
+  actor/org scoped writes and approval recovery survive reload; Go 404 and
+  uncertain results never fall back to the legacy writer. Other HR tabs keep
+  their current routes. Set the selector to `0` for explicit legacy rollback.
 - Vite invoice `recordPayment` writes can use Go's session-authenticated
   `accounting.recordPayment` capability behind the paired
   `CHASTE_GO_ACCOUNTING_RECORD_PAYMENT=1` and

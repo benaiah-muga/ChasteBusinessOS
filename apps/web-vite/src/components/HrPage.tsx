@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrLeaveUseGo, HrApiError, readPendingHrLeaveAction, submitHrAction, submitHrLeaveAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrLeaveAction, type HrOpening, type HrPendingEntry, type HrReport, type HrTimeReport } from "../api/hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrLeaveUseGo, goHrTimeUseGo, HrApiError, readPendingHrLeaveAction, readPendingHrTimeAction, submitHrAction, submitHrLeaveAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrLeaveAction, type HrOpening, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
 import { legacyUrl } from "../legacy";
 import "./hr-page.css";
 
@@ -57,6 +57,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [leaveRecoveryAction, setLeaveRecoveryAction] = useState<HrLeaveAction | null>(null);
+  const [timeRecoveryAction, setTimeRecoveryAction] = useState<HrTimeAction | null>(null);
   const [range, setRange] = useState(monthRange);
   const [timeReport, setTimeReport] = useState<HrTimeReport | null>(null);
   const [pendingEntries, setPendingEntries] = useState<HrPendingEntry[]>([]);
@@ -136,6 +137,22 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     return () => { active = false; };
   }, [tab, actorId, organizationId]);
 
+  useEffect(() => {
+    if (!goHrTimeUseGo()) {
+      setTimeRecoveryAction(null);
+      return;
+    }
+    let active = true;
+    void readPendingHrTimeAction({ actorId, organizationId }).then((action) => {
+      if (!active) return;
+      setTimeRecoveryAction(action);
+      if (action) setNotice({ tone: "pending", text: "A time action is unresolved. Retry the exact action to recover its result before making another change." });
+    }).catch((error) => {
+      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved time action." });
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
   const report = state.status === "ready" ? state.report : null;
   const employees = report?.employees ?? [];
   const activeEmployees = useMemo(() => employees.filter((employee) => employee.active), [employees]);
@@ -199,20 +216,27 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     }
   }
 
-  async function submitTimeAction(action: Parameters<typeof submitHrTimeAction>[0], label: string, after?: () => void): Promise<void> {
-    if (busy) return;
+  async function submitTimeAction(action: HrTimeAction, label: string, after?: () => void, exactRecovery = false): Promise<void> {
+    if (busy || (timeRecoveryAction && !exactRecovery && timeRecoveryAction !== action)) return;
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitHrTimeAction(action);
+      const result = await submitHrTimeAction(action, { actorId, organizationId });
       if (result.kind === "pending") {
-        setNotice({ tone: "pending", text: `${label} needs human approval. Check the Approvals inbox.` });
+        setTimeRecoveryAction(action);
+        setNotice({ tone: "pending", text: `${label} needs approval or result recovery. Retry the exact action after approval is complete.` });
       } else {
+        setTimeRecoveryAction(null);
         setNotice({ tone: "success", text: `${label} completed.` });
-        after?.();
+        if (after) after();
+        else if (action.action === "log") setTimeEntry({ ...timeEntry, hours: "", note: "" });
         await refreshAll();
       }
     } catch (error) {
+      if (goHrTimeUseGo()) {
+        try { setTimeRecoveryAction(await readPendingHrTimeAction({ actorId, organizationId })); }
+        catch { setTimeRecoveryAction(action); }
+      }
       setNotice({ tone: "error", text: error instanceof Error ? error.message : `${label} failed.` });
     } finally {
       setBusy(false);
@@ -282,6 +306,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
 
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
       {tab === "leave" && leaveRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runLeaveAction(leaveRecoveryAction, "Leave action")}>Retry exact leave action</button></div>}
+      {timeRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void submitTimeAction(timeRecoveryAction, "Time action", undefined, true)}>Retry exact time action</button></div>}
       <section id="hr-tab-panel" className="hr-content" role="tabpanel" aria-labelledby={`hr-tab-${tab}`}>
         {tab === "overview" && <Overview report={data} timeRows={timeRows} currency={currency} onTabChange={changeTab} />}
         {tab === "people" && <People employees={data.employees} currency={currency} hire={hire} setHire={setHire} busy={busy} onHire={() => {
@@ -301,7 +326,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
           if (!leaveRequest.employeeId || !leaveRequest.startDate || !leaveRequest.endDate || leaveRequest.endDate < leaveRequest.startDate) return;
           void runLeaveAction({ action: "requestLeave", ...leaveRequest }, "Leave request", () => setLeaveRequest({ ...leaveRequest, startDate: "", endDate: "" }));
         }} onDecision={(requestId, approve) => void runLeaveAction({ action: "decideLeave", requestId, approve }, approve ? "Leave approval" : "Leave rejection")} onCancel={(requestId) => void runLeaveAction({ action: "cancelLeave", requestId }, "Leave cancellation")} />}
-        {tab === "time" && <Time employees={activeEmployees} rows={timeRows} pending={pendingEntries} range={range} setRange={setRange} form={timeEntry} setForm={setTimeEntry} busy={busy} onLog={() => {
+        {tab === "time" && <Time employees={activeEmployees} rows={timeRows} pending={pendingEntries} range={range} setRange={setRange} form={timeEntry} setForm={setTimeEntry} busy={busy || Boolean(timeRecoveryAction)} onLog={() => {
           const hours = Number(timeEntry.hours);
           const minutes = Math.round(hours * 60);
           if (!timeEntry.employeeId || !timeEntry.workDate || !Number.isFinite(hours) || hours <= 0 || !Number.isSafeInteger(minutes)) return;
@@ -545,7 +570,7 @@ function Leave({ employees, rows, form, setForm, busy, onRequest, onDecision, on
 function Time({ employees, rows, pending, range, setRange, form, setForm, busy, onLog, onDecision }: { employees: HrEmployee[]; rows: HrTimeReport["rows"]; pending: HrPendingEntry[]; range: { from: string; to: string }; setRange: (value: { from: string; to: string }) => void; form: { employeeId: string; workDate: string; hours: string; note: string }; setForm: (value: { employeeId: string; workDate: string; hours: string; note: string }) => void; busy: boolean; onLog: () => void; onDecision: (entryId: string, decision: "approve" | "reject") => void }) {
   return <>
     <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Time tracking</p><h2>Log hours</h2></div></div>
-      <form className="hr-form-grid" onSubmit={(event) => { event.preventDefault(); onLog(); }}><label>Employee<select required value={form.employeeId} onChange={(event) => setForm({ ...form, employeeId: event.currentTarget.value })}><option value="">Select employee</option>{employees.map((employee) => <option value={employee.id} key={employee.id}>{employee.name}</option>)}</select></label><label>Work date<input required type="date" value={form.workDate} onChange={(event) => setForm({ ...form, workDate: event.currentTarget.value })} /></label><label>Hours<input required type="number" min="0.01" max="24" step="0.01" value={form.hours} onChange={(event) => setForm({ ...form, hours: event.currentTarget.value })} /></label><label>Note<input maxLength={500} value={form.note} onChange={(event) => setForm({ ...form, note: event.currentTarget.value })} /></label><button className="hr-primary-button" disabled={busy || !form.employeeId || !form.hours}>Submit time</button></form>
+      <form className="hr-form-grid" onSubmit={(event) => { event.preventDefault(); onLog(); }}><label>Employee<select required disabled={busy} value={form.employeeId} onChange={(event) => setForm({ ...form, employeeId: event.currentTarget.value })}><option value="">Select employee</option>{employees.map((employee) => <option value={employee.id} key={employee.id}>{employee.name}</option>)}</select></label><label>Work date<input required disabled={busy} type="date" value={form.workDate} onChange={(event) => setForm({ ...form, workDate: event.currentTarget.value })} /></label><label>Hours<input required disabled={busy} type="number" min="0.01" max="24" step="0.01" value={form.hours} onChange={(event) => setForm({ ...form, hours: event.currentTarget.value })} /></label><label>Note<input disabled={busy} maxLength={300} value={form.note} onChange={(event) => setForm({ ...form, note: event.currentTarget.value })} /></label><button className="hr-primary-button" disabled={busy || !form.employeeId || !form.hours}>Submit time</button></form>
     </section>
     <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Time report</p><h2>Hours by employee</h2></div><span className="hr-count">Approved hours</span></div><div className="hr-range"><label>From<input type="date" value={range.from} onChange={(event) => setRange({ ...range, from: event.currentTarget.value })} /></label><label>To<input type="date" min={range.from} value={range.to} onChange={(event) => setRange({ ...range, to: event.currentTarget.value })} /></label></div>
       {rows.length === 0 ? <p className="hr-muted">No time has been recorded for this date range.</p> : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Employee</th><th scope="col">Approved</th><th scope="col">Pending</th></tr></thead><tbody>{rows.map((row) => <tr key={row.employeeId}><th scope="row">{employeeFullName(employees, row.employeeId)}</th><td>{formatMinutes(row.approvedMinutes)}</td><td>{formatMinutes(row.pendingMinutes)}</td></tr>)}</tbody></table></div>}

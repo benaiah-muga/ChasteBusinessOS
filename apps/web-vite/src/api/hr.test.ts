@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrReport, readPendingHrLeaveAction, submitHrAction, submitHrLeaveAction } from "./hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrLeaveAction, readPendingHrTimeAction, submitHrAction, submitHrLeaveAction, submitHrTimeAction } from "./hr";
 import type { HrApiError } from "./hr";
 
 const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
@@ -156,5 +156,79 @@ describe("Vite People API", () => {
       expect.objectContaining({ capabilityId: "hr.decideLeave", input: { requestId: "44444444-4444-4444-8444-444444444444", approve: true } }),
       expect.objectContaining({ capabilityId: "hr.cancelLeave", input: { requestId: "55555555-5555-4555-8555-555555555555" } }),
     ]);
+  });
+
+  it("loads the Go time report and approval queue through their read capabilities", async () => {
+    vi.stubGlobal("__GO_HR_TIME__", true);
+    const pendingEntry = {
+      id: "11111111-1111-4111-8111-111111111111",
+      employeeId: "22222222-2222-4222-8222-222222222222",
+      employeeName: "Amina",
+      workDate: "2026-10-01T00:00:00.000Z",
+      minutes: 60,
+      note: null,
+      late: false,
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: unknown; intentId: string };
+      expect(init?.method).toBe("POST");
+      expect(body.intentId).toEqual(expect.any(String));
+      if (body.capabilityId === "hr.timeReport") {
+        expect(body.input).toEqual({ from: "2026-10-01", to: "2026-10-31" });
+        return Response.json({ ok: true, data: { rows: [{ employeeId: pendingEntry.employeeId, approvedMinutes: 60, pendingMinutes: 60 }] } });
+      }
+      expect(body).toMatchObject({ capabilityId: "hr.pendingTimeEntries", input: {} });
+      return Response.json({ ok: true, data: { entries: [pendingEntry] } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchHrTime("2026-10-01", "2026-10-31")).resolves.toEqual({ rows: [{ employeeId: pendingEntry.employeeId, approvedMinutes: 60, pendingMinutes: 60 }] });
+    await expect(fetchHrPendingEntries()).resolves.toEqual([pendingEntry]);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+  });
+
+  it("persists exact Go time actions through approval, 404, and reload recovery", async () => {
+    vi.stubGlobal("__GO_HR_TIME__", true);
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
+    const intents: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      intents.push(body.intentId);
+      expect(body).toMatchObject({ capabilityId: "hr.logTime", input: { employeeId: action.employeeId, workDate: action.workDate, minutes: 75, note: action.note } });
+      return intents.length === 1
+        ? Response.json({ pendingApproval: true, reason: "Manager approval required." }, { status: 202 })
+        : Response.json({ error: "capability not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrTimeAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitHrTimeAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingHrTimeAction(scope)).resolves.toEqual(action);
+    await expect(submitHrTimeAction(action, scope, undefined, false)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(intents).toHaveLength(2);
+    expect(intents[1]).toBe(intents[0]);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+  });
+
+  it("maps Go time decisions and keeps malformed successful responses retryable", async () => {
+    vi.stubGlobal("__GO_HR_TIME__", true);
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const intents: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      intents.push(body.intentId);
+      expect(body).toMatchObject({ capabilityId: "hr.decideTimeEntry", input: { entryId: "55555555-5555-4555-8555-555555555555", decision: "approved" } });
+      return intents.length === 1
+        ? Response.json({ ok: true, data: { entryId: "not-a-uuid", status: "approved" } })
+        : Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", status: "approved" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "decide" as const, entryId: "55555555-5555-4555-8555-555555555555", decision: "approve" as const };
+
+    await expect(submitHrTimeAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrTimeAction(scope)).resolves.toEqual(action);
+    await expect(submitHrTimeAction(action, scope)).resolves.toMatchObject({ kind: "success" });
+    expect(intents[1]).toBe(intents[0]);
   });
 });

@@ -101,6 +101,85 @@ describe("Vite People page", () => {
     expect(screen.getByText("Amina Wanjiru")).not.toBeNull();
   });
 
+  it("routes time queue and decisions through Go and retries the exact action after reload", async () => {
+    window.history.replaceState(null, "", "/hr?tab=time");
+    vi.stubGlobal("__GO_HR_TIME__", true);
+    const actorId = "33333333-3333-4333-8333-333333333333";
+    const organizationId = "44444444-4444-4444-8444-444444444444";
+    const entry = {
+      id: "55555555-5555-4555-8555-555555555555",
+      employeeId: "66666666-6666-4666-8666-666666666666",
+      employeeName: employee.name,
+      workDate: "2026-10-04T00:00:00.000Z",
+      minutes: 75,
+      note: "Client visit",
+      late: false,
+    };
+    const intents: string[] = [];
+    let writeCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/hr") return Response.json(report);
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [{ employeeId: entry.employeeId, approvedMinutes: 0, pendingMinutes: 75 }] } });
+        if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [entry] } });
+        expect(body).toMatchObject({ capabilityId: "hr.decideTimeEntry", input: { entryId: entry.id, decision: "approved" } });
+        intents.push(body.intentId);
+        writeCount += 1;
+        return writeCount === 1
+          ? Response.json({ pendingApproval: true, reason: "Manager approval required." }, { status: 202 })
+          : Response.json({ ok: true, data: { entryId: entry.id, status: "approved" } });
+      }
+      throw new Error(`Unexpected legacy time route: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = render(<HrPage actorId={actorId} organizationId={organizationId} />);
+    expect(await screen.findByText(/Client visit/)).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(await screen.findByRole("button", { name: "Retry exact time action" })).not.toBeNull();
+    expect((screen.getByLabelText("Hours") as HTMLInputElement).disabled).toBe(true);
+    first.unmount();
+
+    render(<HrPage actorId={actorId} organizationId={organizationId} />);
+    const retry = await screen.findByRole("button", { name: "Retry exact time action" });
+    fireEvent.click(retry);
+    expect(await screen.findByText("Time action completed.")).not.toBeNull();
+    expect(intents).toHaveLength(2);
+    expect(intents[1]).toBe(intents[0]);
+    expect(fetchMock.mock.calls.every(([path]) => path !== "/api/time" && !String(path).startsWith("/api/time?"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
+  });
+
+  it("keeps non-time HR writes on their existing route when Go Time is enabled", async () => {
+    vi.stubGlobal("__GO_HR_TIME__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/hr" && init?.method === "POST") return Response.json({ ok: true, data: { employeeId: "77777777-7777-4777-8777-777777777777" } });
+      if (path === "/api/hr") return Response.json(report);
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [] } });
+        if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [] } });
+      }
+      throw new Error(`Unexpected route: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HrPage baseCurrency="UGX" />);
+    await screen.findByRole("heading", { name: "People" });
+    fireEvent.click(screen.getByRole("tab", { name: "People" }));
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Grace Nambasa" } });
+    fireEvent.change(screen.getByLabelText(/Monthly salary/), { target: { value: "1200000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add employee" }));
+
+    expect(await screen.findByText("Employee hire completed.")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(true);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/capabilities/execute" && init?.method === "POST")).toBe(true);
+  });
+
   it("opens the Expenses tab from its existing URL and completes governed claim, policy, and payment actions", async () => {
     window.history.replaceState(null, "", "/hr?tab=expenses");
     let claimStatus = "submitted";
@@ -392,7 +471,7 @@ describe("Vite People page", () => {
   it("keeps a hire draft when the governed action is waiting for approval", async () => {
     const fetchMock = hrFetchWithPendingActions(["/api/hr"]);
     vi.stubGlobal("fetch", fetchMock);
-    render(<HrPage baseCurrency="UGX" />);
+    render(<HrPage baseCurrency="UGX" actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await screen.findByRole("heading", { name: "People" });
     fireEvent.click(screen.getByRole("tab", { name: "People" }));
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Grace Nambasa" } });
@@ -407,7 +486,7 @@ describe("Vite People page", () => {
   it("keeps a time entry draft when the governed action is waiting for approval", async () => {
     const fetchMock = hrFetchWithPendingActions(["/api/time"]);
     vi.stubGlobal("fetch", fetchMock);
-    render(<HrPage baseCurrency="UGX" />);
+    render(<HrPage baseCurrency="UGX" actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await screen.findByRole("heading", { name: "People" });
     fireEvent.click(screen.getByRole("tab", { name: "Time" }));
     fireEvent.change(screen.getByLabelText("Employee"), { target: { value: employee.id } });
@@ -415,7 +494,7 @@ describe("Vite People page", () => {
     fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Month end review" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit time" }));
 
-    expect(await screen.findByText("Time entry needs human approval. Check the Approvals inbox.")).not.toBeNull();
+    expect(await screen.findByText("Time entry needs approval or result recovery. Retry the exact action after approval is complete.")).not.toBeNull();
     expect((screen.getByLabelText("Hours") as HTMLInputElement).value).toBe("2.5");
     expect((screen.getByLabelText("Note") as HTMLInputElement).value).toBe("Month end review");
   });

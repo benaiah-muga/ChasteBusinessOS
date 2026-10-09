@@ -134,6 +134,14 @@ func TestHRLeaveTimeParsersMatchTSContracts(t *testing.T) {
 			t.Errorf("ParseHRTimeReportInput accepted %s", raw)
 		}
 	}
+	if _, err := ParseHRPendingTimeEntriesInput(json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("pending time entries input err=%v", err)
+	}
+	for _, raw := range []string{`[]`, `{"employeeId":"33333333-3333-4333-8333-333333333333"}`} {
+		if _, err := ParseHRPendingTimeEntriesInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("ParseHRPendingTimeEntriesInput accepted %s", raw)
+		}
+	}
 
 	if clocked, err := ParseHRClockInInput(json.RawMessage(`{"employeeId":"33333333-3333-4333-8333-333333333333"}`)); err != nil || clocked.EmployeeID == "" {
 		t.Fatalf("clock in input=%+v err=%v", clocked, err)
@@ -200,6 +208,10 @@ func TestHRLeaveTimeOutputsMarshalExactJSON(t *testing.T) {
 	reportJSON, err := marshalJS(HRTimeReportOutput{Rows: []HRTimeReportRow{{EmployeeID: "w-1", ApprovedMinutes: 60, PendingMinutes: 30}}})
 	if err != nil || string(reportJSON) != `{"rows":[{"employeeId":"w-1","approvedMinutes":60,"pendingMinutes":30}]}` {
 		t.Fatalf("time report output JSON = %s, %v", reportJSON, err)
+	}
+	pendingJSON, err := marshalJS(HRPendingTimeEntriesOutput{Entries: []HRPendingTimeEntry{{ID: "e-1", EmployeeID: "w-1", EmployeeName: "Worker", WorkDate: "2026-09-01T00:00:00.000Z", Minutes: 60, Late: false}}})
+	if err != nil || string(pendingJSON) != `{"entries":[{"id":"e-1","employeeId":"w-1","employeeName":"Worker","workDate":"2026-09-01T00:00:00.000Z","minutes":60,"note":null,"late":false}]}` {
+		t.Fatalf("pending time entries output JSON = %s, %v", pendingJSON, err)
 	}
 	clockInJSON, err := marshalJS(HRClockInOutput{EntryID: "e-1", Late: true})
 	if err != nil || string(clockInJSON) != `{"entryId":"e-1","late":true}` {
@@ -758,6 +770,39 @@ func TestHRLeaveTimeTimeEntriesLogDecideAndReport(t *testing.T) {
 		}); err == nil || err.Error() != failure.want {
 			t.Fatalf("time report input=%+v err=%v, want %q", failure.input, err, failure.want)
 		}
+	}
+}
+
+func TestGoHRPendingTimeEntriesExecutorIsOrgScoped(t *testing.T) {
+	fx := newExecutorFixture(t)
+	hrLeaveTimeCleanup(t, fx)
+	grantWavePermission(t, fx, "hr.read")
+	localEmployee := seedHREmployee(t, fx, fx.orgID, seedHREmployeeValues{Name: "Local Worker", MonthlySalaryMinor: 300000})
+	foreignEmployee := seedHREmployee(t, fx, fx.otherOrgID, seedHREmployeeValues{Name: "Foreign Worker", MonthlySalaryMinor: 300000})
+	workDate := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	pendingID := seedHRTimeEntry(t, fx, fx.orgID, seedHRTimeEntryValues{EmployeeID: localEmployee, WorkDate: workDate, Minutes: 90, Status: "submitted", Late: true})
+	seedHRTimeEntry(t, fx, fx.orgID, seedHRTimeEntryValues{EmployeeID: localEmployee, WorkDate: workDate.AddDate(0, 0, -1), Minutes: 120, Status: "approved"})
+	seedHRTimeEntry(t, fx, fx.otherOrgID, seedHRTimeEntryValues{EmployeeID: foreignEmployee, WorkDate: workDate, Minutes: 240, Status: "submitted"})
+
+	input := json.RawMessage(`{}`)
+	result, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, hrPendingTimeEntriesCapabilityID, "hr.read", input, "human", "", "hr-pending-time-read"), hrPendingTimeEntriesCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("pending time entries result=%+v err=%v", result, err)
+	}
+	var output HRPendingTimeEntriesOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Entries) != 1 {
+		t.Fatalf("pending time entries=%+v, want only one submitted local entry", output.Entries)
+	}
+	entry := output.Entries[0]
+	if entry.ID != pendingID || entry.EmployeeID != localEmployee || entry.EmployeeName != "Local Worker" || entry.Minutes != 90 || !entry.Late || entry.Note != nil || entry.WorkDate != "2026-10-01T00:00:00.000Z" {
+		t.Fatalf("pending time entry=%+v, want the full decision row scoped to local org", entry)
+	}
+	denied, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, hrPendingTimeEntriesCapabilityID, "hr.write", input, "human", "", "hr-pending-time-denied"), hrPendingTimeEntriesCapabilityID, input)
+	if err != nil || denied.OK || !strings.Contains(denied.Error, "forbidden: missing permission: hr.read") {
+		t.Fatalf("pending time entries denied=%+v err=%v, want hr.read permission failure", denied, err)
 	}
 }
 

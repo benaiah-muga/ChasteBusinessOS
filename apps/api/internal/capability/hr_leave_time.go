@@ -13,16 +13,17 @@ import (
 )
 
 const (
-	hrRequestLeaveCapabilityID    = "hr.requestLeave"
-	hrCancelLeaveCapabilityID     = "hr.cancelLeave"
-	hrDecideLeaveCapabilityID     = "hr.decideLeave"
-	hrLogTimeCapabilityID         = "hr.logTime"
-	hrDecideTimeEntryCapabilityID = "hr.decideTimeEntry"
-	hrClockInCapabilityID         = "hr.clockIn"
-	hrClockOutCapabilityID        = "hr.clockOut"
-	hrLeaveBalanceCapabilityID    = "hr.leaveBalance"
-	hrLeaveCalendarCapabilityID   = "hr.leaveCalendar"
-	hrTimeReportCapabilityID      = "hr.timeReport"
+	hrRequestLeaveCapabilityID       = "hr.requestLeave"
+	hrCancelLeaveCapabilityID        = "hr.cancelLeave"
+	hrDecideLeaveCapabilityID        = "hr.decideLeave"
+	hrLogTimeCapabilityID            = "hr.logTime"
+	hrDecideTimeEntryCapabilityID    = "hr.decideTimeEntry"
+	hrClockInCapabilityID            = "hr.clockIn"
+	hrClockOutCapabilityID           = "hr.clockOut"
+	hrLeaveBalanceCapabilityID       = "hr.leaveBalance"
+	hrLeaveCalendarCapabilityID      = "hr.leaveCalendar"
+	hrTimeReportCapabilityID         = "hr.timeReport"
+	hrPendingTimeEntriesCapabilityID = "hr.pendingTimeEntries"
 )
 
 // hrMaxMinutesPerDay mirrors MAX_MINUTES_PER_DAY in modules/hr.
@@ -104,6 +105,22 @@ type HRTimeReportRow struct {
 
 type HRTimeReportOutput struct {
 	Rows []HRTimeReportRow `json:"rows"`
+}
+
+type HRPendingTimeEntriesInput struct{}
+
+type HRPendingTimeEntry struct {
+	ID           string  `json:"id"`
+	EmployeeID   string  `json:"employeeId"`
+	EmployeeName string  `json:"employeeName"`
+	WorkDate     string  `json:"workDate"`
+	Minutes      int64   `json:"minutes"`
+	Note         *string `json:"note"`
+	Late         bool    `json:"late"`
+}
+
+type HRPendingTimeEntriesOutput struct {
+	Entries []HRPendingTimeEntry `json:"entries"`
 }
 
 type HRClockInInput struct {
@@ -278,6 +295,17 @@ func ParseHRTimeReportInput(raw json.RawMessage) (HRTimeReportInput, error) {
 		return HRTimeReportInput{}, err
 	}
 	return input, nil
+}
+
+func ParseHRPendingTimeEntriesInput(raw json.RawMessage) (HRPendingTimeEntriesInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return HRPendingTimeEntriesInput{}, err
+	}
+	if len(fields) != 0 {
+		return HRPendingTimeEntriesInput{}, errors.New("input must be an empty object")
+	}
+	return HRPendingTimeEntriesInput{}, nil
 }
 
 func ParseHRClockInInput(raw json.RawMessage) (HRClockInInput, error) {
@@ -560,6 +588,34 @@ func hrTimeReport(ctx context.Context, tx pgx.Tx, orgID string, input HRTimeRepo
 	return report, nil
 }
 
+func hrPendingTimeEntries(ctx context.Context, tx pgx.Tx, orgID string, _ HRPendingTimeEntriesInput) (HRPendingTimeEntriesOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT te.id::text, te.employee_id::text, e.name, te.work_date, te.minutes, te.note, te.late
+		FROM time_entries te
+		INNER JOIN employees e ON e.id = te.employee_id AND e.org_id = te.org_id
+		WHERE te.org_id = $1::uuid AND te.status = 'submitted' AND te.minutes > 0
+		ORDER BY te.work_date DESC, te.id DESC
+		LIMIT 100`, orgID)
+	if err != nil {
+		return HRPendingTimeEntriesOutput{}, err
+	}
+	defer rows.Close()
+	out := HRPendingTimeEntriesOutput{Entries: make([]HRPendingTimeEntry, 0)}
+	for rows.Next() {
+		var entry HRPendingTimeEntry
+		var workDate time.Time
+		if err := rows.Scan(&entry.ID, &entry.EmployeeID, &entry.EmployeeName, &workDate, &entry.Minutes, &entry.Note, &entry.Late); err != nil {
+			return HRPendingTimeEntriesOutput{}, err
+		}
+		entry.WorkDate = hrISOString(workDate)
+		out.Entries = append(out.Entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return HRPendingTimeEntriesOutput{}, err
+	}
+	return out, nil
+}
+
 func hrClockIn(ctx context.Context, tx pgx.Tx, orgID string, input HRClockInInput, now time.Time) (HRClockInOutput, error) {
 	var employeeID string
 	err := tx.QueryRow(ctx, `
@@ -726,6 +782,8 @@ func parseHRLeaveTimeInput(capabilityID string, raw json.RawMessage) (any, error
 		return ParseHRLeaveCalendarInput(raw)
 	case hrTimeReportCapabilityID:
 		return ParseHRTimeReportInput(raw)
+	case hrPendingTimeEntriesCapabilityID:
+		return ParseHRPendingTimeEntriesInput(raw)
 	default:
 		return nil, errors.New("unsupported HR leave and time capability")
 	}
