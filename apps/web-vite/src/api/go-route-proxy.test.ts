@@ -39,6 +39,7 @@ import {
   goAccountingCreditNoteFromEnv,
   goAccountingReverseEntryFromEnv,
   goAccountingPeriodCloseReadsFromEnv,
+  goAccountingCustomerStatementReadsFromEnv,
   goAccountingReportsFromEnv,
   goBankReconciliationWritesFromEnv,
   goPosCustomersSliceFromEnv,
@@ -258,6 +259,15 @@ describe("accounting reports Go selector", () => {
     expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_REPORTS: "0" })).toBe(false);
     expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_REPORTS: "1" })).toBe(false);
+  });
+});
+
+describe("accounting customer statement Go selector", () => {
+  it("requires the statement selector and session capability route", () => {
+    expect(goAccountingCustomerStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS: "1" })).toBe(true);
+    expect(goAccountingCustomerStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goAccountingCustomerStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS: "0" })).toBe(false);
+    expect(goAccountingCustomerStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS: "1" })).toBe(false);
   });
 });
 

@@ -11,6 +11,7 @@ import {
   fetchAccountingTaxCodes,
   fetchCashForecast,
   fetchCustomerStatement,
+  goAccountingCustomerStatementReadsUseGo,
   fetchPaymentReminders,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
@@ -399,6 +400,52 @@ describe("accounting API: capability reads", () => {
     const mock = stubFetch(() => Response.json({}));
     await expect(fetchCustomerStatement("")).rejects.toMatchObject({ status: 400 });
     expect(mock).not.toHaveBeenCalled();
+  });
+
+  it("loads customer statements from the Go capability when selected", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__", true);
+    const currencies = [{
+      currency: "USD",
+      openingBalanceMinor: 0,
+      closingBalanceMinor: 2_500,
+      rows: [{ date: "2026-09-20T10:30:00.000Z", kind: "invoice", ref: "1042", amountMinor: 2_500, balanceMinor: 2_500 }],
+    }];
+    const mock = stubFetch(() => Response.json({ ok: true, data: { currencies } }));
+
+    expect(goAccountingCustomerStatementReadsUseGo()).toBe(true);
+    await expect(fetchCustomerStatement("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).resolves.toEqual({ currencies });
+    expect(mock).toHaveBeenCalledTimes(1);
+    const [url, init] = mock.mock.calls[0]!;
+    expect(url).toBe("/api/capabilities/execute");
+    expect(init).toMatchObject({ method: "POST", cache: "no-store", credentials: "same-origin" });
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      capabilityId: "accounting.customerStatement",
+      input: { customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("validates customer UUIDs before selected Go reads", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: { currencies: [] } }));
+    await expect(fetchCustomerStatement("customer-1")).rejects.toMatchObject({ status: 400 });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "pending", response: () => Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 }), status: 202 },
+    { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }), status: 404 },
+    { label: "malformed", response: () => Response.json({ ok: true, data: { currencies: [{ currency: "USD", rows: [] }] } }), status: 200 },
+    { label: "capability error", response: () => Response.json({ ok: false, error: "Customer statement failed" }, { status: 422 }), status: 500 },
+  ])("fails closed on selected Go statement $label responses", async ({ response, status }) => {
+    vi.stubGlobal("__GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__", true);
+    const mock = stubFetch(response);
+    await expect(fetchCustomerStatement("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).rejects.toMatchObject({
+      name: "AccountingApiError",
+      status,
+    });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
   it("fails loudly when a capability result breaks shape", async () => {

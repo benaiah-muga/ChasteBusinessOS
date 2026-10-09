@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite customer statements can read through Go's session-authenticated
+  `accounting.customerStatement` capability behind paired
+  `CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Customer IDs are validated
+  as UUIDs, output is strictly validated, and pending, malformed, or unavailable
+  Go responses surface as errors without retrying the legacy Accounting route.
 - Vite Manufacturing can route production cost previews, feasibility checks,
   and BOM reports through Go's `manufacturing.costPreview`,
   `manufacturing.checkProductionFeasibility`, and `manufacturing.bomReport`

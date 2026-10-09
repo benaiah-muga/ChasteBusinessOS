@@ -132,6 +132,7 @@ interface StubOptions {
   goBankMatchResponse?: () => Response;
   goBankUnmatchResponse?: () => Response;
   goPurchasingPayBillResponse?: () => Response;
+  goCustomerStatementResponse?: () => Response;
   goReportResponse?: (capabilityId: string) => Response;
 }
 
@@ -194,6 +195,9 @@ function stubAccounting(options: StubOptions = {}) {
       }
       if (capabilityId === "accounting.unmatchBankTransaction") {
         return options.goBankUnmatchResponse?.() ?? Response.json({ ok: true, data: { status: "unmatched", releasedMinor: 2500 } });
+      }
+      if (capabilityId === "accounting.customerStatement") {
+        return options.goCustomerStatementResponse?.() ?? Response.json({ ok: true, data: { currencies: [] } });
       }
       if (capabilityId === "accounting.createInvoice") {
         return options.goCreateInvoiceResponse?.() ?? Response.json({ ok: true, data: {
@@ -1147,6 +1151,33 @@ describe("AccountingPage tabs", () => {
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
     fireEvent.click(screen.getByRole("button", { name: "Load statement" }));
     expect(await screen.findByText("No activity on this account yet.")).toBeTruthy();
+  });
+
+  it("renders the customer statement returned by Go", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__", true);
+    const { calls } = stubAccounting({
+      goCustomerStatementResponse: () => Response.json({ ok: true, data: { currencies: [{
+        currency: "USD",
+        openingBalanceMinor: 0,
+        closingBalanceMinor: 2_500,
+        rows: [{ date: "2026-09-20T10:30:00.000Z", kind: "invoice", ref: "1042", amountMinor: 2_500, balanceMinor: 2_500 }],
+      }] } }),
+    });
+    await renderReady();
+
+    fireEvent.click(screen.getByRole("button", { name: /Cash & collections/ }));
+    await screen.findByRole("table", { name: "Weekly cash forecast" });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    fireEvent.click(screen.getByRole("button", { name: "Load statement" }));
+
+    expect(await screen.findByText("1042")).toBeTruthy();
+    const call = calls.find((entry) => entry.url === "/api/capabilities/execute");
+    expect(call).toBeTruthy();
+    expect(JSON.parse(call!.body!)).toMatchObject({
+      capabilityId: "accounting.customerStatement",
+      input: { customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+    });
+    expect(calls.some((entry) => entry.url === "/api/accounting" && entry.method === "POST" && entry.body?.includes("customerStatement"))).toBe(false);
   });
 
   it("shows budget scenarios and their projected cash", async () => {

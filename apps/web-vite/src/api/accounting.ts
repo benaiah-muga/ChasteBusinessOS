@@ -481,6 +481,10 @@ export function goAccountingReportsUseGo(): boolean {
   return typeof __GO_ACCOUNTING_REPORTS__ !== "undefined" && __GO_ACCOUNTING_REPORTS__;
 }
 
+export function goAccountingCustomerStatementReadsUseGo(): boolean {
+  return typeof __GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__ !== "undefined" && __GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__;
+}
+
 export function goAccountingBankReconciliationWritesUseGo(): boolean {
   return typeof __GO_BANK_RECONCILIATION_WRITES__ !== "undefined" && __GO_BANK_RECONCILIATION_WRITES__;
 }
@@ -716,7 +720,43 @@ export async function fetchPaymentReminders(signal?: AbortSignal): Promise<Accou
 
 export async function fetchCustomerStatement(customerId: string, signal?: AbortSignal): Promise<AccountingStatement> {
   if (!customerId) throw new AccountingApiError(400, "Choose a customer before loading a statement.");
+  if (goAccountingCustomerStatementReadsUseGo()) {
+    if (!z.string().uuid().safeParse(customerId).success) {
+      throw new AccountingApiError(400, "Choose a valid customer before loading a statement.");
+    }
+    return readGoCustomerStatement(customerId, signal);
+  }
   return readCapability({ action: "customerStatement", customerId }, StatementSchema, "load this customer statement", signal);
+}
+
+async function readGoCustomerStatement(customerId: string, signal?: AbortSignal): Promise<AccountingStatement> {
+  const { response, body } = await getJson("/api/capabilities/execute", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({
+      capabilityId: "accounting.customerStatement",
+      input: { customerId },
+      intentId: crypto.randomUUID(),
+    }),
+  }, signal);
+  if (response.status === 202) {
+    const pending = PendingSchema.safeParse(body);
+    if (!pending.success) throw new AccountingApiError(503, "The customer statement service returned an unexpected pending response.");
+    throw new AccountingApiError(202, pending.data.reason ?? pending.data.error ?? "The customer statement request is pending approval.");
+  }
+  if (response.status === 422) {
+    const error = CapabilityErrorSchema.safeParse(body);
+    if (!error.success) throw new AccountingApiError(503, "The customer statement service returned an unexpected response.");
+    throw new AccountingApiError(500, error.data.error.slice(0, 240));
+  }
+  if (response.status !== 200) {
+    throw new AccountingApiError(response.status, errorMessage(response.status, body, "load this customer statement"));
+  }
+  const envelope = EnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new AccountingApiError(response.status, "The customer statement service returned an unexpected response.");
+  const parsed = StatementSchema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new AccountingApiError(response.status, "The customer statement service returned data in an unexpected format.");
+  return parsed.data;
 }
 
 /**

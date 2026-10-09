@@ -2099,3 +2099,11 @@ new owners and the manifest shows zero legacy runtime paths.
      pending, malformed, and unavailable results without falling back to
      `/api/manufacturing`. Add focused Vite API, page, proxy selector, and Go
      parser/executor contract tests.
+207. Route the existing Vite customer statement read through Go's
+     session-authenticated `accounting.customerStatement` capability behind
+     paired `CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Validate customer UUIDs
+     and the complete statement output, preserve the current rendering, and
+     surface pending, malformed, and unavailable responses without falling
+     back to `/api/accounting`. Keep other Accounting routes unchanged; add
+     focused Vite API, page, proxy selector, and Go contract checks.
