@@ -1,672 +1,687 @@
 {
   "schemaVersion": 1,
   "source": "packages/db/src/schema/index.ts",
-  "tableCount": 133,
+  "tableCount": 136,
   "tables": [
     {
       "exportName": "organizations",
       "tableName": "organizations",
-      "line": 26
+      "line": 27
     },
     {
       "exportName": "users",
       "tableName": "users",
-      "line": 60
+      "line": 61
     },
     {
       "exportName": "codingAgentConnections",
       "tableName": "coding_agent_connections",
-      "line": 68
+      "line": 69
     },
     {
       "exportName": "memberships",
       "tableName": "memberships",
-      "line": 97
+      "line": 98
     },
     {
       "exportName": "permissions",
       "tableName": "permissions",
-      "line": 112
+      "line": 113
     },
     {
       "exportName": "roles",
       "tableName": "roles",
-      "line": 121
+      "line": 122
     },
     {
       "exportName": "rolePermissions",
       "tableName": "role_permissions",
-      "line": 135
+      "line": 136
     },
     {
       "exportName": "userRoles",
       "tableName": "user_roles",
-      "line": 149
+      "line": 150
     },
     {
       "exportName": "ledgerEvents",
       "tableName": "ledger_events",
-      "line": 168
+      "line": 169
     },
     {
       "exportName": "agentSessions",
       "tableName": "agent_sessions",
-      "line": 193
+      "line": 197
     },
     {
       "exportName": "sessionEvents",
       "tableName": "session_events",
-      "line": 214
+      "line": 218
     },
     {
       "exportName": "approvals",
       "tableName": "approvals",
-      "line": 230
+      "line": 234
     },
     {
       "exportName": "harnessCompositions",
       "tableName": "harness_compositions",
-      "line": 258
+      "line": 268
     },
     {
       "exportName": "agentRuns",
       "tableName": "agent_runs",
-      "line": 287
+      "line": 297
     },
     {
       "exportName": "policies",
       "tableName": "policies",
-      "line": 320
+      "line": 330
     },
     {
       "exportName": "moduleSettings",
       "tableName": "module_settings",
-      "line": 334
+      "line": 344
     },
     {
       "exportName": "orgBranding",
       "tableName": "org_branding",
-      "line": 353
+      "line": 363
     },
     {
       "exportName": "memories",
       "tableName": "memories",
-      "line": 374
+      "line": 384
     },
     {
       "exportName": "tickets",
       "tableName": "tickets",
-      "line": 391
+      "line": 401
     },
     {
       "exportName": "accounts",
       "tableName": "accounts",
-      "line": 410
+      "line": 420
     },
     {
       "exportName": "customers",
       "tableName": "customers",
-      "line": 426
+      "line": 436
     },
     {
       "exportName": "invoices",
       "tableName": "invoices",
-      "line": 459
+      "line": 469
     },
     {
       "exportName": "invoiceLines",
       "tableName": "invoice_lines",
-      "line": 492
+      "line": 502
     },
     {
       "exportName": "payments",
       "tableName": "payments",
-      "line": 511
+      "line": 521
     },
     {
       "exportName": "journalEntries",
       "tableName": "journal_entries",
-      "line": 530
+      "line": 540
     },
     {
       "exportName": "journalLines",
       "tableName": "journal_lines",
-      "line": 564
+      "line": 574
     },
     {
       "exportName": "posReturns",
       "tableName": "pos_returns",
-      "line": 580
+      "line": 590
     },
     {
       "exportName": "posReturnLines",
       "tableName": "pos_return_lines",
-      "line": 606
+      "line": 616
     },
     {
       "exportName": "vendors",
       "tableName": "vendors",
-      "line": 634
+      "line": 644
     },
     {
       "exportName": "vendorBills",
       "tableName": "vendor_bills",
-      "line": 652
+      "line": 662
     },
     {
       "exportName": "vendorBillLines",
       "tableName": "vendor_bill_lines",
-      "line": 681
+      "line": 691
     },
     {
       "exportName": "vendorPayments",
       "tableName": "vendor_payments",
-      "line": 701
+      "line": 711
     },
     {
       "exportName": "paymentRuns",
       "tableName": "payment_runs",
-      "line": 723
+      "line": 733
     },
     {
       "exportName": "paymentRunLines",
       "tableName": "payment_run_lines",
-      "line": 749
+      "line": 759
     },
     {
       "exportName": "creatorProposals",
       "tableName": "creator_proposals",
-      "line": 771
+      "line": 781
     },
     {
       "exportName": "creatorEvolutionReleases",
       "tableName": "creator_evolution_releases",
-      "line": 802
+      "line": 812
     },
     {
       "exportName": "creatorEvolutionOutcomes",
       "tableName": "creator_evolution_outcomes",
-      "line": 832
+      "line": 842
     },
     {
       "exportName": "invitations",
       "tableName": "invitations",
-      "line": 861
+      "line": 871
     },
     {
       "exportName": "posSessions",
       "tableName": "pos_sessions",
-      "line": 882
+      "line": 892
     },
     {
       "exportName": "deals",
       "tableName": "deals",
-      "line": 904
+      "line": 914
     },
     {
       "exportName": "crmCustomerViews",
       "tableName": "crm_customer_views",
-      "line": 928
+      "line": 938
     },
     {
       "exportName": "items",
       "tableName": "items",
-      "line": 947
+      "line": 957
     },
     {
       "exportName": "stockMovements",
       "tableName": "stock_movements",
-      "line": 979
+      "line": 989
     },
     {
       "exportName": "stockBalances",
       "tableName": "stock_balances",
-      "line": 1011
+      "line": 1021
     },
     {
       "exportName": "docCounters",
       "tableName": "doc_counters",
-      "line": 1034
+      "line": 1044
     },
     {
       "exportName": "purchaseOrders",
       "tableName": "purchase_orders",
-      "line": 1048
+      "line": 1058
     },
     {
       "exportName": "poLines",
       "tableName": "po_lines",
-      "line": 1072
+      "line": 1082
     },
     {
       "exportName": "goodsReceipts",
       "tableName": "goods_receipts",
-      "line": 1105
+      "line": 1115
     },
     {
       "exportName": "goodsReceiptLines",
       "tableName": "goods_receipt_lines",
-      "line": 1132
+      "line": 1142
     },
     {
       "exportName": "periods",
       "tableName": "periods",
-      "line": 1160
+      "line": 1170
     },
     {
       "exportName": "budgetScenarios",
       "tableName": "budget_scenarios",
-      "line": 1176
+      "line": 1186
     },
     {
       "exportName": "budgetLines",
       "tableName": "budget_lines",
-      "line": 1200
+      "line": 1210
     },
     {
       "exportName": "periodCloseChecks",
       "tableName": "period_close_checks",
-      "line": 1220
+      "line": 1230
     },
     {
       "exportName": "periodFxRevaluations",
       "tableName": "period_fx_revaluations",
-      "line": 1241
+      "line": 1251
     },
     {
       "exportName": "conversations",
       "tableName": "conversations",
-      "line": 1264
+      "line": 1274
     },
     {
       "exportName": "conversationMembers",
       "tableName": "conversation_members",
-      "line": 1283
+      "line": 1293
     },
     {
       "exportName": "messages",
       "tableName": "messages",
-      "line": 1298
+      "line": 1308
     },
     {
       "exportName": "messageAttachments",
       "tableName": "message_attachments",
-      "line": 1329
+      "line": 1339
     },
     {
       "exportName": "messageReactions",
       "tableName": "message_reactions",
-      "line": 1352
+      "line": 1362
     },
     {
       "exportName": "conversationPresence",
       "tableName": "conversation_presence",
-      "line": 1373
+      "line": 1383
     },
     {
       "exportName": "purchaseRequests",
       "tableName": "purchase_requests",
-      "line": 1402
+      "line": 1412
     },
     {
       "exportName": "rfqs",
       "tableName": "rfqs",
-      "line": 1428
+      "line": 1438
     },
     {
       "exportName": "documents",
       "tableName": "documents",
-      "line": 1459
+      "line": 1469
     },
     {
       "exportName": "documentVersions",
       "tableName": "document_versions",
-      "line": 1491
+      "line": 1501
     },
     {
       "exportName": "documentSuggestions",
       "tableName": "document_suggestions",
-      "line": 1513
+      "line": 1523
     },
     {
       "exportName": "authoredDocs",
       "tableName": "authored_docs",
-      "line": 1541
+      "line": 1551
     },
     {
       "exportName": "docFolders",
       "tableName": "doc_folders",
-      "line": 1574
+      "line": 1584
     },
     {
       "exportName": "authoredDocVersions",
       "tableName": "authored_doc_versions",
-      "line": 1590
+      "line": 1600
     },
     {
       "exportName": "docDrafts",
       "tableName": "doc_drafts",
-      "line": 1618
+      "line": 1628
     },
     {
       "exportName": "docPresence",
       "tableName": "doc_presence",
-      "line": 1645
+      "line": 1655
     },
     {
       "exportName": "docTemplates",
       "tableName": "doc_templates",
-      "line": 1668
+      "line": 1678
     },
     {
       "exportName": "employees",
       "tableName": "employees",
-      "line": 1688
+      "line": 1698
     },
     {
       "exportName": "leaveRequests",
       "tableName": "leave_requests",
-      "line": 1714
+      "line": 1724
     },
     {
       "exportName": "payrollRuns",
       "tableName": "payroll_runs",
-      "line": 1742
+      "line": 1752
     },
     {
       "exportName": "payslips",
       "tableName": "payslips",
-      "line": 1768
+      "line": 1778
     },
     {
       "exportName": "bomLines",
       "tableName": "bom_lines",
-      "line": 1792
+      "line": 1802
     },
     {
       "exportName": "stockLocations",
       "tableName": "stock_locations",
-      "line": 1819
+      "line": 1829
     },
     {
       "exportName": "lots",
       "tableName": "lots",
-      "line": 1837
+      "line": 1847
     },
     {
       "exportName": "workOrders",
       "tableName": "work_orders",
-      "line": 1859
+      "line": 1869
     },
     {
       "exportName": "jobOpenings",
       "tableName": "job_openings",
-      "line": 1890
+      "line": 1900
     },
     {
       "exportName": "jobApplicants",
       "tableName": "job_applicants",
-      "line": 1906
+      "line": 1916
     },
     {
       "exportName": "projects",
       "tableName": "projects",
-      "line": 1926
+      "line": 1936
     },
     {
       "exportName": "projectTasks",
       "tableName": "project_tasks",
-      "line": 1943
+      "line": 1953
     },
     {
       "exportName": "expensePolicies",
       "tableName": "expense_policies",
-      "line": 1967
+      "line": 1977
     },
     {
       "exportName": "stockReservations",
       "tableName": "stock_reservations",
-      "line": 1986
+      "line": 1996
     },
     {
       "exportName": "cycleCounts",
       "tableName": "cycle_counts",
-      "line": 2010
+      "line": 2020
     },
     {
       "exportName": "cycleCountLines",
       "tableName": "cycle_count_lines",
-      "line": 2028
+      "line": 2038
     },
     {
       "exportName": "stockTransfers",
       "tableName": "stock_transfers",
-      "line": 2059
+      "line": 2069
     },
     {
       "exportName": "stockTransferLines",
       "tableName": "stock_transfer_lines",
-      "line": 2088
+      "line": 2098
     },
     {
       "exportName": "salesOrders",
       "tableName": "sales_orders",
-      "line": 2117
+      "line": 2127
     },
     {
       "exportName": "salesOrderLines",
       "tableName": "sales_order_lines",
-      "line": 2143
+      "line": 2153
     },
     {
       "exportName": "tasks",
       "tableName": "tasks",
-      "line": 2167
+      "line": 2177
     },
     {
       "exportName": "ssoConnections",
       "tableName": "sso_connections",
-      "line": 2194
+      "line": 2204
     },
     {
       "exportName": "scimTokens",
       "tableName": "scim_tokens",
-      "line": 2220
+      "line": 2230
     },
     {
       "exportName": "marketplaceListings",
       "tableName": "marketplace_listings",
-      "line": 2250
+      "line": 2260
     },
     {
       "exportName": "bootstrapIntents",
       "tableName": "bootstrap_intents",
-      "line": 2282
+      "line": 2292
     },
     {
       "exportName": "supportConversations",
       "tableName": "support_conversations",
-      "line": 2305
+      "line": 2315
     },
     {
       "exportName": "supportMessages",
       "tableName": "support_messages",
-      "line": 2347
+      "line": 2357
     },
     {
       "exportName": "fxRates",
       "tableName": "fx_rates",
-      "line": 2369
+      "line": 2379
     },
     {
       "exportName": "fxSettlements",
       "tableName": "fx_settlements",
-      "line": 2394
+      "line": 2404
     },
     {
       "exportName": "quotes",
       "tableName": "quotes",
-      "line": 2425
+      "line": 2435
     },
     {
       "exportName": "quoteLines",
       "tableName": "quote_lines",
-      "line": 2453
+      "line": 2463
     },
     {
       "exportName": "recurringInvoices",
       "tableName": "recurring_invoices",
-      "line": 2469
+      "line": 2479
     },
     {
       "exportName": "recurringInvoiceRuns",
       "tableName": "recurring_invoice_runs",
-      "line": 2497
+      "line": 2507
     },
     {
       "exportName": "timeEntries",
       "tableName": "time_entries",
-      "line": 2520
+      "line": 2530
     },
     {
       "exportName": "expenseClaims",
       "tableName": "expense_claims",
-      "line": 2546
+      "line": 2556
     },
     {
       "exportName": "invoiceShares",
       "tableName": "invoice_shares",
-      "line": 2576
+      "line": 2586
     },
     {
       "exportName": "notifications",
       "tableName": "notifications",
-      "line": 2596
+      "line": 2606
+    },
+    {
+      "exportName": "authEmailOutbox",
+      "tableName": "auth_email_outbox",
+      "line": 2627
     },
     {
       "exportName": "authUser",
       "tableName": "auth_user",
-      "line": 2617
+      "line": 2645
     },
     {
       "exportName": "authSession",
       "tableName": "auth_session",
-      "line": 2627
+      "line": 2655
     },
     {
       "exportName": "authAccount",
       "tableName": "auth_account",
-      "line": 2640
+      "line": 2668
     },
     {
       "exportName": "authVerification",
       "tableName": "auth_verification",
-      "line": 2661
+      "line": 2693
     },
     {
       "exportName": "routines",
       "tableName": "routines",
-      "line": 2678
+      "line": 2710
     },
     {
       "exportName": "jobs",
       "tableName": "jobs",
-      "line": 2716
+      "line": 2748
     },
     {
       "exportName": "routineOccurrences",
       "tableName": "routine_occurrences",
-      "line": 2754
+      "line": 2786
     },
     {
       "exportName": "outboxMessages",
       "tableName": "outbox_messages",
-      "line": 2781
+      "line": 2813
     },
     {
       "exportName": "bankAccounts",
       "tableName": "bank_accounts",
-      "line": 2819
+      "line": 2851
     },
     {
       "exportName": "bankTransactions",
       "tableName": "bank_transactions",
-      "line": 2841
+      "line": 2873
     },
     {
       "exportName": "bankAllocations",
       "tableName": "bank_allocations",
-      "line": 2872
+      "line": 2904
     },
     {
       "exportName": "salesTaxFilings",
       "tableName": "sales_tax_filings",
-      "line": 2902
+      "line": 2934
     },
     {
       "exportName": "taxProfiles",
       "tableName": "tax_profiles",
-      "line": 2923
+      "line": 2955
     },
     {
       "exportName": "taxCodes",
       "tableName": "tax_codes",
-      "line": 2945
+      "line": 2977
     },
     {
       "exportName": "taxReturns",
       "tableName": "tax_returns",
-      "line": 2972
+      "line": 3004
     },
     {
       "exportName": "supportSettings",
       "tableName": "support_settings",
-      "line": 3012
+      "line": 3044
     },
     {
       "exportName": "supportCannedResponses",
       "tableName": "support_canned_responses",
-      "line": 3032
+      "line": 3064
     },
     {
       "exportName": "supportKbArticles",
       "tableName": "support_kb_articles",
-      "line": 3047
+      "line": 3079
+    },
+    {
+      "exportName": "supportKbArticleEmbeddings",
+      "tableName": "support_kb_article_embeddings",
+      "line": 3099
+    },
+    {
+      "exportName": "supportKbArticleEmbeddingJobs",
+      "tableName": "support_kb_article_embedding_jobs",
+      "line": 3125
     },
     {
       "exportName": "marketingSegments",
       "tableName": "marketing_segments",
-      "line": 3065
+      "line": 3154
     },
     {
       "exportName": "marketingCampaigns",
       "tableName": "marketing_campaigns",
-      "line": 3080
+      "line": 3169
     },
     {
       "exportName": "marketingSends",
       "tableName": "marketing_sends",
-      "line": 3100
+      "line": 3189
     },
     {
       "exportName": "marketingDeliveries",
       "tableName": "marketing_deliveries",
-      "line": 3123
+      "line": 3212
     },
     {
       "exportName": "actionReceipts",
       "tableName": "action_receipts",
-      "line": 3155
+      "line": 3244
     },
     {
       "exportName": "agentRunSteps",
       "tableName": "agent_run_steps",
-      "line": 3177
+      "line": 3266
     },
     {
       "exportName": "notificationReads",
       "tableName": "notification_reads",
-      "line": 3213
+      "line": 3302
     }
   ]
 }
