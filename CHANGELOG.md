@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite analytics report generation can route only `POST /api/analytics` to the
+  existing authenticated Go Analytics handler behind paired default-off
+  `GO_ANALYTICS_REPORT_ROUTE=1` and
+  `CHASTE_GO_ANALYTICS_REPORT_ROUTE=1` selectors. Dataset discovery and previews
+  keep their existing GET routing and report response/download behavior.
+
 - Vite Purchasing A/P aging can read through Go's authenticated
   `purchasing.apAging` capability behind paired
   `CHASTE_GO_PURCHASING_AP_AGING_READS=1` and

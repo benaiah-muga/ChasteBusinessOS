@@ -63,6 +63,22 @@ func TestGoAnalyticsRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T)
 	}
 }
 
+func TestGoAnalyticsReportRouteEnabledFromEnvDefaultsOff(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: false},
+		{value: "0", want: false},
+		{value: "1", want: true},
+		{value: "true", want: false},
+	} {
+		if got := goAnalyticsReportRouteEnabledFromEnv(test.value); got != test.want {
+			t.Errorf("goAnalyticsReportRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)
+		}
+	}
+}
+
 func TestGoMetricsRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) {
 	for _, test := range []struct {
 		value string

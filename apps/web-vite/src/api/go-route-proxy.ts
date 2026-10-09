@@ -23,6 +23,7 @@ export type GoRouteProxyFlags = {
   teamWrite: boolean;
   branding: boolean;
   analytics: boolean;
+  analyticsReport: boolean;
   myWork: boolean;
   dashboard: boolean;
   setup: boolean;
@@ -245,6 +246,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     teamWrite: env.CHASTE_GO_TEAM_WRITE_ROUTE !== "0",
     branding: env.CHASTE_GO_BRANDING_ROUTE === "1",
     analytics: env.CHASTE_GO_ANALYTICS_ROUTE !== "0",
+    analyticsReport: env.CHASTE_GO_ANALYTICS_REPORT_ROUTE === "1",
     myWork: env.CHASTE_GO_MY_WORK_ROUTE !== "0",
     dashboard: env.CHASTE_GO_DASHBOARD_ROUTE === "1",
     setup: env.CHASTE_GO_SETUP_ROUTE === "1",
@@ -289,6 +291,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.teamWrite && method === "POST" && /^\/api\/team(?:\?.*)?$/.test(path)) return true;
   if (flags.branding && ["GET", "POST"].includes(method ?? "") && /^\/api\/branding(?:\?.*)?$/.test(path)) return true;
   if (flags.analytics && method === "GET" && /^\/api\/analytics(?:\?.*)?$/.test(path)) return true;
+  if (flags.analyticsReport && method === "POST" && /^\/api\/analytics(?:\?.*)?$/.test(path)) return true;
   if (flags.myWork && method === "GET" && /^\/api\/my-work(?:\?.*)?$/.test(path)) return true;
   if (flags.myWorkSummary && method === "POST" && /^\/api\/my-work\/summarize(?:\?.*)?$/.test(path)) return true;
   if (flags.signals && method === "GET" && /^\/api\/signals(?:\?.*)?$/.test(path)) return true;

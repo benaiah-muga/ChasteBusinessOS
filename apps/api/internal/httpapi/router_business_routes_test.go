@@ -95,6 +95,59 @@ func TestMountGoBusinessRoutesMountsAnalyticsGetOnlyWhenHandlerProvided(t *testi
 	}
 }
 
+func TestMountGoBusinessRoutesMountsAnalyticsReportPostSeparately(t *testing.T) {
+	legacy := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("legacy"))
+	})
+	handler := MountGoBusinessRoutes(
+		legacy,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		routeMarker("analytics read"), nil, nil, nil,
+		routeMarker("analytics report"),
+	)
+	for _, test := range []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{method: http.MethodGet, path: "/api/analytics", want: "analytics read"},
+		{method: http.MethodGet, path: "/api/analytics?dataset=analytics.pipelineByStage", want: "analytics read"},
+		{method: http.MethodPost, path: "/api/analytics", want: "analytics report"},
+		{method: http.MethodPost, path: "/api/analytics?format=html", want: "analytics report"},
+		{method: http.MethodDelete, path: "/api/analytics", want: "legacy"},
+		{method: http.MethodPost, path: "/api/analytics/extra", want: "legacy"},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
+		wantStatus := http.StatusOK
+		if test.want == "legacy" {
+			wantStatus = http.StatusNotFound
+		}
+		if response.Code != wantStatus || response.Body.String() != test.want {
+			t.Errorf("%s %s response=%d %q, want %d %q", test.method, test.path, response.Code, response.Body.String(), wantStatus, test.want)
+		}
+	}
+
+	reportOnly := MountGoBusinessRoutes(
+		legacy,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil,
+		nil, nil, nil,
+		routeMarker("analytics report"),
+	)
+	response := httptest.NewRecorder()
+	reportOnly.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/analytics", nil))
+	if response.Code != http.StatusNotFound || response.Body.String() != "legacy" {
+		t.Fatalf("GET with report-only route response=%d %q, want legacy fallback", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	reportOnly.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/analytics", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "analytics report" {
+		t.Fatalf("POST with report-only route response=%d %q, want Go report route", response.Code, response.Body.String())
+	}
+}
+
 func TestMountGoSalesOrdersRouteMatchesOnlyCollectionGet(t *testing.T) {
 	base := routeMarker("legacy")
 	handler := MountGoSalesOrdersRoute(base, routeMarker("go-orders"))

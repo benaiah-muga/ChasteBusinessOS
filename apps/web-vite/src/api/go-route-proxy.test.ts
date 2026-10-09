@@ -542,6 +542,7 @@ describe("Vite Go route proxy selection", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
+    expect(flags.analyticsReport).toBe(false);
     expect(flags.myWork).toBe(true);
     expect(flags.onboarding).toBe(false);
     expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "posCustomers"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
@@ -594,6 +595,22 @@ describe("Vite Go route proxy selection", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ANALYTICS_ROUTE: "0" });
     expect(flags.analytics).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(false);
+  });
+
+  it("routes only exact analytics report POSTs when separately enabled", () => {
+    const disabled = goRouteProxyFlagsFromEnv({});
+    expect(isGoRouteRequest(disabled, "POST", "/api/analytics")).toBe(false);
+
+    const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_ANALYTICS_REPORT_ROUTE: "1" });
+    expect(isGoRouteRequest(enabled, "POST", "/api/analytics")).toBe(true);
+    expect(isGoRouteRequest(enabled, "POST", "/api/analytics?format=html")).toBe(true);
+    expect(isGoRouteRequest(enabled, "GET", "/api/analytics")).toBe(true);
+    expect(isGoRouteRequest(enabled, "DELETE", "/api/analytics")).toBe(false);
+    expect(isGoRouteRequest(enabled, "POST", "/api/analytics/extra")).toBe(false);
+
+    const readDisabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_ANALYTICS_ROUTE: "0", CHASTE_GO_ANALYTICS_REPORT_ROUTE: "1" });
+    expect(isGoRouteRequest(readDisabled, "GET", "/api/analytics")).toBe(false);
+    expect(isGoRouteRequest(readDisabled, "POST", "/api/analytics")).toBe(true);
   });
 
   it("keeps the whole auth namespace on Go when auth is enabled", () => {
@@ -943,6 +960,7 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_TEAM_WRITE_ROUTE: "1",
       CHASTE_GO_SETUP_ROUTE: "1",
       CHASTE_GO_ANALYTICS_ROUTE: "1",
+      CHASTE_GO_ANALYTICS_REPORT_ROUTE: "1",
       CHASTE_GO_MY_WORK_ROUTE: "1",
       CHASTE_GO_MY_WORK_SUMMARY_ROUTE: "1",
       CHASTE_GO_SIGNALS_ROUTE: "1",
@@ -1001,6 +1019,14 @@ describe("Vite Go route proxy selection", () => {
     runningServers.push({ close: () => onboardingVite.close() });
     const onboardingAddress = onboardingVite.httpServer?.address() as AddressInfo;
     const onboardingOrigin = `http://127.0.0.1:${onboardingAddress.port}`;
+    const reportRouteDisabled = await fetch(`${onboardingOrigin}/api/analytics`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Report", sections: [] }),
+    });
+    expect(await reportRouteDisabled.json()).toMatchObject({ target: "legacy", method: "POST", url: "/api/analytics" });
+    const analyticsGetUnaffected = await fetch(`${onboardingOrigin}/api/analytics?dataset=analytics.pipelineByStage`);
+    expect(await analyticsGetUnaffected.json()).toMatchObject({ target: "go", method: "GET" });
     const onboardingBody = JSON.stringify({
       orgName: "Vite Go Workspace",
       businessDescription: "A workspace bootstrap request sent through the Vite Go route.",
@@ -1089,7 +1115,7 @@ describe("Vite Go route proxy selection", () => {
       body: JSON.stringify({ title: "Quarterly report", sections: [] }),
     });
     expect(await analyticsReport.json()).toMatchObject({
-      target: "legacy",
+      target: "go",
       method: "POST",
       url: "/api/analytics",
       body: JSON.stringify({ title: "Quarterly report", sections: [] }),

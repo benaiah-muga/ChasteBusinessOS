@@ -2191,3 +2191,11 @@ new owners and the manifest shows zero legacy runtime paths.
      return currency, and fail closed without retrying the legacy
      `/api/purchasing` read. Focused Vite and Go route tests pass; browser proof
      remains open.
+214. (Implemented) Route only Vite analytics report generation at
+     `POST /api/analytics` through the existing Go Analytics session handler
+     behind separate default-off `GO_ANALYTICS_REPORT_ROUTE=1` and
+     `CHASTE_GO_ANALYTICS_REPORT_ROUTE=1` selectors. Preserve the existing GET
+     discovery/preview flags, report JSON input/output, dataset read and
+     `analytics.report` permissions, and HTML download behavior. Exact method
+     and route tests cover enabled and disabled paths; browser proof remains
+     open.
