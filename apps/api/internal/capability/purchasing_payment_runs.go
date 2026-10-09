@@ -21,6 +21,7 @@ const (
 	instructPaymentRunCapabilityID     = "purchasing.instructPaymentRun"
 	reversePaymentRunCapabilityID      = "purchasing.reversePaymentRun"
 	listPaymentRunsCapabilityID        = "purchasing.listPaymentRuns"
+	listPaymentRunBillsCapabilityID    = "purchasing.listPaymentRunBills"
 )
 
 const paymentRunBankMethod = "bank_transfer"
@@ -97,6 +98,21 @@ type PaymentRunItem struct {
 
 type ListPaymentRunsOutput struct {
 	Runs []PaymentRunItem `json:"runs"`
+}
+
+type ListPaymentRunBillsInput struct{}
+
+type PaymentRunBill struct {
+	ID         string  `json:"id"`
+	Number     int64   `json:"number"`
+	VendorName string  `json:"vendorName"`
+	VendorRef  *string `json:"vendorRef"`
+	Currency   string  `json:"currency"`
+	DueMinor   int64   `json:"dueMinor"`
+}
+
+type ListPaymentRunBillsOutput struct {
+	Bills []PaymentRunBill `json:"bills"`
 }
 
 func paymentRunIDField(fields map[string]json.RawMessage, key string) (string, error) {
@@ -190,6 +206,13 @@ func ParseListPaymentRunsInput(raw json.RawMessage) (ListPaymentRunsInput, error
 		return ListPaymentRunsInput{}, err
 	}
 	return ListPaymentRunsInput{}, nil
+}
+
+func ParseListPaymentRunBillsInput(raw json.RawMessage) (ListPaymentRunBillsInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return ListPaymentRunBillsInput{}, err
+	}
+	return ListPaymentRunBillsInput{}, nil
 }
 
 var paymentRunCurrencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
@@ -755,6 +778,41 @@ func listPaymentRuns(ctx context.Context, tx pgx.Tx, orgID string, _ ListPayment
 	return ListPaymentRunsOutput{Runs: runs}, nil
 }
 
+func listPaymentRunBills(ctx context.Context, tx pgx.Tx, orgID string, _ ListPaymentRunBillsInput) (ListPaymentRunBillsOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT vb.id::text, vb.number, v.name, vb.vendor_ref, vb.currency,
+			vb.total_minor, vb.paid_minor, vb.credited_minor
+		FROM vendor_bills vb
+		JOIN vendors v ON v.id = vb.vendor_id AND v.org_id = vb.org_id
+		WHERE vb.org_id = $1::uuid AND vb.status = 'open' AND vb.voided_at IS NULL
+		ORDER BY vb.due_at ASC NULLS LAST, vb.number ASC`, orgID)
+	if err != nil {
+		return ListPaymentRunBillsOutput{}, err
+	}
+	defer rows.Close()
+	out := ListPaymentRunBillsOutput{Bills: make([]PaymentRunBill, 0)}
+	for rows.Next() {
+		var bill PaymentRunBill
+		var totalMinor, paidMinor, creditedMinor int64
+		if err := rows.Scan(&bill.ID, &bill.Number, &bill.VendorName, &bill.VendorRef, &bill.Currency, &totalMinor, &paidMinor, &creditedMinor); err != nil {
+			return ListPaymentRunBillsOutput{}, err
+		}
+		balance, err := purchasingBalance(totalMinor, paidMinor, creditedMinor)
+		if err != nil {
+			return ListPaymentRunBillsOutput{}, err
+		}
+		if balance.outstandingMinor <= 0 {
+			continue
+		}
+		bill.DueMinor = balance.outstandingMinor
+		out.Bills = append(out.Bills, bill)
+	}
+	if err := rows.Err(); err != nil {
+		return ListPaymentRunBillsOutput{}, err
+	}
+	return out, nil
+}
+
 func parsePurchasingPaymentRunInput(capabilityID string, raw json.RawMessage) (any, error) {
 	switch capabilityID {
 	case createPaymentRunCapabilityID:
@@ -769,6 +827,8 @@ func parsePurchasingPaymentRunInput(capabilityID string, raw json.RawMessage) (a
 		return ParseReversePaymentRunInput(raw)
 	case listPaymentRunsCapabilityID:
 		return ParseListPaymentRunsInput(raw)
+	case listPaymentRunBillsCapabilityID:
+		return ParseListPaymentRunBillsInput(raw)
 	default:
 		return nil, errors.New("unsupported purchasing payment run capability")
 	}

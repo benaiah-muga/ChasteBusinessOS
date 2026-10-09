@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite supplier payment runs can use Go's governed purchasing capabilities for
+  eligible bill reads, draft creation, cancellation and restoration, approval,
+  and reversal behind paired `CHASTE_GO_PURCHASING_PAYMENT_RUNS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
+  attempts and approval recovery survive reload; Go 404 and uncertain outcomes
+  never fall back to legacy routes. Go checks current bill balances and
+  currencies before creating and instructing a run.
 - Vite HR Time reports, submitted-entry approvals, time logging, and decisions can
   use the Go `hr.*` capabilities behind the paired `CHASTE_GO_HR_TIME=1` and
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. A new org-scoped

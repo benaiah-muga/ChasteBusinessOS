@@ -26,6 +26,7 @@ declare const __GO_PURCHASING_CREATE_ORDER__: boolean;
 declare const __GO_PURCHASING_RECEIVE_GOODS__: boolean;
 declare const __GO_PURCHASING_RETURN_CLOSE__: boolean;
 declare const __GO_PURCHASING_FINANCE_WRITES__: boolean;
+declare const __GO_PURCHASING_PAYMENT_RUNS__: boolean;
 declare const __GO_PURCHASING_SOURCING_WRITES__: boolean;
 declare const __GO_PURCHASING_VENDOR_SLICE__: boolean;
 declare const __GO_MARKETING_SEGMENT_SLICE__: boolean;

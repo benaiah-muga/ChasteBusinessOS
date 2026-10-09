@@ -199,6 +199,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	instructPaymentRunCapabilityID:                      {module: "purchasing", permission: "purchasing.post", risk: "money", inverseCapabilityID: "purchasing.reversePaymentRun"},
 	reversePaymentRunCapabilityID:                       {module: "purchasing", permission: "purchasing.post", risk: "money"},
 	listPaymentRunsCapabilityID:                         {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	listPaymentRunBillsCapabilityID:                     {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	apAgingCapabilityID:                                 {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	periodCloseWorkbenchCapabilityID:                    {module: "accounting", permission: "accounting.read", risk: "read"},
 	updatePeriodCloseCheckCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.restorePeriodCloseCheck"},
@@ -445,7 +446,7 @@ func supportedCapability(capabilityID string) bool {
 		inventoryImportItemsCapabilityID, inventoryUndoItemImportCapabilityID, inventoryRestoreItemImportCapabilityID,
 		inventoryReserveStockCapabilityID, inventoryReleaseReservationCapabilityID, inventoryListReservationsCapabilityID,
 		createPaymentRunCapabilityID, cancelPaymentRunDraftCapabilityID, restorePaymentRunDraftCapabilityID,
-		instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID, apAgingCapabilityID,
+		instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID, listPaymentRunBillsCapabilityID, apAgingCapabilityID,
 		periodCloseWorkbenchCapabilityID, updatePeriodCloseCheckCapabilityID, restorePeriodCloseCheckCapabilityID,
 		closePeriodCapabilityID, reopenPeriodCapabilityID, closeYearCapabilityID,
 		saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID,
@@ -1095,7 +1096,7 @@ func (e *Executor) executeWithFinalizer(
 			}
 			input = parsed
 		case createPaymentRunCapabilityID, cancelPaymentRunDraftCapabilityID, restorePaymentRunDraftCapabilityID,
-			instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID:
+			instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID, listPaymentRunBillsCapabilityID:
 			parsed, err := parsePurchasingPaymentRunInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -2517,6 +2518,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case ListPaymentRunBillsInput:
+			output, err := listPaymentRunBills(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case APAgingInput:
 			output, err := purchasingAPAging(ctx, tx, claims.OrganizationID, parsed, now)
 			if err != nil {
@@ -3390,7 +3397,7 @@ func canonicalInputHash(input any) (string, error) {
 		InventoryListLocationsInput, InventoryListLocationRecordsInput, InventoryListItemMetadataInput, InventoryLookupByBarcodeInput, InventoryListCycleCountsInput,
 		InventoryImportItemsInput, InventoryUndoItemImportInput, InventoryRestoreItemImportInput,
 		InventoryReserveStockInput, InventoryReleaseReservationInput, InventoryListReservationsInput,
-		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput, APAgingInput,
+		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput, ListPaymentRunBillsInput, APAgingInput,
 		ClosePeriodInput, PeriodCloseCheckInput, CloseYearInput,
 		SaveBudgetScenarioInput, BudgetScenarioVersionInput, ListBudgetScenariosInput, BudgetActualVsPlanInput,
 		CreateTaxProfileInput, RemoveTaxProfileInput, CreateTaxCodeInput, ArchiveTaxCodeInput, ActivateTaxCodeInput,

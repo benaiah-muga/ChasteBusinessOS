@@ -200,6 +200,12 @@ func TestPurchasingPaymentRunsParsersMirrorZodContracts(t *testing.T) {
 	if _, err := ParseListPaymentRunsInput(json.RawMessage(`[]`)); err == nil {
 		t.Fatalf("ParseListPaymentRunsInput([]) accepted a non-object")
 	}
+	if _, err := ParseListPaymentRunBillsInput(json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("ParseListPaymentRunBillsInput({}) err = %v", err)
+	}
+	if _, err := ParseListPaymentRunBillsInput(json.RawMessage(`[]`)); err == nil {
+		t.Fatal("ParseListPaymentRunBillsInput([]) accepted a non-object")
+	}
 
 	if _, err := parsePurchasingPaymentRunInput("purchasing.unknown", json.RawMessage(`{}`)); err == nil || err.Error() != "unsupported purchasing payment run capability" {
 		t.Fatalf("parsePurchasingPaymentRunInput(unknown) err = %v, want dispatcher refusal", err)
@@ -211,6 +217,7 @@ func TestPurchasingPaymentRunsParsersMirrorZodContracts(t *testing.T) {
 		instructPaymentRunCapabilityID:     `{"paymentRunId":"` + runUUID + `"}`,
 		reversePaymentRunCapabilityID:      `{"paymentRunId":"` + runUUID + `","reason":"undo it"}`,
 		listPaymentRunsCapabilityID:        `{}`,
+		listPaymentRunBillsCapabilityID:    `{}`,
 	} {
 		if _, err := parsePurchasingPaymentRunInput(capabilityID, json.RawMessage(raw)); err != nil {
 			t.Errorf("parsePurchasingPaymentRunInput(%s) err = %v", capabilityID, err)
@@ -790,5 +797,39 @@ func TestPurchasingPaymentRunsListReturnsRunsAndRemittanceLines(t *testing.T) {
 		if run.ID == foreignRunID {
 			t.Fatalf("foreign organization run %s leaked into the list", foreignRunID)
 		}
+	}
+}
+
+func TestGoPurchasingPaymentRunBillsExecutorIsOrgScopedAndReturnsOnlyPositiveOpenBalances(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupPaymentRunsFixture(t, fx)
+	grantWavePermission(t, fx, "purchasing.read")
+	localVendor := seedPurchasingVendor(t, fx, fx.orgID, nil)
+	foreignVendor := seedPurchasingVendor(t, fx, fx.otherOrgID, nil)
+	partiallyPaid := seedPaymentRunsBill(t, fx, fx.orgID, localVendor, 21, "open", "UGX", crmStringPointer("REF-21"), 10_000, 2_000, 1_000)
+	seedPaymentRunsBill(t, fx, fx.orgID, localVendor, 22, "open", "UGX", nil, 10_000, 7_000, 3_000)
+	seedPaymentRunsBill(t, fx, fx.orgID, localVendor, 23, "void", "UGX", nil, 10_000, 0, 0)
+	seedPaymentRunsBill(t, fx, fx.otherOrgID, foreignVendor, 24, "open", "UGX", nil, 10_000, 0, 0)
+
+	input := json.RawMessage(`{}`)
+	claims := waveModuleClaims(fx, listPaymentRunBillsCapabilityID, "purchasing.read", input, "human", "", "wave4-open-bills-list")
+	result, err := fx.executor.Execute(fx.ctx, claims, listPaymentRunBillsCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("listPaymentRunBills result=%+v err=%v", result, err)
+	}
+	var output ListPaymentRunBillsOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Bills) != 1 {
+		t.Fatalf("eligible bills = %+v, want only the local open bill with remaining balance", output.Bills)
+	}
+	bill := output.Bills[0]
+	if bill.ID != partiallyPaid || bill.Number != 21 || bill.VendorName != "Purchasing fixture vendor" || bill.VendorRef == nil || *bill.VendorRef != "REF-21" || bill.Currency != "UGX" || bill.DueMinor != 7_000 {
+		t.Fatalf("eligible bill = %+v, want bill 21 with 7000 remaining", bill)
+	}
+	denied, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, listPaymentRunBillsCapabilityID, "crm.read", input, "human", "", "wave4-open-bills-denied"), listPaymentRunBillsCapabilityID, input)
+	if err != nil || denied.OK || !strings.Contains(denied.Error, "forbidden: missing permission: purchasing.read") {
+		t.Fatalf("listPaymentRunBills denied result=%+v err=%v, want purchasing.read refusal", denied, err)
 	}
 }

@@ -42,6 +42,32 @@
 .purchasing-run-lines td { font-size: .87rem; }
 .purchasing-run-lines tbody tr:last-child td { border-bottom: 0; }
 .purchasing-run-lines td:last-child, .purchasing-run-lines th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.payment-run-notice, .payment-run-retry { padding: .9rem 1rem; border: 1px solid var(--line, #cbd6d5); border-radius: .8rem; background: var(--surface, #fff); }
+.payment-run-notice.is-success { border-color: #9ed2b5; background: #f0faf4; color: #236140; }
+.payment-run-notice.is-pending, .payment-run-retry { border-color: #e8cc8e; background: #fff8e8; color: #744f0a; }
+.payment-run-notice.is-error { border-color: #e7b5ab; background: #fff9f7; color: #8a382a; }
+.payment-run-retry, .payment-run-section-heading, .payment-run-draft-form, .payment-run-card-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; }
+.payment-run-retry p, .payment-run-draft-form p { margin: .25rem 0; }
+.payment-run-retry small { flex-basis: 100%; }
+.payment-run-section-heading { margin-bottom: .75rem; }
+.payment-run-section-heading h2 { margin: .1rem 0 .35rem; }
+.payment-run-section-heading p { margin: 0; }
+.payment-run-section-heading button, .payment-run-draft-form button, .payment-run-card-actions button, .payment-run-retry button, .payment-run-dialog button { min-height: 2.4rem; padding: .5rem .8rem; border: 1px solid var(--line, #cbd6d5); border-radius: .65rem; background: var(--surface, #fff); color: var(--text, #17252b); cursor: pointer; font-weight: 650; }
+.payment-run-section-heading button:disabled, .payment-run-draft-form button:disabled, .payment-run-card-actions button:disabled, .payment-run-retry button:disabled, .payment-run-dialog button:disabled { cursor: not-allowed; opacity: .55; }
+.payment-run-search, .payment-run-amount, .payment-run-draft-form label, .payment-run-dialog label { display: grid; gap: .35rem; margin: .75rem 0; color: var(--muted, #63727a); font-size: .84rem; }
+.payment-run-search input, .payment-run-amount input, .payment-run-draft-form input, .payment-run-dialog input { min-height: 2.45rem; padding: .5rem .65rem; border: 1px solid var(--line, #cbd6d5); border-radius: .55rem; color: var(--text, #17252b); }
+.payment-run-draft-form { justify-content: flex-start; margin-top: 1rem; padding: 1rem; border-radius: .75rem; background: #f6f8f7; }
+.payment-run-draft-form label { min-width: min(100%, 18rem); flex: 1; }
+.payment-run-bill-table th:first-child, .payment-run-bill-table td:first-child { text-align: center; }
+.payment-run-bill-table td:nth-last-child(-n+2), .payment-run-bill-table th:nth-last-child(-n+2) { text-align: right; }
+.payment-run-bill-table input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--accent, #167d72); }
+.payment-run-amount { min-width: 9rem; text-align: right; }
+.payment-run-reconcile-note { margin: .75rem 1.2rem; color: #744f0a; font-size: .82rem; }
+.payment-run-card-actions { justify-content: flex-start; padding: .85rem 1.2rem; }
+.payment-run-dialog-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 1rem; background: rgb(15 23 28 / 45%); }
+.payment-run-dialog { width: min(100%, 34rem); padding: 1.25rem; border-radius: .9rem; background: var(--surface, #fff); box-shadow: 0 20px 60px rgb(0 0 0 / 25%); }
+.payment-run-dialog h2 { margin-top: 0; }
+.payment-run-dialog .payment-run-card-actions { justify-content: flex-end; padding: .75rem 0 0; }
 @media (max-width: 760px) {
   .purchasing-runs-header, .purchasing-runs-error { align-items: stretch; flex-direction: column; }
   .purchasing-runs-full-workspace { align-self: flex-start; }

@@ -2012,3 +2012,16 @@ new owners and the manifest shows zero legacy runtime paths.
      recover approvals and uncertain results after reload, block legacy rollback
      while unresolved, and fail closed on Go 404. Add focused Go parser,
      executor, org-scope, Vite API, proxy selector, and HR page tests.
+198. Route Vite supplier payment run reads and lifecycle actions through Go's
+     `purchasing.listPaymentRuns`, `purchasing.listPaymentRunBills`,
+     `purchasing.createPaymentRun`, `purchasing.cancelPaymentRunDraft`,
+     `purchasing.restorePaymentRunDraft`, `purchasing.instructPaymentRun`, and
+     `purchasing.reversePaymentRun` capabilities behind paired
+     `CHASTE_GO_PURCHASING_PAYMENT_RUNS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep bill eligibility,
+     balance, and currency checks authoritative in Go. Scope durable exact
+     write attempts by actor and organization, recover approvals and uncertain
+     outcomes after reload, and fail closed on Go 404. Preserve the existing
+     payment run schedule, remittance, cancel, restore, approval, and reversal
+     workflows in Vite. Add focused Go executor, Vite API, proxy, and page
+     coverage.

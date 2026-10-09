@@ -405,7 +405,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
 		case createPaymentRunCapabilityID, cancelPaymentRunDraftCapabilityID, restorePaymentRunDraftCapabilityID,
-			instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID:
+			instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID, listPaymentRunBillsCapabilityID:
 			parsed, parseErr := parsePurchasingPaymentRunInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
@@ -815,6 +815,8 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case instructPaymentRunCapabilityID, reversePaymentRunCapabilityID:
 		return "purchasing.post", true
 	case listPaymentRunsCapabilityID:
+		return "purchasing.read", true
+	case listPaymentRunBillsCapabilityID:
 		return "purchasing.read", true
 	case periodCloseWorkbenchCapabilityID:
 		return "accounting.read", true
