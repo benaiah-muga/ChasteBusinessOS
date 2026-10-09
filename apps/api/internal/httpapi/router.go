@@ -180,6 +180,20 @@ func MountGoInventoryReadRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoCRMReadRoute mounts only the CRM collection GET. CRM writes and other
+// CRM endpoints continue to their current owner.
+func MountGoCRMReadRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/crm", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoPOSReadRoute mounts only the POS collection GET. Actions remain with
 // the existing owner until their write routes pass their own migration gate.
 func MountGoPOSReadRoute(base, route http.Handler) http.Handler {

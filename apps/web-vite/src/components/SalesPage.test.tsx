@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SalesPage } from "./SalesPage";
 import { submitSalesOrderWrite } from "../api/sales";
 
@@ -35,18 +35,22 @@ const orders = [
 const switchboard = { catalog: [{ id: "sales" }], enabledModules: ["sales"] };
 const customers = {
   customers: [
-    { id: "20000000-0000-4000-8000-000000000001", name: "Acme Foods" },
-    { id: "20000000-0000-4000-8000-000000000002", name: "Benaiah Market" },
+    { id: "20000000-0000-4000-8000-000000000001", name: "Acme Foods", purchaseCount: 0, lifetimeSpendMinor: 0 },
+    { id: "20000000-0000-4000-8000-000000000002", name: "Benaiah Market", purchaseCount: 0, lifetimeSpendMinor: 0 },
   ],
 };
 
 function salesFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
     if (input === "/api/modules") return Response.json(switchboard);
-    if (input === "/api/customers") return Response.json(customers);
+    if (input === "/api/pos/customers") return Response.json(customers);
     return Response.json({ orders });
   });
 }
+
+beforeEach(() => {
+  vi.stubGlobal("__GO_POS_CUSTOMERS_SLICE__", true);
+});
 
 afterEach(() => {
   cleanup();
@@ -72,6 +76,7 @@ describe("Vite sales page", () => {
     expect(screen.getByText("$1,299.00")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith("/api/sales", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/pos/customers", expect.any(Object));
 
     fireEvent.click(screen.getByRole("button", { name: "Confirmed" }));
     expect(screen.getByRole("button", { name: "Confirmed" }).getAttribute("aria-pressed")).toBe("true");
@@ -90,7 +95,7 @@ describe("Vite sales page", () => {
     let attempt = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       attempt += 1;
       return attempt === 1
         ? Response.json({ error: "unavailable" }, { status: 503 })
@@ -108,7 +113,7 @@ describe("Vite sales page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { confirmed: true, backordered: true, reservedThousandths: 0 } });
       return Response.json({ error: "unexpected route" }, { status: 404 });
@@ -146,7 +151,7 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders: activeOrganization === "org-1" ? orders : [orgBOrder] });
       if (input === "/api/capabilities/execute") {
         writes += 1;
@@ -188,7 +193,7 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       if (input === "/api/capabilities/execute") {
         writes += 1;
@@ -234,7 +239,7 @@ describe("Vite sales page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       writes += 1;
       return writes === 1
@@ -285,7 +290,7 @@ describe("Vite sales page", () => {
     });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } });
       void init;
@@ -331,7 +336,7 @@ describe("Vite sales page", () => {
     let activeOrganization = "org-1";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders: activeOrganization === "org-1" ? orders : [] });
       if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { status: "cancelled", releasedThousandths: 1000 } });
       return Response.json({ error: "unexpected route" }, { status: 404 });
@@ -359,7 +364,7 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       if (input === "/api/capabilities/execute") {
         writes += 1;
@@ -429,7 +434,7 @@ describe("Vite sales page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       writes += 1;
       if (writes === 1) return Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 });
@@ -468,7 +473,7 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       if (input === "/api/capabilities/execute") {
         writes += 1;
@@ -504,7 +509,7 @@ describe("Vite sales page", () => {
     let salesReads = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") {
         salesReads += 1;
         return salesReads === 1
@@ -537,7 +542,7 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       if (input === "/api/capabilities/execute") {
         writes += 1;
@@ -573,7 +578,7 @@ describe("Vite sales page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       capabilityAttempt += 1;
       return capabilityAttempt === 1
@@ -627,7 +632,7 @@ describe("Vite sales page", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage is blocked"); });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       return Response.json({ error: "The sales service is unavailable. Check the order status before trying again." }, { status: 503 });
     }));
@@ -646,7 +651,7 @@ describe("Vite sales page", () => {
   it("shows route-level Go permission failures as access denied", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => input === "/api/modules"
       ? Response.json(switchboard)
-      : input === "/api/customers" ? Response.json(customers)
+      : input === "/api/pos/customers" ? Response.json(customers)
       : Response.json({ error: "forbidden: missing sales.read" }, { status: 422 })));
     render(<SalesPage />);
 

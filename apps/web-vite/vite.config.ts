@@ -51,6 +51,7 @@ export default defineConfig(({ mode }) => {
       __GO_INVENTORY_LOCATION_RESERVATION_WRITES__: JSON.stringify(goInventoryLocationReservationWrites),
       __GO_INVENTORY_BARCODE_LOOKUP__: JSON.stringify(goInventoryBarcodeLookup),
       __GO_CRM_DEAL_STAGE_MOVE__: JSON.stringify(goCrmDealStageMove),
+      __GO_CRM_READS__: JSON.stringify(env.CHASTE_GO_CRM_READS !== "0"),
       __GO_CRM_DEAL_CREATE__: JSON.stringify(goCrmDealCreate),
       __GO_CRM_TASK_WRITES__: JSON.stringify(goCrmTaskWrites),
       __GO_CRM_CUSTOMER_CREATE__: JSON.stringify(goCrmCustomerCreate),

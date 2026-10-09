@@ -23,41 +23,42 @@ import (
 )
 
 const (
-	createCustomerCapabilityID           = "crm.createCustomer"
-	saveCustomerViewCapabilityID         = "crm.saveCustomerView"
-	restoreCustomerViewCapabilityID      = "crm.restoreCustomerView"
-	deactivateCustomerCapabilityID       = "crm.deactivateCustomer"
-	mergeCustomersCapabilityID           = "crm.mergeCustomers"
-	restoreCustomerMergeCapabilityID     = "crm.restoreCustomerMerge"
-	importCustomersCapabilityID          = "crm.importCustomers"
-	undoCustomerImportCapabilityID       = "crm.undoCustomerImport"
-	restoreImportedCustomersCapabilityID = "crm.restoreImportedCustomers"
-	updateCustomerProfilesCapabilityID   = "crm.updateCustomerProfiles"
-	restoreCustomerProfilesCapabilityID  = "crm.restoreCustomerProfiles"
-	reapplyCustomerProfilesCapabilityID  = "crm.reapplyCustomerProfiles"
-	listCustomersCapabilityID            = "crm.listCustomers"
-	listCustomerViewsCapabilityID        = "crm.listCustomerViews"
-	listDealsCapabilityID                = "crm.listDeals"
-	pipelineReportCapabilityID           = "crm.pipelineReport"
-	listTasksCapabilityID                = "crm.listTasks"
-	customerTimelineCapabilityID         = "crm.customerTimeline"
-	createInvoiceCapabilityID            = "accounting.createInvoice"
-	recordFxRateCapabilityID             = "accounting.recordFxRate"
-	recordPaymentCapabilityID            = "accounting.recordPayment"
-	reversePaymentCapabilityID           = "accounting.reversePayment"
-	trialBalanceCapabilityID             = "accounting.trialBalance"
-	createProjectCapabilityID            = "projects.createProject"
-	archiveProjectCapabilityID           = "projects.archiveProject"
-	createProjectTaskCapabilityID        = "projects.createTask"
-	moveProjectTaskCapabilityID          = "projects.moveTask"
-	assignProjectTaskCapabilityID        = "projects.assignTask"
-	iamListMembersCapabilityID           = "iam.listMembers"
-	scimProvisionUserCapabilityID        = "iam.scimProvisionUser"
-	iamCreateRoleCapabilityID            = "iam.createRole"
-	iamUpdateRolePermissionsCapabilityID = "iam.updateRolePermissions"
-	iamAssignRoleCapabilityID            = "iam.assignRole"
-	iamInviteMemberCapabilityID          = "iam.inviteMember"
-	iamBootstrapOrganizationCapabilityID = "iam.bootstrapOrganization"
+	createCustomerCapabilityID            = "crm.createCustomer"
+	saveCustomerViewCapabilityID          = "crm.saveCustomerView"
+	restoreCustomerViewCapabilityID       = "crm.restoreCustomerView"
+	deactivateCustomerCapabilityID        = "crm.deactivateCustomer"
+	mergeCustomersCapabilityID            = "crm.mergeCustomers"
+	restoreCustomerMergeCapabilityID      = "crm.restoreCustomerMerge"
+	importCustomersCapabilityID           = "crm.importCustomers"
+	undoCustomerImportCapabilityID        = "crm.undoCustomerImport"
+	restoreImportedCustomersCapabilityID  = "crm.restoreImportedCustomers"
+	updateCustomerProfilesCapabilityID    = "crm.updateCustomerProfiles"
+	restoreCustomerProfilesCapabilityID   = "crm.restoreCustomerProfiles"
+	reapplyCustomerProfilesCapabilityID   = "crm.reapplyCustomerProfiles"
+	listCustomersCapabilityID             = "crm.listCustomers"
+	listCRMCustomerCollectionCapabilityID = "crm.listCustomerCollection"
+	listCustomerViewsCapabilityID         = "crm.listCustomerViews"
+	listDealsCapabilityID                 = "crm.listDeals"
+	pipelineReportCapabilityID            = "crm.pipelineReport"
+	listTasksCapabilityID                 = "crm.listTasks"
+	customerTimelineCapabilityID          = "crm.customerTimeline"
+	createInvoiceCapabilityID             = "accounting.createInvoice"
+	recordFxRateCapabilityID              = "accounting.recordFxRate"
+	recordPaymentCapabilityID             = "accounting.recordPayment"
+	reversePaymentCapabilityID            = "accounting.reversePayment"
+	trialBalanceCapabilityID              = "accounting.trialBalance"
+	createProjectCapabilityID             = "projects.createProject"
+	archiveProjectCapabilityID            = "projects.archiveProject"
+	createProjectTaskCapabilityID         = "projects.createTask"
+	moveProjectTaskCapabilityID           = "projects.moveTask"
+	assignProjectTaskCapabilityID         = "projects.assignTask"
+	iamListMembersCapabilityID            = "iam.listMembers"
+	scimProvisionUserCapabilityID         = "iam.scimProvisionUser"
+	iamCreateRoleCapabilityID             = "iam.createRole"
+	iamUpdateRolePermissionsCapabilityID  = "iam.updateRolePermissions"
+	iamAssignRoleCapabilityID             = "iam.assignRole"
+	iamInviteMemberCapabilityID           = "iam.inviteMember"
+	iamBootstrapOrganizationCapabilityID  = "iam.bootstrapOrganization"
 )
 const approvalTTL = 7 * 24 * time.Hour
 
@@ -71,6 +72,7 @@ type capabilitySpec struct {
 	inverseInputSource  string
 	inverseFields       []string
 	oneTimeOutput       bool
+	humanOnly           bool
 }
 
 var capabilitySpecs = map[string]capabilitySpec{
@@ -87,6 +89,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	restoreCustomerProfilesCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.reapplyCustomerProfiles"},
 	reapplyCustomerProfilesCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
 	listCustomersCapabilityID:                           {module: "crm", permission: "crm.read", risk: "read"},
+	listCRMCustomerCollectionCapabilityID:               {module: "crm", permission: "crm.read", risk: "read", humanOnly: true},
 	listCustomerViewsCapabilityID:                       {module: "crm", permission: "crm.read", risk: "read"},
 	listDealsCapabilityID:                               {module: "crm", permission: "crm.read", risk: "read"},
 	documentsListDocsCapabilityID:                       {module: "documents", permission: "documents.read", risk: "read"},
@@ -410,7 +413,7 @@ func supportedCapability(capabilityID string) bool {
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
-		listCustomersCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID, documentsListIngestedCapabilityID,
+		listCustomersCapabilityID, listCRMCustomerCollectionCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID, documentsListIngestedCapabilityID,
 		documentsListDocVersionsCapabilityID, documentsGetDocVersionCapabilityID,
 		pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
 		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID,
@@ -699,6 +702,9 @@ func (e *Executor) executeWithFinalizer(
 	} else if !isUUID(claims.Subject) || !isUUID(claims.OrganizationID) || claims.ActorID == nil || !isUUID(*claims.ActorID) || *claims.ActorID != claims.Subject {
 		return Result{}, ErrSessionInvalid
 	}
+	if spec.humanOnly && (system || claims.ActorType != "human" || claims.ActorID == nil || *claims.ActorID != claims.Subject || strings.TrimSpace(claims.AuthSessionID) == "") {
+		return Result{OK: false, Error: "forbidden: capability requires an authenticated human session"}, nil
+	}
 	if (capabilityID == saveCustomerViewCapabilityID || capabilityID == restoreCustomerViewCapabilityID) &&
 		(system || claims.ActorType != "human" || claims.ActorID == nil || *claims.ActorID != claims.Subject || claims.AuthSessionID == "") {
 		return Result{}, ErrSessionInvalid
@@ -776,6 +782,12 @@ func (e *Executor) executeWithFinalizer(
 			input = parsed
 		case listCustomersCapabilityID:
 			parsed, err := ParseListCustomersInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case listCRMCustomerCollectionCapabilityID:
+			parsed, err := ParseListCRMCustomerCollectionInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -1780,6 +1792,12 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case ListCustomersInput:
 			output, err := listCustomers(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListCRMCustomerCollectionInput:
+			output, err := listCRMCustomerCollection(ctx, tx, claims.OrganizationID, parsed, now)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3329,7 +3347,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreatorInstallListingInput, CreatorListMarketplaceInput, CreatorStageCandidateInput,
 		CreatorPromoteCandidateInput, CreatorRollbackCandidateInput, CreatorRecordCanaryOutcomeInput:
 		return canonicalHash(parsed)
-	case ListCustomersInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
+	case ListCustomersInput, ListCRMCustomerCollectionInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
 		ListAuthoredDocsInput, IngestedDocumentsInput, ListDocumentVersionsInput, DocumentVersionIDInput,
 		CreateDealInput, MoveDealStageInput, ConvertLeadInput,
 		CreateTaskInput, CompleteTaskInput, UpdateTaskDetailsInput,

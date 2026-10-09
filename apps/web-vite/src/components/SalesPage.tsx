@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite, type SalesOrder } from "../api/sales";
-import { CrmApiError, fetchCrmCustomers, type CrmCustomer } from "../api/crm";
+import { PosApiError } from "../api/pos";
+import { fetchPosCustomers, type PosCustomer } from "../api/pos-session";
 import { legacyUrl } from "../legacy";
 import "./sales-page.css";
 
@@ -9,7 +10,7 @@ type PageState =
   | { status: "loading" }
   | { status: "disabled" }
   | { status: "failed"; error: SalesApiError }
-  | { status: "ready"; orders: SalesOrder[]; customers: CrmCustomer[] };
+  | { status: "ready"; orders: SalesOrder[]; customers: PosCustomer[] };
 
 type CurrencyStyle = { symbol: string; minorUnits: number };
 type OrderFilter = "all" | "draft" | "confirmed" | "delivered" | "cancelled";
@@ -163,7 +164,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         setState({ status: "disabled" });
         return;
       }
-      const [orders, customers] = await Promise.all([fetchSalesOrders(signal), fetchCrmCustomers(signal)]);
+      const [orders, customers] = await Promise.all([fetchSalesOrders(signal), fetchPosCustomers(signal)]);
       if (!signal?.aborted) setState({ status: "ready", orders, customers });
     } catch (error) {
       if (signal?.aborted) return;
@@ -171,7 +172,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         status: "failed",
         error: error instanceof SalesApiError
           ? error
-          : error instanceof CrmApiError
+          : error instanceof PosApiError
             ? new SalesApiError(error.status, error.message)
           : new SalesApiError(0, "Could not reach the sales service. Check your connection and try again."),
       });

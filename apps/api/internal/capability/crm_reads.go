@@ -21,6 +21,50 @@ type CRMCustomerSummary struct {
 	Email *string `json:"email"`
 }
 
+type CRMCustomerMergedRecord struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	MergedAt *string `json:"mergedAt"`
+}
+
+type CRMCustomerNextStep struct {
+	Kind        string `json:"kind"`
+	Summary     string `json:"summary"`
+	RefID       string `json:"refId"`
+	AmountMinor *int64 `json:"amountMinor,omitempty"`
+}
+
+// CRMCustomerCollectionItem contains the CRM UI's richer customer profile.
+// Keep it separate from CRMCustomerSummary, which is exposed to agent tools.
+type CRMCustomerCollectionItem struct {
+	ID                     string                    `json:"id"`
+	Name                   string                    `json:"name"`
+	Email                  *string                   `json:"email"`
+	OwnerUserID            *string                   `json:"ownerUserId"`
+	OwnerName              *string                   `json:"ownerName"`
+	OwnerEmail             *string                   `json:"ownerEmail"`
+	Phone                  *string                   `json:"phone"`
+	PreferredContactMethod string                    `json:"preferredContactMethod"`
+	DoNotContact           bool                      `json:"doNotContact"`
+	UpdatedByUserID        *string                   `json:"updatedByUserId"`
+	UpdatedByName          *string                   `json:"updatedByName"`
+	UpdatedByEmail         *string                   `json:"updatedByEmail"`
+	Tags                   []string                  `json:"tags"`
+	Notes                  *string                   `json:"notes"`
+	CreatedAt              string                    `json:"createdAt"`
+	UpdatedAt              string                    `json:"updatedAt"`
+	DeactivatedAt          *string                   `json:"deactivatedAt"`
+	MergedRecords          []CRMCustomerMergedRecord `json:"mergedRecords"`
+	PurchaseCount          int64                     `json:"purchaseCount"`
+	LifetimeSpendMinor     int64                     `json:"lifetimeSpendMinor"`
+	LastActivityAt         string                    `json:"lastActivityAt"`
+	NextStep               *CRMCustomerNextStep      `json:"nextStep"`
+}
+
+type ListCRMCustomerCollectionOutput struct {
+	Customers []CRMCustomerCollectionItem `json:"customers"`
+}
+
 type ListCustomersOutput struct {
 	Customers []CRMCustomerSummary `json:"customers"`
 }

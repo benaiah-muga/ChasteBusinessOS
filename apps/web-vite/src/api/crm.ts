@@ -140,12 +140,14 @@ async function get<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal):
 }
 
 export async function fetchCrmDeals(signal?: AbortSignal): Promise<CrmDeal[]> {
-  const result = await get("/api/deals", z.object({ deals: z.array(CrmDealSchema) }), signal);
+  const path = crmReadsUseGo() ? "/api/crm?deals=1" : "/api/deals";
+  const result = await get(path, z.object({ deals: z.array(CrmDealSchema) }), signal);
   return result.deals;
 }
 
 export async function fetchCrmCustomers(signal?: AbortSignal): Promise<CrmCustomer[]> {
-  const result = await get("/api/customers", z.object({ customers: z.array(CrmCustomerSchema) }), signal);
+  const path = crmReadsUseGo() ? "/api/crm?customers=1" : "/api/customers";
+  const result = await get(path, z.object({ customers: z.array(CrmCustomerSchema) }), signal);
   return result.customers;
 }
 
@@ -156,14 +158,21 @@ export async function fetchCrmTimeline(customerId: string, signal?: AbortSignal)
   return result.entries;
 }
 
-export async function fetchCrmTasks(signal?: AbortSignal): Promise<CrmTask[]> {
-  const result = await get("/api/crm?tasks=1", z.object({ tasks: z.array(CrmTaskSchema) }), signal);
+export async function fetchCrmTasks(signal?: AbortSignal, options: { openOnly?: boolean } = {}): Promise<CrmTask[]> {
+  const query = new URLSearchParams({ tasks: "1" });
+  if (options.openOnly) query.set("open", "1");
+  const result = await get(`/api/crm?${query}`, z.object({ tasks: z.array(CrmTaskSchema) }), signal);
   return result.tasks;
 }
 
 export async function fetchCrmViews(signal?: AbortSignal): Promise<SavedCustomerView[]> {
-  const result = await get("/api/crm/views", z.object({ views: z.array(SavedCustomerViewSchema) }), signal);
+  const path = crmReadsUseGo() ? "/api/crm?views=1" : "/api/crm/views";
+  const result = await get(path, z.object({ views: z.array(SavedCustomerViewSchema) }), signal);
   return result.views;
+}
+
+function crmReadsUseGo(): boolean {
+  return typeof __GO_CRM_READS__ === "undefined" || __GO_CRM_READS__;
 }
 
 export type CrmActionOutcome<T = Record<string, unknown>> =

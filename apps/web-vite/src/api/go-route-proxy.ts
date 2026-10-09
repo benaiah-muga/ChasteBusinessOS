@@ -36,6 +36,7 @@ export type GoRouteProxyFlags = {
   notifications: boolean;
   notificationsWrite: boolean;
   inventoryRead: boolean;
+  crmReads: boolean;
   posRead: boolean;
   posShiftSummary: boolean;
   posCustomers: boolean;
@@ -153,6 +154,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     notifications: env.CHASTE_GO_NOTIFICATIONS_ROUTE === "1",
     notificationsWrite: env.CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE === "1",
     inventoryRead: env.CHASTE_GO_INVENTORY_READ_ROUTE === "1",
+    crmReads: env.CHASTE_GO_CRM_READS !== "0",
     posRead: env.CHASTE_GO_POS_READ_ROUTE !== "0",
     posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
     posCustomers: goPosCustomersSliceFromEnv(env),
@@ -193,6 +195,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.notifications && method === "GET" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
   if (flags.notificationsWrite && method === "POST" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
   if (flags.inventoryRead && method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
+  if (flags.crmReads && method === "GET" && isGoCrmReadRequest(path)) return true;
   if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;
   if (flags.posCustomers && method === "GET" && /^\/api\/pos\/customers(?:\?.*)?$/.test(path)) return true;
   if (flags.posShiftSummary && method === "POST" && /^\/api\/pos\/shift-summary(?:\?.*)?$/.test(path)) return true;
@@ -200,6 +203,35 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.setup && isGoSetupRequest(method, path)) return true;
   if (flags.ledger && method === "GET" && /^\/api\/ledger(?:\?.*)?$/.test(path)) return true;
   return flags.metrics && method === "GET" && /^\/api\/metrics(?:\?.*)?$/.test(path);
+}
+
+function isGoCrmReadRequest(path: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(path, "http://vite.local");
+  } catch {
+    return false;
+  }
+  if (url.origin !== "http://vite.local" || url.pathname !== "/api/crm" || url.hash) return false;
+
+  const params = url.searchParams;
+  const selectors = ["deals", "customers", "tasks", "views", "timeline"];
+  const activeSelectors = selectors.filter((key) => params.has(key));
+  if (activeSelectors.length !== 1) return false;
+
+  const selector = activeSelectors[0];
+  if (!selector) return false;
+  if (selector === "timeline") {
+    const timelineId = params.get("timeline");
+    return params.getAll("timeline").length === 1 && timelineId !== null &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(timelineId) && params.size === 1;
+  }
+  if (selector === "tasks") {
+    return params.getAll("tasks").length === 1 && params.get("tasks") === "1" &&
+      params.size === (params.has("open") ? 2 : 1) &&
+      (!params.has("open") || (params.getAll("open").length === 1 && (params.get("open") === "1" || params.get("open") === "0")));
+  }
+  return params.getAll(selector).length === 1 && params.get(selector) === "1" && params.size === 1;
 }
 
 function isGoAuthRequest(url: string): boolean {

@@ -130,6 +130,9 @@ func crmReadRequest(query url.Values) (string, json.RawMessage, error) {
 	if query.Get("deals") != "" {
 		return "crm.listDeals", json.RawMessage(`{}`), nil
 	}
+	if query.Get("customers") != "" {
+		return "crm.listCustomerCollection", json.RawMessage(`{}`), nil
+	}
 	if query.Get("views") != "" {
 		return "crm.listCustomerViews", json.RawMessage(`{}`), nil
 	}
@@ -154,7 +157,8 @@ func verifyCRMReadAssertion(secret, token string, now time.Time) (goCRMReadAsser
 		!isUUID(claims.Subject) || !isUUID(claims.OrganizationID) || claims.ActorID == nil ||
 		!isUUID(*claims.ActorID) || *claims.ActorID != claims.Subject || claims.ActorType != "human" ||
 		strings.TrimSpace(claims.AuthSessionID) == "" || claims.ExpiresAt-claims.IssuedAt > 30 ||
-		(claims.CapabilityID != "crm.customerTimeline" && claims.CapabilityID != "crm.listTasks" && claims.CapabilityID != "crm.listDeals" && claims.CapabilityID != "crm.listCustomerViews") {
+		(claims.CapabilityID != "crm.customerTimeline" && claims.CapabilityID != "crm.listTasks" && claims.CapabilityID != "crm.listDeals" &&
+			claims.CapabilityID != "crm.listCustomers" && claims.CapabilityID != "crm.listCustomerCollection" && claims.CapabilityID != "crm.listCustomerViews") {
 		return goCRMReadAssertionClaims{}, authbridge.ErrInvalidAssertion
 	}
 	if claims.Permissions == nil || !sort.StringsAreSorted(claims.Permissions) {

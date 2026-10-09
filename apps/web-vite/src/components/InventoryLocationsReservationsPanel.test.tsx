@@ -122,7 +122,13 @@ describe("InventoryLocationsReservationsPanel", () => {
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: { released: true } }));
     vi.stubGlobal("fetch", fetchMock);
     const onChanged = vi.fn().mockResolvedValue(undefined);
-    render(<InventoryLocationsReservationsPanel items={items} locations={locations} reservations={reservations} onChanged={onChanged} />);
+    render(<InventoryLocationsReservationsPanel
+      items={items}
+      locations={locations}
+      reservations={reservations}
+      onChanged={onChanged}
+      retryScope={{ actorId: "0d57752c-41c1-4aae-9c78-b51d9ec07d62", organizationId: "2beae091-6921-4e49-97b1-5049196e0ac5" }}
+    />);
 
     fireEvent.change(screen.getByLabelText("Stock item"), { target: { value: "BAG-50" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1.25" } });

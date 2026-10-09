@@ -267,6 +267,13 @@ signed Go `crm.listTasks` capability. It requires `pnpm dev:api`, preserves
 open-task filtering and the existing response shape, and fails closed on
 unavailable or invalid Go results. Other CRM reads remain on their current
 handlers. The flag defaults to `0`.
+Vite CRM list reads for deals, customers, tasks, saved views, and customer
+timelines use Go's direct session-authenticated `GET /api/crm` API. The Go API
+resolves the Better Auth session and active organization itself, so Vite does
+not rely on Next.js to mint a read assertion. The Vite dev proxy selector
+`CHASTE_GO_CRM_READS` and Go mount `GO_CRM_READ_ROUTE` are enabled in
+`.env.example`; set both to `0` to temporarily restore the legacy read routes.
+Go unavailability fails closed without retrying through Next.js.
 `GO_CRM_IMPORT_WRITES=1` opts customer imports and customer import undo into
 the signed Go capability bridge. It requires `pnpm dev:api`; product imports
 remain on `GO_INVENTORY_IMPORT_WRITES`. The flag defaults to `0`, and uncertain

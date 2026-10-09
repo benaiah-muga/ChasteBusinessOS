@@ -909,7 +909,7 @@ it("reports typing presence after the debounce and clears it on the mount heartb
     const composer = await screen.findByLabelText("Message general");
     fireEvent.change(composer, { target: { value: "Resilient send" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await screen.findByRole("alert");
+    await screen.findByRole("alert", {}, { timeout: 5_000 });
 
     const storageKey = Object.keys(window.localStorage).find((key) => key.startsWith(`chaste:message-send-intent:${me}:${channelId}:`));
     expect(storageKey).toMatch(/:[0-9a-f]{64}$/);

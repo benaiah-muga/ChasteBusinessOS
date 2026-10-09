@@ -6,6 +6,10 @@ import { submitCrmTaskMutation } from "../api/crm";
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
 
+const isDealsRead = (path: string): boolean => path === "/api/deals" || path === "/api/crm?deals=1";
+const isCustomersRead = (path: string): boolean => path === "/api/customers" || path === "/api/crm?customers=1";
+const isCustomerViewsRead = (path: string): boolean => path === "/api/crm/views" || path === "/api/crm?views=1";
+
 function customer(name = "Northwind") {
   return { id: customerId, name, email: "contact@northwind.test", phone: null, preferredContactMethod: "email", doNotContact: false, ownerUserId: null, ownerName: null, tags: ["renewal"], notes: "Priority account", nextStep: null, lastActivityAt: "2026-09-28T12:00:00.000Z", deactivatedAt: null };
 }
@@ -22,16 +26,17 @@ afterEach(() => {
 
 describe("Vite CRM page", () => {
   it("shows the duplicate warning returned after customer creation", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", false);
     const createdId = "d79382ac-743f-4d27-8b5f-92f2cba74d8e";
     const duplicateWarning = 'Looks like existing customer "Northwind" (matched by email). Merge or deactivate one of them.';
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
       if (path === "/api/customers" && init?.method === "POST") return Response.json({ ok: true, data: { customerId: createdId, duplicateWarning } });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -51,10 +56,10 @@ describe("Vite CRM page", () => {
     vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", false);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -74,14 +79,14 @@ describe("Vite CRM page", () => {
     let legacyWrites = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
       if (path === "/api/customers" && init?.method === "POST") {
         legacyWrites += 1;
         return Response.json({ ok: true, data: { customerId, duplicateWarning: null } });
       }
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/capabilities/execute") {
         const body = JSON.parse(String(init?.body)) as (typeof goBodies)[number];
         goBodies.push(body);
@@ -133,11 +138,11 @@ describe("Vite CRM page", () => {
     const otherOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
       if (path === "/api/customers" && init?.method === "POST") return createResponse;
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/capabilities/execute") return createResponse;
       return new Response(null, { status: 404 });
     });
@@ -172,10 +177,10 @@ describe("Vite CRM page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/deals" && init?.method === "POST") return dealResponse;
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -208,10 +213,10 @@ describe("Vite CRM page", () => {
         legacyCreateCalls += 1;
         return Response.json({ ok: true, data: { dealId } });
       }
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/capabilities/execute") {
         createCalls += 1;
         return createCalls === 1
@@ -263,10 +268,10 @@ describe("Vite CRM page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/deals" && init?.method === "POST") throw new Error("deal create must not fall back to the legacy route");
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/capabilities/execute") {
         createCalls += 1;
         return createCalls === 1
@@ -300,10 +305,10 @@ describe("Vite CRM page", () => {
     vi.stubGlobal("__GO_CRM_DEAL_CREATE__", false);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -324,10 +329,10 @@ describe("Vite CRM page", () => {
     const otherOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/capabilities/execute") return createResponse;
       return new Response(null, { status: 404 });
     });
@@ -367,10 +372,10 @@ describe("Vite CRM page", () => {
     }];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [customer(), inactiveCustomer] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer(), inactiveCustomer] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: savedViews });
+      if (isCustomerViewsRead(path)) return Response.json({ views: savedViews });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -389,10 +394,10 @@ describe("Vite CRM page", () => {
   it("requires a lost reason and restores a stage move that is waiting for approval", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals" && init?.method !== "POST") return Response.json({ deals: [deal("proposal")] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path) && init?.method !== "POST") return Response.json({ deals: [deal("proposal")] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/deals" && init?.method === "POST") return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
       return new Response(null, { status: 404 });
     });
@@ -417,10 +422,10 @@ describe("Vite CRM page", () => {
     vi.stubGlobal("__GO_CRM_DEAL_STAGE_MOVE__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals" && init?.method !== "POST") return Response.json({ deals: [deal("proposal")] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path) && init?.method !== "POST") return Response.json({ deals: [deal("proposal")] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/capabilities/execute") return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
       return new Response(null, { status: 404 });
     });
@@ -456,13 +461,13 @@ describe("Vite CRM page", () => {
     let taskReads = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") {
         taskReads += 1;
         return Response.json({ tasks: [] });
       }
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/crm" && init?.method === "POST") {
         return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
       }
@@ -502,8 +507,8 @@ describe("Vite CRM page", () => {
     let teamReads = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") {
         taskReads += 1;
         return Response.json({ tasks: taskReads === 1 ? [] : [{
@@ -518,7 +523,7 @@ describe("Vite CRM page", () => {
           assigneeName: "Avery",
         }] });
       }
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team" && init?.method !== "POST") {
         teamReads += 1;
         if (teamReads === 1) return new Response(null, { status: 503 });
@@ -557,13 +562,13 @@ describe("Vite CRM page", () => {
     const teamResponse = new Promise<Response>((resolve) => { resolveTeam = resolve; });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") {
         taskReads += 1;
         return Response.json({ tasks: [] });
       }
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team" && init?.method !== "POST") {
         teamReads += 1;
         return teamResponse;
@@ -600,10 +605,10 @@ describe("Vite CRM page", () => {
     let timelineReads = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       if (path === `/api/crm?timeline=${customerId}`) {
         timelineReads += 1;
@@ -647,10 +652,10 @@ describe("Vite CRM page", () => {
     const pendingResponse = new Promise<Response>((resolve) => { resolvePending = resolve; });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
       if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [] });
       if (path === "/api/capabilities/execute") {
@@ -707,10 +712,10 @@ describe("Vite CRM page", () => {
     let attempts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [] });
       if (path === "/api/capabilities/execute") {
@@ -756,10 +761,10 @@ describe("Vite CRM page", () => {
     const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [] });
       if (path === "/api/capabilities/execute") return updateResponse;
@@ -792,10 +797,10 @@ describe("Vite CRM page", () => {
     const submittedInputs: unknown[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
       if (path === "/api/capabilities/execute") {
         attempts += 1;
@@ -839,10 +844,10 @@ describe("Vite CRM page", () => {
     let currentCustomer = customer();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/customers" && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as {
           action: string;
@@ -885,11 +890,11 @@ describe("Vite CRM page", () => {
     const customers = [customer(), { ...customer("Contoso"), id: secondCustomerId, tags: [] }];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
       if (path === "/api/customers" && init?.method === "POST") return Response.json({ ok: true, data: { updatedCount: 2, previous: [] } });
-      if (path === "/api/customers") return Response.json({ customers });
+      if (isCustomersRead(path)) return Response.json({ customers });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
       return new Response(null, { status: 404 });
     });
@@ -931,10 +936,10 @@ describe("Vite CRM page", () => {
     ];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       return new Response(null, { status: 404 });
     });
@@ -964,10 +969,10 @@ describe("Vite CRM page", () => {
     const taskId = "99999999-9999-4999-8999-999999999999";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [{ id: taskId, title: "Review renewal", doneAt: null }] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 });
       return new Response(null, { status: 404 });
@@ -992,10 +997,10 @@ describe("Vite CRM page", () => {
     let capabilityWrites = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [task] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
         capabilityWrites += 1;
@@ -1040,13 +1045,13 @@ describe("Vite CRM page", () => {
     let capabilityWrites = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [
         { id: taskId, title: "Review renewal", dueAt: null, doneAt: null, assigneeUserId: null },
         { id: otherTaskId, title: "Check shipment", dueAt: null, doneAt: null, assigneeUserId: null },
       ] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
         capabilityWrites += 1;
@@ -1081,10 +1086,10 @@ describe("Vite CRM page", () => {
     const exportedCustomer = { ...customer(), name: "=1+1" };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [exportedCustomer] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [exportedCustomer] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
     const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
@@ -1121,10 +1126,10 @@ describe("Vite CRM page", () => {
     const firstTimeline = new Promise<Response>((resolve) => { resolveFirstTimeline = resolve; });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [customer(), secondCustomer] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer(), secondCustomer] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       if (path === `/api/crm?timeline=${customerId}`) return firstTimeline;
       if (path === `/api/crm?timeline=${secondCustomerId}`) return Response.json({ entries: [
@@ -1160,10 +1165,10 @@ describe("Vite CRM page", () => {
     });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       if (path === `/api/crm?timeline=${customerId}`) return pendingTimeline;
       return new Response(null, { status: 404 });
@@ -1191,10 +1196,10 @@ describe("Vite CRM page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/deals" && init?.method === "POST") return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified" } });
-      if (path === "/api/deals") return Response.json({ deals: [deal("lead")] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [deal("lead")] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified" } });
       return new Response(null, { status: 404 });
     });
@@ -1214,10 +1219,10 @@ describe("Vite CRM page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/deals" && init?.method === "POST") return Response.json({ ok: true, data: { moved: true, stage: "qualified" } });
-      if (path === "/api/deals") return Response.json({ deals: [deal("proposal")] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [deal("proposal")] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1245,10 +1250,10 @@ describe("Vite CRM page", () => {
     const taskId = "44444444-4444-4444-8444-444444444444";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [{ id: taskId, title: "Schedule Northwind review", doneAt: "2026-09-19T12:00:00.000Z" }] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/crm?timeline=" + customerId) return Response.json({ entries: [] });
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ draft: "Hello Northwind, can we review invoice 7?", sources: [{ kind: "invoice", date: "2026-09-20T12:00:00.000Z", refId: dealId, summary: "Invoice #7 is awaiting payment" }, { kind: "task", date: "2026-09-21T12:00:00.000Z", refId: taskId, summary: "Schedule Northwind review" }] });
       return new Response(null, { status: 404 });
@@ -1273,10 +1278,10 @@ describe("Vite CRM page", () => {
     const protectedCustomer = { ...customer(), doNotContact: true };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers") return Response.json({ customers: [protectedCustomer] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [protectedCustomer] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [] });
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ draft: "Unexpected draft", sources: [] });
       return new Response(null, { status: 404 });
@@ -1304,10 +1309,10 @@ describe("Vite CRM page", () => {
     const rows = Array.from({ length: 45 }, (_, index) => `Customer ${index + 1},${index + 1} Main St,person${index + 1}@example.test,555000${String(index + 1).padStart(4, "0")}`).join("\n");
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       if (path === "/api/import" && init?.method === "POST") return Response.json({ inserted: 45, skippedDuplicates: 0, createdIds: [] });
       return new Response(null, { status: 404 });
@@ -1384,10 +1389,10 @@ describe("Vite CRM page", () => {
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/customers" && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { action: string };
         return Response.json({ ok: true, data: body.action === "merge" ? undoSnapshot : {} });
@@ -1431,10 +1436,10 @@ describe("Vite CRM page", () => {
     const importPosts: Array<{ body: string; response: Response }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/import" && init?.method === "POST") {
         const body = String(init.body);
         const requestBody = JSON.parse(body) as { action?: string };
@@ -1475,10 +1480,10 @@ describe("Vite CRM page", () => {
     const deactivationPosts: unknown[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals") return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [
         { kind: "invoice", date: "2026-09-20T12:00:00.000Z", refId: "invoice-history-1", summary: "Invoice #42 (sent, UGX 120,000)" },
       ] });

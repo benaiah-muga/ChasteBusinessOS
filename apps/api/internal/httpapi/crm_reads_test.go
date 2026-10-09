@@ -240,6 +240,7 @@ func TestCRMReadRequestMatchesLegacyModePrecedence(t *testing.T) {
 		{query: url.Values{"tasks": {"1"}, "open": {"1"}}, capID: "crm.listTasks", input: `{"openOnly":true}`},
 		{query: url.Values{"tasks": {"1"}}, capID: "crm.listTasks", input: `{}`},
 		{query: url.Values{"deals": {"1"}}, capID: "crm.listDeals", input: `{}`},
+		{query: url.Values{"customers": {"1"}}, capID: "crm.listCustomerCollection", input: `{}`},
 		{query: url.Values{"views": {"1"}}, capID: "crm.listCustomerViews", input: `{}`},
 	} {
 		capID, input, err := crmReadRequest(test.query)
@@ -249,5 +250,11 @@ func TestCRMReadRequestMatchesLegacyModePrecedence(t *testing.T) {
 	}
 	if _, _, err := crmReadRequest(url.Values{}); err == nil {
 		t.Fatal("empty query unexpectedly selected a Go CRM capability")
+	}
+	for _, capabilityID := range []string{"crm.listCustomers", "crm.listCustomerCollection"} {
+		token := signCRMReadAssertion(t, capabilityID, `{}`, []string{"crm.read"})
+		if _, err := verifyCRMReadAssertion(assertionSecret, token, time.Now()); err != nil {
+			t.Errorf("signed assertion for %s was rejected: %v", capabilityID, err)
+		}
 	}
 }

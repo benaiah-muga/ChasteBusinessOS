@@ -594,9 +594,9 @@ new owners and the manifest shows zero legacy runtime paths.
     formula protection, and task views for due today, overdue, unassigned, and
     all tasks with an option to include completed work. Opening a task source
     from an AI draft reveals completed tasks so the linked record receives focus.
-    Focused API and component tests pass. Keep API and page ownership on the
-    existing defaults until runtime and parity proofs pass; browser proof
-    remains deferred by user direction.
+     Focused API and component tests pass. Item 185 routes the Vite list reads
+     directly to Go. CRM mutations and other legacy routes remain to be cut
+     over; authenticated browser proof remains open.
 26. (Done) Add an opt-in Go read for the approvals inbox and recent history
     behind `GO_APPROVALS_READ`. Bind the complete TypeScript capability
     permission map to the signed request, and recheck the verified session,
@@ -1855,4 +1855,18 @@ new owners and the manifest shows zero legacy runtime paths.
      the exact Next proxy peer CIDRs in `GO_API_TRUSTED_PROXY_CIDRS` can supply
      the forwarded scheme; an unset list trusts no proxy. Proxy, selector,
      response-contract, and trusted-peer tests pass. Browser proof remains
+     open.
+185. (Implemented) Route Vite CRM reads for deals, customers, tasks, saved
+     views, and customer timelines to Go's direct session-authenticated API.
+     Go resolves the Better Auth cookie or bearer token, validates the optional
+     organization selector, and executes the corresponding CRM read capability
+     with claims built inside Go. The full CRM customer collection uses a
+     human-only `crm.listCustomerCollection` capability; the summary
+     `crm.listCustomers` agent tool remains unchanged. SalesPage uses the
+     POS-scoped customer endpoint so `pos.sell` access remains available.
+     Pair `CHASTE_GO_CRM_READS=1` with `GO_CRM_READ_ROUTE=1`; both are enabled
+     in the local template and can be set to `0` to restore legacy reads. Keep
+     the signed assertion route for legacy Next callers; Vite must not depend
+     on Next to mint CRM read assertions. CRM writes and AI follow-up drafting
+     remain on their existing routes. Authenticated browser proof remains
      open.

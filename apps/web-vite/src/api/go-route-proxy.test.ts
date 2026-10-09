@@ -295,7 +295,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "posRead", "posShiftSummary", "posCustomers"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "posCustomers"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -458,6 +458,44 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "HEAD", "/api/inventory")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/inventory/history")).toBe(false);
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "GET", "/api/inventory")).toBe(false);
+  });
+
+  it("routes supported CRM reads to Go by default and allows a legacy rollback", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(defaults.crmReads).toBe(true);
+    for (const query of [
+      "deals=1",
+      "customers=1",
+      "tasks=1",
+      "tasks=1&open=1",
+      "tasks=1&open=0",
+      "views=1",
+      "timeline=aaaaaaaa-0000-4000-8000-000000000001",
+    ]) {
+      expect(isGoRouteRequest(defaults, "GET", `/api/crm?${query}`), query).toBe(true);
+    }
+    for (const [method, url] of [
+      ["POST", "/api/crm?deals=1"],
+      ["GET", "/api/crm"],
+      ["GET", "/api/crm?unknown=1"],
+      ["GET", "/api/crm?deals=1&tasks=1"],
+      ["GET", "/api/crm?deals=1&deals=1"],
+      ["GET", "/api/crm?tasks=anything"],
+      ["GET", "/api/crm?tasks=0"],
+      ["GET", "/api/crm?tasks=1&open=true"],
+      ["GET", "/api/crm?tasks=1&open=1&open=1"],
+      ["GET", "/api/crm?timeline=not-a-uuid"],
+      ["GET", "/api/crm?timeline=aaaaaaaa-0000-4000-8000"],
+      ["GET", "/api/crm?views=1&extra=1"],
+      ["GET", "/api/crm/views"],
+      ["GET", "/api/crm/extra?deals=1"],
+    ]) {
+      expect(isGoRouteRequest(defaults, method, url), `${method} ${url}`).toBe(false);
+    }
+
+    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_CRM_READS: "0" });
+    expect(disabled.crmReads).toBe(false);
+    expect(isGoRouteRequest(disabled, "GET", "/api/crm?deals=1")).toBe(false);
   });
 
   it("routes only exact GET /api/pos requests when the POS read selector is enabled", () => {

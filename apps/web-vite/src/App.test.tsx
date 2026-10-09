@@ -139,8 +139,8 @@ beforeEach(() => {
       roles: [{ id: "role-bookkeeper", key: "bookkeeper", name: "Bookkeeper", isSystem: false, permissions: ["accounting.read"] }],
       catalog: ["accounting.read", "accounting.write"],
     });
-    if (path === "/api/deals") return Response.json({ deals: [] });
-    if (path === "/api/customers") return Response.json({ customers: [] });
+    if (path === "/api/crm?deals=1") return Response.json({ deals: [] });
+    if (path === "/api/crm?customers=1") return Response.json({ customers: [] });
     if (path.startsWith("/api/documents?id=")) return Response.json({ document: {
       id: "document-1",
       title: "Supplier agreement",
@@ -162,7 +162,7 @@ beforeEach(() => {
       folder: "Suppliers",
     }] });
     if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
-    if (path === "/api/crm/views") return Response.json({ views: [] });
+    if (path === "/api/crm?views=1") return Response.json({ views: [] });
     if (path === "/api/inventory") return Response.json({
       items: [{ sku: "MUG-1", name: "Ceramic mug", kind: "goods", unitLabel: "unit", salePriceMinor: 1250, imageUrl: null, tags: ["Kitchen"], barcode: "123456", onHandThousandths: 4000, valueMinor: 2000, avgUnitCostMinor: 500, reservedThousandths: 1000, availableThousandths: 3000, totalValueMinor: 2000, reorderPointThousandths: 5000, reorderNeeded: true }],
       totalValueMinor: 2000,
@@ -420,7 +420,7 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Good to see you." })).not.toBeNull();
     expect(window.location.pathname).toBe("/login");
-    expect(fetchMock.mock.calls.some(([input]) => ["/api/deals", "/api/customers", "/api/crm", "/api/crm/views"].includes(String(input)))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => ["/api/deals", "/api/customers", "/api/crm", "/api/crm?deals=1", "/api/crm?customers=1", "/api/crm?views=1", "/api/crm/views"].includes(String(input)))).toBe(false);
   });
 
   it("loads the authenticated home and signs out through Better Auth", async () => {
@@ -645,8 +645,8 @@ describe("Vite app frame", () => {
     expect(screen.getByRole("link", { name: "CRM" }).getAttribute("aria-current")).toBe("page");
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/deals", expect.objectContaining({ credentials: "same-origin" }));
-      expect(fetchMock).toHaveBeenCalledWith("/api/customers", expect.objectContaining({ credentials: "same-origin" }));
+      expect(fetchMock).toHaveBeenCalledWith("/api/crm?deals=1", expect.objectContaining({ credentials: "same-origin" }));
+      expect(fetchMock).toHaveBeenCalledWith("/api/crm?customers=1", expect.objectContaining({ credentials: "same-origin" }));
     });
   });
 

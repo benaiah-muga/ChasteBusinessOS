@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -7,16 +7,55 @@ const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
 afterEach(() => { vi.unstubAllGlobals(); window.localStorage.clear(); });
 
 describe("CRM API client", () => {
-  it("validates the legacy deals list and carries the same-origin session", async () => {
+  it("reads and validates deals directly from the Go CRM endpoint with the same-origin session", async () => {
     const deal = { id: dealId, title: "Renewal", stage: "proposal", valueMinor: 250000, note: null, customerId, customerName: "Northwind", updatedAt: "2026-09-29T12:00:00.000Z" };
     const fetchMock = vi.fn(async () => Response.json({ deals: [deal] }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchCrmDeals()).resolves.toEqual([deal]);
-    expect(fetchMock).toHaveBeenCalledWith("/api/deals", expect.objectContaining({ credentials: "same-origin", headers: { accept: "application/json" }, signal: expect.any(AbortSignal) }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/crm?deals=1", expect.objectContaining({ credentials: "same-origin", headers: { accept: "application/json" }, signal: expect.any(AbortSignal) }));
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ deals: [{ id: dealId }] })));
     await expect(fetchCrmDeals()).rejects.toBeInstanceOf(CrmApiError);
+  });
+
+  it("uses the direct Go CRM read selectors for customers, tasks, and saved views", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ customers: [{ id: customerId, name: "Northwind" }] }))
+      .mockResolvedValueOnce(Response.json({ tasks: [{ id: dealId, title: "Call Northwind" }] }))
+      .mockResolvedValueOnce(Response.json({ tasks: [{ id: dealId, title: "Call Northwind" }] }))
+      .mockResolvedValueOnce(Response.json({ views: [{ id: dealId, name: "Active", filters: { status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCrmCustomers()).resolves.toHaveLength(1);
+    await expect(fetchCrmTasks()).resolves.toHaveLength(1);
+    await expect(fetchCrmTasks(undefined, { openOnly: true })).resolves.toHaveLength(1);
+    await expect(fetchCrmViews()).resolves.toHaveLength(1);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/crm?customers=1",
+      "/api/crm?tasks=1",
+      "/api/crm?tasks=1&open=1",
+      "/api/crm?views=1",
+    ]);
+    for (const [, init] of fetchMock.mock.calls) expect(init?.credentials).toBe("same-origin");
+  });
+
+  it("restores the legacy deals, customers, and views URLs when Go CRM reads are disabled", async () => {
+    vi.stubGlobal("__GO_CRM_READS__", false);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ deals: [{ id: dealId, title: "Renewal", stage: "proposal", valueMinor: 250000, updatedAt: "2026-09-29T12:00:00.000Z" }] }))
+      .mockResolvedValueOnce(Response.json({ customers: [{ id: customerId, name: "Northwind" }] }))
+      .mockResolvedValueOnce(Response.json({ views: [{ id: dealId, name: "Active", filters: { status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCrmDeals()).resolves.toHaveLength(1);
+    await expect(fetchCrmCustomers()).resolves.toHaveLength(1);
+    await expect(fetchCrmViews()).resolves.toHaveLength(1);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/deals",
+      "/api/customers",
+      "/api/crm/views",
+    ]);
   });
 
   it("encodes the customer timeline identifier and validates the timeline result", async () => {
