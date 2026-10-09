@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Payroll now reads payroll runs through Go's `hr.report` capability and
+  creates drafts through `hr.createPayrollRun` behind paired
+  `CHASTE_GO_HR_PAYROLL=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors.
+  Draft attempts are scoped to actor and organization, and pending or uncertain
+  actions can be retried with the same intent after reload. Go 404 and uncertain
+  results never fall back to the legacy writer. Payroll execution, void, and
+  reversal controls remain outside this Vite slice.
 - Vite supplier payment runs can use Go's governed purchasing capabilities for
   eligible bill reads, draft creation, cancellation and restoration, approval,
   and reversal behind paired `CHASTE_GO_PURCHASING_PAYMENT_RUNS=1` and

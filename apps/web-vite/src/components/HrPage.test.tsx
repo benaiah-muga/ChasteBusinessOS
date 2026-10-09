@@ -70,6 +70,49 @@ afterEach(() => {
 });
 
 describe("Vite People page", () => {
+  it("loads Payroll from Go and retries a pending draft with the same intent after reload", async () => {
+    window.history.replaceState(null, "", "/hr?tab=payroll");
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    const actorId = "22222222-2222-4222-8222-222222222222";
+    const organizationId = "33333333-3333-4333-8333-333333333333";
+    const intentIds: string[] = [];
+    let writes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: report });
+        expect(body).toMatchObject({ capabilityId: "hr.createPayrollRun", input: { year: 2026, month: 9 }, intentId: expect.any(String) });
+        intentIds.push(body.intentId);
+        writes += 1;
+        return writes === 1
+          ? Response.json({ pendingApproval: true, reason: "Payroll approval required." }, { status: 202 })
+          : Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } });
+      }
+      throw new Error(`Unexpected payroll route: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
+    expect(await screen.findByRole("heading", { name: "Prepare a payroll run" })).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("Payroll period"), { target: { value: "2026-09" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft run" }));
+    expect(await screen.findByRole("button", { name: "Retry exact payroll draft" })).not.toBeNull();
+    expect((screen.getByRole("button", { name: "Create draft run" }) as HTMLButtonElement).disabled).toBe(true);
+    first.unmount();
+
+    render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact payroll draft" }));
+    expect(await screen.findByText("Payroll draft completed.")).not.toBeNull();
+    expect(intentIds).toHaveLength(2);
+    expect(intentIds[1]).toBe(intentIds[0]);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/capabilities/execute" && init?.method === "POST")).toBe(true);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
+  });
+
   it("loads the overview and exposes keyboard accessible section tabs", async () => {
     const fetchMock = hrFetch();
     vi.stubGlobal("fetch", fetchMock);

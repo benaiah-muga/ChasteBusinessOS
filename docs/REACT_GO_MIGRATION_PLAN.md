@@ -2025,3 +2025,12 @@ new owners and the manifest shows zero legacy runtime paths.
      payment run schedule, remittance, cancel, restore, approval, and reversal
      workflows in Vite. Add focused Go executor, Vite API, proxy, and page
      coverage.
+199. Route only the Vite Payroll tab's run report and draft creation through
+     Go's `hr.report` and `hr.createPayrollRun` capabilities behind paired
+     `CHASTE_GO_HR_PAYROLL=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`
+     selectors. Keep other HR tab transports and payroll execution, void, and
+     reversal controls unchanged. Scope durable exact draft attempts by actor
+     and organization, recover pending or uncertain writes after reload, block
+     legacy fallback while unresolved, and fail closed on Go 404. Add focused
+     Vite API, page, and proxy tests; existing Go parser and governed executor
+     tests remain the capability contract proof.

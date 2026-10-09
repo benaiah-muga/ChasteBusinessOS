@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrLeaveAction, readPendingHrTimeAction, submitHrAction, submitHrLeaveAction, submitHrTimeAction } from "./hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
 import type { HrApiError } from "./hr";
 
 const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
@@ -110,6 +110,35 @@ describe("Vite People API", () => {
 
     await expect(fetchGoHrReport()).resolves.toEqual(report);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ credentials: "same-origin", cache: "no-store" }));
+  });
+
+  it("retries payroll draft creation with its exact actor/org intent after pending approval and Go 404", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    const action = { action: "createPayrollRun" as const, year: 2026, month: 9 };
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId?: string; input?: Record<string, unknown>; intentId: string };
+      intentIds.push(body.intentId);
+      expect(body).toMatchObject({ capabilityId: "hr.createPayrollRun", input: { year: 2026, month: 9 }, intentId: expect.any(String) });
+      if (intentIds.length === 1) return Response.json({ pendingApproval: true, reason: "Payroll approval required." }, { status: 202 });
+      if (intentIds.length === 2) return Response.json({ error: "capability not found" }, { status: 404 });
+      return Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitHrPayrollAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(action);
+    vi.stubGlobal("__GO_HR_PAYROLL__", false);
+    await expect(submitHrPayrollAction(action, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+
+    expect(intentIds).toHaveLength(3);
+    expect(intentIds[1]).toBe(intentIds[0]);
+    expect(intentIds[2]).toBe(intentIds[0]);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
   });
 
   it("keeps actor and organization scoped exact leave attempts through approval and Go 404", async () => {

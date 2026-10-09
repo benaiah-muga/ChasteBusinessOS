@@ -17,6 +17,7 @@ declare const __GO_CRM_CUSTOMER_PROFILE_UPDATE__: boolean;
 declare const __GO_HR_EXPENSES__: boolean;
 declare const __GO_HR_LEAVE__: boolean;
 declare const __GO_HR_TIME__: boolean;
+declare const __GO_HR_PAYROLL__: boolean;
 declare const __GO_ACCOUNTING_RECORD_PAYMENT__: boolean;
 declare const __GO_ACCOUNTING_CREATE_INVOICE__: boolean;
 declare const __GO_ACCOUNTING_CREDIT_NOTE__: boolean;
