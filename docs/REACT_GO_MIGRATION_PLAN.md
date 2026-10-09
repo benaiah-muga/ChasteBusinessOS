@@ -2222,10 +2222,12 @@ new owners and the manifest shows zero legacy runtime paths.
      validation, existing error behavior, and currency display. The API flag
      gates the handler server-side, and selected Go errors never retry through
      legacy. Focused Vite API/proxy tests pass; browser proof remains open.
-216. (Implemented) Route the Vite Documents library list and preview detail
+216. (Implemented, default-on) Route the Vite Documents library list and preview detail
      through `documents.listIngestedDocuments` using inputs `{}` and
      `{id, preview:true}`. Gate the Vite selector on the session capability
-     route and enforce `GO_DOCUMENT_INGESTED_READS=1` in Go for every caller.
+     route and enforce default-on `GO_DOCUMENT_INGESTED_READS=1` in Go for
+     every caller. For legacy rollback, set both the Vite and API document
+     selectors to `0`.
      Strictly validate the success envelope and list/detail outputs, preserving
      organization-scoped permission checks, order, preview redaction, and the
      existing content link and editor routes. Selected-Go errors fail closed.

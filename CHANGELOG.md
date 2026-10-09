@@ -68,12 +68,15 @@ The full v1 changelog is preserved at the bottom of this file.
   collaboration, and writes retain their existing routes; selected-Go errors
   do not retry through legacy.
 
-- Vite Documents library list and preview detail can use Go's authenticated
-  `documents.listIngestedDocuments` capability behind
+- Vite Documents library list and preview detail now use Go's authenticated
+  `documents.listIngestedDocuments` capability by default behind
   `CHASTE_GO_DOCUMENT_INGESTED_READS=1` and
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API enforces
-  `GO_DOCUMENT_INGESTED_READS=1` for all callers. Go output is strictly
-  validated, and selected-Go errors do not retry through legacy.
+  `GO_DOCUMENT_INGESTED_READS=1` for all callers. For legacy rollback, set both
+  `CHASTE_GO_DOCUMENT_INGESTED_READS` and `GO_DOCUMENT_INGESTED_READS` to `0`.
+  Go output is strictly validated, and selected-Go errors do not retry through
+  legacy. Authored editor/version selectors and content/write routes are
+  unchanged.
 
 - Vite inventory item history can use the authenticated Go session reader via
   the existing paired `CHASTE_GO_INVENTORY_READ_ROUTE=1` and
