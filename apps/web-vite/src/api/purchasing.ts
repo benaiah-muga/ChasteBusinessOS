@@ -417,6 +417,7 @@ export type PurchasingTaxCode = z.infer<typeof TaxCodeSchema>;
 export type PurchasingWorkspace = z.infer<typeof PurchasingWorkspaceSchema>;
 export type PurchasingAction = z.infer<typeof PurchasingActionSchema>;
 export type PurchasingReceiveGoodsResult = z.infer<typeof ReceiveGoodsOutputSchema>;
+export type PurchasingPayBillAction = z.infer<typeof PayBillSchema>;
 
 export type PurchasingActionOutcome<T = Record<string, unknown>> =
   | { kind: "completed"; data: T }
@@ -427,6 +428,10 @@ export class PurchasingApiError extends Error {
     super(message);
     this.name = "PurchasingApiError";
   }
+}
+
+export function goPurchasingFinanceWritesUseGo(): boolean {
+  return typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__;
 }
 
 function requestSignal(signal?: AbortSignal, timeoutMs = 15_000): AbortSignal {
@@ -644,10 +649,10 @@ async function createPurchaseOrderAttempt(
   }
 }
 
-function parsePurchaseOrderAttempt(raw: string | null): { fingerprint: string; intentId: string } | null {
+function parsePurchaseOrderAttempt(raw: string | null): { fingerprint: string; intentId: string; action?: unknown } | null {
   if (raw === null) return null;
   const parsed: unknown = JSON.parse(raw);
-  const attempt = z.object({ fingerprint: z.string().regex(/^[0-9a-f]{64}$/), intentId: z.string().uuid() }).safeParse(parsed);
+  const attempt = z.object({ fingerprint: z.string().regex(/^[0-9a-f]{64}$/), intentId: z.string().uuid(), action: z.unknown().optional() }).safeParse(parsed);
   if (!attempt.success) throw new Error("saved purchase order attempt is invalid");
   return attempt.data;
 }
@@ -793,7 +798,11 @@ async function createPurchaseFinanceAttempt(action: PurchaseFinanceAction, scope
   if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
   const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      fingerprint,
+      intentId: attempt.intentId,
+      ...(action.action === "payBill" ? { action } : {}),
+    }));
     const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
     if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
     return { ...attempt, intentId: persisted.intentId };
@@ -836,6 +845,13 @@ async function submitPurchaseFinanceCapability(
         intentId: attempt.intentId,
       }),
     }, activity, signal, true);
+    if (response.status === 404 && action.action === "payBill") {
+      throw new PurchasingApiError(
+        404,
+        "Go could not confirm this bill payment capability. Retry the exact payment through Go to recover its result.",
+        true,
+      );
+    }
     if (response.status === 404) {
       ({ response, body } = await request("/api/purchasing", {
         method: "POST",
@@ -853,7 +869,7 @@ async function submitPurchaseFinanceCapability(
     if (!(error instanceof PurchasingApiError)) {
       throw new PurchasingApiError(0, "The request was interrupted. Check the record before trying again.", true);
     }
-    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !(action.action === "payBill" && error.status === 404)) {
       clearPurchaseFinanceAttempt(attempt);
     }
     throw error;
@@ -1002,7 +1018,7 @@ export async function createPurchasingBill(
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = CreateBillSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the bill details and try again.");
-  const useGo = typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__;
+  const useGo = goPurchasingFinanceWritesUseGo();
   if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "recording the bill", signal);
   const goAction = GoCreateBillSchema.safeParse(parsedAction.data);
   if (!goAction.success) throw new PurchasingApiError(0, "Check the bill quantities, prices, tax codes, and PO line references before submitting.");
@@ -1010,17 +1026,43 @@ export async function createPurchasingBill(
 }
 
 export async function payPurchasingBill(
-  action: z.infer<typeof PayBillSchema>,
+  action: unknown,
   signal?: AbortSignal,
   retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = PayBillSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the payment amount and try again.");
-  const useGo = typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__;
+  const useGo = goPurchasingFinanceWritesUseGo();
   if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "paying the bill", signal);
   const goAction = GoPayBillSchema.safeParse(parsedAction.data);
   if (!goAction.success) throw new PurchasingApiError(0, "Enter a positive payment amount within the supported database range.");
   return submitPurchaseFinanceCapability(goAction.data, "purchasing.payBill", PayBillOutputSchema, "paying the bill", signal, retryScope);
+}
+
+export async function readPendingPurchasingBillPayment(
+  retryScope: { actorId: string | null; organizationId: string | null },
+): Promise<PurchasingPayBillAction | null> {
+  if (!retryScope.actorId?.trim() || !retryScope.organizationId?.trim()) return null;
+  const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
+  let scopeDigest: string;
+  try { scopeDigest = await digestHex(JSON.stringify(scope)); }
+  catch { throw new PurchasingApiError(0, "Purchasing retry recovery is unavailable in this browser session.", true); }
+  const storageKey = `${purchaseFinanceAttemptPrefix}payBill:${scopeDigest}`;
+  let stored: ReturnType<typeof parsePurchaseOrderAttempt>;
+  try { stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey)); }
+  catch { throw new PurchasingApiError(0, "Could not read the unresolved bill payment. Enable browser storage and reload.", true); }
+  if (!stored) return null;
+  const action = PayBillSchema.safeParse(stored.action);
+  if (!action.success) {
+    throw new PurchasingApiError(0, "An unresolved bill payment is missing its saved details and cannot be safely retried.", true);
+  }
+  let fingerprint: string;
+  try { fingerprint = await digestHex(JSON.stringify({ ...scope, action: canonicalize(action.data) })); }
+  catch { throw new PurchasingApiError(0, "Could not verify the saved bill payment. Check the bill before retrying.", true); }
+  if (fingerprint !== stored.fingerprint) {
+    throw new PurchasingApiError(0, "The saved bill payment details failed verification. Check the bill before retrying.", true);
+  }
+  return action.data;
 }
 
 export async function creditPurchasingBill(
@@ -1030,7 +1072,7 @@ export async function creditPurchasingBill(
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = BillCreditNoteSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the bill credit amount and reason, then try again.");
-  const useGo = typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__;
+  const useGo = goPurchasingFinanceWritesUseGo();
   if (!useGo) return submit(parsedAction.data, BillCreditNoteOutputSchema, "crediting the bill", signal);
   const goAction = GoBillCreditNoteSchema.safeParse(parsedAction.data);
   if (!goAction.success) throw new PurchasingApiError(0, "Enter a valid bill, positive credit amount, and reason between 3 and 500 characters.");

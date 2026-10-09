@@ -14,6 +14,7 @@ import {
   fetchPurchasingSupplierStatement,
   fetchPurchasingWorkspace,
   payPurchasingBill,
+  readPendingPurchasingBillPayment,
   PurchasingApiError,
   receivePurchasingGoods,
   returnPurchasingGoods,
@@ -22,7 +23,10 @@ import {
   selectPurchasingWinningQuote,
 } from "./purchasing";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+});
 
 const workspace = {
   baseCurrency: "USD",
@@ -402,6 +406,52 @@ describe("governed purchasing writes", () => {
     expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(uncertain.intentId);
     await expect(payPurchasingBill(paymentAction, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { paymentId, entryId, fullyPaid: true } });
     expect(postedBody(fetchMock.mock.calls[3]!).intentId).toBe(uncertain.intentId);
+  });
+
+  it("persists the exact omitted-method payment for reload recovery", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const action = { action: "payBill" as const, billNumber: 91, amountMinor: 1200 };
+    const paymentId = "3c9e3c30-1e5c-4b3c-9d4b-5b3c4d5e6f70";
+    const entryId = "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, reason: "Approval required." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { paymentId, entryId, fullyPaid: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(payPurchasingBill(action, undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Approval required." });
+    const first = postedBody(fetchMock.mock.calls[0]!);
+    expect(first).toMatchObject({ capabilityId: "purchasing.payBill", input: { billNumber: 91, amountMinor: 1200 } });
+    expect(first.input).not.toHaveProperty("method");
+    await expect(readPendingPurchasingBillPayment(retryScope)).resolves.toEqual(action);
+    await expect(payPurchasingBill(action, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { paymentId, entryId, fullyPaid: true } });
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(first.intentId);
+    await expect(readPendingPurchasingBillPayment(retryScope)).resolves.toBeNull();
+  });
+
+  it("keeps a payBill marker on Go 404 without calling the legacy Purchasing route", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const action = { action: "payBill" as const, billNumber: 92, amountMinor: 850 };
+    const paymentId = "3c9e3c30-1e5c-4b3c-9d4b-5b3c4d5e6f70";
+    const entryId = "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "capability not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { paymentId, entryId, fullyPaid: false } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(payPurchasingBill(action, undefined, retryScope)).rejects.toMatchObject({
+      status: 404,
+      requestMayHaveReachedServer: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(await readPendingPurchasingBillPayment(retryScope)).toEqual(action);
+
+    const first = postedBody(fetchMock.mock.calls[0]!);
+    await expect(payPurchasingBill(action, undefined, retryScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/capabilities/execute");
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(first.intentId);
+    expect(await readPendingPurchasingBillPayment(retryScope)).toBeNull();
   });
 
   it("routes bill credits through Go, reuses the intent after pending, and validates the result", async () => {

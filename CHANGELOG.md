@@ -55,6 +55,12 @@ The full v1 changelog is preserved at the bottom of this file.
   never fall back to the legacy writer. Go remains authoritative for matching
   eligibility and allocation rules. Other banking actions and reads retain
   their existing routes.
+- Accounting Payables now routes bill payments through the existing Go
+  `purchasing.payBill` client flow when
+  `CHASTE_GO_PURCHASING_FINANCE_WRITES=1`. The exact amount and optional method
+  are preserved, including Go's `bank_transfer` default when method is
+  omitted. Actor/org scoped retries and approval recovery survive reload, and
+  the payBill retry intent is shared with the Purchasing workspace.
 - Go leave requests now verify that the employee belongs to the caller's
   organization before inserting a request. Missing and cross-organization
   employee IDs are rejected without creating leave records.

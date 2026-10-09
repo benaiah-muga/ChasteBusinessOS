@@ -46,6 +46,12 @@ import {
   type AccountingTaxCode,
 } from "../api/accounting";
 import { legacyUrl } from "../legacy";
+import {
+  goPurchasingFinanceWritesUseGo,
+  payPurchasingBill,
+  readPendingPurchasingBillPayment,
+  PurchasingApiError,
+} from "../api/purchasing";
 import "./AccountingPage.css";
 
 /* ------------------------------------------------------------------ money -- */
@@ -358,6 +364,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
   const [pendingCreditNote, setPendingCreditNote] = useState<AccountingCreditNoteAction | null>(null);
   const [pendingReverseEntry, setPendingReverseEntry] = useState<AccountingReverseEntryAction | null>(null);
   const [pendingBankReconciliationWrite, setPendingBankReconciliationWrite] = useState<AccountingBankReconciliationWriteAction | null>(null);
+  const [pendingPurchasingBillPayment, setPendingPurchasingBillPayment] = useState<Awaited<ReturnType<typeof readPendingPurchasingBillPayment>>>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentRetryScope: AccountingPaymentRetryScope = { actorId, organizationId };
 
@@ -485,6 +492,21 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     return () => { active = false; };
   }, [actorId, organizationId]);
 
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    let active = true;
+    void readPendingPurchasingBillPayment(paymentRetryScope).then((action) => {
+      if (!active) return;
+      setPendingPurchasingBillPayment(action);
+      if (action) setNotice({ tone: "pending", text: "A bill payment is unresolved. Retry the exact payment to recover its result." });
+    }).catch((error) => {
+      if (active && goPurchasingFinanceWritesUseGo()) {
+        setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved bill payment." });
+      }
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
   const changeTab = useCallback((next: string) => {
     const resolved = readTabParam(`?tab=${next}`);
     setTab(resolved);
@@ -520,9 +542,21 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const goReverseEntry = isReverseEntry && goAccountingReverseEntryUseGo();
       const isBankReconciliationWrite = path === "/api/banking" && (payload.action === "matchBankTransaction" || payload.action === "unmatchBankTransaction");
       const goBankReconciliationWrite = isBankReconciliationWrite && goAccountingBankReconciliationWritesUseGo();
+      const isPurchasingBillPayment = path === "/api/accounting" && payload.action === "payBill";
+      const goPurchasingBillPayment = isPurchasingBillPayment && goPurchasingFinanceWritesUseGo();
       setBusy(true);
       try {
-        const outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
+        let outcome: Awaited<ReturnType<typeof submitAccountingAction>>;
+        if (goPurchasingBillPayment) {
+          const action: Record<string, unknown> = { ...payload };
+          delete action.intentId;
+          const purchasingOutcome = await payPurchasingBill(action, undefined, paymentRetryScope);
+          outcome = purchasingOutcome.kind === "pending"
+            ? purchasingOutcome
+            : { kind: "completed" };
+        } else {
+          outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
+        }
         if (goRecordPayment) {
           setPendingRecordPayment(outcome.kind === "pending"
             ? await readPendingAccountingRecordPayment(paymentRetryScope)
@@ -549,6 +583,11 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             ? await readPendingAccountingBankReconciliationWrite(paymentRetryScope)
             : null);
         }
+        if (goPurchasingBillPayment) {
+          setPendingPurchasingBillPayment(outcome.kind === "pending"
+            ? await readPendingPurchasingBillPayment(paymentRetryScope)
+            : null);
+        }
         // A 202 is a queued approval, never a completed write: say so plainly.
         setNotice(
           outcome.kind === "pending"
@@ -556,7 +595,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : { tone: "success", text: `${label} done.` },
         );
         void load();
-        return !((goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry || goBankReconciliationWrite) && outcome.kind === "pending");
+        return !((goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry || goBankReconciliationWrite || goPurchasingBillPayment) && outcome.kind === "pending");
       } catch (error) {
         if (goRecordPayment) {
           try { setPendingRecordPayment(await readPendingAccountingRecordPayment(paymentRetryScope)); }
@@ -578,9 +617,13 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
           try { setPendingBankReconciliationWrite(await readPendingAccountingBankReconciliationWrite(paymentRetryScope)); }
           catch { setPendingBankReconciliationWrite(payload as unknown as AccountingBankReconciliationWriteAction); }
         }
+        if (goPurchasingBillPayment) {
+          try { setPendingPurchasingBillPayment(await readPendingPurchasingBillPayment(paymentRetryScope)); }
+          catch { setPendingPurchasingBillPayment(payload as unknown as Awaited<ReturnType<typeof readPendingPurchasingBillPayment>>); }
+        }
         setNotice({
           tone: "error",
-          text: error instanceof AccountingApiError
+          text: error instanceof AccountingApiError || error instanceof PurchasingApiError
             ? error.message
             : `${label} did not complete. Check your connection and try again.`,
         });
@@ -703,6 +746,12 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
                   `Payment on invoice #${pendingRecordPayment.invoiceNumber}`,
                 )}
               >{goAccountingRecordPaymentUseGo() ? "Retry exact payment" : "Enable Go payment route to retry"}</button>}
+              {pendingPurchasingBillPayment && <button
+                type="button"
+                className="accounting-button accounting-button-small"
+                disabled={busy || !goPurchasingFinanceWritesUseGo()}
+                onClick={() => void runAction("/api/accounting", { ...pendingPurchasingBillPayment }, `Payment for bill #${pendingPurchasingBillPayment.billNumber}`)}
+              >{goPurchasingFinanceWritesUseGo() ? "Retry exact bill payment" : "Enable Go Purchasing route to retry"}</button>}
               <button
                 type="button"
                 className="accounting-notice-dismiss"

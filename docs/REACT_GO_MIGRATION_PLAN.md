@@ -1991,3 +1991,12 @@ new owners and the manifest shows zero legacy runtime paths.
      Go remains authoritative for allocation and matched-state rules. Add
      focused API, proxy, and AccountingPage tests plus governed Go executor
      coverage. Authenticated browser proof remains open.
+196. Route Accounting Payables `payBill` actions through the existing Vite Go
+     `payPurchasingBill` flow and `purchasing.payBill` capability under the
+     existing `CHASTE_GO_PURCHASING_FINANCE_WRITES=1` selector. Preserve the
+     exact amount and optional payment method, including the Go
+     `bank_transfer` default when omitted. Reuse the Purchasing finance retry
+     intent store, add persisted action details only for bill payment so the
+     Accounting page can recover an exact 202 or uncertain action after
+     reload, and test the same stable intent through API and UI. Keep other
+     Accounting actions unchanged.

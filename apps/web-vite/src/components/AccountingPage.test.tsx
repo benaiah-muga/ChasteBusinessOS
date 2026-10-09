@@ -131,6 +131,7 @@ interface StubOptions {
   goReverseEntryResponse?: () => Response;
   goBankMatchResponse?: () => Response;
   goBankUnmatchResponse?: () => Response;
+  goPurchasingPayBillResponse?: () => Response;
 }
 
 function stubAccounting(options: StubOptions = {}) {
@@ -148,6 +149,13 @@ function stubAccounting(options: StubOptions = {}) {
     }
     if (url === "/api/capabilities/execute") {
       const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
+      if (capabilityId === "purchasing.payBill") {
+        return options.goPurchasingPayBillResponse?.() ?? Response.json({ ok: true, data: {
+          paymentId: "33333333-3333-4333-8333-333333333333",
+          entryId: "44444444-4444-4444-8444-444444444444",
+          fullyPaid: true,
+        } });
+      }
       if (capabilityId === "accounting.creditNote") {
         return options.goCreditNoteResponse?.() ?? Response.json({ ok: true, data: {
           entryId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
@@ -433,6 +441,7 @@ describe("AccountingPage states", () => {
 
 describe("AccountingPage governed writes", () => {
   it("pays a bill with a minted intentId and confirms completion", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", false);
     const { calls } = stubAccounting();
     await renderReady();
 
@@ -448,6 +457,83 @@ describe("AccountingPage governed writes", () => {
       expect(payload.intentId).toMatch(/^[0-9a-f-]{36}$/);
     });
     expect(await screen.findByText(/^Payment of \$40.00 done\.$/)).toBeTruthy();
+  });
+
+  it("routes Accounting bill payment through Go and recovers the exact pending action after reload", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    let attempt = 0;
+    const { calls } = stubAccounting({
+      goPurchasingPayBillResponse: () => ++attempt === 1
+        ? Response.json({ pendingApproval: true, reason: "Bill payment approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: {
+          paymentId: "33333333-3333-4333-8333-333333333333",
+          entryId: "44444444-4444-4444-8444-444444444444",
+          fullyPaid: true,
+        } }),
+    });
+    const first = render(<AccountingPage {...ids} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+    fireEvent.click(await screen.findByRole("button", { name: "Pay" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Pay $40.00" }));
+
+    expect(await screen.findByRole("button", { name: "Retry exact bill payment" })).not.toBeNull();
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("payBill"))).toBe(false);
+    const firstWrite = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute")!.body!) as {
+      capabilityId: string;
+      input: Record<string, unknown>;
+      intentId: string;
+    };
+    expect(firstWrite).toMatchObject({ capabilityId: "purchasing.payBill", input: { billNumber: 77, amountMinor: 4000 } });
+    expect(firstWrite.input).not.toHaveProperty("method");
+
+    first.unmount();
+    render(<AccountingPage {...ids} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact bill payment" }));
+    expect(await screen.findByText(/^Payment for bill #77 done\.$/)).not.toBeNull();
+    const writes = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body!) as typeof firstWrite);
+    expect(writes).toHaveLength(2);
+    expect(writes[1]).toEqual(firstWrite);
+  });
+
+  it("keeps a bill payment unresolved on Go 404 and retries only the same Go action", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    let attempt = 0;
+    const { calls } = stubAccounting({
+      goPurchasingPayBillResponse: () => ++attempt === 1
+        ? Response.json({ error: "capability not found" }, { status: 404 })
+        : Response.json({ ok: true, data: {
+          paymentId: "33333333-3333-4333-8333-333333333333",
+          entryId: "44444444-4444-4444-8444-444444444444",
+          fullyPaid: true,
+        } }),
+    });
+    const first = render(<AccountingPage {...ids} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+    fireEvent.click(await screen.findByRole("button", { name: "Pay" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Pay $40.00" }));
+
+    expect(await screen.findByRole("button", { name: "Retry exact bill payment" })).not.toBeNull();
+    const firstWrites = calls.filter((call) => call.url === "/api/capabilities/execute");
+    expect(firstWrites).toHaveLength(1);
+    expect(calls.some((call) => call.method === "POST" && (call.url === "/api/purchasing" || call.url === "/api/accounting" && call.body?.includes("payBill")))).toBe(false);
+    const firstWrite = JSON.parse(firstWrites[0]!.body!) as Record<string, unknown>;
+
+    first.unmount();
+    render(<AccountingPage {...ids} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact bill payment" }));
+    expect(await screen.findByText(/^Payment for bill #77 done\.$/)).not.toBeNull();
+    const writes = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body!) as Record<string, unknown>);
+    expect(writes).toHaveLength(2);
+    expect(writes[1]).toEqual(firstWrite);
+    expect(calls.some((call) => call.method === "POST" && (call.url === "/api/purchasing" || call.url === "/api/accounting" && call.body?.includes("payBill")))).toBe(false);
   });
 
   it("surfaces a 202 as pending approval, never as success", async () => {
