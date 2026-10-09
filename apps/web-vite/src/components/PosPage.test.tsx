@@ -429,6 +429,37 @@ describe("Vite POS register page", () => {
     expect(await screen.findByText("Sale #41 recorded for $25.00 (cash $25.00).")).not.toBeNull();
   });
 
+  it("keeps a Go 404 sale locked and retries the same intent without legacy POST", async () => {
+    let saleAttempts = 0;
+    const fetchMock = registerRoute((url, payload) => {
+      if (url !== "/api/capabilities/execute" || payload?.capabilityId !== "pos.completeSale") return null;
+      saleAttempts += 1;
+      if (saleAttempts === 1) return Response.json({ error: "route not mounted" }, { status: 404 });
+      return Response.json({
+        ok: true,
+        data: { invoiceId: saleId, invoiceNumber: 41, totalMinor: 2500, tenderedMinor: 2500, changeGivenMinor: 0, tenders: [{ method: "cash", amountMinor: 2500 }] },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/pos?tab=sell");
+    render(<PosPage baseCurrency="USD" actorId="operator-go-404" useGoCompleteSale />);
+
+    fireEvent.change(await screen.findByLabelText("Search products by name, SKU, or barcode"), { target: { value: "bread" } });
+    fireEvent.click(await screen.findByRole("button", { name: /^Boda bread/ }));
+    fireEvent.click(await completeSaleButton());
+    expect(await screen.findByText("Sale status is not confirmed")).not.toBeNull();
+    expect((screen.getByLabelText("Search products by name, SKU, or barcode") as HTMLInputElement).disabled).toBe(true);
+    const firstCall = fetchMock.mock.calls.find(([url]) => url === "/api/capabilities/execute");
+    const first = JSON.parse(String(firstCall?.[1]?.body)) as Payload;
+
+    fireEvent.click(await completeSaleButton());
+    await waitFor(() => expect(saleAttempts).toBe(2));
+    const goCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute");
+    const retried = JSON.parse(String(goCalls[1]?.[1]?.body)) as Payload;
+    expect(retried).toEqual(first);
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/pos" && init?.method === "POST" && JSON.parse(String(init.body)).action === "sale")).toBe(false);
+  });
+
   it("surfaces a governed 202 as pending rather than as a posted sale", async () => {
     const fetchMock = registerRoute((url, payload) => url === "/api/pos" && payload?.action === "sale"
       ? Response.json({ ok: false, pendingApproval: true, reason: "needs a manager" }, { status: 202 })

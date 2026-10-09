@@ -392,6 +392,16 @@ describe("POS register session API client", () => {
     expect(Object.keys(localStorage).some((key) => key.startsWith("chaste.pos.sale-intent.v1:"))).toBe(false);
   });
 
+  it("keeps selector-off sale requests on legacy", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: saleOutput }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitPosSale(saleAction(), undefined, undefined, { useGo: false, scopeId: "user-legacy" })).resolves.toEqual({ kind: "completed", data: saleOutput });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/pos");
+    expect(Object.keys(localStorage).some((key) => key.startsWith("chaste.pos.sale-intent.v1:"))).toBe(false);
+  });
+
   it("sends the exact minor-unit sale contract and validates Go's sale output", async () => {
     const action = {
       action: "sale" as const,
@@ -448,7 +458,7 @@ describe("POS register session API client", () => {
     const stored = Object.entries(localStorage).find(([key]) => key.startsWith("chaste.pos.sale-intent.v1:"));
     expect(stored).toBeDefined();
     expect(stored![0]).toMatch(/^chaste\.pos\.sale-intent\.v1:[0-9a-f]{64}$/);
-    expect(stored![1]).toBe(JSON.stringify({ intentId: firstRequest.intentId }));
+    expect(stored![1]).toBe(JSON.stringify({ intentId: firstRequest.intentId, route: "go" }));
     expect(stored![1]).not.toContain("Boda bread");
 
     vi.resetModules();
@@ -462,25 +472,68 @@ describe("POS register session API client", () => {
     expect(Object.keys(localStorage).some((key) => key.startsWith("chaste.pos.sale-intent.v1:"))).toBe(false);
   });
 
-  it("falls back only on Go 404 and keeps the sale intent identical", async () => {
+  it("fails closed on Go 404 and retries the same sale intent through Go", async () => {
     const action = { ...saleAction(), cashReceivedMinor: 3200 };
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: saleOutput }));
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockImplementationOnce(async () => Response.json({ error: "route not mounted" }, { status: 404 }));
 
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-fallback" })).resolves.toEqual({
+    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-go-404" })).rejects.toMatchObject({ status: 404 });
+    expect(Object.keys(localStorage).some((key) => key.startsWith("chaste.pos.sale-intent.v1:"))).toBe(true);
+    const goRequest = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
+
+    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-go-404" })).resolves.toEqual({
       kind: "completed",
       data: saleOutput,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
-    expect(fetchMock.mock.calls[1]![0]).toBe("/api/pos");
-    const goRequest = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
-    const legacyRequest = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body));
-    expect(legacyRequest).toEqual({ ...action, intentId: goRequest.intentId });
+    expect(fetchMock.mock.calls[1]![0]).toBe("/api/capabilities/execute");
+    const retriedRequest = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body));
+    expect(retriedRequest).toEqual(goRequest);
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/pos")).toBe(false);
   });
 
-  it.each([401, 403, 422, 500, 503])("does not fall back to legacy after Go sale HTTP %s", async (status) => {
+  it("blocks selector rollback after Go 404, then recovers on the same Go intent", async () => {
+    const action = { ...saleAction(), cashReceivedMinor: 3210 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "route not mounted" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: saleOutput }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-route-pin" })).rejects.toMatchObject({ status: 404 });
+    await expect(submitPosSale(action, undefined, undefined, { useGo: false, scopeId: "user-route-pin" })).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("Restore the Go POS sale route"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
+
+    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-route-pin" })).resolves.toEqual({ kind: "completed", data: saleOutput });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]![0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)));
+  });
+
+  it("treats route-less pre-upgrade sale markers as Go-pinned", async () => {
+    const action = { ...saleAction(), cashReceivedMinor: 3220 };
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ error: "route not mounted" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-old-marker" })).rejects.toMatchObject({ status: 404 });
+    const [storageKey] = Object.keys(localStorage);
+    const request = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
+    localStorage.setItem(storageKey!, JSON.stringify({ intentId: request.intentId }));
+
+    vi.resetModules();
+    const reloaded = await import("./pos-session");
+    await expect(reloaded.submitPosSale(action, undefined, undefined, { useGo: false, scopeId: "user-old-marker" })).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("Restore the Go POS sale route"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([401, 403, 404, 422, 500, 503])("does not fall back to legacy after Go sale HTTP %s", async (status) => {
     const action = { ...saleAction(), cashReceivedMinor: 3300 };
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ error: "Go declined the sale" }, { status }));
     vi.stubGlobal("fetch", fetchMock);

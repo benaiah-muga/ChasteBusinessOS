@@ -1043,7 +1043,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       await load();
     } catch (error) {
       const status = error instanceof PosApiError ? error.status : 0;
-      const definitiveRefusal = status >= 400 && status < 500 && status !== 408;
+      const definitiveRefusal = status >= 400 && status < 500 && status !== 404 && status !== 408;
       setSaleAttemptUncertain(!definitiveRefusal);
       if (definitiveRefusal) setSaleAttemptIntentId(null);
       if (!definitiveRefusal) {
@@ -1159,7 +1159,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       const detail = noticeFor(error, "Review current stock, prices, and register status before retrying.");
       const status = error instanceof PosApiError ? error.status : 0;
       const malformedSuccess = status === 202 || (status >= 200 && status < 300);
-      const uncertain = status === 0 || status === 408 || status >= 500 || malformedSuccess;
+      const uncertain = status === 0 || status === 404 || status === 408 || status >= 500 || malformedSuccess;
       setQueuedSales((current) => current.map((sale) => sale.id === queued.id ? { ...sale, status: uncertain ? "uncertain" : "failed", errorMessage: detail.title } : sale));
       setNotice(uncertain
         ? { tone: "error", title: "Queued sale result is not confirmed", hint: "The server may have accepted this sale. Keep the queued attempt and retry with the same identity, or verify Sales and Approvals before discarding it." }

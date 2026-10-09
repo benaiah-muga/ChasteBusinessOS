@@ -2276,3 +2276,9 @@ new owners and the manifest shows zero legacy runtime paths.
      on a Go 404, allow retry only through Go, and block selector rollback until
      resolution. Keep legacy requests when their corresponding Go selector is
      off. Focused Vite API tests cover the affected actions.
+223. Remove selected-Go 404 fallback for Vite POS sale submission through
+     `pos.completeSale`. Persist the route alongside its exact sale intent,
+     preserve the marker on 404, and block retry through legacy after selector
+     rollback. Retry the same payload and intent through Go only; explicit
+     selector-off sales continue to use `/api/pos`. Treat pre-upgrade
+     route-less sale markers as Go-pinned, matching their historical writer.

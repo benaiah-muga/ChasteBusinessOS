@@ -4,7 +4,9 @@ import { inventoryItemActionRequest, type AdjustInventoryStock, type CreateInven
 
 const uuid = z.string().uuid();
 const SALE_INTENT_STORAGE_PREFIX = "chaste.pos.sale-intent.v1:";
-const saleRetryIntentByDigest = new Map<string, string>();
+type SaleRetryRoute = "go" | "legacy";
+type SaleRetryIntent = { intentId: string; route: SaleRetryRoute };
+const saleRetryIntentByDigest = new Map<string, SaleRetryIntent>();
 const RETURN_INTENT_STORAGE_PREFIX = "chaste.pos.return-intent.v1:";
 const returnRetryIntentByDigest = new Map<string, string>();
 const RETURN_ACTIVE_ATTEMPT_PREFIX = "chaste.pos.return-active.v1:";
@@ -408,23 +410,27 @@ async function saleIntentStorageKey(action: PosSaleAction, scopeId: string | nul
   return `${SALE_INTENT_STORAGE_PREFIX}${hexDigest}`;
 }
 
-function rememberSaleIntent(storageKey: string, intentId: string): void {
-  saleRetryIntentByDigest.set(storageKey, intentId);
+function rememberSaleIntent(storageKey: string, intentId: string, route: SaleRetryRoute): void {
+  const attempt = { intentId, route };
+  saleRetryIntentByDigest.set(storageKey, attempt);
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ intentId }));
+    window.localStorage.setItem(storageKey, JSON.stringify(attempt));
   } catch {
     // The in-memory record still protects retries until the current page closes.
   }
 }
 
-function readSaleIntent(storageKey: string): string | null {
+function readSaleIntent(storageKey: string): SaleRetryIntent | null {
   const inMemory = saleRetryIntentByDigest.get(storageKey);
   if (inMemory) return inMemory;
   try {
     const record: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
     if (record !== null && typeof record === "object" && "intentId" in record && typeof record.intentId === "string" && uuid.safeParse(record.intentId).success) {
-      saleRetryIntentByDigest.set(storageKey, record.intentId);
-      return record.intentId;
+      // Before routes were persisted, only selected-Go sales wrote this marker.
+      const route: SaleRetryRoute = "route" in record && (record.route === "go" || record.route === "legacy") ? record.route : "go";
+      const attempt = { intentId: record.intentId, route };
+      saleRetryIntentByDigest.set(storageKey, attempt);
+      return attempt;
     }
   } catch {
     return null;
@@ -433,7 +439,7 @@ function readSaleIntent(storageKey: string): string | null {
 }
 
 function clearSaleIntent(storageKey: string, intentId: string): void {
-  if (saleRetryIntentByDigest.get(storageKey) === intentId) saleRetryIntentByDigest.delete(storageKey);
+  if (saleRetryIntentByDigest.get(storageKey)?.intentId === intentId) saleRetryIntentByDigest.delete(storageKey);
   try {
     const record: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
     if (record !== null && typeof record === "object" && "intentId" in record && record.intentId === intentId) {
@@ -691,24 +697,32 @@ export async function submitPosSale(
   const payload = parseOrThrow(PosSaleActionSchema, action, "Check the sale lines and payment amounts before submitting.");
   const configuredForGo = typeof __GO_POS_COMPLETE_SALE_SLICE__ !== "undefined" && __GO_POS_COMPLETE_SALE_SLICE__;
   const useGo = options.useGo ?? configuredForGo;
+  const route: SaleRetryRoute = useGo ? "go" : "legacy";
   let storageKey: string | null = null;
   let stableIntentId = intentId ?? crypto.randomUUID();
-  if (useGo || options.persistRetryIntent === true) {
+  if (useGo || options.persistRetryIntent === true || intentId !== undefined || options.scopeId != null) {
     storageKey = await saleIntentStorageKey(payload, options.scopeId ?? null);
-    stableIntentId = intentId ?? readSaleIntent(storageKey) ?? crypto.randomUUID();
-    rememberSaleIntent(storageKey, stableIntentId);
+    const stored = readSaleIntent(storageKey);
+    if (stored && stored.route !== route) {
+      const storedRouteLabel = stored.route === "go" ? "Go" : "legacy";
+      throw new PosApiError(0, `This sale has an unresolved ${storedRouteLabel} retry. Restore the ${storedRouteLabel} POS sale route and retry the exact sale before switching routes.`);
+    }
+    if (stored && intentId !== undefined && stored.intentId !== intentId) {
+      throw new PosApiError(0, "This sale has a different unresolved retry identity. Retry the exact sale already in progress before starting another.");
+    }
+    stableIntentId = intentId ?? stored?.intentId ?? crypto.randomUUID();
+    if (useGo || options.persistRetryIntent === true || stored) rememberSaleIntent(storageKey, stableIntentId, route);
   }
 
   let result: { status: number; body: unknown };
   if (useGo) {
     const { action: _action, ...input } = payload;
     result = await postGoPosCapability("pos.completeSale", input, stableIntentId, signal);
-    if (result.status === 404) result = await postPosAction(payload, stableIntentId, signal);
   } else {
     result = await postPosAction(payload, stableIntentId, signal);
   }
 
-  if (storageKey && result.status >= 400 && result.status < 500 && result.status !== 408) clearSaleIntent(storageKey, stableIntentId);
+  if (storageKey && result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408) clearSaleIntent(storageKey, stableIntentId);
   const outcome = interpret(result, SaleOutputSchema, "The sale could not be posted.");
   if (storageKey && outcome.kind === "completed") clearSaleIntent(storageKey, stableIntentId);
   return outcome;
@@ -717,8 +731,8 @@ export async function submitPosSale(
 export async function clearPosSaleRetryIntent(action: PosSaleAction, scopeId: string | null, expectedIntentId?: string): Promise<void> {
   const payload = parseOrThrow(PosSaleActionSchema, action, "The current sale could not be identified for retry cleanup.");
   const storageKey = await saleIntentStorageKey(payload, scopeId);
-  const intentId = readSaleIntent(storageKey);
-  if (intentId && (expectedIntentId === undefined || expectedIntentId === intentId)) clearSaleIntent(storageKey, intentId);
+  const attempt = readSaleIntent(storageKey);
+  if (attempt && (expectedIntentId === undefined || expectedIntentId === attempt.intentId)) clearSaleIntent(storageKey, attempt.intentId);
 }
 
 export async function closePosSession(

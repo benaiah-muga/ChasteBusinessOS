@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite POS sales no longer retry through legacy `/api/pos` when the selected Go
+  `pos.completeSale` capability returns 404. The actor-scoped exact sale intent
+  is pinned to its route and kept for exact Go retry; selector rollback is
+  blocked while the Go attempt is unresolved. Selector-off sales remain on
+  legacy.
+
 - Selected Go Manufacturing writes for BOM definition, work orders, and
   production fail closed on 404 without retrying through `/api/manufacturing`.
   Their actor/org-scoped exact intent stays pending for same-action Go retry;
