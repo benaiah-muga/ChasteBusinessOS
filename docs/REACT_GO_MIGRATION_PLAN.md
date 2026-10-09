@@ -2259,15 +2259,17 @@ new owners and the manifest shows zero legacy runtime paths.
      existing sanitized shape. Keep document content, collaboration, writes,
      and the Vite library read path unchanged. Selected Go errors fail closed;
      browser proof remains open.
-219. (Implemented) Route only Vite mention-people and add-member lookups through
-     `messaging.listPeople`, behind paired
+219. (Implemented; default-on) Route only Vite mention-people and add-member
+     lookups through `messaging.listPeople`, behind paired
      `CHASTE_GO_MESSAGING_PEOPLE_READS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Enforce
      `GO_MESSAGING_PEOPLE_READS=1` on the Go session capability route for all
-     callers. Preserve the initial limit of 100, searched limit of 30, trimmed
-     80-character query bound, and the Vite person/agent alias shape. Keep
-     conversation, thread, presence, and message-search reads unchanged; show
-     selected-Go errors without legacy fallback. Browser proof remains open.
+     callers; the capability requires organization-scoped `messaging.read`.
+     Set both people-read selectors to `0` for legacy lookup rollback. Preserve
+     the initial limit of 100, searched limit of 30, trimmed 80-character query
+     bound, and the Vite person/agent alias shape. Keep conversation, thread,
+     presence, and message-search reads and all writes unchanged; show selected
+     Go errors without legacy fallback. Browser proof remains open.
 220. (Implemented, default-on) Route Vite authored-document editor detail
      through `documents.getDoc` when `CHASTE_GO_DOCUMENTS_EDITOR_READS=1` and
      `CHASTE_GO_DOCUMENTS_VERSION_READS=1` are paired with the session route.

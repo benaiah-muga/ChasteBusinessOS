@@ -60,13 +60,16 @@ The full v1 changelog is preserved at the bottom of this file.
   failure. Workspace, collaboration, compare-owned routes, and writes remain
   unchanged.
 
-- Vite mention and add-member people lookup can use the authenticated Go
-  `messaging.listPeople` capability behind paired
+- Vite mention and add-member people lookup now use the authenticated Go
+  `messaging.listPeople` capability by default behind paired
   `CHASTE_GO_MESSAGING_PEOPLE_READS=1` and
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. The API enforces
-  `GO_MESSAGING_PEOPLE_READS=1` for every caller. Initial lookup retains the
-  100-row limit; add-member search retains 30 rows and an 80-character trimmed
-  query. Selected Go failures are visible and do not retry through legacy.
+  `GO_MESSAGING_PEOPLE_READS=1` for every caller and the capability checks
+  org-scoped `messaging.read`. Set both people-read selectors to `0` for legacy
+  lookup rollback. Initial lookup retains the 100-row limit; add-member search
+  retains 30 rows and an 80-character trimmed query. Selected Go failures are
+  visible and do not retry through legacy. Conversation, thread, presence, and
+  message-search routes and all writes remain unchanged.
 
 - Vite authored-document version history and archived compare previews can use
   the authenticated Go `documents.listDocVersions` and
