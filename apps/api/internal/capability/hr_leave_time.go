@@ -397,6 +397,17 @@ func hrRequestLeave(ctx context.Context, tx pgx.Tx, claims authbridge.Capability
 	if endDate.Before(startDate) {
 		return HRRequestLeaveOutput{}, errors.New("leave cannot end before it starts")
 	}
+	var employeeExists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM employees
+			WHERE org_id = $1::uuid AND id = $2::uuid
+		)`, claims.OrganizationID, input.EmployeeID).Scan(&employeeExists); err != nil {
+		return HRRequestLeaveOutput{}, err
+	}
+	if !employeeExists {
+		return HRRequestLeaveOutput{}, errors.New("employee not found")
+	}
 	calendarDays := hrCalendarDaysBetween(startDate, endDate)
 	var requestID string
 	if err := tx.QueryRow(ctx, `

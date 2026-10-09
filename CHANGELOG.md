@@ -13,6 +13,18 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Go leave requests now verify that the employee belongs to the caller's
+  organization before inserting a request. Missing and cross-organization
+  employee IDs are rejected without creating leave records.
+- Vite HR Leave now reads its report through Go's session-authenticated
+  `hr.report` capability and routes leave requests, decisions, and cancellation
+  through `hr.requestLeave`, `hr.decideLeave`, and `hr.cancelLeave`. The paired
+  `CHASTE_GO_HR_LEAVE=1` selector is enabled in local setups and requires
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Exact actor/org scoped retries and
+  pending approval recovery survive reload; a Go 404 never falls back to the
+  legacy endpoint, and selector rollback blocks unresolved actions. Other HR
+  tabs keep their existing routes. Set the selector to `0` for explicit legacy
+  rollback.
 - Vite HR Expenses now reads claims and policy limits through Go's
   session-authenticated `accounting.listExpenseClaims` and
   `accounting.listExpensePolicies` capabilities, and sends submissions,

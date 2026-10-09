@@ -491,6 +491,8 @@ func TestHRLeaveTimeRequestLeavePersistsAndStateMachinesGuard(t *testing.T) {
 		input HRRequestLeaveInput
 		want  string
 	}{
+		{HRRequestLeaveInput{EmployeeID: foreignID, StartDate: "2026-09-01", EndDate: "2026-09-03"}, "employee not found"},
+		{HRRequestLeaveInput{EmployeeID: executorUUID(t), StartDate: "2026-09-01", EndDate: "2026-09-03"}, "employee not found"},
 		{HRRequestLeaveInput{EmployeeID: employeeID, StartDate: "2026-13-01", EndDate: "2026-09-05"}, "leave dates must be valid ISO dates (YYYY-MM-DD)"},
 		{HRRequestLeaveInput{EmployeeID: employeeID, StartDate: "not-a-date", EndDate: "2026-09-05"}, "leave dates must be valid ISO dates (YYYY-MM-DD)"},
 		{HRRequestLeaveInput{EmployeeID: employeeID, StartDate: "2026-09-05", EndDate: "2026-09-04"}, "leave cannot end before it starts"},
@@ -504,6 +506,9 @@ func TestHRLeaveTimeRequestLeavePersistsAndStateMachinesGuard(t *testing.T) {
 	}
 	if got := fx.count(`SELECT count(*) FROM leave_requests WHERE employee_id = $1::uuid AND start_date = '2026-09-05'`, employeeID); got != 0 {
 		t.Fatalf("failed request rows=%d, want rolled back", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM leave_requests WHERE org_id = $1::uuid AND employee_id = $2::uuid`, fx.orgID, foreignID); got != 0 {
+		t.Fatalf("cross-org leave request rows=%d, want no insert", got)
 	}
 }
 

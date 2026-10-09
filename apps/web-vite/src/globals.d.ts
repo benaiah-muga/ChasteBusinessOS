@@ -15,6 +15,7 @@ declare const __GO_CRM_CUSTOMER_MERGE__: boolean;
 declare const __GO_CRM_CUSTOMER_IMPORT__: boolean;
 declare const __GO_CRM_CUSTOMER_PROFILE_UPDATE__: boolean;
 declare const __GO_HR_EXPENSES__: boolean;
+declare const __GO_HR_LEAVE__: boolean;
 declare const __GO_PURCHASING_CREATE_ORDER__: boolean;
 declare const __GO_PURCHASING_RECEIVE_GOODS__: boolean;
 declare const __GO_PURCHASING_RETURN_CLOSE__: boolean;

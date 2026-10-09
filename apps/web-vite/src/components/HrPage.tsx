@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
-import { fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, HrApiError, submitHrAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrOpening, type HrPendingEntry, type HrReport, type HrTimeReport } from "../api/hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrLeaveUseGo, HrApiError, readPendingHrLeaveAction, submitHrAction, submitHrLeaveAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrLeaveAction, type HrOpening, type HrPendingEntry, type HrReport, type HrTimeReport } from "../api/hr";
 import { legacyUrl } from "../legacy";
 import "./hr-page.css";
 
@@ -51,8 +51,12 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     const requested = new URLSearchParams(window.location.search).get("tab");
     return tabs.find((item) => item.id === requested)?.id ?? "overview";
   });
+  const reportUsesGoLeave = useRef(tab === "leave" && goHrLeaveUseGo());
+  const currentTab = useRef(tab);
+  currentTab.current = tab;
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  const [leaveRecoveryAction, setLeaveRecoveryAction] = useState<HrLeaveAction | null>(null);
   const [range, setRange] = useState(monthRange);
   const [timeReport, setTimeReport] = useState<HrTimeReport | null>(null);
   const [pendingEntries, setPendingEntries] = useState<HrPendingEntry[]>([]);
@@ -67,7 +71,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   });
   const currency = baseCurrency;
 
-  const load = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
+  const load = useCallback(async (signal?: AbortSignal, useGoLeaveReport = false): Promise<boolean> => {
     if (!signal) setState({ status: "loading" });
     try {
       const enabled = await fetchHrEnabled(signal);
@@ -76,7 +80,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         setState({ status: "disabled" });
         return false;
       }
-      const report = await fetchHrReport(signal);
+      const report = useGoLeaveReport ? await fetchGoHrReport(signal) : await fetchHrReport(signal);
       if (!signal?.aborted) setState({ status: "ready", report });
       return !signal?.aborted;
     } catch (error) {
@@ -101,11 +105,36 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
 
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal).then((enabled) => {
-      if (enabled) void refreshTime(range.from, range.to, controller.signal);
+    void load(controller.signal, reportUsesGoLeave.current).then((enabled) => {
+      if (enabled && currentTab.current !== "leave") void refreshTime(range.from, range.to, controller.signal);
     });
     return () => controller.abort();
   }, [load, range.from, range.to, refreshTime]);
+
+  useEffect(() => {
+    const useGoLeaveReport = tab === "leave" && goHrLeaveUseGo();
+    if (reportUsesGoLeave.current === useGoLeaveReport) return;
+    reportUsesGoLeave.current = useGoLeaveReport;
+    void load(undefined, useGoLeaveReport).then((enabled) => {
+      if (enabled && tab !== "leave") void refreshTime(range.from, range.to);
+    });
+  }, [tab, load, range.from, range.to, refreshTime]);
+
+  useEffect(() => {
+    if (tab !== "leave" || !goHrLeaveUseGo()) {
+      setLeaveRecoveryAction(null);
+      return;
+    }
+    let active = true;
+    void readPendingHrLeaveAction({ actorId, organizationId }).then((action) => {
+      if (!active) return;
+      setLeaveRecoveryAction(action);
+      if (action) setNotice({ tone: "pending", text: "A leave action is unresolved. Retry the exact action to recover its result before making another change." });
+    }).catch((error) => {
+      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved leave action." });
+    });
+    return () => { active = false; };
+  }, [tab, actorId, organizationId]);
 
   const report = state.status === "ready" ? state.report : null;
   const employees = report?.employees ?? [];
@@ -121,7 +150,33 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   }
 
   async function refreshAll(): Promise<void> {
-    if (await load()) await refreshTime(range.from, range.to);
+    if (await load(undefined, reportUsesGoLeave.current) && tab !== "leave") await refreshTime(range.from, range.to);
+  }
+
+  async function runLeaveAction(action: HrLeaveAction, label: string, after: () => void = () => undefined): Promise<void> {
+    if (busy || (leaveRecoveryAction && leaveRecoveryAction !== action)) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await submitHrLeaveAction(action, { actorId, organizationId });
+      if (result.kind === "pending") {
+        setLeaveRecoveryAction(action);
+        setNotice({ tone: "pending", text: `${label} needs approval or result recovery. Retry the exact action after approval is complete.` });
+      } else {
+        setLeaveRecoveryAction(null);
+        setNotice({ tone: "success", text: `${label} completed.` });
+        after();
+        await refreshAll();
+      }
+    } catch (error) {
+      if (goHrLeaveUseGo()) {
+        try { setLeaveRecoveryAction(await readPendingHrLeaveAction({ actorId, organizationId })); }
+        catch { setLeaveRecoveryAction(action); }
+      }
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : `${label} failed.` });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function runAction(label: string, action: Parameters<typeof submitHrAction>[0], after: () => void = () => undefined): Promise<void> {
@@ -226,6 +281,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
       </nav>
 
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
+      {tab === "leave" && leaveRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runLeaveAction(leaveRecoveryAction, "Leave action")}>Retry exact leave action</button></div>}
       <section id="hr-tab-panel" className="hr-content" role="tabpanel" aria-labelledby={`hr-tab-${tab}`}>
         {tab === "overview" && <Overview report={data} timeRows={timeRows} currency={currency} onTabChange={changeTab} />}
         {tab === "people" && <People employees={data.employees} currency={currency} hire={hire} setHire={setHire} busy={busy} onHire={() => {
@@ -241,10 +297,10 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
           if (!selectedOpening || !applicantForm.name.trim()) return;
           void runAction("Applicant creation", { action: "addApplicant", openingId: selectedOpening.id, name: applicantForm.name.trim(), email: applicantForm.email.trim() || undefined }, () => setApplicantForm({ ...applicantForm, name: "", email: "" }));
         }} onMove={(applicant, stage) => void runAction("Applicant stage update", { action: "moveApplicant", applicantId: applicant.id, stage })} />}
-        {tab === "leave" && <Leave employees={activeEmployees} rows={data.leave} form={leaveRequest} setForm={setLeaveRequest} busy={busy} onRequest={() => {
+        {tab === "leave" && <Leave employees={activeEmployees} rows={data.leave} form={leaveRequest} setForm={setLeaveRequest} busy={busy || Boolean(leaveRecoveryAction)} onRequest={() => {
           if (!leaveRequest.employeeId || !leaveRequest.startDate || !leaveRequest.endDate || leaveRequest.endDate < leaveRequest.startDate) return;
-          void runAction("Leave request", { action: "requestLeave", ...leaveRequest }, () => setLeaveRequest({ ...leaveRequest, startDate: "", endDate: "" }));
-        }} onDecision={(requestId, approve) => void runAction(approve ? "Leave approval" : "Leave rejection", { action: "decideLeave", requestId, approve })} />}
+          void runLeaveAction({ action: "requestLeave", ...leaveRequest }, "Leave request", () => setLeaveRequest({ ...leaveRequest, startDate: "", endDate: "" }));
+        }} onDecision={(requestId, approve) => void runLeaveAction({ action: "decideLeave", requestId, approve }, approve ? "Leave approval" : "Leave rejection")} onCancel={(requestId) => void runLeaveAction({ action: "cancelLeave", requestId }, "Leave cancellation")} />}
         {tab === "time" && <Time employees={activeEmployees} rows={timeRows} pending={pendingEntries} range={range} setRange={setRange} form={timeEntry} setForm={setTimeEntry} busy={busy} onLog={() => {
           const hours = Number(timeEntry.hours);
           const minutes = Math.round(hours * 60);
@@ -475,13 +531,13 @@ function Hiring({ openings, applicants, busy, openingTitle, setOpeningTitle, app
   </>;
 }
 
-function Leave({ employees, rows, form, setForm, busy, onRequest, onDecision }: { employees: HrEmployee[]; rows: HrReport["leave"]; form: { employeeId: string; kind: string; startDate: string; endDate: string }; setForm: (value: { employeeId: string; kind: string; startDate: string; endDate: string }) => void; busy: boolean; onRequest: () => void; onDecision: (requestId: string, approve: boolean) => void }) {
+function Leave({ employees, rows, form, setForm, busy, onRequest, onDecision, onCancel }: { employees: HrEmployee[]; rows: HrReport["leave"]; form: { employeeId: string; kind: string; startDate: string; endDate: string }; setForm: (value: { employeeId: string; kind: string; startDate: string; endDate: string }) => void; busy: boolean; onRequest: () => void; onDecision: (requestId: string, approve: boolean) => void; onCancel: (requestId: string) => void }) {
   return <>
     <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Time away</p><h2>Request leave</h2></div></div>
-      <form className="hr-form-grid" onSubmit={(event) => { event.preventDefault(); onRequest(); }}><label>Employee<select required value={form.employeeId} onChange={(event) => setForm({ ...form, employeeId: event.currentTarget.value })}><option value="">Select employee</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label><label>Leave type<select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.currentTarget.value })}>{["annual", "sick", "parental", "unpaid", "other"].map((kind) => <option value={kind} key={kind}>{kind}</option>)}</select></label><label>Start date<input required type="date" value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.currentTarget.value })} /></label><label>End date<input required type="date" min={form.startDate || undefined} value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.currentTarget.value })} /></label><button className="hr-primary-button" disabled={busy || !form.employeeId || !form.startDate || !form.endDate || form.endDate < form.startDate}>Submit leave request</button></form>
+      <form className="hr-form-grid" onSubmit={(event) => { event.preventDefault(); onRequest(); }}><label>Employee<select required disabled={busy} value={form.employeeId} onChange={(event) => setForm({ ...form, employeeId: event.currentTarget.value })}><option value="">Select employee</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label><label>Leave type<select disabled={busy} value={form.kind} onChange={(event) => setForm({ ...form, kind: event.currentTarget.value })}>{["annual", "sick", "parental", "unpaid", "other"].map((kind) => <option value={kind} key={kind}>{kind}</option>)}</select></label><label>Start date<input required disabled={busy} type="date" value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.currentTarget.value })} /></label><label>End date<input required disabled={busy} type="date" min={form.startDate || undefined} value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.currentTarget.value })} /></label><button className="hr-primary-button" disabled={busy || !form.employeeId || !form.startDate || !form.endDate || form.endDate < form.startDate}>Submit leave request</button></form>
     </section>
     <section className="hr-card hr-table-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Requests</p><h2>Leave activity</h2></div></div>
-      {rows.length === 0 ? <p className="hr-muted">No leave requests have been recorded.</p> : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Employee</th><th scope="col">Dates</th><th scope="col">Type</th><th scope="col">Days</th><th scope="col">Status</th><th scope="col">Review</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><th scope="row">{row.employeeName}</th><td>{formatDate(row.startDate)} to {formatDate(row.endDate)}</td><td>{row.kind}</td><td>{row.calendarDays}</td><td><span className={`hr-pill ${row.status === "approved" ? "is-active" : "is-muted"}`}>{row.status}</span></td><td>{row.status === "pending" ? <div className="hr-row-actions"><button type="button" disabled={busy} onClick={() => onDecision(row.id, true)}>Approve</button><button type="button" disabled={busy} onClick={() => onDecision(row.id, false)}>Decline</button></div> : "-"}</td></tr>)}</tbody></table></div>}
+      {rows.length === 0 ? <p className="hr-muted">No leave requests have been recorded.</p> : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Employee</th><th scope="col">Dates</th><th scope="col">Type</th><th scope="col">Days</th><th scope="col">Status</th><th scope="col">Review</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><th scope="row">{row.employeeName}</th><td>{formatDate(row.startDate)} to {formatDate(row.endDate)}</td><td>{row.kind}</td><td>{row.calendarDays}</td><td><span className={`hr-pill ${row.status === "approved" ? "is-active" : "is-muted"}`}>{row.status}</span></td><td>{row.status === "pending" ? <div className="hr-row-actions"><button type="button" disabled={busy} onClick={() => onDecision(row.id, true)}>Approve</button><button type="button" disabled={busy} onClick={() => onDecision(row.id, false)}>Decline</button><button type="button" disabled={busy} onClick={() => onCancel(row.id)}>Cancel</button></div> : "-"}</td></tr>)}</tbody></table></div>}
     </section>
   </>;
 }

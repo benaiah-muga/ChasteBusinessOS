@@ -204,7 +204,7 @@ describe("Vite People page", () => {
       return Response.json({ rows: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<HrPage />);
+    render(<HrPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await screen.findByText("Taxi to the client kickoff");
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
 
@@ -297,9 +297,10 @@ describe("Vite People page", () => {
   });
 
   it("submits leave through the existing governed HR API and refreshes records", async () => {
+    vi.stubGlobal("__GO_HR_LEAVE__", false);
     const fetchMock = hrFetch();
     vi.stubGlobal("fetch", fetchMock);
-    render(<HrPage />);
+    render(<HrPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await screen.findByRole("heading", { name: "People" });
     fireEvent.click(screen.getByRole("tab", { name: "Leave" }));
 
@@ -314,6 +315,78 @@ describe("Vite People page", () => {
     const body = JSON.parse(String(submission?.[1]?.body)) as Record<string, unknown>;
     expect(body).toMatchObject({ action: "requestLeave", employeeId: employee.id, startDate: "2026-10-10", endDate: "2026-10-11" });
     expect(body.intentId).toEqual(expect.any(String));
+  });
+
+  it("uses Go for the Leave route and recovers the exact pending action after reload", async () => {
+    window.history.replaceState(null, "", "/hr?tab=leave");
+    vi.stubGlobal("__GO_HR_LEAVE__", true);
+    const employeeId = "11111111-1111-4111-8111-111111111111";
+    const requestId = "22222222-2222-4222-8222-222222222222";
+    const actorId = "33333333-3333-4333-8333-333333333333";
+    const organizationId = "44444444-4444-4444-8444-444444444444";
+    const goReport = { ...report, employees: [{ ...employee, id: employeeId }] };
+    const writes: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: goReport });
+        writes.push(body);
+        return writes.length === 1
+          ? Response.json({ pendingApproval: true, reason: "Manager approval required." }, { status: 202 })
+          : Response.json({ ok: true, data: { requestId, calendarDays: 2 } });
+      }
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
+      return Response.json({ error: "Unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId, organizationId };
+    const page = render(<HrPage {...props} />);
+
+    expect(await screen.findByRole("heading", { name: "Request leave" })).not.toBeNull();
+    expect(fetchMock.mock.calls.filter(([path, init]) => path === "/api/capabilities/execute" && JSON.parse(String(init?.body)).capabilityId === "hr.report")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Employee"), { target: { value: employeeId } });
+    fireEvent.change(screen.getByLabelText("Start date"), { target: { value: "2026-10-12" } });
+    fireEvent.change(screen.getByLabelText("End date"), { target: { value: "2026-10-13" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit leave request" }));
+    expect(await screen.findByRole("button", { name: "Retry exact leave action" })).not.toBeNull();
+    expect((screen.getByLabelText("Start date") as HTMLInputElement).disabled).toBe(true);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
+
+    page.unmount();
+    render(<HrPage {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact leave action" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Leave action completed."));
+
+    expect(writes).toHaveLength(2);
+    expect(writes[0]).toMatchObject({ capabilityId: "hr.requestLeave", input: { employeeId, kind: "annual", startDate: "2026-10-12", endDate: "2026-10-13" } });
+    expect(writes[1]?.input).toEqual(writes[0]?.input);
+    expect(writes[1]?.intentId).toBe(writes[0]?.intentId);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
+  });
+
+  it("loads one report when switching to the Go Leave source", async () => {
+    vi.stubGlobal("__GO_HR_LEAVE__", true);
+    const employeeId = "11111111-1111-4111-8111-111111111111";
+    const goReport = { ...report, employees: [{ ...employee, id: employeeId }] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/hr") return Response.json(report);
+      if (path === "/api/capabilities/execute") return Response.json({ ok: true, data: goReport });
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      return Response.json({ rows: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HrPage actorId="33333333-3333-4333-8333-333333333333" organizationId="44444444-4444-4444-8444-444444444444" />);
+    await screen.findByRole("heading", { name: "People" });
+    fireEvent.click(screen.getByRole("tab", { name: "Leave" }));
+    await screen.findByRole("heading", { name: "Request leave" });
+
+    expect(fetchMock.mock.calls.filter(([path, init]) => path === "/api/capabilities/execute" && JSON.parse(String(init?.body)).capabilityId === "hr.report")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/hr")).toHaveLength(1);
   });
 
   it("keeps a hire draft when the governed action is waiting for approval", async () => {
@@ -350,7 +423,7 @@ describe("Vite People page", () => {
   it("clearly reports when the HR module is disabled", async () => {
     const fetchMock = hrFetch(false);
     vi.stubGlobal("fetch", fetchMock);
-    render(<HrPage />);
+    render(<HrPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     expect(await screen.findByRole("heading", { name: "People is turned off" })).not.toBeNull();
     expect(fetchMock).not.toHaveBeenCalledWith("/api/time?pending=1", expect.any(Object));
   });

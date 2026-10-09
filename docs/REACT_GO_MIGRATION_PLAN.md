@@ -1922,3 +1922,13 @@ new owners and the manifest shows zero legacy runtime paths.
      Focused API, proxy selector, and HrPage tests pass; existing DB-backed Go
      expense capability tests remain the contract proof. Authenticated browser
      proof remains open.
+190. Route only the Vite HR Leave tab through Go's session-authenticated
+     `hr.report`, `hr.requestLeave`, `hr.decideLeave`, and `hr.cancelLeave`
+     capabilities behind paired `CHASTE_GO_HR_LEAVE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the Leave selector
+     to `0` for explicit legacy rollback. Scope durable exact-action retries by
+     the authenticated actor and organization, recover pending approvals after
+     reload, block other leave mutations while unresolved, and fail closed on
+     Go 404 without falling back to `/api/hr`. Keep all other HR tabs on their
+     existing routes. Add focused API, proxy selector, and HrPage coverage;
+     authenticated browser proof remains open.

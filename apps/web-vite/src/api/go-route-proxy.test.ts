@@ -25,6 +25,7 @@ import {
   goManufacturingProductionWritesFromEnv,
   goSalesOrderWritesFromEnv,
   goHrExpensesFromEnv,
+  goHrLeaveFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -144,6 +145,15 @@ describe("HR expenses Go selector", () => {
     expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_EXPENSES: "0" })).toBe(false);
     expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_EXPENSES: "1" })).toBe(false);
+  });
+});
+
+describe("HR Leave Go selector", () => {
+  it("requires the paired session capability route and explicit leave selector", () => {
+    expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_LEAVE: "1" })).toBe(true);
+    expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_LEAVE: "0" })).toBe(false);
+    expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_LEAVE: "1" })).toBe(false);
   });
 });
 
