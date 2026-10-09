@@ -1180,7 +1180,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         setConfirmDeleteMessageScope(currentDeleteScope);
         setConfirmDeleteMessageId(messageId);
         const status = error instanceof MessagingApiError ? error.status : 0;
-        const safeToRetry = status >= 400 && status < 500 && status !== 408 && status !== 429;
+        const safeToRetry = status >= 400 && status < 500 && status !== 404 && status !== 408 && status !== 429;
         setConfirmDeleteLocked(!safeToRetry);
       }
     }

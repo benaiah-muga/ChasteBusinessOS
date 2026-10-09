@@ -179,7 +179,12 @@ const GoEditMessageEnvelopeSchema = z.object({
 }).strict();
 const GoDeleteMessageEnvelopeSchema = z.object({
   ok: z.literal(true),
-  data: z.object({ deleted: z.literal(true) }).strict(),
+  data: z.object({
+    deleted: z.literal(true),
+    messageId: z.string().min(1),
+    deletedAt: IsoTimestampSchema.nullable(),
+    expectedDeletedAt: IsoTimestampSchema,
+  }).strict(),
 }).strict();
 
 export class MessagingApiError extends Error {
@@ -700,34 +705,24 @@ async function deleteMessageThroughGo(
     }
   }
 
-  const legacy = () => deleteMessageLegacy(action.messageId, signal, action.intentId);
   const result = await send("/api/capabilities/execute", {
     method: "POST",
     body: JSON.stringify({ capabilityId: "messaging.deleteMessage", input: { messageId: action.messageId }, intentId: action.intentId }),
   }, "delete this message", signal);
-  if (result.response.status === 404) {
-    try {
-      const outcome = await legacy();
-      if (outcome.kind === "completed") clearPendingMessageDelete(key, action.intentId);
-      return outcome;
-    } catch (error) {
-      const status = error instanceof MessagingApiError ? error.status : 0;
-      if (status >= 400 && status < 500 && status !== 408 && status !== 429) clearPendingMessageDelete(key, action.intentId);
-      throw error;
-    }
-  }
   if (result.response.status === 202) {
     const parsed = PendingApprovalSchema.safeParse(result.body);
     if (!parsed.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to delete this message.");
     return { kind: "pending", reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? "Deleting this message is waiting for approval." };
   }
   if (!result.response.ok) {
-    const terminal = result.response.status >= 400 && result.response.status < 500 && result.response.status !== 408 && result.response.status !== 429;
+    const terminal = result.response.status >= 400 && result.response.status < 500 && result.response.status !== 404 && result.response.status !== 408 && result.response.status !== 429;
     if (terminal) clearPendingMessageDelete(key, action.intentId);
     throw new MessagingApiError(result.response.status, readError(result.response.status, result.body, "delete this message"));
   }
   const parsed = GoDeleteMessageEnvelopeSchema.safeParse(result.body);
-  if (!parsed.success) throw new MessagingApiError(result.response.status, "The messaging service returned an unexpected response to delete this message.");
+  if (!parsed.success || parsed.data.data.messageId !== action.messageId) {
+    throw new MessagingApiError(result.response.status, "The messaging service returned an unexpected response to delete this message.");
+  }
   clearPendingMessageDelete(key, action.intentId);
   return { kind: "completed", data: { ok: true } };
 }

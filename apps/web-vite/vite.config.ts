@@ -64,7 +64,7 @@ export default defineConfig(({ mode }) => {
   const goBankReconciliationWrites = goBankReconciliationWritesFromEnv(env);
   const goMessagingSendSlice = env.CHASTE_GO_MESSAGING_SEND_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goMessagingEditSlice = env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_EDIT_SLICE !== "0";
-  const goMessagingDeleteSlice = env.CHASTE_GO_MESSAGING_DELETE_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
+  const goMessagingDeleteSlice = env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_DELETE_SLICE !== "0";
   const goMessagingPeopleReads = goMessagingPeopleReadsFromEnv(env);
   const goPosOpenSessionSlice = goPosOpenSessionSliceFromEnv(env);
   const goPosCloseSessionSlice = goPosCloseSessionSliceFromEnv(env);

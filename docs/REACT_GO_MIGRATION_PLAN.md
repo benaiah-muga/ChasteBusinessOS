@@ -1851,14 +1851,15 @@ new owners and the manifest shows zero legacy runtime paths.
      receipt-backed restore inverse guarded by body and monotonic edit time.
      Focused API/UI/proxy tests pass; authenticated browser proof remains
      open.
-181. (Implemented) Add the opt-in `CHASTE_GO_MESSAGING_DELETE_SLICE` selector
-     for Vite message deletions through Go's `messaging.deleteMessage`
-     capability. Restore the actor/org scoped confirmation and intent after
-     pending or uncertain results, validate the response, block stale
-     confirmation state across organization or session changes, require actor
-     and organization scope for both Go and legacy delete writes, and keep
-     unresolved Go deletions locked across selector rollback. Focused API/UI
-     tests pass; authenticated browser proof remains open.
+181. (Implemented; default-on when session capability routing is enabled)
+     Route Vite message deletions through Go's `messaging.deleteMessage`
+     unless `CHASTE_GO_MESSAGING_DELETE_SLICE=0`. Restore the actor/org scoped
+     confirmation and intent after pending or uncertain results, strictly
+     validate the deleted flag, message ID, and receipt timestamp, fail closed
+     on 404, require actor and organization scope for Go and legacy deletion,
+     block stale confirmation state across organization or session changes,
+     and keep unresolved Go deletions locked across selector rollback.
+     Focused API/UI/proxy tests pass; authenticated browser proof remains open.
 182. (Implemented) Add the internal pre-organization database bootstrap
      primitive for Go. Derive the owner from a live verified Better Auth
      session, serialize attempts by that user, and create the organization,

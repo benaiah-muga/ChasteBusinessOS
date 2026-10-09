@@ -28,6 +28,7 @@ const (
 	messagingEditMessageCapabilityID             = "messaging.editMessage"
 	messagingRestoreMessageEditCapabilityID      = "messaging.restoreMessageEdit"
 	messagingDeleteMessageCapabilityID           = "messaging.deleteMessage"
+	messagingRestoreMessageDeleteCapabilityID    = "messaging.restoreMessageDelete"
 	messagingAdvanceReadCursorCapabilityID       = "messaging.advanceReadCursor"
 	messagingRestoreReadCursorCapabilityID       = "messaging.restoreReadCursor"
 	messagingSetMessageReactionCapabilityID      = "messaging.setMessageReaction"
@@ -104,7 +105,8 @@ var messagingCapabilitySpecs = map[string]MessagingCapabilitySpec{
 	messagingAddMemberCapabilityID:               {Module: "messaging", Permission: "messaging.write", Risk: "write"},
 	messagingEditMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageEditCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
 	messagingRestoreMessageEditCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingEditMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
-	messagingDeleteMessageCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write"},
+	messagingDeleteMessageCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageDeleteCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "deletedAt", "expectedDeletedAt"}},
+	messagingRestoreMessageDeleteCapabilityID:    {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingDeleteMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "expectedDeletedAt"}},
 	messagingAdvanceReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
 	messagingRestoreReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingAdvanceReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
 	messagingSetMessageReactionCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageReactionCapabilityID, InverseInputSource: "input", InverseFields: []string{"messageId", "emoji"}},
@@ -269,11 +271,27 @@ type MessagingRestoreMessageEditOutput struct {
 }
 
 type MessagingDeleteMessageInput struct {
-	MessageID string `json:"messageId"`
+	MessageID                 string  `json:"messageId"`
+	ExpectedDeletedAt         *string `json:"expectedDeletedAt,omitempty"`
+	ExpectedDeletedAtProvided bool    `json:"-"`
 }
 
 type MessagingDeleteMessageOutput struct {
-	Deleted bool `json:"deleted"`
+	MessageID         string  `json:"messageId"`
+	Deleted           bool    `json:"deleted"`
+	DeletedAt         *string `json:"deletedAt"`
+	ExpectedDeletedAt string  `json:"expectedDeletedAt"`
+}
+
+type MessagingRestoreMessageDeleteInput struct {
+	MessageID         string  `json:"messageId"`
+	DeletedAt         *string `json:"deletedAt"`
+	ExpectedDeletedAt string  `json:"expectedDeletedAt"`
+}
+
+type MessagingRestoreMessageDeleteOutput struct {
+	MessageID         string  `json:"messageId"`
+	ExpectedDeletedAt *string `json:"expectedDeletedAt"`
 }
 
 // ReadAtProvided separates an absent readAt (advance to now) from an explicit
@@ -384,6 +402,8 @@ func parseMessagingInput(capabilityID string, raw json.RawMessage) (any, error) 
 		return parseMessagingRestoreMessageEditInput(raw)
 	case messagingDeleteMessageCapabilityID:
 		return parseMessagingDeleteMessageInput(raw)
+	case messagingRestoreMessageDeleteCapabilityID:
+		return parseMessagingRestoreMessageDeleteInput(raw)
 	case messagingAdvanceReadCursorCapabilityID:
 		return parseMessagingAdvanceReadCursorInput(raw)
 	case messagingRestoreReadCursorCapabilityID:
@@ -881,6 +901,52 @@ func parseMessagingDeleteMessageInput(raw json.RawMessage) (MessagingDeleteMessa
 	var input MessagingDeleteMessageInput
 	if input.MessageID, err = messagingRequiredString(fields, "messageId"); err != nil {
 		return MessagingDeleteMessageInput{}, err
+	}
+	if rawExpected, ok := fields["expectedDeletedAt"]; ok {
+		input.ExpectedDeletedAtProvided = true
+		if !bytes.Equal(bytes.TrimSpace(rawExpected), []byte("null")) {
+			var expected string
+			if err := json.Unmarshal(rawExpected, &expected); err != nil {
+				return MessagingDeleteMessageInput{}, errors.New("expectedDeletedAt must be an ISO datetime or null")
+			}
+			parsed, err := messagingParseDateTime(expected)
+			if err != nil {
+				return MessagingDeleteMessageInput{}, errors.New("expectedDeletedAt must be an ISO datetime or null")
+			}
+			formatted := messagingFormatTime(parsed)
+			input.ExpectedDeletedAt = &formatted
+		}
+	}
+	return input, nil
+}
+
+func parseMessagingRestoreMessageDeleteInput(raw json.RawMessage) (MessagingRestoreMessageDeleteInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return MessagingRestoreMessageDeleteInput{}, err
+	}
+	var input MessagingRestoreMessageDeleteInput
+	if input.MessageID, err = messagingRequiredString(fields, "messageId"); err != nil {
+		return MessagingRestoreMessageDeleteInput{}, err
+	}
+	deletedAtRaw, ok := fields["deletedAt"]
+	if !ok {
+		return MessagingRestoreMessageDeleteInput{}, errors.New("deletedAt is required")
+	}
+	if !bytes.Equal(bytes.TrimSpace(deletedAtRaw), []byte("null")) {
+		var deletedAt string
+		if err := json.Unmarshal(deletedAtRaw, &deletedAt); err != nil {
+			return MessagingRestoreMessageDeleteInput{}, errors.New("deletedAt must be an ISO datetime or null")
+		}
+		parsed, err := messagingParseDateTime(deletedAt)
+		if err != nil {
+			return MessagingRestoreMessageDeleteInput{}, errors.New("deletedAt must be an ISO datetime or null")
+		}
+		formatted := messagingFormatTime(parsed)
+		input.DeletedAt = &formatted
+	}
+	if input.ExpectedDeletedAt, err = messagingRequiredDateTimeString(fields, "expectedDeletedAt"); err != nil {
+		return MessagingRestoreMessageDeleteInput{}, err
 	}
 	return input, nil
 }
@@ -1521,20 +1587,20 @@ func messagingAddMember(
 	return MessagingAddMemberOutput{Added: true}, nil
 }
 
-func messagingLoadOwnMessage(ctx context.Context, tx pgx.Tx, orgID, messageID string) (string, string, *string, string, *time.Time, error) {
+func messagingLoadOwnMessage(ctx context.Context, tx pgx.Tx, orgID, messageID string) (string, string, *string, string, *time.Time, *time.Time, error) {
 	var senderType, id, body string
 	var senderUserID *string
-	var editedAt *time.Time
+	var editedAt, deletedAt *time.Time
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, sender_type, sender_user_id::text, body, edited_at FROM messages
-		WHERE id = $2::uuid AND org_id = $1::uuid LIMIT 1 FOR UPDATE`, orgID, messageID).Scan(&id, &senderType, &senderUserID, &body, &editedAt)
+		SELECT id::text, sender_type, sender_user_id::text, body, edited_at, deleted_at FROM messages
+		WHERE id = $2::uuid AND org_id = $1::uuid LIMIT 1 FOR UPDATE`, orgID, messageID).Scan(&id, &senderType, &senderUserID, &body, &editedAt, &deletedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", nil, "", nil, errors.New("message not found")
+		return "", "", nil, "", nil, nil, errors.New("message not found")
 	}
 	if err != nil {
-		return "", "", nil, "", nil, err
+		return "", "", nil, "", nil, nil, err
 	}
-	return id, senderType, senderUserID, body, editedAt, nil
+	return id, senderType, senderUserID, body, editedAt, deletedAt, nil
 }
 
 func messagingEditMessage(
@@ -1543,7 +1609,7 @@ func messagingEditMessage(
 	if actorType != "human" || userID == nil {
 		return MessagingEditMessageOutput{}, errors.New("only your own human messages can be edited")
 	}
-	messageID, senderType, senderUserID, previousBody, previousEditedAt, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
+	messageID, senderType, senderUserID, previousBody, previousEditedAt, _, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
 	if err != nil {
 		return MessagingEditMessageOutput{}, err
 	}
@@ -1575,7 +1641,7 @@ func messagingRestoreMessageEdit(
 	if actorType != "human" || userID == nil {
 		return MessagingRestoreMessageEditOutput{}, errors.New("only your own human messages can be restored")
 	}
-	messageID, senderType, senderUserID, currentBody, currentEditedAt, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
+	messageID, senderType, senderUserID, currentBody, currentEditedAt, _, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
 	if err != nil {
 		return MessagingRestoreMessageEditOutput{}, err
 	}
@@ -1617,19 +1683,100 @@ func messagingDeleteMessage(
 	if actorType != "human" || userID == nil {
 		return MessagingDeleteMessageOutput{}, errors.New("only your own human messages can be deleted")
 	}
-	messageID, senderType, senderUserID, _, _, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
+	messageID, senderType, senderUserID, _, _, currentDeletedAt, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
 	if err != nil {
 		return MessagingDeleteMessageOutput{}, err
 	}
 	if senderType != "human" || senderUserID == nil || *senderUserID != *userID {
 		return MessagingDeleteMessageOutput{}, errors.New("you can only delete your own messages")
 	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE messages SET deleted_at = $3 WHERE id = $2::uuid AND org_id = $1::uuid`,
-		orgID, messageID, messagingNow()); err != nil {
+	if input.ExpectedDeletedAtProvided && !messagingOptionalTimesEqual(currentDeletedAt, input.ExpectedDeletedAt) {
+		return MessagingDeleteMessageOutput{}, errors.New("message deletion state changed since the inverse was recorded")
+	}
+	var lastDeleteTime *time.Time
+	var lastDeleteTimeText *string
+	if err := tx.QueryRow(ctx, `
+		SELECT max(data->>'expectedDeletedAt') FROM action_receipts
+		WHERE org_id = $1::uuid AND capability_id = $2 AND ok = true AND outcome = 'known'
+		  AND data->>'messageId' = $3`, orgID, messagingDeleteMessageCapabilityID, messageID).Scan(&lastDeleteTimeText); err != nil {
 		return MessagingDeleteMessageOutput{}, err
 	}
-	return MessagingDeleteMessageOutput{Deleted: true}, nil
+	if lastDeleteTimeText != nil {
+		parsed, err := messagingParseDateTime(*lastDeleteTimeText)
+		if err != nil {
+			return MessagingDeleteMessageOutput{}, errors.New("message has an invalid prior deletion receipt")
+		}
+		lastDeleteTime = &parsed
+	}
+	if currentDeletedAt != nil && (lastDeleteTime == nil || currentDeletedAt.After(*lastDeleteTime)) {
+		lastDeleteTime = currentDeletedAt
+	}
+	deletedAt := messagingNextDeleteTime(lastDeleteTime)
+	if _, err := tx.Exec(ctx, `
+		UPDATE messages SET deleted_at = $3 WHERE id = $2::uuid AND org_id = $1::uuid`,
+		orgID, messageID, deletedAt); err != nil {
+		return MessagingDeleteMessageOutput{}, err
+	}
+	return MessagingDeleteMessageOutput{
+		MessageID: messageID, Deleted: true, DeletedAt: messagingFormatOptionalTime(currentDeletedAt),
+		ExpectedDeletedAt: messagingFormatTime(deletedAt),
+	}, nil
+}
+
+func messagingOptionalTimesEqual(left *time.Time, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return messagingFormatTime(*left) == *right
+}
+
+func messagingRestoreMessageDelete(
+	ctx context.Context, tx pgx.Tx, orgID, actorType string, userID *string, input MessagingRestoreMessageDeleteInput,
+) (MessagingRestoreMessageDeleteOutput, error) {
+	if actorType != "human" || userID == nil {
+		return MessagingRestoreMessageDeleteOutput{}, errors.New("only your own human messages can be restored")
+	}
+	messageID, senderType, senderUserID, _, _, currentDeletedAt, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
+	if err != nil {
+		return MessagingRestoreMessageDeleteOutput{}, err
+	}
+	if senderType != "human" || senderUserID == nil || *senderUserID != *userID {
+		return MessagingRestoreMessageDeleteOutput{}, errors.New("you can only restore your own messages")
+	}
+	if currentDeletedAt == nil || messagingFormatTime(*currentDeletedAt) != input.ExpectedDeletedAt {
+		return MessagingRestoreMessageDeleteOutput{}, errors.New("message deletion state changed since the inverse was recorded")
+	}
+	var hasMatchingReceipt bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM action_receipts
+			WHERE org_id = $1::uuid AND capability_id = $2 AND ok = true AND outcome = 'known'
+			  AND data->>'messageId' = $3
+			  AND data->>'expectedDeletedAt' = $4
+			  AND data->>'deletedAt' IS NOT DISTINCT FROM $5::text
+		)`, orgID, messagingDeleteMessageCapabilityID, input.MessageID, input.ExpectedDeletedAt, input.DeletedAt).Scan(&hasMatchingReceipt); err != nil {
+		return MessagingRestoreMessageDeleteOutput{}, err
+	}
+	if !hasMatchingReceipt {
+		return MessagingRestoreMessageDeleteOutput{}, errors.New("message restore requires a matching successful delete receipt")
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE messages SET deleted_at = $3 WHERE id = $2::uuid AND org_id = $1::uuid`,
+		orgID, messageID, input.DeletedAt); err != nil {
+		return MessagingRestoreMessageDeleteOutput{}, err
+	}
+	return MessagingRestoreMessageDeleteOutput{MessageID: messageID, ExpectedDeletedAt: input.DeletedAt}, nil
+}
+
+func messagingNextDeleteTime(previous *time.Time) time.Time {
+	next := messagingNow()
+	if previous != nil {
+		previousMillisecond := previous.UTC().Truncate(time.Millisecond)
+		if !next.After(previousMillisecond) {
+			next = previousMillisecond.Add(time.Millisecond)
+		}
+	}
+	return next
 }
 
 func messagingAdvanceReadCursor(

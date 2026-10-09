@@ -19,6 +19,7 @@ import {
 import {
   MAX_ATTACHMENT_BYTES,
   deleteMessage,
+  getPendingMessageDelete,
   getPendingMessageEdit,
   type Conversation,
   type Message,
@@ -607,6 +608,69 @@ describe("messages page states", () => {
     expect((within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete message" }));
     expect(writes).toHaveLength(writesBeforeReload);
+  });
+
+  it("keeps a Go deletion 404 locked across selector rollback without calling legacy DELETE", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      paths.push(path);
+      if (path === "/api/capabilities/execute") return Response.json({ error: "route unavailable" }, { status: 404 });
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    const first = render(<MessagesPage {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete message" }));
+    fireEvent.click(within(screen.getByRole("alertdialog", { name: "Delete this message?" })).getByRole("button", { name: "Delete message" }));
+    const scope = { actorId: me, organizationId: props.organizationId };
+    await waitFor(async () => expect(await getPendingMessageDelete(scope)).toMatchObject({ messageId: "m1", conversationId: channelId }));
+    expect(paths.some((path) => path.startsWith("/api/messages/m1?intentId="))).toBe(false);
+    await waitFor(() => {
+      expect((within(screen.getByRole("alertdialog", { name: "Delete this message?" })).getByRole("button", { name: "Delete message" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    first.unmount();
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
+    render(<MessagesPage {...props} />);
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete this message?" });
+    expect((within(dialog).getByRole("button", { name: "Delete message" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(paths.some((path) => path.startsWith("/api/messages/m1?intentId="))).toBe(false);
+  });
+
+  it("blocks selector-off deletion when a pending Go marker cannot be checked for missing scope", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const scope = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
+    await deleteMessage("m1", undefined, { allowGo: true, ...scope, conversationId: channelId });
+    expect(await getPendingMessageDelete(scope)).toMatchObject({ messageId: "m1", conversationId: channelId });
+
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
+    const writes: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute" || (path.startsWith("/api/messages/") && init?.method === "DELETE")) writes.push(path);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete message" }));
+    fireEvent.click(within(screen.getByRole("alertdialog", { name: "Delete this message?" })).getByRole("button", { name: "Delete message" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("actor and organization are resolved");
+    expect(writes).toEqual([]);
+    await expect(getPendingMessageDelete(scope)).resolves.toMatchObject({ messageId: "m1", conversationId: channelId });
   });
 
   it.each([true, false])("blocks message deletion until actor and organization scope resolve when Go selector is %s", async (goDeleteEnabled) => {

@@ -390,6 +390,23 @@ describe("messaging API client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("fails closed on selector-off deletion with an unresolved marker and incomplete scope", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const scope = { actorId: "user-delete-unscoped", organizationId: "org-delete-unscoped" };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
+    await deleteMessage(messageId, undefined, { allowGo: true, ...scope, conversationId });
+    expect(await getPendingMessageDelete(scope)).toMatchObject({ messageId, conversationId });
+
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(deleteMessage(messageId)).rejects.toMatchObject({
+      message: expect.stringContaining("signed-in actor and active organization"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(getPendingMessageDelete(scope)).resolves.toMatchObject({ messageId, conversationId });
+  });
+
   it("keeps fresh selector-off deletions on the legacy route", async () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
@@ -410,31 +427,51 @@ describe("messaging API client", () => {
     const recovered = await getPendingMessageDelete(scope);
     expect(recovered).toMatchObject({ messageId, conversationId });
 
-    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { deleted: true } }));
+    const fetchMock = vi.fn(async () => Response.json({
+      ok: true,
+      data: { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" },
+    }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(deleteMessage(messageId, undefined, options)).resolves.toEqual({ kind: "completed", data: { ok: true } });
     expect(lastBody(fetchMock)).toMatchObject({ intentId: recovered?.intentId });
     await expect(getPendingMessageDelete(scope)).resolves.toBeNull();
 
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deleted: false } })));
-    await expect(deleteMessage(messageId, undefined, { allowGo: true, actorId: "user-delete-invalid", organizationId: "org-delete-invalid", conversationId }))
-      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
   });
 
-  it("falls back to the legacy tombstone route only on a capability 404 with the same intent", async () => {
+  it.each([
+    ["false deleted flag", { deleted: false, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" }],
+    ["wrong message ID", { deleted: true, messageId: "another-message", deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" }],
+    ["malformed previous deletion timestamp", { deleted: true, messageId, deletedAt: "yesterday", expectedDeletedAt: "2026-10-01T09:00:00.000Z" }],
+    ["malformed receipt timestamp", { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "yesterday" }],
+    ["unexpected receipt field", { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z", actorId: "spoofed" }],
+  ])("retains the Go delete marker after a successful response with %s", async (_case, data) => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/capabilities/execute") return Response.json({ error: "not found" }, { status: 404 });
-      return Response.json({ ok: true });
+    const scope = { actorId: `user-delete-invalid-${String(_case).replaceAll(" ", "-")}`, organizationId: "org-delete-invalid" };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data })));
+    await expect(deleteMessage(messageId, undefined, { allowGo: true, ...scope, conversationId }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    await expect(getPendingMessageDelete(scope)).resolves.toMatchObject({ messageId, conversationId, intentId: expect.any(String) });
+  });
+
+  it("fails closed on a Go delete 404 and retries the same scoped intent through Go", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const scope = { actorId: "user-delete-404", organizationId: "org-delete-404" };
+    const bodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (bodies.length === 1) return Response.json({ error: "not found" }, { status: 404 });
+      return Response.json({ ok: true, data: { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    await expect(deleteMessage(messageId, undefined, {
-      allowGo: true, actorId: "user-delete-fallback", organizationId: "org-delete-fallback", conversationId,
-    })).resolves.toEqual({ kind: "completed", data: { ok: true } });
+    const options = { allowGo: true, ...scope, conversationId };
+    await expect(deleteMessage(messageId, undefined, options)).rejects.toMatchObject({ status: 404 });
+    const pending = await getPendingMessageDelete(scope);
+    expect(pending).toMatchObject({ messageId, conversationId, intentId: expect.any(String) });
+    await expect(deleteMessage(messageId, undefined, options)).resolves.toEqual({ kind: "completed", data: { ok: true } });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    const legacyUrl = new URL(String(fetchMock.mock.calls[1]?.[0]), "http://localhost");
-    expect(legacyUrl.pathname).toBe(`/api/messages/${messageId}`);
-    expect(legacyUrl.searchParams.get("intentId")).toEqual(expect.any(String));
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+    await expect(getPendingMessageDelete(scope)).resolves.toBeNull();
   });
 
   it("preserves Go capability errors for the composer", async () => {

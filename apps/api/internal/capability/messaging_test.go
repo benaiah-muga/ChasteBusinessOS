@@ -23,7 +23,8 @@ func TestMessagingCapabilitySpecsMatchTheMigrationManifest(t *testing.T) {
 		messagingAddMemberCapabilityID:               {Module: "messaging", Permission: "messaging.write", Risk: "write"},
 		messagingEditMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageEditCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
 		messagingRestoreMessageEditCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingEditMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
-		messagingDeleteMessageCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write"},
+		messagingDeleteMessageCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageDeleteCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "deletedAt", "expectedDeletedAt"}},
+		messagingRestoreMessageDeleteCapabilityID:    {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingDeleteMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "expectedDeletedAt"}},
 		messagingAdvanceReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
 		messagingRestoreReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingAdvanceReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
 		messagingSetMessageReactionCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageReactionCapabilityID, InverseInputSource: "input", InverseFields: []string{"messageId", "emoji"}},
@@ -105,6 +106,9 @@ func TestMessagingParsersAcceptEveryValidManifestPayload(t *testing.T) {
 		{messagingEditMessageCapabilityID, `{"messageId":"msg-1","body":"corrected","expectedBody":"current","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`, `{"messageId":"msg-1","body":"corrected","expectedBody":"current","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`},
 		{messagingRestoreMessageEditCapabilityID, `{"messageId":"msg-1","body":"original","expectedBody":"corrected","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`, `{"messageId":"msg-1","body":"original","expectedBody":"corrected","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`},
 		{messagingDeleteMessageCapabilityID, `{"messageId":"msg-1"}`, `{"messageId":"msg-1"}`},
+		{messagingDeleteMessageCapabilityID, `{"messageId":"msg-1","expectedDeletedAt":null}`, `{"messageId":"msg-1"}`},
+		{messagingDeleteMessageCapabilityID, `{"messageId":"msg-1","expectedDeletedAt":"2026-09-20T00:00:00Z"}`, `{"messageId":"msg-1","expectedDeletedAt":"2026-09-20T00:00:00.000Z"}`},
+		{messagingRestoreMessageDeleteCapabilityID, `{"messageId":"msg-1","deletedAt":null,"expectedDeletedAt":"2026-09-20T00:00:00Z"}`, `{"messageId":"msg-1","deletedAt":null,"expectedDeletedAt":"2026-09-20T00:00:00.000Z"}`},
 		{messagingAdvanceReadCursorCapabilityID, `{"conversationId":"` + conversationID + `"}`,
 			`{"conversationId":"` + conversationID + `"}`},
 		{messagingAdvanceReadCursorCapabilityID, `{"conversationId":"` + conversationID + `","readAt":null}`,
@@ -223,6 +227,11 @@ func TestMessagingParsersRejectInvalidManifestPayloads(t *testing.T) {
 		{"restore edit with invalid expected editedAt", messagingRestoreMessageEditCapabilityID, `{"messageId":"m","body":"original","expectedBody":"corrected","expectedEditedAt":"yesterday"}`},
 		{"restore edit with oversized body", messagingRestoreMessageEditCapabilityID, `{"messageId":"m","body":"` + strings.Repeat("b", 8001) + `","expectedBody":"corrected","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`},
 		{"delete message without id", messagingDeleteMessageCapabilityID, `{}`},
+		{"delete message with invalid expected deletedAt", messagingDeleteMessageCapabilityID, `{"messageId":"m","expectedDeletedAt":"yesterday"}`},
+		{"delete message with numeric expected deletedAt", messagingDeleteMessageCapabilityID, `{"messageId":"m","expectedDeletedAt":4}`},
+		{"restore delete without deletedAt", messagingRestoreMessageDeleteCapabilityID, `{"messageId":"m","expectedDeletedAt":"2026-09-20T00:00:00Z"}`},
+		{"restore delete without expected timestamp", messagingRestoreMessageDeleteCapabilityID, `{"messageId":"m","deletedAt":null}`},
+		{"restore delete with invalid prior timestamp", messagingRestoreMessageDeleteCapabilityID, `{"messageId":"m","deletedAt":"yesterday","expectedDeletedAt":"2026-09-20T00:00:00Z"}`},
 		{"advance cursor with non-uuid conversation", messagingAdvanceReadCursorCapabilityID, `{"conversationId":"conv-1"}`},
 		{"advance cursor with offset datetime", messagingAdvanceReadCursorCapabilityID, `{"conversationId":"` + conversationID + `","readAt":"2026-09-20T00:00:00+02:00"}`},
 		{"advance cursor with date only", messagingAdvanceReadCursorCapabilityID, `{"conversationId":"` + conversationID + `","readAt":"2026-09-20"}`},
@@ -332,6 +341,33 @@ func TestMessagingAdvanceReadCursorDistinguishesAbsentFromNull(t *testing.T) {
 	}
 }
 
+func TestMessagingDeleteGuardDistinguishesAbsentFromExplicitNull(t *testing.T) {
+	absent, err := parseMessagingInput(messagingDeleteMessageCapabilityID, json.RawMessage(`{"messageId":"m"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicitNull, err := parseMessagingInput(messagingDeleteMessageCapabilityID, json.RawMessage(`{"messageId":"m","expectedDeletedAt":null}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	absentInput := absent.(MessagingDeleteMessageInput)
+	nullInput := explicitNull.(MessagingDeleteMessageInput)
+	if absentInput.ExpectedDeletedAtProvided || !nullInput.ExpectedDeletedAtProvided || nullInput.ExpectedDeletedAt != nil {
+		t.Fatalf("delete guard absent=%+v explicit-null=%+v", absentInput, nullInput)
+	}
+	abSentHash, err := canonicalInputHash(absentInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nullHash, err := canonicalInputHash(nullInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abSentHash == nullHash {
+		t.Fatal("absent and explicit-null delete guards must have different canonical hashes")
+	}
+}
+
 func TestMessagingOutputShapesMatchTheManifest(t *testing.T) {
 	cases := []struct {
 		id   string
@@ -347,7 +383,8 @@ func TestMessagingOutputShapesMatchTheManifest(t *testing.T) {
 		{messagingAddMemberCapabilityID, MessagingAddMemberOutput{Added: true}, []string{"added"}},
 		{messagingEditMessageCapabilityID, MessagingEditMessageOutput{MessageID: "m", Body: "before", ExpectedBody: "after", ExpectedEditedAt: "2026-09-20T00:00:00.000Z", EditedAt: "2026-09-20T00:00:00.000Z"}, []string{"messageId", "body", "expectedBody", "expectedEditedAt", "editedAt"}},
 		{messagingRestoreMessageEditCapabilityID, MessagingRestoreMessageEditOutput{MessageID: "m", Body: "after", ExpectedBody: "before", ExpectedEditedAt: "2026-09-20T00:00:00.000Z", EditedAt: "2026-09-20T00:00:00.000Z"}, []string{"messageId", "body", "expectedBody", "expectedEditedAt", "editedAt"}},
-		{messagingDeleteMessageCapabilityID, MessagingDeleteMessageOutput{Deleted: true}, []string{"deleted"}},
+		{messagingDeleteMessageCapabilityID, MessagingDeleteMessageOutput{MessageID: "m", Deleted: true, ExpectedDeletedAt: "2026-09-20T00:00:00.000Z"}, []string{"messageId", "deleted", "deletedAt", "expectedDeletedAt"}},
+		{messagingRestoreMessageDeleteCapabilityID, MessagingRestoreMessageDeleteOutput{MessageID: "m"}, []string{"messageId", "expectedDeletedAt"}},
 		{messagingAdvanceReadCursorCapabilityID, MessagingReadCursorOutput{ConversationID: "c"}, []string{"conversationId", "previousReadAt"}},
 		{messagingRestoreReadCursorCapabilityID, MessagingReadCursorOutput{ConversationID: "c"}, []string{"conversationId", "previousReadAt"}},
 		{messagingSetMessageReactionCapabilityID, MessagingSetMessageReactionOutput{Active: true}, []string{"previousActive", "active"}},

@@ -403,6 +403,7 @@ export function registerMessagingCapabilities(registry: CapabilityRegistry, deps
   registry.register(editMessage(deps));
   registry.register(restoreMessageEdit(deps));
   registry.register(deleteMessage(deps));
+  registry.register(restoreMessageDelete(deps));
   registry.register(advanceReadCursor(deps));
   registry.register(restoreReadCursor(deps));
   registry.register(setMessageReaction(deps));
@@ -773,21 +774,122 @@ const deleteMessage = (deps: ModuleDeps) =>
     module: "messaging",
     risk: "write",
     permission: "messaging.write",
-    input: z.object({ messageId: z.string() }),
-    output: z.object({ deleted: z.literal(true) }),
+    input: z.object({ messageId: z.string(), expectedDeletedAt: z.string().datetime().nullable().optional() }),
+    output: z.object({
+      messageId: z.string(),
+      deleted: z.literal(true),
+      deletedAt: z.string().datetime().nullable(),
+      expectedDeletedAt: z.string().datetime(),
+    }),
+    inverse: {
+      capabilityId: "messaging.restoreMessageDelete",
+      buildInput: (_input, output) => ({
+        messageId: output.messageId,
+        deletedAt: output.deletedAt,
+        expectedDeletedAt: output.expectedDeletedAt,
+      }),
+    },
     execute: async (ctx, input) => {
       if (ctx.actor.type !== "human" || !ctx.actor.id) throw new Error("only your own human messages can be deleted");
-      const [row] = await deps.db
-        .select({ id: messages.id, senderType: messages.senderType, senderUserId: messages.senderUserId })
-        .from(messages)
-        .where(and(eq(messages.id, input.messageId), eq(messages.orgId, ctx.actor.orgId)))
-        .limit(1);
-      if (!row) throw new Error("message not found");
-      if (row.senderType !== "human" || row.senderUserId !== ctx.actor.id) {
-        throw new Error("you can only delete your own messages");
-      }
-      await deps.db.update(messages).set({ deletedAt: new Date() }).where(eq(messages.id, row.id));
-      return { deleted: true as const };
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [row] = await tx
+          .select({ id: messages.id, senderType: messages.senderType, senderUserId: messages.senderUserId, deletedAt: messages.deletedAt })
+          .from(messages)
+          .where(and(eq(messages.id, input.messageId), eq(messages.orgId, ctx.actor.orgId)))
+          .limit(1)
+          .for("update");
+        if (!row) throw new Error("message not found");
+        if (row.senderType !== "human" || row.senderUserId !== ctx.actor.id) {
+          throw new Error("you can only delete your own messages");
+        }
+        if (input.expectedDeletedAt !== undefined && (row.deletedAt?.toISOString() ?? null) !== input.expectedDeletedAt) {
+          throw new Error("message deletion state changed since the inverse was recorded");
+        }
+        const [lastDelete] = await tx
+          .select({ expectedDeletedAt: sql<string | null>`MAX(${actionReceipts.data}->>'expectedDeletedAt')` })
+          .from(actionReceipts)
+          .where(
+            and(
+              eq(actionReceipts.orgId, ctx.actor.orgId),
+              eq(actionReceipts.capabilityId, "messaging.deleteMessage"),
+              eq(actionReceipts.ok, true),
+              eq(actionReceipts.outcome, "known"),
+              sql`${actionReceipts.data}->>'messageId' = ${row.id}`,
+            ),
+          );
+        const receiptTime = lastDelete?.expectedDeletedAt ? Date.parse(lastDelete.expectedDeletedAt) : 0;
+        if (lastDelete?.expectedDeletedAt && !Number.isFinite(receiptTime)) {
+          throw new Error("message has an invalid prior deletion receipt");
+        }
+        const deletedAt = new Date(Math.max(Date.now(), (row.deletedAt?.getTime() ?? 0) + 1, receiptTime + 1));
+        await tx.update(messages).set({ deletedAt }).where(eq(messages.id, row.id));
+        return {
+          messageId: row.id,
+          deleted: true as const,
+          deletedAt: row.deletedAt?.toISOString() ?? null,
+          expectedDeletedAt: deletedAt.toISOString(),
+        };
+      });
+    },
+  });
+
+const restoreMessageDelete = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "messaging.restoreMessageDelete",
+    title: "Restore deleted message",
+    intent:
+      "Restore your own message after a matching successful deletion, only while that exact deletion timestamp is still current",
+    module: "messaging",
+    risk: "write",
+    permission: "messaging.write",
+    input: z.object({
+      messageId: z.string(),
+      deletedAt: z.string().datetime().nullable(),
+      expectedDeletedAt: z.string().datetime(),
+    }),
+    output: z.object({ messageId: z.string(), expectedDeletedAt: z.string().datetime().nullable() }),
+    inverse: {
+      capabilityId: "messaging.deleteMessage",
+      buildInput: (_input, output) => ({
+        messageId: output.messageId,
+        expectedDeletedAt: output.expectedDeletedAt,
+      }),
+    },
+    execute: async (ctx, input) => {
+      if (ctx.actor.type !== "human" || !ctx.actor.id) throw new Error("only your own human messages can be restored");
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [row] = await tx
+          .select({ id: messages.id, senderType: messages.senderType, senderUserId: messages.senderUserId, deletedAt: messages.deletedAt })
+          .from(messages)
+          .where(and(eq(messages.id, input.messageId), eq(messages.orgId, ctx.actor.orgId)))
+          .limit(1)
+          .for("update");
+        if (!row) throw new Error("message not found");
+        if (row.senderType !== "human" || row.senderUserId !== ctx.actor.id) {
+          throw new Error("you can only restore your own messages");
+        }
+        if (row.deletedAt?.toISOString() !== input.expectedDeletedAt) {
+          throw new Error("message deletion state changed since the inverse was recorded");
+        }
+        const [receipt] = await tx
+          .select({ id: actionReceipts.id })
+          .from(actionReceipts)
+          .where(
+            and(
+              eq(actionReceipts.orgId, ctx.actor.orgId),
+              eq(actionReceipts.capabilityId, "messaging.deleteMessage"),
+              eq(actionReceipts.ok, true),
+              eq(actionReceipts.outcome, "known"),
+              sql`${actionReceipts.data}->>'messageId' = ${input.messageId}`,
+              sql`${actionReceipts.data}->>'deletedAt' IS NOT DISTINCT FROM ${input.deletedAt}`,
+              sql`${actionReceipts.data}->>'expectedDeletedAt' = ${input.expectedDeletedAt}`,
+            ),
+          )
+          .limit(1);
+        if (!receipt) throw new Error("message restore requires a matching successful delete receipt");
+        await tx.update(messages).set({ deletedAt: input.deletedAt ? new Date(input.deletedAt) : null }).where(eq(messages.id, row.id));
+        return { messageId: row.id, expectedDeletedAt: input.deletedAt };
+      });
     },
   });
 

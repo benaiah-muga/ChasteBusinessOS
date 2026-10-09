@@ -254,6 +254,89 @@ func TestMessagingEditRestoreRequiresReceiptAndReplaysGuardedInverse(t *testing.
 	}
 }
 
+func TestMessagingDeleteRestoreRequiresReceiptAndGuardsABA(t *testing.T) {
+	fx := newMessagingFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'messaging.write', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	channel := fx.createChannel(t, fx.userID, "guarded deletes")
+	messageID := fx.send(t, fx.userID, channel, "message to restore")
+
+	deletedResult, err := executeMessagingCapability(fx, messagingDeleteMessageCapabilityID,
+		`{"messageId":"`+messageID+`"}`, "message-delete-inverse-delete")
+	if err != nil || !deletedResult.OK {
+		t.Fatalf("delete result=%+v err=%v", deletedResult, err)
+	}
+	var deleted MessagingDeleteMessageOutput
+	if err := json.Unmarshal(deletedResult.Data, &deleted); err != nil {
+		t.Fatal(err)
+	}
+	if deleted.MessageID != messageID || !deleted.Deleted || deleted.DeletedAt != nil || deleted.ExpectedDeletedAt == "" {
+		t.Fatalf("delete inverse snapshot=%+v", deleted)
+	}
+	fabricated := `{"messageId":"` + messageID + `","deletedAt":"2020-01-01T00:00:00.000Z","expectedDeletedAt":"` + deleted.ExpectedDeletedAt + `"}`
+	if result, err := executeMessagingCapability(fx, messagingRestoreMessageDeleteCapabilityID, fabricated, "message-delete-fabricated-restore"); err == nil || !strings.Contains(err.Error(), "matching successful delete receipt") {
+		t.Fatalf("restore fabricated snapshot result=%+v err=%v, want receipt proof rejection", result, err)
+	}
+
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingRestoreMessageDeleteOutput, error) {
+		return messagingRestoreMessageDelete(fx.ctx, tx, fx.orgID, "human", messagingUserPointer(fx.colleagueID), MessagingRestoreMessageDeleteInput{
+			MessageID: messageID, DeletedAt: deleted.DeletedAt, ExpectedDeletedAt: deleted.ExpectedDeletedAt,
+		})
+	}); err == nil || err.Error() != "you can only restore your own messages" {
+		t.Fatalf("restore by different author err=%v, want author refusal", err)
+	}
+	var foreignTenant MessagingRestoreMessageDeleteOutput
+	_, tenantErr := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.otherOrgID, func(tx pgx.Tx) (MessagingRestoreMessageDeleteOutput, error) {
+		return messagingRestoreMessageDelete(fx.ctx, tx, fx.otherOrgID, "human", messagingUserPointer(fx.userID), MessagingRestoreMessageDeleteInput{
+			MessageID: messageID, DeletedAt: deleted.DeletedAt, ExpectedDeletedAt: deleted.ExpectedDeletedAt,
+		})
+	})
+	if tenantErr == nil || tenantErr.Error() != "message not found" {
+		t.Fatalf("restore in foreign tenant=%+v err=%v, want tenant-isolated not found", foreignTenant, tenantErr)
+	}
+
+	restoreInput, err := json.Marshal(MessagingRestoreMessageDeleteInput{
+		MessageID: deleted.MessageID, DeletedAt: deleted.DeletedAt, ExpectedDeletedAt: deleted.ExpectedDeletedAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := executeMessagingCapability(fx, messagingRestoreMessageDeleteCapabilityID, string(restoreInput), "message-delete-inverse-restore")
+	if err != nil || !restored.OK {
+		t.Fatalf("restore from delete receipt result=%+v err=%v", restored, err)
+	}
+	var restoredSnapshot MessagingRestoreMessageDeleteOutput
+	if err := json.Unmarshal(restored.Data, &restoredSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if restoredSnapshot.MessageID != messageID || restoredSnapshot.ExpectedDeletedAt != nil {
+		t.Fatalf("restore inverse snapshot=%+v, want active state", restoredSnapshot)
+	}
+	replay, err := executeMessagingCapability(fx, messagingRestoreMessageDeleteCapabilityID, string(restoreInput), "message-delete-inverse-restore")
+	var replaySnapshot MessagingRestoreMessageDeleteOutput
+	if json.Unmarshal(replay.Data, &replaySnapshot) != nil || err != nil || !replay.OK || !replay.Replayed || !reflect.DeepEqual(replaySnapshot, restoredSnapshot) {
+		t.Fatalf("restore receipt replay=%+v snapshot=%+v err=%v", replay, replaySnapshot, err)
+	}
+
+	redoInput := `{"messageId":"` + restoredSnapshot.MessageID + `","expectedDeletedAt":null}`
+	redone, err := executeMessagingCapability(fx, messagingDeleteMessageCapabilityID, redoInput, "message-delete-inverse-redo")
+	if err != nil || !redone.OK {
+		t.Fatalf("redo delete from restore receipt result=%+v err=%v", redone, err)
+	}
+	var redoneSnapshot MessagingDeleteMessageOutput
+	if err := json.Unmarshal(redone.Data, &redoneSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if redoneSnapshot.DeletedAt != nil || redoneSnapshot.ExpectedDeletedAt <= deleted.ExpectedDeletedAt {
+		t.Fatalf("redo delete snapshot=%+v, want active prior state and a fresh timestamp", redoneSnapshot)
+	}
+	staleRestore, err := executeMessagingCapability(fx, messagingRestoreMessageDeleteCapabilityID, string(restoreInput), "message-delete-stale-restore")
+	if err == nil || staleRestore.OK || !strings.Contains(err.Error(), "deletion state changed") {
+		t.Fatalf("old restore after delete/restore/delete=%+v err=%v, want ABA guard refusal", staleRestore, err)
+	}
+}
+
 func TestMessagingConversationLifecycleGovernsMembershipAndTenant(t *testing.T) {
 	fx := newMessagingFixture(t)
 	channel := fx.createChannel(t, fx.userID, "lifecycle")

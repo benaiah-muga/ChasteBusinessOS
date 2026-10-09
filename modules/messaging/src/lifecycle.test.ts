@@ -289,8 +289,70 @@ describe("messaging message lifecycle", () => {
     });
     expect(stale).toMatchObject({ ok: false, error: expect.stringContaining("message changed since the inverse") });
 
-    const deleted = await run("messaging.deleteMessage", ctx(creatorId, ["messaging.write"]), { messageId });
-    expect(deleted).toMatchObject({ ok: true, data: { deleted: true } });
+    const deleted = (await run("messaging.deleteMessage", ctx(creatorId, ["messaging.write"]), { messageId })) as {
+      ok: true;
+      data: { messageId: string; deleted: true; deletedAt: string | null; expectedDeletedAt: string };
+    };
+    expect(deleted).toMatchObject({
+      ok: true,
+      data: { messageId, deleted: true, deletedAt: null, expectedDeletedAt: expect.any(String) },
+    });
+    await db.db.insert(actionReceipts).values({
+      orgId,
+      intentKey: `${orgId}:messaging-delete-receipt`,
+      capabilityId: "messaging.deleteMessage",
+      inputHash: "sha256:messaging-delete-receipt",
+      ok: true,
+      outcome: "known",
+      data: deleted.data,
+    });
+
+    const deleteWrongAuthor = await run("messaging.restoreMessageDelete", ctx(memberId, ["messaging.write"]), {
+      messageId,
+      deletedAt: deleted.data.deletedAt,
+      expectedDeletedAt: deleted.data.expectedDeletedAt,
+    });
+    expect(deleteWrongAuthor).toMatchObject({ ok: false, error: expect.stringContaining("you can only restore your own messages") });
+
+    const fabricatedDelete = await run("messaging.restoreMessageDelete", ctx(creatorId, ["messaging.write"]), {
+      messageId,
+      deletedAt: "2020-01-01T00:00:00.000Z",
+      expectedDeletedAt: deleted.data.expectedDeletedAt,
+    });
+    expect(fabricatedDelete).toMatchObject({ ok: false, error: expect.stringContaining("matching successful delete receipt") });
+
+    const foreignTenantContext = ctx(creatorId, ["messaging.write"]);
+    const foreignTenant = await run("messaging.restoreMessageDelete", {
+      ...foreignTenantContext,
+      actor: { ...foreignTenantContext.actor, orgId: crypto.randomUUID() },
+    }, {
+      messageId,
+      deletedAt: deleted.data.deletedAt,
+      expectedDeletedAt: deleted.data.expectedDeletedAt,
+    });
+    expect(foreignTenant).toMatchObject({ ok: false, error: expect.stringContaining("message not found") });
+
+    const restoreInput = {
+      messageId,
+      deletedAt: deleted.data.deletedAt,
+      expectedDeletedAt: deleted.data.expectedDeletedAt,
+    };
+    const restoredDelete = (await run("messaging.restoreMessageDelete", ctx(creatorId, ["messaging.write"]), restoreInput)) as {
+      ok: true;
+      data: { messageId: string; expectedDeletedAt: string | null };
+    };
+    expect(restoredDelete).toMatchObject({ ok: true, data: { messageId, expectedDeletedAt: null } });
+    const [restoredMessage] = await db.db.select().from(messages).where(eq(messages.id, messageId));
+    expect(restoredMessage?.deletedAt).toBeNull();
+
+    const redoneDelete = (await run("messaging.deleteMessage", ctx(creatorId, ["messaging.write"]), {
+      messageId,
+      expectedDeletedAt: restoredDelete.data.expectedDeletedAt,
+    })) as { ok: true; data: { messageId: string; deletedAt: string | null; expectedDeletedAt: string } };
+    expect(redoneDelete).toMatchObject({ ok: true, data: { messageId, deletedAt: null } });
+    expect(Date.parse(redoneDelete.data.expectedDeletedAt)).toBeGreaterThan(Date.parse(deleted.data.expectedDeletedAt));
+    const staleRestore = await run("messaging.restoreMessageDelete", ctx(creatorId, ["messaging.write"]), restoreInput);
+    expect(staleRestore).toMatchObject({ ok: false, error: expect.stringContaining("deletion state changed") });
 
     const read = (await run("messaging.readMessages", ctx(creatorId, ["messaging.read"]), {
       conversationId: channel,

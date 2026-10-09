@@ -1766,6 +1766,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case MessagingRestoreMessageDeleteInput:
+			output, err := messagingRestoreMessageDelete(ctx, tx, claims.OrganizationID, claims.ActorType, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case MessagingAdvanceReadCursorInput:
 			output, err := messagingAdvanceReadCursor(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
 			if err != nil {
@@ -3420,6 +3426,12 @@ func (e *Executor) executeWithFinalizer(
 
 func canonicalInputHash(input any) (string, error) {
 	switch parsed := input.(type) {
+	case MessagingDeleteMessageInput:
+		canonical := map[string]any{"messageId": parsed.MessageID}
+		if parsed.ExpectedDeletedAtProvided {
+			canonical["expectedDeletedAt"] = parsed.ExpectedDeletedAt
+		}
+		return canonicalHash(canonical)
 	case CreateCustomerInput:
 		return CanonicalInputHash(parsed)
 	case SaveCustomerViewInput, RestoreCustomerViewInput:
@@ -3520,7 +3532,7 @@ func canonicalInputHash(input any) (string, error) {
 		notificationReceiptInput, notificationRestoreReceiptInput,
 		MessagingListPeopleInput, MessagingCreateConversationInput, MessagingUpdateConversationInput,
 		MessagingArchiveConversationInput, MessagingConversationIDInput, MessagingAddMemberInput,
-		MessagingEditMessageInput, MessagingRestoreMessageEditInput, MessagingDeleteMessageInput, MessagingAdvanceReadCursorInput,
+		MessagingEditMessageInput, MessagingRestoreMessageEditInput, MessagingRestoreMessageDeleteInput, MessagingAdvanceReadCursorInput,
 		MessagingRestoreReadCursorInput, MessagingMessageReactionInput, MessagingMessagePinInput,
 		MessagingUpdateConversationPresenceInput, MessagingRestoreConversationPresenceInput,
 		MessagingUploadMessageAttachmentInput, MessagingDeletePendingAttachmentInput:
