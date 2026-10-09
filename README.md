@@ -619,9 +619,10 @@ so production route ownership stays unchanged unless both route flags are
 deliberately enabled. Set `GO_SUPPORT_TRUSTED_PROXY_CIDRS` only to trusted
 reverse proxy networks; forwarded addresses from other peers are ignored.
 
-The Vite development proxy sends Go's implemented `/api/auth` methods and paths
-to Go. Other auth paths and methods continue through the legacy Better Auth
-catch-all. Set `CHASTE_GO_AUTH_OIDC_ROUTE=1` or
+When Go auth is enabled, the Vite development proxy sends every method and path
+under `/api/auth` to Go, including unsupported compatibility paths, which Go
+rejects with 404 or 405. Set `CHASTE_GO_AUTH_ROUTE=0` to restore the legacy
+Better Auth catch-all. Set `CHASTE_GO_AUTH_OIDC_ROUTE=1` or
 `CHASTE_GO_AUTH_SAML_ROUTE=1` alongside the matching Go auth feature flag to
 route those optional federation paths to Go. Most other Go route flags are opt-in
 and evaluated against the request method and exact path before the legacy

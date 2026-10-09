@@ -25,15 +25,16 @@ func NewRouterWithOrgRoute(pinger Pinger, logger *slog.Logger, bridgeSecret stri
 	return newRouterWithApprovalInbox(pinger, logger, bridgeSecret, policyReader, ledgerReader, orgMembershipChecker, capabilityExecutor, metricsReader, approvalInboxReader, orgRoute, approvalDeciders...)
 }
 
-// NewRouterWithAuthAndOrgRoute mounts auth routes only when an auth handler is
-// explicitly supplied. Production route ownership remains with the legacy app
-// until GO_AUTH_ROUTE is enabled after compatibility review.
+// NewRouterWithAuthAndOrgRoute mounts the full auth namespace only when an auth
+// handler is explicitly supplied. Unsupported auth paths remain owned by Go
+// and fail closed instead of reaching the base handler.
 func NewRouterWithAuthAndOrgRoute(pinger Pinger, logger *slog.Logger, bridgeSecret string, policyReader PolicyReader, ledgerReader LedgerReader, orgMembershipChecker OrgMembershipChecker, capabilityExecutor CapabilityExecutor, metricsReader MetricsReader, approvalInboxReader ApprovalInboxReader, orgRoute, authRoute http.Handler, approvalDeciders ...ApprovalDecisionDecider) http.Handler {
 	base := NewRouterWithOrgRoute(pinger, logger, bridgeSecret, policyReader, ledgerReader, orgMembershipChecker, capabilityExecutor, metricsReader, approvalInboxReader, orgRoute, approvalDeciders...)
 	if authRoute == nil {
 		return base
 	}
 	mux := http.NewServeMux()
+	mux.Handle("/api/auth", http.NotFoundHandler())
 	mux.Handle("/api/auth/", http.StripPrefix("/api/auth", authRoute))
 	mux.Handle("/", base)
 	return mux

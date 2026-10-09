@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Go now owns the exact `/api/auth` root and every nested auth path when the
+  Vite Go auth proxy is enabled. Unsupported paths and methods fail closed in
+  Go instead of reaching the legacy Better Auth handler; `CHASTE_GO_AUTH_ROUTE=0`
+  keeps the legacy compatibility path available.
 - Organization creation now has a single Go writer. The legacy Next POST is a
   strict session-preserving proxy to Go with no TypeScript fallback; it
   forwards the original bounded body, Cookie or Bearer token, Origin, and Host,

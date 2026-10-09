@@ -1770,11 +1770,12 @@ new owners and the manifest shows zero legacy runtime paths.
      membership rows while capturing and applying snapshots so undo cannot
      overwrite an intervening profile edit. Authenticated browser proof remains
      open because the in-app browser is unavailable in this environment.
-175. When the Vite Go auth proxy is enabled, route every method and path under
-     `/api/auth` to Go. Unsupported Better Auth compatibility paths now fail
-     closed in the Go auth handler instead of falling through to the legacy
-     service; the explicit `CHASTE_GO_AUTH_ROUTE=0` compatibility opt-out is
-     retained. Other API namespaces and their route selectors are unchanged.
+175. (Implemented) When the Vite Go auth proxy is enabled, route every method
+     and path under `/api/auth`, including the exact root, to Go. Unsupported
+     Better Auth compatibility paths fail closed in Go instead of falling
+     through to the legacy service; the explicit
+     `CHASTE_GO_AUTH_ROUTE=0` compatibility opt-out is retained. Other API
+     namespaces and their route selectors are unchanged.
 176. (Implemented) Persist the exact Vite Sales create action alongside its
      actor/org scoped intent. Restore and lock unresolved drafts after remount,
      retry with the original payload and intent, and unlock on definitive 4xx

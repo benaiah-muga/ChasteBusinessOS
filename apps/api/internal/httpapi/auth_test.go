@@ -232,6 +232,20 @@ func TestGoAuthRouteMountIsExplicitAndUsesBetterAuthPaths(t *testing.T) {
 	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != "null" {
 		t.Fatalf("mounted auth endpoint status=%d body=%q", response.Code, response.Body.String())
 	}
+	for _, path := range []string{"/api/auth", "/api/auth/", "/api/auth/unsupported/compatibility/path"} {
+		request = httptest.NewRequest(http.MethodGet, path, nil)
+		response = httptest.NewRecorder()
+		mounted.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Errorf("unsupported Go auth path %q status=%d body=%q", path, response.Code, response.Body.String())
+		}
+	}
+	request = httptest.NewRequest(http.MethodDelete, "/api/auth/get-session", nil)
+	response = httptest.NewRecorder()
+	mounted.ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Errorf("unsupported Go auth method status=%d body=%q", response.Code, response.Body.String())
+	}
 
 	oidcRoutes := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/native/exchange" {
@@ -248,6 +262,37 @@ func TestGoAuthRouteMountIsExplicitAndUsesBetterAuthPaths(t *testing.T) {
 	withOIDC.ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("native OIDC exchange route status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
+func TestGoAuthRouteMountOwnsRootAndArbitraryNestedPaths(t *testing.T) {
+	var dispatched []string
+	authRoute := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dispatched = append(dispatched, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mounted := NewRouterWithAuthAndOrgRoute(nil, nil, "", nil, nil, nil, nil, nil, nil, nil, authRoute)
+	rootRequest := httptest.NewRequest(http.MethodGet, "/api/auth", nil)
+	rootResponse := httptest.NewRecorder()
+	mounted.ServeHTTP(rootResponse, rootRequest)
+	if rootResponse.Code != http.StatusNotFound {
+		t.Fatalf("Go auth namespace root status=%d, want fail-closed 404", rootResponse.Code)
+	}
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPatch, path: "/api/auth/unimplemented/nested?source=compat"},
+	} {
+		request := httptest.NewRequest(test.method, test.path, nil)
+		response := httptest.NewRecorder()
+		mounted.ServeHTTP(response, request)
+		if response.Code != http.StatusNoContent {
+			t.Errorf("%s %s reached status=%d, want auth handler", test.method, test.path, response.Code)
+		}
+	}
+	if strings.Join(dispatched, ",") != "PATCH /unimplemented/nested" {
+		t.Fatalf("Go auth handler dispatches=%v", dispatched)
 	}
 }
 
