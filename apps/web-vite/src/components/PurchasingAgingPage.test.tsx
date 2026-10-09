@@ -34,6 +34,23 @@ describe("PurchasingAgingPage", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({ credentials: "same-origin" }));
   });
 
+  it("uses the Go A/P aging capability and falls back to workspace currency", async () => {
+    vi.stubGlobal("__GO_PURCHASING_AP_AGING_READS__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(enabledSwitchboard))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { buckets: report.apAging.buckets } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingAgingPage baseCurrency="UGX" />);
+
+    expect(await screen.findByRole("heading", { name: /UGX\s+1,800/ })).toBeTruthy();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      capabilityId: "purchasing.apAging",
+      input: {},
+      intentId: expect.any(String),
+    });
+  });
+
   it("shows a clear zero-balance state without hiding the aging rows", async () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(jsonResponse(enabledSwitchboard))

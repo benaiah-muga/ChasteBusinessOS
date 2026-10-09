@@ -51,7 +51,11 @@ export function PurchasingAgingPage({ baseCurrency = null }: { baseCurrency?: st
         setState({ status: "disabled" });
         return;
       }
-      setState({ status: "ready", buckets: result.buckets, currency: baseCurrency ?? result.baseCurrency });
+      const currency = baseCurrency ?? result.baseCurrency;
+      if (!currency) {
+        throw new PurchasingPaymentRunsApiError(0, "Workspace currency is unavailable for accounts payable aging.");
+      }
+      setState({ status: "ready", buckets: result.buckets, currency });
     } catch (error) {
       if (signal?.aborted) return;
       setState({

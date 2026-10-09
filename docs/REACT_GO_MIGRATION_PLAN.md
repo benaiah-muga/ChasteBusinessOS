@@ -2182,3 +2182,12 @@ new owners and the manifest shows zero legacy runtime paths.
      result is unresolved. Preserve the current saved-view read path. Focused
      Vite API/page/proxy tests pass; existing Go parser and integration coverage
      covers the capability contract. Browser proof remains open.
+213. (Implemented) Route the Vite Purchasing A/P aging report through Go's
+     session-authenticated `purchasing.apAging` capability behind paired
+     `CHASTE_GO_PURCHASING_AP_AGING_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors and server-side
+     `GO_PURCHASING_AP_AGING_READS=1` gate. Validate the capability envelope
+     and strict bucket output, use the workspace currency because Go does not
+     return currency, and fail closed without retrying the legacy
+     `/api/purchasing` read. Focused Vite and Go route tests pass; browser proof
+     remains open.

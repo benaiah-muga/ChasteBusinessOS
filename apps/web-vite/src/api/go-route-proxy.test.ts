@@ -24,6 +24,7 @@ import {
   goPurchasingReturnCloseFromEnv,
   goPurchasingFinanceWritesFromEnv,
   goPurchasingPaymentRunsFromEnv,
+  goPurchasingAPAgingReadsFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
   goPurchasingIntelReadsFromEnv,
   goPurchasingSourcingWritesFromEnv,
@@ -345,6 +346,14 @@ describe("purchase payment run Go selector", () => {
     expect(goPurchasingPaymentRunsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_PAYMENT_RUNS: "1" })).toBe(true);
     expect(goPurchasingPaymentRunsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingPaymentRunsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_PAYMENT_RUNS: "1" })).toBe(false);
+  });
+});
+
+describe("Purchasing A/P aging Go selector", () => {
+  it("requires the A/P aging selector and session capability route", () => {
+    expect(goPurchasingAPAgingReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_AP_AGING_READS: "1" })).toBe(true);
+    expect(goPurchasingAPAgingReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goPurchasingAPAgingReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_AP_AGING_READS: "1" })).toBe(false);
   });
 });
 

@@ -199,6 +199,9 @@ func run(logger *slog.Logger) error {
 		for capabilityID := range httpapi.InventoryCycleCountDisabledCapabilities(os.Getenv("GO_INVENTORY_CYCLE_COUNT_WRITES") == "1") {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}
+		for capabilityID := range httpapi.PurchasingAPAgingDisabledCapabilities(os.Getenv("GO_PURCHASING_AP_AGING_READS") == "1") {
+			disabledCapabilities[capabilityID] = struct{}{}
+		}
 		sessionCapabilityRoute = httpapi.NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, capabilityExecutor, logger, disabledCapabilities, trustedProxyCIDRs)
 		logger.Info("Go session capability route mounted", "path", "/api/capabilities/execute")
 	}

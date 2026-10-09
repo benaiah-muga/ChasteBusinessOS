@@ -13,6 +13,14 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Purchasing A/P aging can read through Go's authenticated
+  `purchasing.apAging` capability behind paired
+  `CHASTE_GO_PURCHASING_AP_AGING_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors, with the API's
+  `GO_PURCHASING_AP_AGING_READS=1` flag also required. The read validates Go's
+  bucket response and uses the workspace currency; selected-Go failures do not
+  retry through `/api/purchasing`.
+
 - Vite inventory transfer create and confirm writes no longer fall back to the
   legacy inventory route when a selected Go capability returns 404. The exact
   actor/org scoped intent is retained, and retries remain targeted to the

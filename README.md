@@ -529,8 +529,11 @@ or returns invalid data. The TypeScript path remains the default and the flag
 defaults to `0`.
 `GO_PURCHASING_AP_AGING_READS=1` opts the supplier AP aging read into the
 signed Go capability bridge. It requires `pnpm dev:api`; other purchasing
-reads and all writes remain on their existing handlers. The flag defaults to
-`0`.
+reads and all writes remain on their existing handlers. The same default-off
+flag gates `purchasing.apAging` on the session capability route. The flag
+defaults to `0`. Vite direct reads additionally require
+`CHASTE_GO_PURCHASING_AP_AGING_READS=1` and
+`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`.
 `GO_PURCHASING_PRICE_HISTORY_READS=1` opts the supplier price history read into
 the signed Go `purchasing.priceHistory` capability. It requires `pnpm dev:api`,
 preserves the existing response shape, and fails closed if Go is unavailable
