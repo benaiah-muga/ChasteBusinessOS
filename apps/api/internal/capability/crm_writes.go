@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"time"
 
@@ -43,15 +44,16 @@ type CustomerMergeSnapshot struct {
 }
 
 type CustomerMergeSnapshotInput struct {
-	SurvivorCustomerID  string                  `json:"survivorCustomerId"`
-	DuplicateCustomerID string                  `json:"duplicateCustomerId"`
-	Previous            []CustomerMergeSnapshot `json:"previous"`
+	SurvivorCustomerID  string `json:"survivorCustomerId"`
+	DuplicateCustomerID string `json:"duplicateCustomerId"`
+	MergeIntentID       string `json:"mergeIntentId"`
 }
 
 type CustomerMergeOutput struct {
 	SurvivorCustomerID  string                  `json:"survivorCustomerId"`
 	DuplicateCustomerID string                  `json:"duplicateCustomerId"`
 	Previous            []CustomerMergeSnapshot `json:"previous"`
+	Merged              []CustomerMergeSnapshot `json:"merged"`
 }
 
 type CustomerImportRow struct {
@@ -139,27 +141,18 @@ func ParseCustomerMergeSnapshotInput(raw json.RawMessage) (CustomerMergeSnapshot
 	if survivorErr != nil || duplicateErr != nil || !isZodUUID(survivorID) || !isZodUUID(duplicateID) {
 		return CustomerMergeSnapshotInput{}, errors.New("survivorCustomerId and duplicateCustomerId must be UUIDs")
 	}
-	previousRaw, ok := fields["previous"]
-	if !ok || bytesIsNull(previousRaw) {
-		return CustomerMergeSnapshotInput{}, errors.New("previous must contain between 2 and 502 snapshots")
+	mergeIntentID, mergeIntentErr := requiredString(fields, "mergeIntentId")
+	if mergeIntentErr != nil || !isZodUUID(mergeIntentID) {
+		return CustomerMergeSnapshotInput{}, errors.New("mergeIntentId must be a UUID")
 	}
-	var snapshots []json.RawMessage
-	if err := json.Unmarshal(previousRaw, &snapshots); err != nil || len(snapshots) < 2 || len(snapshots) > 502 {
-		return CustomerMergeSnapshotInput{}, errors.New("previous must contain between 2 and 502 snapshots")
+	if _, hasCallerSnapshot := fields["previous"]; hasCallerSnapshot {
+		return CustomerMergeSnapshotInput{}, errors.New("previous snapshots are server controlled")
 	}
-	input := CustomerMergeSnapshotInput{
+	return CustomerMergeSnapshotInput{
 		SurvivorCustomerID:  survivorID,
 		DuplicateCustomerID: duplicateID,
-		Previous:            make([]CustomerMergeSnapshot, 0, len(snapshots)),
-	}
-	for _, snapshotRaw := range snapshots {
-		snapshot, err := parseCustomerMergeSnapshot(snapshotRaw)
-		if err != nil {
-			return CustomerMergeSnapshotInput{}, err
-		}
-		input.Previous = append(input.Previous, snapshot)
-	}
-	return input, nil
+		MergeIntentID:       mergeIntentID,
+	}, nil
 }
 
 func parseCustomerMergeSnapshot(raw json.RawMessage) (CustomerMergeSnapshot, error) {
@@ -491,6 +484,19 @@ func timeString(value *time.Time) *string {
 	return &formatted
 }
 
+func customerMergeSnapshotExact(row customerMergeRecord) CustomerMergeSnapshot {
+	snapshot := customerMergeSnapshot(row)
+	if row.DeactivatedAt != nil {
+		value := row.DeactivatedAt.UTC().Format(time.RFC3339Nano)
+		snapshot.DeactivatedAt = &value
+	}
+	if row.MergedAt != nil {
+		value := row.MergedAt.UTC().Format(time.RFC3339Nano)
+		snapshot.MergedAt = &value
+	}
+	return snapshot
+}
+
 func mergeCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CustomerMergeInput, now time.Time) (CustomerMergeOutput, error) {
 	ids := []string{input.SurvivorCustomerID, input.DuplicateCustomerID}
 	rows, err := queryCustomerMergeRecords(ctx, tx, `
@@ -514,6 +520,9 @@ func mergeCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.Capability
 	if survivor == nil || duplicate == nil {
 		return CustomerMergeOutput{}, errors.New("both customers must belong to this organization")
 	}
+	if !isZodUUID(claims.IntentID) {
+		return CustomerMergeOutput{}, errors.New("customer merge requires a durable intent receipt")
+	}
 	if survivor.MergedIntoCustomerID != nil {
 		return CustomerMergeOutput{}, errors.New("the surviving customer was already merged; choose the current surviving record")
 	}
@@ -522,7 +531,8 @@ func mergeCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.Capability
 	}
 	children, err := queryCustomerMergeRecords(ctx, tx, `
 		SELECT `+customerMergeColumns+` FROM customers
-		WHERE org_id = $1::uuid AND merged_into_customer_id = $2::uuid`, claims.OrganizationID, duplicate.ID)
+		WHERE org_id = $1::uuid AND merged_into_customer_id = $2::uuid
+		ORDER BY id FOR UPDATE`, claims.OrganizationID, duplicate.ID)
 	if err != nil {
 		return CustomerMergeOutput{}, err
 	}
@@ -602,13 +612,58 @@ func mergeCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.Capability
 		survivor.ID, now, updatedBy, claims.OrganizationID, mergedIDs); err != nil {
 		return CustomerMergeOutput{}, err
 	}
-	return CustomerMergeOutput{SurvivorCustomerID: survivor.ID, DuplicateCustomerID: duplicate.ID, Previous: previous}, nil
+	affectedIDs := make([]string, 0, len(previous))
+	for _, snapshot := range previous {
+		affectedIDs = append(affectedIDs, snapshot.CustomerID)
+	}
+	mergedRows, err := queryCustomerMergeRecords(ctx, tx, `
+		SELECT `+customerMergeColumns+` FROM customers
+		WHERE org_id = $1::uuid AND id = ANY($2::uuid[]) FOR UPDATE`, claims.OrganizationID, affectedIDs)
+	if err != nil {
+		return CustomerMergeOutput{}, err
+	}
+	merged := make([]CustomerMergeSnapshot, 0, len(mergedRows))
+	for _, row := range mergedRows {
+		merged = append(merged, customerMergeSnapshotExact(row))
+	}
+	return CustomerMergeOutput{SurvivorCustomerID: survivor.ID, DuplicateCustomerID: duplicate.ID, Previous: previous, Merged: merged}, nil
 }
 
 func restoreCustomerMerge(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CustomerMergeSnapshotInput, now time.Time) (CustomerMergeOutput, error) {
-	ids := make([]string, 0, len(input.Previous))
-	for _, snapshot := range input.Previous {
+	intentKey := claims.OrganizationID + ":" + input.MergeIntentID
+	mergeReceipt, found, err := loadReceipt(ctx, tx, claims.OrganizationID, intentKey)
+	if err != nil {
+		return CustomerMergeOutput{}, err
+	}
+	if !found || !mergeReceipt.OK || mergeReceipt.CapabilityID != mergeCustomersCapabilityID {
+		return CustomerMergeOutput{}, errors.New("the original successful customer merge receipt was not found")
+	}
+	var merge CustomerMergeOutput
+	if err := json.Unmarshal(mergeReceipt.Data, &merge); err != nil {
+		return CustomerMergeOutput{}, errors.New("the original customer merge receipt is invalid")
+	}
+	if merge.SurvivorCustomerID != input.SurvivorCustomerID || merge.DuplicateCustomerID != input.DuplicateCustomerID ||
+		len(merge.Previous) < 2 || len(merge.Previous) > 502 || len(merge.Previous) != len(merge.Merged) {
+		return CustomerMergeOutput{}, errors.New("the restore does not match the original customer merge")
+	}
+	previousByID := make(map[string]CustomerMergeSnapshot, len(merge.Previous))
+	mergedByID := make(map[string]CustomerMergeSnapshot, len(merge.Merged))
+	ids := make([]string, 0, len(merge.Previous))
+	for _, snapshot := range merge.Previous {
+		if snapshot.CustomerID == "" || previousByID[snapshot.CustomerID].CustomerID != "" {
+			return CustomerMergeOutput{}, errors.New("the original customer merge receipt has invalid snapshots")
+		}
+		previousByID[snapshot.CustomerID] = snapshot
 		ids = append(ids, snapshot.CustomerID)
+	}
+	for _, snapshot := range merge.Merged {
+		if snapshot.CustomerID == "" || mergedByID[snapshot.CustomerID].CustomerID != "" {
+			return CustomerMergeOutput{}, errors.New("the original customer merge receipt has invalid snapshots")
+		}
+		mergedByID[snapshot.CustomerID] = snapshot
+	}
+	if len(previousByID) != len(mergedByID) || previousByID[merge.SurvivorCustomerID].CustomerID == "" || previousByID[merge.DuplicateCustomerID].CustomerID == "" {
+		return CustomerMergeOutput{}, errors.New("the original customer merge receipt has invalid snapshots")
 	}
 	rows, err := queryCustomerMergeRecords(ctx, tx, `
 		SELECT `+customerMergeColumns+` FROM customers
@@ -621,10 +676,15 @@ func restoreCustomerMerge(ctx context.Context, tx pgx.Tx, claims authbridge.Capa
 	}
 	current := make([]CustomerMergeSnapshot, 0, len(rows))
 	for _, row := range rows {
-		current = append(current, customerMergeSnapshot(row))
+		currentSnapshot := customerMergeSnapshotExact(row)
+		expected, exists := mergedByID[row.ID]
+		if !exists || !reflect.DeepEqual(currentSnapshot, expected) {
+			return CustomerMergeOutput{}, errors.New("a merged customer record changed after the merge, so it cannot be restored safely")
+		}
+		current = append(current, currentSnapshot)
 	}
 	updatedBy := humanActorID(claims)
-	for _, snapshot := range input.Previous {
+	for _, snapshot := range merge.Previous {
 		deactivatedAt := legacySnapshotTime(snapshot.DeactivatedAt)
 		mergedAt := legacySnapshotTime(snapshot.MergedAt)
 		if _, err := tx.Exec(ctx, `
@@ -645,9 +705,10 @@ func restoreCustomerMerge(ctx context.Context, tx pgx.Tx, claims authbridge.Capa
 		}
 	}
 	return CustomerMergeOutput{
-		SurvivorCustomerID:  input.SurvivorCustomerID,
-		DuplicateCustomerID: input.DuplicateCustomerID,
+		SurvivorCustomerID:  merge.SurvivorCustomerID,
+		DuplicateCustomerID: merge.DuplicateCustomerID,
 		Previous:            current,
+		Merged:              merge.Previous,
 	}, nil
 }
 

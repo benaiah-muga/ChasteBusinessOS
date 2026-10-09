@@ -13,6 +13,15 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite CRM customer merge and undo now use Go's session-authenticated
+  `crm.mergeCustomers` and `crm.restoreCustomerMerge` capabilities by default
+  in local setups. Merge and undo inputs retain exact actor and organization
+  scoped retry intents through approval and uncertain results. A Go 404 never
+  falls back to the legacy writer, and selector rollback blocks unresolved
+  actions. The successful merge snapshot is persisted so undo remains available
+  after reload. Go now binds undo to the server's durable original merge receipt
+  and rejects restore if any affected record changed after the merge. Set
+  `CHASTE_GO_CRM_CUSTOMER_MERGE=0` to use `/api/customers`.
 - Vite CRM customer deactivation now uses Go's session-authenticated
   `crm.deactivateCustomer` capability by default in local setups. The scoped
   retry marker preserves the exact customer action and intent through pending

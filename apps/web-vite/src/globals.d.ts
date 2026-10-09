@@ -11,6 +11,7 @@ declare const __GO_CRM_DEAL_CREATE__: boolean;
 declare const __GO_CRM_TASK_WRITES__: boolean;
 declare const __GO_CRM_CUSTOMER_CREATE__: boolean;
 declare const __GO_CRM_CUSTOMER_DEACTIVATE__: boolean;
+declare const __GO_CRM_CUSTOMER_MERGE__: boolean;
 declare const __GO_CRM_CUSTOMER_PROFILE_UPDATE__: boolean;
 declare const __GO_PURCHASING_CREATE_ORDER__: boolean;
 declare const __GO_PURCHASING_RECEIVE_GOODS__: boolean;

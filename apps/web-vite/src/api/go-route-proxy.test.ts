@@ -12,6 +12,7 @@ import {
   goCrmDealCreateFromEnv,
   goCrmCustomerCreateFromEnv,
   goCrmCustomerDeactivateFromEnv,
+  goCrmCustomerMergeFromEnv,
   goCrmCustomerProfileUpdateFromEnv,
   goCrmTaskWritesFromEnv,
   goPurchasingCreateOrderFromEnv,
@@ -108,6 +109,14 @@ describe("CRM customer deactivation Go selector", () => {
     expect(goCrmCustomerDeactivateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_CUSTOMER_DEACTIVATE: "1" })).toBe(true);
     expect(goCrmCustomerDeactivateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goCrmCustomerDeactivateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_CUSTOMER_DEACTIVATE: "1" })).toBe(false);
+  });
+});
+
+describe("CRM customer merge Go selector", () => {
+  it("requires both the merge selector and session capability route", () => {
+    expect(goCrmCustomerMergeFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_CUSTOMER_MERGE: "1" })).toBe(true);
+    expect(goCrmCustomerMergeFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goCrmCustomerMergeFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_CUSTOMER_MERGE: "1" })).toBe(false);
   });
 });
 

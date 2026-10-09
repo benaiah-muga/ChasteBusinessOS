@@ -1882,3 +1882,15 @@ new owners and the manifest shows zero legacy runtime paths.
      Customer merge and import routes remain unchanged. Go's existing
      capability enforces CRM write permission, organization scope, and approval
      policy. Authenticated browser proof remains open.
+187. (Implemented) Route Vite CRM customer merge and undo through Go's existing
+     `crm.mergeCustomers` and `crm.restoreCustomerMerge` capabilities under the
+     paired `CHASTE_GO_CRM_CUSTOMER_MERGE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` flags. Set the merge selector to
+     `0` to use `/api/customers`. Persist exact scoped merge and undo intents
+     across approval and uncertain results, fail closed on Go 404, and block
+     legacy rollback while either Go operation is unresolved. Persist the
+     returned merge snapshot so undo remains available after reload. The Go
+     restore resolves the original successful merge receipt server-side, ignores
+     caller-supplied snapshots, and rejects undo when any restored field changed
+     after the merge. All other CRM mutations keep their existing routes.
+     Browser proof remains open.

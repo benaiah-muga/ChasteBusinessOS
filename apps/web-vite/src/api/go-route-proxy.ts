@@ -83,6 +83,10 @@ export function goCrmCustomerDeactivateFromEnv(env: Record<string, string | unde
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_CUSTOMER_DEACTIVATE === "1";
 }
 
+export function goCrmCustomerMergeFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_CUSTOMER_MERGE === "1";
+}
+
 export function goCrmCustomerProfileUpdateFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE === "1";
 }

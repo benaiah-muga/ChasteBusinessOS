@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -486,6 +486,84 @@ describe("CRM API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(submitCrmCustomerDeactivate(customerId, undefined, true)).rejects.toMatchObject({ status: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("persists exact merge and undo attempts through pending, uncertain, and 404 results", async () => {
+    const scope = { actorId: dealId, organizationId: customerId };
+    const mergeInput = { survivorCustomerId: dealId, duplicateCustomerId: customerId };
+    const mergeResult = {
+      ...mergeInput,
+      previous: [dealId, customerId].map((id) => ({
+        customerId: id,
+        email: null,
+        phone: null,
+        preferredContactMethod: "email",
+        doNotContact: false,
+        reminderOptOut: false,
+        marketingOptOut: false,
+        ownerUserId: null,
+        tags: [],
+        notes: null,
+        creditLimitMinor: null,
+        paymentTermDays: null,
+        deactivatedAt: null,
+        mergedIntoCustomerId: null,
+        mergedAt: null,
+      })),
+    };
+    const first = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 }))
+      .mockRejectedValueOnce(new TypeError("connection reset"));
+    vi.stubGlobal("fetch", first);
+    await expect(submitCrmCustomerMerge(mergeInput, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
+    expect(await readPendingCrmCustomerMerge(scope)).toEqual(mergeInput);
+    const mergeIntentId = JSON.parse(String(first.mock.calls[0]?.[1]?.body)).intentId;
+    await expect(submitCrmCustomerMerge(mergeInput, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+
+    const mergeRetry = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: mergeResult }));
+    vi.stubGlobal("fetch", mergeRetry);
+    await expect(submitCrmCustomerMerge(mergeInput, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    const noScopeFallback = vi.fn();
+    vi.stubGlobal("fetch", noScopeFallback);
+    await expect(submitCrmCustomerMerge(mergeInput, undefined, false)).rejects.toMatchObject({ status: 0 });
+    expect(noScopeFallback).not.toHaveBeenCalled();
+    vi.stubGlobal("fetch", mergeRetry);
+    await expect(submitCrmCustomerMerge(mergeInput, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(mergeRetry.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
+    const completedMerge = await submitCrmCustomerMerge(mergeInput, undefined, true, scope);
+    expect(completedMerge).toMatchObject({ kind: "completed", data: { ...mergeResult, mergeIntentId } });
+    const mergeBodies = mergeRetry.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(mergeBodies).toHaveLength(2);
+    expect(mergeBodies.map((body) => body.intentId)).toEqual([mergeIntentId, mergeIntentId]);
+    expect(mergeBodies[0]).toMatchObject({ capabilityId: "crm.mergeCustomers", input: mergeInput });
+    await expect(readPendingCrmCustomerMerge(scope)).resolves.toBeNull();
+    await expect(readCrmCustomerMergeUndo(scope)).resolves.toMatchObject({ ...mergeResult, mergeIntentId });
+    const undoInput = { ...mergeResult, mergeIntentId };
+
+    const undo = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 }))
+      .mockRejectedValueOnce(new TypeError("connection reset"));
+    vi.stubGlobal("fetch", undo);
+    await expect(submitCrmCustomerMergeUndo(undoInput, undefined, true, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingCrmCustomerMergeUndo(scope)).resolves.toEqual(undoInput);
+    const undoIntentId = JSON.parse(String(undo.mock.calls[0]?.[1]?.body)).intentId;
+    await expect(submitCrmCustomerMergeUndo(undoInput, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+
+    const undoRetry = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: mergeResult }));
+    vi.stubGlobal("fetch", undoRetry);
+    await expect(submitCrmCustomerMergeUndo(undoInput, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(submitCrmCustomerMergeUndo(undoInput, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    await expect(submitCrmCustomerMergeUndo(undoInput, undefined, true, scope)).resolves.toMatchObject({ kind: "completed" });
+    const undoBodies = undoRetry.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(undoBodies).toHaveLength(2);
+    expect(undoBodies.map((body) => body.intentId)).toEqual([undoIntentId, undoIntentId]);
+    expect(undoBodies[0]).toMatchObject({ capabilityId: "crm.restoreCustomerMerge", input: { survivorCustomerId: dealId, duplicateCustomerId: customerId, mergeIntentId } });
+    await expect(readPendingCrmCustomerMergeUndo(scope)).resolves.toBeNull();
+    await expect(readCrmCustomerMergeUndo(scope)).resolves.toBeNull();
   });
 
   it("fails closed for customer creation without actor and organization scope", async () => {

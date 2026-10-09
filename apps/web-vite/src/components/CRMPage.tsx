@@ -22,6 +22,9 @@ import {
   CrmApiError,
   readPendingCrmDealCreate,
   readPendingCrmCustomerCreate,
+  readPendingCrmCustomerMerge,
+  readPendingCrmCustomerMergeUndo,
+  readCrmCustomerMergeUndo,
   readPendingCrmCustomerProfileUpdate,
   readPendingCrmTaskCreate,
   readPendingCrmTaskDetailsForScope,
@@ -30,6 +33,8 @@ import {
   submitCrmDealCreate,
   submitCrmCustomerCreate,
   submitCrmCustomerDeactivate,
+  submitCrmCustomerMerge,
+  submitCrmCustomerMergeUndo,
   submitCrmCustomerProfileUpdate,
   submitCrmTaskMutation,
   undoCrmImport,
@@ -203,6 +208,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [deactivateTarget, setDeactivateTarget] = useState<CrmCustomer | null>(null);
   const [mergeSurvivorId, setMergeSurvivorId] = useState("");
   const [mergeUndo, setMergeUndo] = useState<Record<string, unknown> | null>(null);
+  const [mergeRecoveryResolvedScope, setMergeRecoveryResolvedScope] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importHeaders, setImportHeaders] = useState<string[]>([]);
   const [importSourceRows, setImportSourceRows] = useState<string[][]>([]);
@@ -245,6 +251,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     profileUpdateScopeRef.current = profileUpdateScopeIdentity;
     profileUpdateScopeGeneration.current += 1;
   }
+  const mergeRecoveryScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
   const busy = sharedBusy || customerCreateBusy || dealCreateBusy || profileUpdateBusyCount > 0;
   const customerCreateReady = Boolean(customerCreateScopeIdentity && customerCreateResolvedScope === customerCreateScopeIdentity);
   const dealCreateReady = Boolean(dealCreateScopeIdentity && dealCreateResolvedScope === dealCreateScopeIdentity);
@@ -280,6 +287,36 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       controller.abort();
     };
   }, [load]);
+
+  useEffect(() => {
+    if (mergeRecoveryScopeIdentity && mergeRecoveryResolvedScope === mergeRecoveryScopeIdentity) return;
+    setMergeRecoveryResolvedScope(null);
+    setMergeTarget(null);
+    setMergeSurvivorId("");
+    setMergeUndo(null);
+    if (!mergeRecoveryScopeIdentity || !actorId?.trim() || !organizationId?.trim() || loading) return;
+    let active = true;
+    const scope = { actorId, organizationId };
+    void Promise.all([
+      readPendingCrmCustomerMerge(scope),
+      readPendingCrmCustomerMergeUndo(scope),
+      readCrmCustomerMergeUndo(scope),
+    ]).then(([pendingMerge, pendingUndo, savedUndo]) => {
+      if (!active) return;
+      if (pendingMerge) {
+        const duplicate = customers.find((customer) => customer.id === pendingMerge.duplicateCustomerId);
+        if (duplicate) {
+          setMergeTarget(duplicate);
+          setMergeSurvivorId(pendingMerge.survivorCustomerId);
+        }
+      }
+      setMergeUndo(pendingUndo ?? savedUndo);
+      setMergeRecoveryResolvedScope(mergeRecoveryScopeIdentity);
+    }).catch((reason: unknown) => {
+      if (active) setNotice({ tone: "error", text: friendlyError(reason) });
+    });
+    return () => { active = false; };
+  }, [actorId, customers, loading, mergeRecoveryResolvedScope, mergeRecoveryScopeIdentity, organizationId]);
 
   useEffect(() => {
     if (!goCrmCustomerProfileUpdate) {
@@ -1050,8 +1087,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
 
     {convertTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-convert-title"><h2 id="crm-convert-title">Convert lead</h2><p>Qualify “{convertTarget.title}” and link it to a new or existing customer.</p><div className="crm-convert-modes"><button type="button" aria-pressed={convertMode === "new"} onClick={() => setConvertMode("new")}>Create customer</button><button type="button" aria-pressed={convertMode === "existing"} onClick={() => setConvertMode("existing")}>Use existing customer</button></div>{convertMode === "new" ? <label>Customer name<input autoFocus required value={convertCustomerName} onChange={(event) => setConvertCustomerName(event.target.value)} /></label> : <label>Customer<select value={convertCustomerId} onChange={(event) => setConvertCustomerId(event.target.value)}><option value="">Choose a customer</option>{activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>}<footer><button type="button" onClick={() => setConvertTarget(null)}>Cancel</button><button type="button" disabled={busy || (convertMode === "new" ? !convertCustomerName.trim() : !convertCustomerId)} onClick={() => void convertLead()}>Convert lead</button></footer></section></div>}
 
-    {mergeTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-merge-title"><h2 id="crm-merge-title">Merge customer records</h2><p>Linked history is retained on the surviving customer. The merge can be undone from its confirmation.</p><label>Duplicate record<select value={mergeTarget.id} onChange={(event) => { const found = customers.find((customer) => customer.id === event.target.value); if (found) setMergeTarget(found); }}><option value={mergeTarget.id}>{mergeTarget.name}</option>{customers.filter((customer) => customer.id !== mergeTarget.id && !customer.deactivatedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label>Keep this customer<select value={mergeSurvivorId} onChange={(event) => setMergeSurvivorId(event.target.value)}>{customers.filter((customer) => customer.id !== mergeTarget.id && !customer.deactivatedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><footer><button type="button" onClick={() => setMergeTarget(null)}>Cancel</button><button type="button" disabled={busy || !mergeSurvivorId || mergeSurvivorId === mergeTarget.id} onClick={() => void mutate("/api/customers", { action: "merge", survivorCustomerId: mergeSurvivorId, duplicateCustomerId: mergeTarget.id }, (data) => { setMergeUndo(data); setMergeTarget(null); })}>Merge records</button></footer></section></div>}
-    {mergeUndo && <div className="crm-notice crm-notice-success" role="status">Customer records merged. <button type="button" onClick={() => void mutate("/api/customers", { action: "undoMerge", ...mergeUndo }, () => setMergeUndo(null))}>Undo merge</button></div>}
+    {mergeTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-merge-title"><h2 id="crm-merge-title">Merge customer records</h2><p>Linked history is retained on the surviving customer. The merge can be undone from its confirmation.</p><label>Duplicate record<select value={mergeTarget.id} onChange={(event) => { const found = customers.find((customer) => customer.id === event.target.value); if (found) setMergeTarget(found); }}><option value={mergeTarget.id}>{mergeTarget.name}</option>{customers.filter((customer) => customer.id !== mergeTarget.id && !customer.deactivatedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label>Keep this customer<select value={mergeSurvivorId} onChange={(event) => setMergeSurvivorId(event.target.value)}>{customers.filter((customer) => customer.id !== mergeTarget.id && !customer.deactivatedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><footer><button type="button" onClick={() => setMergeTarget(null)}>Cancel</button><button type="button" disabled={busy || !mergeSurvivorId || mergeSurvivorId === mergeTarget.id} onClick={() => void mutate("/api/customers", { action: "merge", survivorCustomerId: mergeSurvivorId, duplicateCustomerId: mergeTarget.id }, (data) => { setMergeUndo(data); setMergeTarget(null); }, () => submitCrmCustomerMerge({ survivorCustomerId: mergeSurvivorId, duplicateCustomerId: mergeTarget.id }, undefined, undefined, { actorId, organizationId }))}>Merge records</button></footer></section></div>}
+    {mergeUndo && <div className="crm-notice crm-notice-success" role="status">Customer records merged. <button type="button" disabled={busy} onClick={() => void mutate("/api/customers", { action: "undoMerge", ...mergeUndo }, () => setMergeUndo(null), () => submitCrmCustomerMergeUndo(mergeUndo, undefined, undefined, { actorId, organizationId }))}>Undo merge</button></div>}
     {deactivateTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-deactivate-title"><h2 id="crm-deactivate-title">Deactivate {deactivateTarget.name}?</h2><p>This removes the customer from active pickers and agent lookups. Existing invoices and history stay available.</p><footer><button type="button" onClick={() => setDeactivateTarget(null)}>Cancel</button><button type="button" disabled={busy} onClick={() => void mutate("/api/customers", { action: "deactivate", customerId: deactivateTarget.id }, () => setDeactivateTarget(null), () => submitCrmCustomerDeactivate(deactivateTarget.id, undefined, undefined, { actorId, organizationId }))}>Deactivate customer</button></footer></section></div>}
 
     {importOpen && <div className="crm-modal-backdrop"><section className="crm-modal crm-import-modal" role="dialog" aria-modal="true" aria-labelledby="crm-import-title"><header><div><p className="crm-eyebrow">Customer data</p><h2 id="crm-import-title">Import customers</h2></div><button type="button" onClick={() => setImportOpen(false)} aria-label="Close import">×</button></header>{importSummary ? <div><p role="status">{importSummary.undone ? "Import undone." : `${importSummary.imported} customers imported, ${importSummary.skipped} duplicates skipped.`}</p>{!importSummary.undone && importSummary.ids.length > 0 && <button type="button" disabled={busy} onClick={() => void undoImport()}>Undo this import</button>}<button type="button" onClick={() => setImportOpen(false)}>Done</button></div> : <><div className="crm-import-start"><p>Map your columns, review likely matches, then fix invalid rows before adding customers.</p><button type="button" onClick={downloadCustomerTemplate}>Download template</button><label className="crm-file">{importRows.length ? "Choose another CSV" : "Choose CSV"}<input type="file" accept=".csv,text/csv" onChange={(event) => void readImport(event.target.files?.[0])} /></label></div>{importHeaders.length > 0 && <><div className="crm-import-mapping" aria-label="Column mapping">{(["name", "email", "phone"] as const).map((field) => <label key={field}>Map {field}<select aria-label={`Map ${field}`} value={importMapping[field]} onChange={(event) => updateImportMapping(field, event.target.value)}><option value={-1}>Do not import</option>{importHeaders.map((header, index) => <option key={`${field}-${index}`} value={index}>{header || "Unnamed column"}</option>)}</select></label>)}</div><div className="crm-import-summary"><span>{importRows.length} rows, {importRows.filter((row) => !row.error).length} valid, {importRows.filter((row) => row.duplicate).length} possible duplicates.</span><span>{selectedImportCount} selected to import</span><span>Rows {importPage * importPageSize + 1}-{Math.min((importPage + 1) * importPageSize, importRows.length)} of {importRows.length}</span></div><div className="crm-import-pagination"><button type="button" disabled={importPage === 0} onClick={() => setImportPage((page) => Math.max(0, page - 1))}>Previous</button><button type="button" disabled={(importPage + 1) * importPageSize >= importRows.length} onClick={() => setImportPage((page) => page + 1)}>Next</button></div><div className="crm-import-rows">{visibleImportRows.map((row, localIndex) => { const index = importPage * importPageSize + localIndex; return <article key={row.rowNumber}><label><input type="checkbox" disabled={Boolean(row.error)} checked={row.include} onChange={(event) => setImportRows((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, include: event.target.checked, includeExplicit: true } : item))} /> Row {row.rowNumber}</label><input aria-label={`Row ${row.rowNumber} name`} value={row.name} onChange={(event) => editImportRow(index, "name", event.target.value)} /><input aria-label={`Row ${row.rowNumber} email`} value={row.email} onChange={(event) => editImportRow(index, "email", event.target.value)} /><input aria-label={`Row ${row.rowNumber} phone`} value={row.phone} onChange={(event) => editImportRow(index, "phone", event.target.value)} />{row.error && <span role="alert">{row.error}</span>}{row.duplicate && <label><input type="checkbox" checked={row.allowDuplicate} onChange={(event) => setImportRows((current) => validateImportRows(current.map((item, rowIndex) => rowIndex === index ? { ...item, allowDuplicate: event.target.checked, include: event.target.checked, includeExplicit: true } : item), customers))} />{row.duplicate}, import anyway</label>}</article>; })}</div><button type="button" disabled={busy || selectedImportCount === 0} onClick={() => void submitImport()}>Import {selectedImportCount} customers</button></>}</>}</section></div>}

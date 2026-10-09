@@ -228,6 +228,9 @@ export async function submitCrmDealStageMove(
 const CRM_TASK_INTENT_PREFIX = "chaste.crm.task-intent.v1:";
 const CRM_CUSTOMER_CREATE_INTENT_PREFIX = "chaste.crm.customer-create-intent.v1:";
 const CRM_CUSTOMER_DEACTIVATE_INTENT_PREFIX = "chaste.crm.customer-deactivate-intent.v1:";
+const CRM_CUSTOMER_MERGE_INTENT_PREFIX = "chaste.crm.customer-merge-intent.v1:";
+const CRM_CUSTOMER_MERGE_UNDO_INTENT_PREFIX = "chaste.crm.customer-merge-undo-intent.v1:";
+const CRM_CUSTOMER_MERGE_UNDO_STATE_PREFIX = "chaste.crm.customer-merge-undo-state.v1:";
 const CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX = "chaste.crm.customer-profile-update-intent.v1:";
 const CRM_DEAL_CREATE_INTENT_PREFIX = "chaste.crm.deal-create-intent.v1:";
 const CrmTaskAttemptSchema = z.object({
@@ -263,7 +266,58 @@ export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
 type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string };
 export type CrmDealCreateInput = Omit<CrmDealCreateMutation, "action">;
 type CrmCustomerDeactivateMutation = { action: "deactivateCustomer"; customerId: string };
-type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation;
+type CrmCustomerMergeSnapshot = {
+  customerId: string;
+  email: string | null;
+  phone: string | null;
+  preferredContactMethod: "email" | "phone" | "whatsapp" | "other";
+  doNotContact: boolean;
+  reminderOptOut: boolean;
+  marketingOptOut: boolean;
+  ownerUserId: string | null;
+  tags: string[];
+  notes: string | null;
+  creditLimitMinor: number | null;
+  paymentTermDays: number | null;
+  deactivatedAt: string | null;
+  mergedIntoCustomerId: string | null;
+  mergedAt: string | null;
+};
+export type CrmCustomerMergeResult = {
+  survivorCustomerId: string;
+  duplicateCustomerId: string;
+  previous: CrmCustomerMergeSnapshot[];
+  merged?: CrmCustomerMergeSnapshot[];
+  mergeIntentId?: string;
+};
+type CrmCustomerMergeMutation = { action: "mergeCustomers"; survivorCustomerId: string; duplicateCustomerId: string };
+type CrmCustomerMergeUndoMutation = { action: "restoreCustomerMerge" } & CrmCustomerMergeResult;
+type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmCustomerMergeMutation | CrmCustomerMergeUndoMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation;
+const CrmCustomerMergeInputSchema = z.object({ survivorCustomerId: uuid, duplicateCustomerId: uuid }).strict().refine((input) => input.survivorCustomerId !== input.duplicateCustomerId);
+const CrmCustomerMergeSnapshotSchema = z.object({
+  customerId: uuid,
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  preferredContactMethod: contactMethod,
+  doNotContact: z.boolean(),
+  reminderOptOut: z.boolean(),
+  marketingOptOut: z.boolean(),
+  ownerUserId: uuid.nullable(),
+  tags: z.array(z.string().max(40)),
+  notes: z.string().nullable(),
+  creditLimitMinor: z.number().int().nullable(),
+  paymentTermDays: z.number().int().nullable(),
+  deactivatedAt: z.string().nullable(),
+  mergedIntoCustomerId: uuid.nullable(),
+  mergedAt: z.string().nullable(),
+}).strict();
+const CrmCustomerMergeResultSchema = z.object({
+  survivorCustomerId: uuid,
+  duplicateCustomerId: uuid,
+  previous: z.array(CrmCustomerMergeSnapshotSchema).min(2).max(502),
+  merged: z.array(CrmCustomerMergeSnapshotSchema).min(2).max(502).optional(),
+  mergeIntentId: uuid.optional(),
+}).strict();
 
 const CrmTaskMutationSchema = z.discriminatedUnion("action", [
   z.object({
@@ -616,6 +670,184 @@ export async function readPendingCrmCustomerDeactivate(scope: CrmTaskRetryScope,
     throw new CrmApiError(0, "An unresolved customer deactivation could not be verified. Contact an administrator before retrying.");
   }
   return true;
+}
+
+export async function readPendingCrmCustomerMerge(scope: CrmTaskRetryScope): Promise<Pick<CrmCustomerMergeResult, "survivorCustomerId" | "duplicateCustomerId"> | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_CUSTOMER_MERGE_INTENT_PREFIX}${scopeHash}:merge`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to check an unresolved customer merge."); }
+  if (raw === null) return null;
+  const stored = parseCrmTaskAttempt(raw);
+  const action = z.object({ action: z.literal("mergeCustomers"), survivorCustomerId: uuid, duplicateCustomerId: uuid }).strict()
+    .refine((input) => input.survivorCustomerId !== input.duplicateCustomerId).safeParse(stored.action);
+  if (!action.success || await crmTaskFingerprint(action.data) !== stored.fingerprint) {
+    throw new CrmApiError(0, "An unresolved customer merge could not be verified. Contact an administrator before retrying.");
+  }
+  return { survivorCustomerId: action.data.survivorCustomerId, duplicateCustomerId: action.data.duplicateCustomerId };
+}
+
+export async function readPendingCrmCustomerMergeUndo(scope: CrmTaskRetryScope): Promise<CrmCustomerMergeResult | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_CUSTOMER_MERGE_UNDO_INTENT_PREFIX}${scopeHash}:undo`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to check an unresolved customer merge undo."); }
+  if (raw === null) return null;
+  const stored = parseCrmTaskAttempt(raw);
+  const action = z.object({ action: z.literal("restoreCustomerMerge") }).merge(CrmCustomerMergeResultSchema).strict().safeParse(stored.action);
+  if (!action.success || await crmTaskFingerprint(action.data) !== stored.fingerprint) {
+    throw new CrmApiError(0, "An unresolved customer merge undo could not be verified. Contact an administrator before retrying.");
+  }
+  return {
+    survivorCustomerId: action.data.survivorCustomerId,
+    duplicateCustomerId: action.data.duplicateCustomerId,
+    previous: action.data.previous,
+    ...(action.data.merged ? { merged: action.data.merged } : {}),
+    ...(action.data.mergeIntentId ? { mergeIntentId: action.data.mergeIntentId } : {}),
+  };
+}
+
+export async function readCrmCustomerMergeUndo(scope: CrmTaskRetryScope): Promise<CrmCustomerMergeResult | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_CUSTOMER_MERGE_UNDO_STATE_PREFIX}${scopeHash}:undo`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to restore the available customer merge undo."); }
+  if (raw === null) return null;
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new CrmApiError(0, "The saved customer merge undo is malformed. Contact an administrator before retrying."); }
+  const parsed = CrmCustomerMergeResultSchema.safeParse(decoded);
+  if (!parsed.success) throw new CrmApiError(0, "The saved customer merge undo could not be verified. Contact an administrator before retrying.");
+  return parsed.data;
+}
+
+export async function submitCrmCustomerMerge(
+  input: Pick<CrmCustomerMergeResult, "survivorCustomerId" | "duplicateCustomerId">,
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<CrmCustomerMergeResult>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_MERGE__ !== "undefined" && __GO_CRM_CUSTOMER_MERGE__);
+  const parsedInput = CrmCustomerMergeInputSchema.safeParse(input);
+  if (!parsedInput.success) throw new CrmApiError(0, "Choose two different valid customers to merge.");
+  const scope = await crmTaskScope(retryScope);
+  if (!useGo) {
+    if (await readPendingCrmCustomerMerge({ actorId: scope.actorId, organizationId: scope.organizationId }) ||
+      await readPendingCrmCustomerMergeUndo({ actorId: scope.actorId, organizationId: scope.organizationId })) {
+      throw new CrmApiError(0, "A Go customer merge is unresolved. Restore the Go customer route and retry its exact action before using the legacy route.", true);
+    }
+    const outcome = await submitCrmAction("/api/customers", { action: "merge", ...parsedInput.data }, signal);
+    if (outcome.kind === "pending") return outcome;
+    const parsedOutput = CrmCustomerMergeResultSchema.safeParse(outcome.data);
+    if (!parsedOutput.success || parsedOutput.data.survivorCustomerId !== parsedInput.data.survivorCustomerId || parsedOutput.data.duplicateCustomerId !== parsedInput.data.duplicateCustomerId) {
+      throw new CrmApiError(0, "The CRM service returned an unexpected merge result.", true);
+    }
+    return { kind: "completed", data: parsedOutput.data };
+  }
+  if (await readPendingCrmCustomerMergeUndo({ actorId: scope.actorId, organizationId: scope.organizationId })) {
+    throw new CrmApiError(0, "A Go customer merge undo is unresolved. Retry that exact undo before starting another merge.", true);
+  }
+  const action: CrmCustomerMergeMutation = { action: "mergeCustomers", ...parsedInput.data };
+  const attempt = await crmTaskAttempt(action, scope, "merge", CRM_CUSTOMER_MERGE_INTENT_PREFIX);
+  try {
+    const { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.mergeCustomers", input: parsedInput.data, intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const parsedOutput = CrmCustomerMergeResultSchema.safeParse(outcome.data);
+    if (!parsedOutput.success || parsedOutput.data.survivorCustomerId !== parsedInput.data.survivorCustomerId || parsedOutput.data.duplicateCustomerId !== parsedInput.data.duplicateCustomerId ||
+      !parsedOutput.data.previous.some((snapshot) => snapshot.customerId === parsedInput.data.survivorCustomerId) || !parsedOutput.data.previous.some((snapshot) => snapshot.customerId === parsedInput.data.duplicateCustomerId)) {
+      throw new CrmApiError(response.status, "The CRM service returned an unexpected merge result.", true);
+    }
+    const completedMerge = { ...parsedOutput.data, mergeIntentId: attempt.intentId };
+    await persistCrmCustomerMergeUndo(scope, completedMerge);
+    await clearCrmTaskAttempt(attempt.storageKey);
+    return { kind: "completed", data: completedMerge };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+      await clearCrmTaskAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+export async function submitCrmCustomerMergeUndo(
+  input: unknown,
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<CrmCustomerMergeResult>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_MERGE__ !== "undefined" && __GO_CRM_CUSTOMER_MERGE__);
+  const parsedInput = CrmCustomerMergeResultSchema.safeParse(input);
+  if (!parsedInput.success) throw new CrmApiError(0, "The customer merge snapshot is invalid and cannot be restored.");
+  const scope = await crmTaskScope(retryScope);
+  if (!useGo) {
+    if (await readPendingCrmCustomerMerge({ actorId: scope.actorId, organizationId: scope.organizationId }) ||
+      await readPendingCrmCustomerMergeUndo({ actorId: scope.actorId, organizationId: scope.organizationId })) {
+      throw new CrmApiError(0, "A Go customer merge is unresolved. Restore the Go customer route and retry its exact action before using the legacy route.", true);
+    }
+    const outcome = await submitCrmAction("/api/customers", { action: "undoMerge", ...parsedInput.data }, signal);
+    if (outcome.kind === "pending") return outcome;
+    const parsedOutput = CrmCustomerMergeResultSchema.safeParse(outcome.data);
+    if (!parsedOutput.success) throw new CrmApiError(0, "The CRM service returned an unexpected merge undo result.", true);
+    await clearCrmCustomerMergeUndo(scope);
+    return { kind: "completed", data: parsedOutput.data };
+  }
+  if (await readPendingCrmCustomerMerge({ actorId: scope.actorId, organizationId: scope.organizationId })) {
+    throw new CrmApiError(0, "A Go customer merge is unresolved. Retry that exact merge before undoing it.", true);
+  }
+  if (!parsedInput.data.mergeIntentId) {
+    throw new CrmApiError(0, "The original Go merge receipt is missing, so this merge cannot be restored safely.");
+  }
+  const action: CrmCustomerMergeUndoMutation = { action: "restoreCustomerMerge", ...parsedInput.data };
+  const attempt = await crmTaskAttempt(action, scope, "undo", CRM_CUSTOMER_MERGE_UNDO_INTENT_PREFIX);
+  try {
+    const { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.restoreCustomerMerge", input: {
+        survivorCustomerId: parsedInput.data.survivorCustomerId,
+        duplicateCustomerId: parsedInput.data.duplicateCustomerId,
+        mergeIntentId: parsedInput.data.mergeIntentId,
+      }, intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const parsedOutput = CrmCustomerMergeResultSchema.safeParse(outcome.data);
+    if (!parsedOutput.success || parsedOutput.data.survivorCustomerId !== parsedInput.data.survivorCustomerId || parsedOutput.data.duplicateCustomerId !== parsedInput.data.duplicateCustomerId) {
+      throw new CrmApiError(response.status, "The CRM service returned an unexpected merge undo result.", true);
+    }
+    await clearCrmCustomerMergeUndo(scope);
+    await clearCrmTaskAttempt(attempt.storageKey);
+    return { kind: "completed", data: parsedOutput.data };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+      await clearCrmTaskAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+async function persistCrmCustomerMergeUndo(scope: { scopeHash: string }, result: CrmCustomerMergeResult): Promise<void> {
+  const storageKey = `${CRM_CUSTOMER_MERGE_UNDO_STATE_PREFIX}${scope.scopeHash}:undo`;
+  const serialized = JSON.stringify(result);
+  try {
+    window.localStorage.setItem(storageKey, serialized);
+    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("customer merge undo snapshot did not persist");
+  } catch {
+    throw new CrmApiError(0, "The merge completed, but its undo snapshot could not be saved. Retry the exact merge before starting another CRM change.", true);
+  }
+}
+
+async function clearCrmCustomerMergeUndo(scope: { scopeHash: string }): Promise<void> {
+  try { window.localStorage.removeItem(`${CRM_CUSTOMER_MERGE_UNDO_STATE_PREFIX}${scope.scopeHash}:undo`); }
+  catch { throw new CrmApiError(0, "The merge undo completed, but its saved snapshot could not be cleared. Reload CRM before retrying.", true); }
 }
 
 export async function readPendingCrmCustomerProfileUpdate(scope: CrmTaskRetryScope): Promise<CrmCustomerProfileUpdateMutation | null> {

@@ -116,7 +116,7 @@ func TestGoCustomerMergeMatchesLegacyAndPreservesHistory(t *testing.T) {
 	}
 
 	input := json.RawMessage(fmt.Sprintf(`{"survivorCustomerId":%q,"duplicateCustomerId":%q}`, survivor, duplicate))
-	result := executeCRMWrite(t, fx, mergeCustomersCapabilityID, input, "merge-parity")
+	result := executeCRMWrite(t, fx, mergeCustomersCapabilityID, input, "4bfe97c6-e210-4a99-839f-e7da4b677c20")
 	if !result.OK || result.PendingApproval {
 		t.Fatalf("merge result=%+v, want direct human success", result)
 	}
@@ -192,7 +192,7 @@ func TestGoCustomerMergeMatchesLegacyAndPreservesHistory(t *testing.T) {
 	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id = $1::uuid AND kind = 'capability.executed' AND capability_id = $2`, fx.orgID, mergeCustomersCapabilityID); got != 1 {
 		t.Fatalf("merge audit events=%d, want one", got)
 	}
-	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id = $1::uuid AND intent_key = $2`, fx.orgID, fx.orgID+":merge-parity"); got != 1 {
+	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id = $1::uuid AND intent_key = $2`, fx.orgID, fx.orgID+":4bfe97c6-e210-4a99-839f-e7da4b677c20"); got != 1 {
 		t.Fatalf("merge receipts=%d, want one", got)
 	}
 }
@@ -208,7 +208,8 @@ func TestGoCustomerMergeRestorePreservesLegacySnapshotSemantics(t *testing.T) {
 		PreferredContactMethod: "phone", Tags: []string{"duplicate"}, Notes: crmStringPointer("duplicate original notes"),
 	})
 	mergeInput := json.RawMessage(fmt.Sprintf(`{"survivorCustomerId":%q,"duplicateCustomerId":%q}`, survivor, duplicate))
-	merged := executeCRMWrite(t, fx, mergeCustomersCapabilityID, mergeInput, "merge-before-restore")
+	mergeIntentID := "9b1de39a-1ec1-4c9e-92ef-8e15e5dd9580"
+	merged := executeCRMWrite(t, fx, mergeCustomersCapabilityID, mergeInput, mergeIntentID)
 	if !merged.OK {
 		t.Fatalf("merge result=%+v", merged)
 	}
@@ -217,7 +218,7 @@ func TestGoCustomerMergeRestorePreservesLegacySnapshotSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 	restoreInput, err := json.Marshal(CustomerMergeSnapshotInput{
-		SurvivorCustomerID: mergeOutput.SurvivorCustomerID, DuplicateCustomerID: mergeOutput.DuplicateCustomerID, Previous: mergeOutput.Previous,
+		SurvivorCustomerID: mergeOutput.SurvivorCustomerID, DuplicateCustomerID: mergeOutput.DuplicateCustomerID, MergeIntentID: mergeIntentID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +247,8 @@ func TestGoCustomerMergeRestorePreservesLegacySnapshotSemantics(t *testing.T) {
 		t.Fatalf("legacy restore state survivor=(%q,%q) duplicate=(%q,%q,%v,%v)", survivorName, survivorNotes, duplicateName, duplicateNotes, duplicateMergedInto, duplicateDeactivatedAt)
 	}
 
-	mergedAgain := executeCRMWrite(t, fx, mergeCustomersCapabilityID, mergeInput, "merge-before-trusted-restore")
+	mergeIntentID = "16ae9aa0-2368-4113-bf65-7087bbdf6103"
+	mergedAgain := executeCRMWrite(t, fx, mergeCustomersCapabilityID, mergeInput, mergeIntentID)
 	if !mergedAgain.OK {
 		t.Fatalf("second merge result=%+v", mergedAgain)
 	}
@@ -254,27 +256,180 @@ func TestGoCustomerMergeRestorePreservesLegacySnapshotSemantics(t *testing.T) {
 	if err := json.Unmarshal(mergedAgain.Data, &secondOutput); err != nil {
 		t.Fatal(err)
 	}
-	callerSnapshotNote := "caller supplied restore snapshot"
-	for index := range secondOutput.Previous {
-		if secondOutput.Previous[index].CustomerID == survivor {
-			secondOutput.Previous[index].Notes = &callerSnapshotNote
-		}
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE customers SET notes='edited after merge' WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, survivor); err != nil {
+		t.Fatal(err)
 	}
-	trustedRestore, err := json.Marshal(CustomerMergeSnapshotInput{
-		SurvivorCustomerID: secondOutput.SurvivorCustomerID, DuplicateCustomerID: secondOutput.DuplicateCustomerID, Previous: secondOutput.Previous,
+	conflictedRestore, err := json.Marshal(CustomerMergeSnapshotInput{
+		SurvivorCustomerID: secondOutput.SurvivorCustomerID, DuplicateCustomerID: secondOutput.DuplicateCustomerID, MergeIntentID: mergeIntentID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	trustedResult := executeCRMWrite(t, fx, restoreCustomerMergeCapabilityID, trustedRestore, "restore-trusted-caller-snapshot")
-	if !trustedResult.OK {
-		t.Fatalf("caller-snapshot restore result=%+v", trustedResult)
+	_, conflictErr := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, restoreCustomerMergeCapabilityID, conflictedRestore, "human", "", "3be9487d-5d27-4604-a4dc-f042e302cda7"), restoreCustomerMergeCapabilityID, conflictedRestore)
+	if conflictErr == nil || !strings.Contains(conflictErr.Error(), "changed after the merge") {
+		t.Fatalf("restore after profile edit error=%v, want conflict refusal", conflictErr)
+	}
+	var survivorAfterMerge *string
+	for _, snapshot := range secondOutput.Merged {
+		if snapshot.CustomerID == survivor {
+			survivorAfterMerge = snapshot.Notes
+		}
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE customers SET notes=$1 WHERE org_id=$2::uuid AND id=$3::uuid`, survivorAfterMerge, fx.orgID, survivor); err != nil {
+		t.Fatal(err)
+	}
+	callerSnapshotNote := "caller supplied restore snapshot"
+	forgedPrevious := append([]CustomerMergeSnapshot(nil), secondOutput.Previous...)
+	for index := range forgedPrevious {
+		if forgedPrevious[index].CustomerID == survivor {
+			forgedPrevious[index].Notes = &callerSnapshotNote
+		}
+		if forgedPrevious[index].CustomerID == duplicate {
+			forgedPrevious[index].CustomerID = fx.otherOrgID
+		}
+	}
+	forgedRestore, err := json.Marshal(map[string]any{
+		"survivorCustomerId":  secondOutput.SurvivorCustomerID,
+		"duplicateCustomerId": secondOutput.DuplicateCustomerID,
+		"mergeIntentId":       mergeIntentID,
+		"previous":            forgedPrevious,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgedResult := executeCRMWrite(t, fx, restoreCustomerMergeCapabilityID, forgedRestore, "c4c90137-2055-4bfb-9c7e-11b6d28eae83")
+	if forgedResult.OK || !strings.Contains(forgedResult.Error, "server controlled") {
+		t.Fatalf("forged caller snapshot result=%+v, want rejection", forgedResult)
+	}
+	wrongIDs, err := json.Marshal(CustomerMergeSnapshotInput{
+		SurvivorCustomerID: fx.otherOrgID, DuplicateCustomerID: duplicate, MergeIntentID: mergeIntentID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, wrongIDsErr := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, restoreCustomerMergeCapabilityID, wrongIDs, "human", "", "a64c901a-7db5-49f6-a0e7-f6a804e7a6fc"), restoreCustomerMergeCapabilityID, wrongIDs)
+	if wrongIDsErr == nil || !strings.Contains(wrongIDsErr.Error(), "does not match") {
+		t.Fatalf("forged merge IDs error=%v, want rejection", wrongIDsErr)
+	}
+	validRestore, err := json.Marshal(CustomerMergeSnapshotInput{
+		SurvivorCustomerID: secondOutput.SurvivorCustomerID, DuplicateCustomerID: secondOutput.DuplicateCustomerID, MergeIntentID: mergeIntentID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validResult := executeCRMWrite(t, fx, restoreCustomerMergeCapabilityID, validRestore, "6c18e83a-3862-4ce0-a40c-36af24053be5")
+	if !validResult.OK {
+		t.Fatalf("server receipt restore result=%+v", validResult)
 	}
 	if err := fx.owner.QueryRow(fx.ctx, `SELECT notes FROM customers WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, survivor).Scan(&survivorNotes); err != nil {
 		t.Fatal(err)
 	}
-	if survivorNotes != callerSnapshotNote {
-		t.Fatalf("restored notes=%q, want caller-provided snapshot value %q", survivorNotes, callerSnapshotNote)
+	if survivorNotes != "survivor original notes" {
+		t.Fatalf("restored notes=%q, want server-recorded original value", survivorNotes)
+	}
+}
+
+func TestGoCustomerMergeLocksChildrenBeforeCapturingUndoSnapshot(t *testing.T) {
+	fx := newExecutorFixture(t)
+	survivor := seedMergeCustomer(t, fx, fx.orgID, mergeCustomerSeed{Name: "Survivor", PreferredContactMethod: "email", Tags: []string{}})
+	duplicate := seedMergeCustomer(t, fx, fx.orgID, mergeCustomerSeed{Name: "Duplicate", PreferredContactMethod: "phone", Tags: []string{}})
+	child := seedMergeCustomer(t, fx, fx.orgID, mergeCustomerSeed{Name: "Previously merged child", PreferredContactMethod: "other", Tags: []string{}, MergedIntoCustomerID: crmStringPointer(duplicate)})
+
+	lockTx, err := fx.owner.Begin(fx.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lockTx.Rollback(fx.ctx) })
+	var lockPID int32
+	if err := lockTx.QueryRow(fx.ctx, `SELECT pg_backend_pid()`).Scan(&lockPID); err != nil {
+		t.Fatal(err)
+	}
+	var lockedChildID string
+	if err := lockTx.QueryRow(fx.ctx, `SELECT id::text FROM customers WHERE org_id=$1::uuid AND id=$2::uuid FOR UPDATE`, fx.orgID, child).Scan(&lockedChildID); err != nil {
+		t.Fatal(err)
+	}
+	if lockedChildID != child {
+		t.Fatalf("locked child=%q, want %q", lockedChildID, child)
+	}
+
+	mergeIntentID := executorUUID(t)
+	mergeInput := json.RawMessage(fmt.Sprintf(`{"survivorCustomerId":%q,"duplicateCustomerId":%q}`, survivor, duplicate))
+	claims := crmWriteClaims(fx, mergeCustomersCapabilityID, mergeInput, "human", "", mergeIntentID)
+	type mergeResult struct {
+		result Result
+		err    error
+	}
+	completed := make(chan mergeResult, 1)
+	go func() {
+		result, err := fx.executor.Execute(fx.ctx, claims, mergeCustomersCapabilityID, mergeInput)
+		completed <- mergeResult{result: result, err: err}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waitingOnChild bool
+		if err := fx.owner.QueryRow(fx.ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE $1::integer = ANY(pg_blocking_pids(pid)) AND wait_event_type = 'Lock'
+			)`, lockPID).Scan(&waitingOnChild); err != nil {
+			t.Fatal(err)
+		}
+		if waitingOnChild {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("merge did not wait for the locked child row")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := lockTx.Exec(fx.ctx, `UPDATE customers SET notes='edit committed while merge waited' WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, child); err != nil {
+		t.Fatal(err)
+	}
+	if err := lockTx.Commit(fx.ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var merged mergeResult
+	select {
+	case merged = <-completed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("merge did not finish after the child edit committed")
+	}
+	if merged.err != nil || !merged.result.OK {
+		t.Fatalf("concurrent merge result=%+v err=%v", merged.result, merged.err)
+	}
+	var mergeOutput CustomerMergeOutput
+	if err := json.Unmarshal(merged.result.Data, &mergeOutput); err != nil {
+		t.Fatal(err)
+	}
+	for _, snapshots := range [][]CustomerMergeSnapshot{mergeOutput.Previous, mergeOutput.Merged} {
+		found := false
+		for _, snapshot := range snapshots {
+			if snapshot.CustomerID == child {
+				found = snapshot.Notes != nil && *snapshot.Notes == "edit committed while merge waited"
+			}
+		}
+		if !found {
+			t.Fatalf("merge snapshots did not preserve the committed child edit: %+v", snapshots)
+		}
+	}
+
+	restoreInput, err := json.Marshal(CustomerMergeSnapshotInput{
+		SurvivorCustomerID: survivor, DuplicateCustomerID: duplicate, MergeIntentID: mergeIntentID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := executeCRMWrite(t, fx, restoreCustomerMergeCapabilityID, restoreInput, executorUUID(t)); !result.OK {
+		t.Fatalf("restore after concurrent child edit result=%+v", result)
+	}
+	var childNotes string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT notes FROM customers WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, child).Scan(&childNotes); err != nil {
+		t.Fatal(err)
+	}
+	if childNotes != "edit committed while merge waited" {
+		t.Fatalf("restored child notes=%q, want committed concurrent edit", childNotes)
 	}
 }
 
@@ -465,7 +620,7 @@ func TestGoCustomerMergeAndImportEnforceScopeApprovalAndAudit(t *testing.T) {
 		EXECUTE FUNCTION public.%s()`, triggerName, fx.orgID, mergeCustomersCapabilityID, importCustomersCapabilityID, functionName)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, mergeCustomersCapabilityID, mergeInput, "human", "", "rollback-merge"), mergeCustomersCapabilityID, mergeInput); err == nil {
+	if _, err := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, mergeCustomersCapabilityID, mergeInput, "human", "", "be81198c-6a82-48b8-ae63-a3a5eb588b3d"), mergeCustomersCapabilityID, mergeInput); err == nil {
 		t.Fatal("merge succeeded despite its audit append failure")
 	}
 	if _, err := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, importCustomersCapabilityID, importInput, "human", "", "rollback-import"), importCustomersCapabilityID, importInput); err == nil {
@@ -494,12 +649,13 @@ func TestGoCustomerMergeAndImportEnforceScopeApprovalAndAudit(t *testing.T) {
 	approvedSurvivor := seedMergeCustomer(t, fx, fx.orgID, mergeCustomerSeed{Name: "Approved survivor", PreferredContactMethod: "email", Tags: []string{}})
 	approvedDuplicate := seedMergeCustomer(t, fx, fx.orgID, mergeCustomerSeed{Name: "Approved duplicate", PreferredContactMethod: "phone", Tags: []string{}})
 	approvedMergeInput := json.RawMessage(fmt.Sprintf(`{"survivorCustomerId":%q,"duplicateCustomerId":%q}`, approvedSurvivor, approvedDuplicate))
-	mergeResult := executeCRMWriteWithActorApproval(t, fx, mergeCustomersCapabilityID, approvedMergeInput)
+	approvedMergeIntentID := "88f268d6-a885-4216-8cdf-c0b65e15d0f2"
+	mergeResult := executeCRMWriteWithActorApproval(t, fx, mergeCustomersCapabilityID, approvedMergeInput, approvedMergeIntentID)
 	var mergeOutput CustomerMergeOutput
 	if err := json.Unmarshal(mergeResult.Data, &mergeOutput); err != nil {
 		t.Fatal(err)
 	}
-	restoreInput, err := json.Marshal(CustomerMergeSnapshotInput{SurvivorCustomerID: mergeOutput.SurvivorCustomerID, DuplicateCustomerID: mergeOutput.DuplicateCustomerID, Previous: mergeOutput.Previous})
+	restoreInput, err := json.Marshal(CustomerMergeSnapshotInput{SurvivorCustomerID: mergeOutput.SurvivorCustomerID, DuplicateCustomerID: mergeOutput.DuplicateCustomerID, MergeIntentID: approvedMergeIntentID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,9 +721,13 @@ func TestParseCustomerImportInputMatchesLegacyNormalization(t *testing.T) {
 	}
 }
 
-func executeCRMWriteWithActorApproval(t *testing.T, fx *executorFixture, capabilityID string, input json.RawMessage) Result {
+func executeCRMWriteWithActorApproval(t *testing.T, fx *executorFixture, capabilityID string, input json.RawMessage, intents ...string) Result {
 	t.Helper()
-	claims := crmWriteClaims(fx, capabilityID, input, "agent", fx.agentSession, "")
+	intentID := ""
+	if len(intents) > 0 {
+		intentID = intents[0]
+	}
+	claims := crmWriteClaims(fx, capabilityID, input, "agent", fx.agentSession, intentID)
 	pending, err := fx.executor.Execute(fx.ctx, claims, capabilityID, input)
 	if err != nil || pending.OK || !pending.PendingApproval {
 		t.Fatalf("agent %s result=%+v err=%v, want pending approval", capabilityID, pending, err)
@@ -578,7 +738,7 @@ func executeCRMWriteWithActorApproval(t *testing.T, fx *executorFixture, capabil
 		t.Fatal(err)
 	}
 	decider := NewApprovalDecider(fx.runtime, fx.executor)
-	approved, err := decider.Decide(fx.ctx, crmWriteClaims(fx, capabilityID, input, "human", "", ""), ApprovalDecisionInput{ApprovalID: approvalID, Decision: "approve"})
+	approved, err := decider.Decide(fx.ctx, crmWriteClaims(fx, capabilityID, input, "human", "", intentID), ApprovalDecisionInput{ApprovalID: approvalID, Decision: "approve"})
 	if err != nil || !approved.OK || approved.Status != "executed" || approved.Result == nil || !approved.Result.OK || approved.Result.PendingApproval {
 		t.Fatalf("approval %s result=%+v err=%v, want one completed execution", capabilityID, approved, err)
 	}

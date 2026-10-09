@@ -1394,13 +1394,12 @@ describe("Vite CRM page", () => {
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/customers" && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as { action: string };
-        return Response.json({ ok: true, data: body.action === "merge" ? undoSnapshot : {} });
+        return Response.json({ ok: true, data: undoSnapshot });
       }
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     const duplicateRow = screen.getByRole("row", { name: /Duplicate Company/ });
@@ -1426,6 +1425,67 @@ describe("Vite CRM page", () => {
     await waitFor(() => expect(fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")).toHaveLength(2));
     const undoPost = fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")[1];
     expect(JSON.parse(String(undoPost?.[1]?.body))).toMatchObject({ action: "undoMerge", ...undoSnapshot });
+  });
+
+  it("routes merge and undo merge through their Go capabilities", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_MERGE__", true);
+    const survivorCustomerId = "69e5831e-cb62-4f9a-91d5-4b9e7c62d949";
+    const duplicateCustomerId = customerId;
+    const customers = [{ ...customer("Survivor Company"), id: survivorCustomerId }, { ...customer("Duplicate Company"), id: duplicateCustomerId }];
+    const mergeResult = {
+      survivorCustomerId,
+      duplicateCustomerId,
+      previous: [survivorCustomerId, duplicateCustomerId].map((id) => ({
+        customerId: id,
+        email: null,
+        phone: null,
+        preferredContactMethod: "email",
+        doNotContact: false,
+        reminderOptOut: false,
+        marketingOptOut: false,
+        ownerUserId: null,
+        tags: [],
+        notes: null,
+        creditLimitMinor: null,
+        paymentTermDays: null,
+        deactivatedAt: null,
+        mergedIntoCustomerId: null,
+        mergedAt: null,
+      })),
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: mergeResult });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = render(<CRMPage actorId={dealId} organizationId={customerId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(within(await screen.findByRole("row", { name: /Duplicate Company/ })).getByRole("button", { name: "Merge" }));
+    const mergeDialog = await screen.findByRole("dialog", { name: "Merge customer records" });
+    fireEvent.change(within(mergeDialog).getByLabelText("Keep this customer"), { target: { value: survivorCustomerId } });
+    fireEvent.click(within(mergeDialog).getByRole("button", { name: "Merge records" }));
+    expect(await screen.findByRole("button", { name: "Undo merge" })).not.toBeNull();
+    unmount();
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
+    expect(await screen.findByRole("button", { name: "Undo merge" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo merge" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute")).toHaveLength(2));
+    const posts = fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute");
+    const mergeBody = JSON.parse(String(posts[0]?.[1]?.body));
+    const undoBody = JSON.parse(String(posts[1]?.[1]?.body));
+    expect(mergeBody).toMatchObject({ capabilityId: "crm.mergeCustomers", input: { survivorCustomerId, duplicateCustomerId }, intentId: expect.any(String) });
+    expect(undoBody).toMatchObject({
+      capabilityId: "crm.restoreCustomerMerge",
+      input: { survivorCustomerId, duplicateCustomerId, mergeIntentId: mergeBody.intentId },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/customers" && init?.method === "POST")).toBe(false);
   });
 
   it("imports customers and sends the exact created IDs when Undo this import is used", async () => {
