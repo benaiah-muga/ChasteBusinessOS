@@ -2044,3 +2044,11 @@ new owners and the manifest shows zero legacy runtime paths.
      and uncertain actions after reload, block legacy fallback while
      unresolved, and fail closed on Go 404. Add focused Go contract and Vite
      API, page, and proxy tests.
+201. Route only Vite period-close readiness reads through Go's session-
+     authenticated `accounting.periodCloseWorkbench` capability behind paired
+     `CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep the current period
+     picker, module switchboard behavior, and other Accounting routes unchanged.
+     Go derives organization access from the session and enforces
+     `accounting.read`; a Go error must not fall back to the legacy readiness
+     route. Add focused Vite API, page, proxy selector, and Go contract checks.

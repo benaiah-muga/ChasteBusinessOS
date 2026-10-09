@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchAccountingCloseEnabled,
   fetchAccountingCloseReadiness,
+  accountingPeriodCloseReadsUseGo,
   AccountingCloseApiError,
 } from "./accounting-close";
 
@@ -25,6 +26,24 @@ function closeReadiness(year: number, month: number) {
 }
 
 describe("accounting close API", () => {
+  it("uses the session capability endpoint for Go period-close reads when selected", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_PERIOD_CLOSE_READS__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: closeReadiness(2026, 8) }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(accountingPeriodCloseReadsUseGo()).toBe(true);
+    await expect(fetchAccountingCloseReadiness(2026, 8)).resolves.toEqual(closeReadiness(2026, 8));
+    const [path, init] = fetchMock.mock.calls[0] ?? [];
+    expect(path).toBe("/api/capabilities/execute");
+    expect(init).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store" });
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      capabilityId: "accounting.periodCloseWorkbench",
+      input: { year: 2026, month: 8 },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/accounting/close"))).toBe(false);
+  });
+
   it("validates the Accounting switchboard and complete close-readiness response", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["accounting"] }))

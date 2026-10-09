@@ -43,6 +43,33 @@ function stubAccounting(taskList = readiness(2026, 8).tasks) {
 }
 
 describe("AccountingCloseReadinessPage", () => {
+  it("loads readiness through accounting.periodCloseWorkbench when the Go selector is enabled", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_PERIOD_CLOSE_READS__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") {
+        return Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["accounting"] });
+      }
+      if (url === "/api/capabilities/execute") {
+        const request = JSON.parse(String(init?.body)) as { input: { year: number; month: number } };
+        return Response.json({ ok: true, data: readiness(request.input.year, request.input.month) });
+      }
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingCloseReadinessPage />);
+
+    expect(await screen.findByRole("heading", { name: "Not ready to close" })).toBeTruthy();
+    const capabilityCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/capabilities/execute");
+    expect(capabilityCall?.[1]).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store" });
+    expect(JSON.parse(String(capabilityCall?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.periodCloseWorkbench",
+      input: { year: expect.any(Number), month: expect.any(Number) },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/accounting/close"))).toBe(false);
+  });
+
   it("shows the readiness status, blockers, tasks, period totals, and full-workspace link", async () => {
     const fetchMock = stubAccounting();
     render(<AccountingCloseReadinessPage />);

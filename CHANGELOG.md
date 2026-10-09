@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite period-close readiness can read through Go's session-authenticated
+  `accounting.periodCloseWorkbench` capability behind paired
+  `CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go derives organization
+  access from the session and enforces `accounting.read`; a Go error does not
+  fall back to the legacy readiness route. Other Accounting screens and
+  actions retain their current routes.
 - Vite Hiring now reads openings and applicants through Go's `hr.report`
   capability and routes opening creation, applicant creation, and pipeline
   stage changes through `hr.createOpening`, `hr.addApplicant`, and

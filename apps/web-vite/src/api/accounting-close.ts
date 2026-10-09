@@ -49,6 +49,10 @@ const ErrorResponseSchema = z.object({ error: z.string().optional(), message: z.
 export type AccountingCloseTask = z.infer<typeof CloseTaskSchema>;
 export type AccountingCloseReadiness = z.infer<typeof CloseReadinessSchema>;
 
+export function accountingPeriodCloseReadsUseGo(): boolean {
+  return typeof __GO_ACCOUNTING_PERIOD_CLOSE_READS__ !== "undefined" && __GO_ACCOUNTING_PERIOD_CLOSE_READS__;
+}
+
 export class AccountingCloseApiError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -60,15 +64,20 @@ function signalWithTimeout(signal?: AbortSignal): AbortSignal {
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
 }
 
-async function getJson(path: string, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
+async function getJson(
+  path: string,
+  signal?: AbortSignal,
+  init: Pick<RequestInit, "method" | "body"> = {},
+): Promise<{ response: Response; body: unknown }> {
   let response: Response;
   try {
     response = await fetch(path, {
-      method: "GET",
+      method: init.method ?? "GET",
       credentials: "same-origin",
       headers: { accept: "application/json" },
       cache: "no-store",
       signal: signalWithTimeout(signal),
+      ...(init.body === undefined ? {} : { body: init.body, headers: { accept: "application/json", "content-type": "application/json" } }),
     });
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -113,8 +122,18 @@ export async function fetchAccountingCloseReadiness(
   if (!Number.isSafeInteger(year) || year < 2000 || year > 2100 || !Number.isSafeInteger(month) || month < 1 || month > 12) {
     throw new AccountingCloseApiError(400, "Choose a valid close period.");
   }
+  const useGo = accountingPeriodCloseReadsUseGo();
   const query = new URLSearchParams({ year: String(year), month: String(month) });
-  const { response, body } = await getJson(`/api/accounting/close?${query.toString()}`, signal);
+  const { response, body } = useGo
+    ? await getJson("/api/capabilities/execute", signal, {
+      method: "POST",
+      body: JSON.stringify({
+        capabilityId: "accounting.periodCloseWorkbench",
+        input: { year, month },
+        intentId: crypto.randomUUID(),
+      }),
+    })
+    : await getJson(`/api/accounting/close?${query.toString()}`, signal);
   if (!response.ok) {
     throw new AccountingCloseApiError(response.status, errorMessage(response.status, body, "period-close readiness"));
   }
