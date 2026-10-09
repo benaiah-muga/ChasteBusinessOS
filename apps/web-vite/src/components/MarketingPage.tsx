@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import "./MarketingPage.css";
@@ -153,6 +153,15 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
   const campaignScopeIdentity = actorId?.trim() && organizationId?.trim()
     ? JSON.stringify({ actorId: actorId.trim(), organizationId: organizationId.trim() })
     : null;
+  const previousCampaignScopeIdentityRef = useRef(campaignScopeIdentity);
+  const campaignScopeGenerationRef = useRef(0);
+  if (previousCampaignScopeIdentityRef.current !== campaignScopeIdentity) {
+    previousCampaignScopeIdentityRef.current = campaignScopeIdentity;
+    campaignScopeGenerationRef.current += 1;
+  }
+  const campaignScopeIdentityRef = useRef(campaignScopeIdentity);
+  campaignScopeIdentityRef.current = campaignScopeIdentity;
+  const [loadedScopeIdentity, setLoadedScopeIdentity] = useState(campaignScopeIdentity);
   const [campaignDraftStorageKey, setCampaignDraftStorageKey] = useState<string | null>(null);
   const [campaignDraftKeyScopeIdentity, setCampaignDraftKeyScopeIdentity] = useState<string | null>(null);
   const [campaignDraftStatus, setCampaignDraftStatus] = useState<"loading" | "ready" | "failed">(goCampaignWritesEnabled ? "loading" : "ready");
@@ -214,57 +223,82 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
     }
   }, [campaignDraftKeyScopeIdentity, campaignDraftStorageKey, campaignDraftStatus, campaignDraftLocked, campaignDraftReady, campaignForm, campaignScopeIdentity, goCampaignWritesEnabled]);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    if (!signal) setDataState({ status: "loading" });
-    setSendResults({});
-    setAnalytics({});
+  const load = useCallback(async (signal?: AbortSignal, isCurrent: () => boolean = () => true) => {
+    if (!signal && isCurrent()) setDataState({ status: "loading" });
+    if (isCurrent()) {
+      setSendResults({});
+      setAnalytics({});
+    }
     try {
       const snapshot = await fetchMarketingSnapshot(signal);
-      if (!signal?.aborted) setDataState({ status: "ready", snapshot });
+      if (!signal?.aborted && isCurrent()) setDataState({ status: "ready", snapshot });
     } catch (error) {
-      if (!signal?.aborted) setDataState({ status: "failed", message: messageFor(error) });
+      if (!signal?.aborted && isCurrent()) setDataState({ status: "failed", message: messageFor(error) });
     }
   }, []);
 
-  const loadModules = useCallback(async (signal?: AbortSignal) => {
-    if (!signal) setModuleState({ status: "loading" });
+  const loadModules = useCallback(async (
+    signal?: AbortSignal,
+    scopeIdentity: string | null = campaignScopeIdentity,
+    scopeGeneration: number = campaignScopeGenerationRef.current,
+  ) => {
+    const isCurrentScope = () => campaignScopeIdentityRef.current === scopeIdentity
+      && campaignScopeGenerationRef.current === scopeGeneration;
+    if (!signal && isCurrentScope()) setModuleState({ status: "loading" });
     try {
       const enabled = await fetchMarketingEnabled(signal);
-      if (signal?.aborted) return;
+      if (signal?.aborted || !isCurrentScope()) return;
       setModuleState({ status: "ready", enabled });
-      if (enabled) await load(signal);
+      if (enabled) await load(signal, isCurrentScope);
       else setDataState({ status: "ready", snapshot: emptySnapshot });
+      if (!signal?.aborted && isCurrentScope()) setLoadedScopeIdentity(scopeIdentity);
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || !isCurrentScope()) return;
       setModuleState({ status: "failed", message: messageFor(error) });
+      setLoadedScopeIdentity(scopeIdentity);
     }
-  }, [load]);
+  }, [campaignScopeIdentity, load]);
 
   useEffect(() => {
+    const scopeIdentity = campaignScopeIdentity;
+    const scopeGeneration = campaignScopeGenerationRef.current;
     const controller = new AbortController();
-    void loadModules(controller.signal);
+    setLoadedScopeIdentity(null);
+    setModuleState({ status: "loading" });
+    setDataState({ status: "loading" });
+    setNotice(null);
+    setBusy(false);
+    setSegmentForm({ name: "", minSpend: "0.00" });
+    setCampaignForm(EmptyCampaignForm);
+    setCampaignDraftLocked(false);
+    setSendResults({});
+    setAnalytics({});
+    void loadModules(controller.signal, scopeIdentity, scopeGeneration);
     return () => controller.abort();
-  }, [loadModules]);
+  }, [campaignScopeIdentity, loadModules]);
 
-  async function run<Output>(label: string, send: () => Promise<{ kind: "pending"; reason: string } | { kind: "completed"; data: Output }>, lifecycle?: { onPending?: () => void; onError?: (error: unknown) => void }): Promise<Output | null> {
+  async function run<Output>(label: string, send: () => Promise<{ kind: "pending"; reason: string } | { kind: "completed"; data: Output }>, lifecycle?: { onPending?: () => void; onError?: (error: unknown) => void; isCurrent?: () => boolean }): Promise<Output | null> {
     if (busy) return null;
     setBusy(true);
     setNotice(null);
     try {
       const outcome = await send();
+      if (lifecycle?.isCurrent && !lifecycle.isCurrent()) return null;
       if (outcome.kind === "pending") {
         lifecycle?.onPending?.();
         setNotice({ tone: "pending", message: outcome.reason || `${label} needs human approval. It is in the Approvals inbox.` });
         return null;
       }
-      await load();
+      await load(undefined, lifecycle?.isCurrent);
+      if (lifecycle?.isCurrent && !lifecycle.isCurrent()) return null;
       return outcome.data;
     } catch (error) {
+      if (lifecycle?.isCurrent && !lifecycle.isCurrent()) return null;
       lifecycle?.onError?.(error);
       setNotice({ tone: "error", message: messageFor(error) });
       return null;
     } finally {
-      setBusy(false);
+      if (!lifecycle?.isCurrent || lifecycle.isCurrent()) setBusy(false);
     }
   }
 
@@ -277,8 +311,12 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
       setNotice({ tone: "error", message: "Enter the minimum lifetime spend as a whole, non-negative amount." });
       return;
     }
-    const done = await run("Create segment", () => submitMarketingAction({ action: "createSegment", name, minSpendMinor }));
-    if (done) {
+    const operationScopeIdentity = campaignScopeIdentity;
+    const operationScopeGeneration = campaignScopeGenerationRef.current;
+    const isCurrentScope = () => campaignScopeIdentityRef.current === operationScopeIdentity
+      && campaignScopeGenerationRef.current === operationScopeGeneration;
+    const done = await run("Create segment", () => submitMarketingAction({ action: "createSegment", name, minSpendMinor }), { isCurrent: isCurrentScope });
+    if (done && isCurrentScope()) {
       setNotice({ tone: "success", message: "Segment saved. Campaigns against it target the same people every time." });
       setSegmentForm({ name: "", minSpend: "0.00" });
     }
@@ -291,6 +329,10 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
     const subject = campaignForm.subject.trim();
     const body = campaignForm.body;
     if (!campaignForm.segmentId || !name || !subject || !body.trim()) return;
+    const operationScopeIdentity = campaignScopeIdentity;
+    const operationScopeGeneration = campaignScopeGenerationRef.current;
+    const isCurrentScope = () => campaignScopeIdentityRef.current === operationScopeIdentity
+      && campaignScopeGenerationRef.current === operationScopeGeneration;
     if (goCampaignWritesEnabled) {
       if (!campaignDraftReady || !campaignDraftStorageKey) {
         setNotice({ tone: "error", message: "Wait for the scoped campaign draft to finish loading before submitting." });
@@ -331,8 +373,9 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
           }
         }
       },
+      isCurrent: isCurrentScope,
     });
-    if (done) {
+    if (done && isCurrentScope()) {
       setNotice({ tone: "success", message: "Campaign drafted. Nothing goes out until you press Send." });
       setCampaignForm(EmptyCampaignForm);
       setCampaignDraftLocked(false);
@@ -350,18 +393,26 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
   }
 
   async function sendCampaign(campaignId: string) {
-    const result = await run("Send campaign", () => submitMarketingAction({ action: "sendCampaign", campaignId }, crypto.randomUUID(), { actorId, organizationId }));
-    if (!result) return;
+    const operationScopeIdentity = campaignScopeIdentity;
+    const operationScopeGeneration = campaignScopeGenerationRef.current;
+    const isCurrentScope = () => campaignScopeIdentityRef.current === operationScopeIdentity
+      && campaignScopeGenerationRef.current === operationScopeGeneration;
+    const result = await run("Send campaign", () => submitMarketingAction({ action: "sendCampaign", campaignId }, crypto.randomUUID(), { actorId, organizationId }), { isCurrent: isCurrentScope });
+    if (!result || !isCurrentScope()) return;
     setSendResults((current) => ({ ...current, [campaignId]: result }));
     setNotice({ tone: "success", message: sendSummary(result) });
   }
 
   async function loadAnalytics(campaignId: string) {
-    const stats = await run("Campaign analytics", () => submitMarketingAction({ action: "campaignAnalytics", campaignId }));
-    if (stats) setAnalytics((current) => ({ ...current, [campaignId]: stats }));
+    const operationScopeIdentity = campaignScopeIdentity;
+    const operationScopeGeneration = campaignScopeGenerationRef.current;
+    const isCurrentScope = () => campaignScopeIdentityRef.current === operationScopeIdentity
+      && campaignScopeGenerationRef.current === operationScopeGeneration;
+    const stats = await run("Campaign analytics", () => submitMarketingAction({ action: "campaignAnalytics", campaignId }), { isCurrent: isCurrentScope });
+    if (stats && isCurrentScope()) setAnalytics((current) => ({ ...current, [campaignId]: stats }));
   }
 
-  if (moduleState.status === "loading") {
+  if (loadedScopeIdentity !== campaignScopeIdentity || moduleState.status === "loading") {
     return <main className="mk-page">{styleTag}<p className="mk-wait" role="status">Checking whether marketing is available…</p></main>;
   }
   if (moduleState.status === "failed") {

@@ -107,6 +107,53 @@ describe("manufacturing API", () => {
     await expect(fetchManufacturingEnabled()).resolves.toBe(true);
   });
 
+  it("fails closed on empty or corrupt saved Go work order attempts", async () => {
+    const scope = { actorId: "actor-1", organizationId: "org-1" };
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(scope)));
+    const scopeHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const key = `chaste:manufacturing-work-order-attempt:${scopeHash}`;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const marker of ["", "{", "{}", JSON.stringify({ fingerprint: "not-a-digest", intentId: "not-a-uuid" })]) {
+      window.localStorage.setItem(key, marker);
+      await expect(submitManufacturingAction(
+        { action: "releaseWorkOrder", workOrderId: "10000000-0000-4000-8000-000000000001" },
+        undefined,
+        { useGoWorkOrders: true, retryScope: scope },
+      )).rejects.toThrow("Enable browser storage before changing manufacturing data");
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(window.localStorage.getItem(key)).toBe(marker);
+    }
+  });
+
+  it("blocks selector rollback to legacy after an uncertain Go manufacturing write", async () => {
+    const scope = { actorId: "actor-1", organizationId: "org-1" };
+    const action = { action: "createWorkOrder" as const, assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000 };
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("network"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitManufacturingAction(action, undefined, { useGoWorkOrders: true, retryScope: scope }))
+      .rejects.toBeInstanceOf(ManufacturingApiError);
+    await expect(submitManufacturingAction(action, undefined, { useGoWorkOrders: false, retryScope: scope }))
+      .rejects.toThrow("Restore Go manufacturing writes and retry that exact action");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("blocks legacy manufacturing writes when scope is unavailable and any Go attempt is unresolved", async () => {
+    const scope = { actorId: "actor-1", organizationId: "org-1" };
+    const action = { action: "produceFromBom" as const, assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "LOT-1" };
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("network"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitManufacturingAction(action, undefined, { useGoProductionActions: true, retryScope: scope }))
+      .rejects.toBeInstanceOf(ManufacturingApiError);
+    await expect(submitManufacturingAction(action, undefined, { useGoProductionActions: false }))
+      .rejects.toThrow("A previous manufacturing result may be unresolved");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves approval-pending writes and stamps a fresh intent id", async () => {
     const fetchMock = stubSequenced([Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 })]);
     await expect(submitManufacturingAction({ action: "deleteBom", assemblySku: "DESK-1" })).resolves.toEqual({ kind: "pending", reason: "Owner review" });

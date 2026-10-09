@@ -103,6 +103,33 @@ describe("inventory transfer API client", () => {
     expect(retry.intentId).toBe(first.intentId);
   });
 
+  it("preserves malformed nonempty retry markers and refuses to mint another intent", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network"));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
+    const invalidMarkers = [
+      "{broken",
+      JSON.stringify({ fingerprint: "not-a-fingerprint", intentId: transferId }),
+      JSON.stringify({ fingerprint: "a".repeat(64), intentId: "not-a-uuid" }),
+      JSON.stringify({ fingerprint: "a".repeat(64), intentId: transferId, extra: true }),
+    ];
+
+    for (const [index, invalidMarker] of invalidMarkers.entries()) {
+      const scope = { actorId: `actor-${index}`, organizationId: `org-${index}` };
+      const input = { fromLocationCode: "MAIN", toLocationCode: "SHOP", sku: "ITEM-1", quantityThousandths: 2500 };
+      await expect(createInventoryTransfer(input, scope)).rejects.toBeInstanceOf(Error);
+      const key = Array.from({ length: localStorage.length }, (_, keyIndex) => localStorage.key(keyIndex))
+        .filter((candidate) => candidate?.startsWith("chaste:inventory-transfer-attempt:")).at(-1);
+      expect(key).toBeDefined();
+      localStorage.setItem(key!, invalidMarker);
+      const requestCount = fetchMock.mock.calls.length;
+
+      await expect(createInventoryTransfer(input, scope)).rejects.toThrow("retry marker is malformed");
+      expect(fetchMock).toHaveBeenCalledTimes(requestCount);
+      expect(localStorage.getItem(key!)).toBe(invalidMarker);
+    }
+  });
+
   it("keeps pending reasons and terminal errors, and rejects malformed success", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Manager approval required." }, 202))

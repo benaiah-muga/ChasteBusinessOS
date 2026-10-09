@@ -113,14 +113,48 @@ describe("CRM API client", () => {
   it("reuses an intent when a missing Go route falls back to legacy", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { moved: true, stage: "proposal" } }));
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { moved: true, stage: "lost" } }));
     vi.stubGlobal("fetch", fetchMock);
+    const input = { dealId, stage: "lost" as const, lostReason: "Customer chose another vendor" };
 
-    await submitCrmDealStageMove({ dealId, stage: "proposal" }, undefined, true, { actorId: customerId, organizationId: dealId });
+    await submitCrmDealStageMove(input, undefined, true, { actorId: customerId, organizationId: dealId });
     const goBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/deals"]);
-    expect(legacyBody).toMatchObject({ action: "move", dealId, stage: "proposal", intentId: goBody.intentId });
+    expect(goBody).toMatchObject({ capabilityId: "crm.moveDealStage", input, intentId: expect.any(String) });
+    expect(legacyBody).toEqual({ action: "move", ...input, intentId: goBody.intentId });
+  });
+
+  it("does not fall back to legacy for non-404 Go failures and retains the retry intent", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "temporarily unavailable" }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { moved: true, stage: "proposal" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { dealId, stage: "proposal" as const };
+    const scope = { actorId: customerId, organizationId: dealId };
+
+    await expect(submitCrmDealStageMove(input, undefined, true, scope)).rejects.toMatchObject({ status: 503 });
+    await expect(submitCrmDealStageMove(input, undefined, true, scope)).resolves.toMatchObject({ kind: "completed" });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    const intents = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).intentId);
+    expect(intents[0]).toBe(intents[1]);
+  });
+
+  it.each([408, 429])("retains the Go deal-stage intent after uncertain HTTP %i", async (status) => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "retry later" }, { status }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { moved: true, stage: "proposal" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { dealId, stage: "proposal" as const };
+    const scope = { actorId: customerId, organizationId: dealId };
+
+    await expect(submitCrmDealStageMove(input, undefined, true, scope)).rejects.toMatchObject({ status });
+    await expect(submitCrmDealStageMove(input, undefined, true, scope)).resolves.toMatchObject({ kind: "completed" });
+
+    const intents = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).intentId);
+    expect(intents[0]).toBe(intents[1]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
   });
 
   it("routes deal creation through Go and strictly validates the deal ID", async () => {

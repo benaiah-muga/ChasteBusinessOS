@@ -221,6 +221,8 @@ export async function submitMarketingAction<Action extends MarketingAction>(
   let attempt: MarketingAttempt | null = null;
   if (useGoCampaign && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign")) {
     attempt = await getMarketingAttempt(parsedAction.data, retryScope);
+  } else if (!useGoCampaign && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign")) {
+    await assertNoUnresolvedGoMarketingAttempt(parsedAction.data, retryScope);
   }
   const activeIntentId = attempt?.intentId ?? intentId;
   const legacyBody = { ...parsedAction.data, intentId: activeIntentId };
@@ -278,7 +280,7 @@ export async function submitMarketingAction<Action extends MarketingAction>(
 
 type MarketingAttempt = { storageKey: string; fingerprint: string; intentId: string };
 
-async function getMarketingAttempt(action: Extract<MarketingAction, { action: "createCampaign" | "sendCampaign" }>, scope?: MarketingRetryScope): Promise<MarketingAttempt> {
+async function marketingAttemptStorageKey(action: Extract<MarketingAction, { action: "createCampaign" | "sendCampaign" }>, scope?: MarketingRetryScope): Promise<{ storageKey: string; fingerprint: string }> {
   const actorId = scope?.actorId?.trim();
   const organizationId = scope?.organizationId?.trim();
   if (!actorId || !organizationId || !uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
@@ -300,6 +302,11 @@ async function getMarketingAttempt(action: Extract<MarketingAction, { action: "c
   }
   const actionTarget = action.action === "createCampaign" ? "create" : `send:${action.campaignId}`;
   const storageKey = `chaste.marketing.campaign-intent.v1:${scopeHash}:${actionTarget}`;
+  return { storageKey, fingerprint };
+}
+
+async function getMarketingAttempt(action: Extract<MarketingAction, { action: "createCampaign" | "sendCampaign" }>, scope?: MarketingRetryScope): Promise<MarketingAttempt> {
+  const { storageKey, fingerprint } = await marketingAttemptStorageKey(action, scope);
   try {
     const raw = window.localStorage.getItem(storageKey);
     if (raw !== null) {
@@ -320,6 +327,36 @@ async function getMarketingAttempt(action: Extract<MarketingAction, { action: "c
     return { storageKey, fingerprint, intentId: intent.intentId };
   } catch {
     throw new MarketingApiError(0, "A previous campaign attempt is still unresolved or browser storage could not retain this retry. Restore the exact draft or resolve the earlier attempt before changing it.");
+  }
+}
+
+async function assertNoUnresolvedGoMarketingAttempt(
+  action: Extract<MarketingAction, { action: "createCampaign" | "sendCampaign" }>,
+  scope?: MarketingRetryScope,
+): Promise<void> {
+  const actionTarget = action.action === "createCampaign" ? "create" : `send:${action.campaignId}`;
+  try {
+    const actorId = scope?.actorId?.trim();
+    const organizationId = scope?.organizationId?.trim();
+    if (actorId && organizationId && uuid.safeParse(actorId).success && uuid.safeParse(organizationId).success) {
+      const { storageKey } = await marketingAttemptStorageKey(action, scope);
+      if (window.localStorage.getItem(storageKey) !== null) {
+        throw new MarketingApiError(0, "A Go campaign action is still unresolved. Restore Go campaign writes and retry that exact action before using the legacy route.");
+      }
+      return;
+    }
+
+    const prefix = "chaste.marketing.campaign-intent.v1:";
+    const suffix = `:${actionTarget}`;
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith(prefix) && key.endsWith(suffix)) {
+        throw new MarketingApiError(0, "A Go campaign action is still unresolved. Restore Go campaign writes and retry that exact action before using the legacy route.");
+      }
+    }
+  } catch (error) {
+    if (error instanceof MarketingApiError) throw error;
+    throw new MarketingApiError(0, "Campaign retry state could not be checked. Enable browser storage or restore Go campaign writes before continuing.");
   }
 }
 

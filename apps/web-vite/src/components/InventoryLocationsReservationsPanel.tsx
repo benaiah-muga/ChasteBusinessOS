@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { InventoryItem, InventoryLocation } from "../api/inventory";
 import {
   createInventoryLocation,
@@ -35,6 +35,16 @@ export function InventoryLocationsReservationsPanel({
   onChanged,
   retryScope,
 }: InventoryLocationsReservationsPanelProps) {
+  const scopeKey = JSON.stringify({
+    actorId: retryScope?.actorId.trim() ?? "",
+    organizationId: retryScope?.organizationId.trim() ?? "",
+  });
+  const currentScopeKey = useRef(scopeKey);
+  const scopeGeneration = useRef(0);
+  if (currentScopeKey.current !== scopeKey) {
+    currentScopeKey.current = scopeKey;
+    scopeGeneration.current += 1;
+  }
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
@@ -45,14 +55,21 @@ export function InventoryLocationsReservationsPanel({
   const stockItems = useMemo(() => items.filter((item) => item.kind !== "service"), [items]);
   const openReservations = useMemo(() => reservations.filter((reservation) => reservation.status === "open"), [reservations]);
 
+  useEffect(() => {
+    setBusy(false);
+    setNotice(null);
+  }, [scopeKey]);
+
   async function runAction(
     action: () => Promise<{ kind: "completed" } | { kind: "pending"; reason: string }>,
     successMessage: string,
   ): Promise<boolean> {
+    const requestGeneration = scopeGeneration.current;
     setBusy(true);
     setNotice(null);
     try {
       const result = await action();
+      if (requestGeneration !== scopeGeneration.current) return false;
       if (result.kind === "pending") {
         setNotice({ tone: "pending", message: `This action is waiting for approval. ${result.reason}` });
         return false;
@@ -61,10 +78,13 @@ export function InventoryLocationsReservationsPanel({
       try {
         await onChanged();
       } catch {
+        if (requestGeneration !== scopeGeneration.current) return false;
         setNotice({ tone: "error", message: `${successMessage} The action completed, but the inventory view could not refresh. Reload to see the latest status.` });
       }
+      if (requestGeneration !== scopeGeneration.current) return false;
       return true;
     } catch (error) {
+      if (requestGeneration !== scopeGeneration.current) return false;
       setNotice({
         tone: "error",
         message: error instanceof InventoryLocationActionError
@@ -73,7 +93,7 @@ export function InventoryLocationsReservationsPanel({
       });
       return false;
     } finally {
-      setBusy(false);
+      if (requestGeneration === scopeGeneration.current) setBusy(false);
     }
   }
 

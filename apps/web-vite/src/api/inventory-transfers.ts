@@ -19,6 +19,10 @@ const pendingEnvelope = z.object({
 }).passthrough();
 const failureEnvelope = z.object({ ok: z.literal(false), error: z.string() }).passthrough();
 const legacyFailure = z.object({ error: z.string() }).passthrough();
+const TransferAttemptSchema = z.object({
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/i),
+  intentId: z.string().uuid(),
+}).strict();
 
 export class InventoryTransferApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -63,17 +67,15 @@ type InventoryTransferAttempt = { storageKey: string; fingerprint: string; inten
 const transferAttemptPrefix = "chaste:inventory-transfer-attempt:";
 
 function parseTransferAttempt(value: string | null): { fingerprint: string; intentId: string } | null {
-  if (!value) return null;
+  if (value === null) return null;
   try {
     const parsed: unknown = JSON.parse(value);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const attempt = parsed as { fingerprint?: unknown; intentId?: unknown };
-    return typeof attempt.fingerprint === "string" && typeof attempt.intentId === "string"
-      ? { fingerprint: attempt.fingerprint, intentId: attempt.intentId }
-      : null;
+    const attempt = TransferAttemptSchema.safeParse(parsed);
+    if (attempt.success) return attempt.data;
   } catch {
-    return null;
+    // A nonempty marker can represent a request whose outcome is unknown.
   }
+  throw new InventoryTransferApiError(0, "A saved stock transfer retry marker is malformed. Check transfer history before trying again.");
 }
 
 async function transferDigest(value: string): Promise<string> {
@@ -98,7 +100,8 @@ async function createTransferAttempt(payload: InventoryTransferAction, retryScop
   let stored: { fingerprint: string; intentId: string } | null;
   try {
     stored = parseTransferAttempt(window.localStorage.getItem(storageKey));
-  } catch {
+  } catch (error) {
+    if (error instanceof InventoryTransferApiError) throw error;
     throw new InventoryTransferApiError(0, "Enable browser storage before changing a stock transfer so an uncertain action can be retried safely.");
   }
   if (stored && stored.fingerprint !== fingerprint) {

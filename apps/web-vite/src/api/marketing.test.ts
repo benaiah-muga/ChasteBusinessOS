@@ -273,7 +273,7 @@ describe("marketing campaign Go routing", () => {
 
   it("blocks a changed campaign payload while the prior create is pending", async () => {
     vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
-    const fetchMock = vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "Needs review" }, { status: 202 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ ok: false, pendingApproval: true, reason: "Needs review" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await submitMarketingAction(createCampaignAction, undefined, retryScope);
@@ -333,6 +333,32 @@ describe("marketing campaign Go routing", () => {
     await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).rejects.toBeInstanceOf(MarketingApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it.each([
+    { label: "creation", action: createCampaignAction },
+    { label: "send", action: { action: "sendCampaign" as const, campaignId } },
+  ])("blocks legacy $label after an unresolved Go attempt when the selector is off", async ({ action }) => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ ok: false, pendingApproval: true, reason: "Needs review" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction(action, undefined, retryScope)).resolves.toMatchObject({ kind: "pending" });
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", false);
+
+    await expect(submitMarketingAction(action, undefined, retryScope)).rejects.toThrow(/Restore Go campaign writes and retry that exact action/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("allows a fresh scoped legacy campaign action when there is no unresolved Go marker", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", false);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({ ok: true, data: { campaignId: "7ed25b56-02d4-4f5b-b858-9681920abdd0" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction(createCampaignAction, undefined, retryScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/marketing");
   });
 
   it("fails closed without scope or when a stored intent marker is malformed", async () => {

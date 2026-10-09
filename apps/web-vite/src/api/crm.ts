@@ -209,7 +209,7 @@ export async function submitCrmDealStageMove(
     if (outcome.kind === "completed") await clearCrmDealStageAttempt(attempt.storageKey);
     return outcome;
   } catch (error) {
-    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
       await clearCrmDealStageAttempt(attempt.storageKey);
     }
     throw error;

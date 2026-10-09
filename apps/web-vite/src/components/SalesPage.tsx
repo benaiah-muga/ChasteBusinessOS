@@ -139,12 +139,18 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const confirmIntents = useRef(new Map<string, string>());
   const previousCreateScope = useRef<string | null>(null);
   const currentCreateScope = useRef<string | null>(null);
+  const confirmationScope = useRef<string | null>(null);
+  const confirmationGeneration = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const currency = useMemo(() => currencyFor(baseCurrency), [baseCurrency]);
   const createScopeIdentity = actorId?.trim() && organizationId?.trim()
     ? JSON.stringify([actorId.trim(), organizationId.trim()])
     : null;
   currentCreateScope.current = createScopeIdentity;
+  if (confirmationScope.current !== createScopeIdentity) {
+    confirmationScope.current = createScopeIdentity;
+    confirmationGeneration.current += 1;
+  }
   const createScopeReady = createScopeIdentity !== null && createAttemptRestoredScope === createScopeIdentity;
   const createWriteLocked = !createScopeReady || createAttemptPending;
 
@@ -176,7 +182,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [createScopeIdentity, load]);
 
   useEffect(() => {
     let current = true;
@@ -186,9 +192,14 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     setCreateAttemptPending(false);
     if (scopeChanged) {
       setWriteBusy(false);
+      setConfirmingOrderId(null);
+      setApprovalWaitingOrderIds(new Set());
+      setAllowBackorder({});
+      confirmIntents.current.clear();
       setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
       setShowCreateForm(false);
       setCreateError(null);
+      setOrderActionTarget(null);
       setActionNotice(null);
     }
     if (!actorId || !organizationId || !createScopeIdentity) return () => { current = false; };
@@ -248,6 +259,10 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   }, [customerNames, filter, search, state]);
 
   async function handleConfirm(order: SalesOrder) {
+    const submittedScope = createScopeIdentity;
+    const submittedGeneration = confirmationGeneration.current;
+    const isCurrentScope = () => currentCreateScope.current === submittedScope
+      && confirmationGeneration.current === submittedGeneration;
     const checkingApproval = approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id);
     if (!checkingApproval && !window.confirm(`Confirm order #${order.number}?`)) return;
     const intentId = confirmIntents.current.get(order.id) ?? savedConfirmIntent(order.id) ?? crypto.randomUUID();
@@ -258,6 +273,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     setActionNotice(null);
     try {
       const result = await confirmSalesOrder(order.id, intentId, backorderChoice);
+      if (!isCurrentScope()) return;
       if (result.kind === "pending") {
         persistConfirmIntent(order.id, intentId, true, backorderChoice);
         setApprovalWaitingOrderIds((current) => new Set(current).add(order.id));
@@ -279,6 +295,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       });
       setActionNotice({ tone: "success", message: `Order #${order.number} confirmed.` });
     } catch (error) {
+      if (!isCurrentScope()) return;
       if (error instanceof SalesApiError && error.status === 422) {
         confirmIntents.current.delete(order.id);
         clearConfirmIntent(order.id);
@@ -293,7 +310,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         message: error instanceof SalesApiError ? error.message : "The order confirmation could not be completed.",
       });
     } finally {
-      setConfirmingOrderId(null);
+      if (isCurrentScope()) setConfirmingOrderId(null);
     }
   }
 
@@ -366,12 +383,14 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   }
 
   async function handleOrderAction(): Promise<void> {
-    if (!orderActionTarget) return;
+    if (!orderActionTarget || !createScopeReady || !createScopeIdentity) return;
     const target = orderActionTarget;
+    const submittedScope = createScopeIdentity;
     setWriteBusy(true);
     setActionNotice(null);
     try {
       const result = await submitSalesOrderWrite({ action: target.action, orderId: target.order.id }, { actorId, organizationId });
+      if (currentCreateScope.current !== submittedScope) return;
       if (result.kind === "pending") {
         setActionNotice({ tone: "pending", message: result.reason });
         return;
@@ -395,11 +414,12 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
               ? `Reserved quantities delivered and invoiced for order #${target.order.number}. The order remains confirmed.`
               : `Order #${target.order.number} updated.`,
       });
-      await refreshOrderList();
+      await refreshOrderList(submittedScope);
     } catch (error) {
+      if (currentCreateScope.current !== submittedScope) return;
       setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The sales order action could not be completed." });
     } finally {
-      setWriteBusy(false);
+      if (currentCreateScope.current === submittedScope) setWriteBusy(false);
     }
   }
 
@@ -549,10 +569,10 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
                       Allow backorder
                     </label>
                     <button type="button" disabled={confirmingOrderId !== null} onClick={() => void handleConfirm(order)}>{confirmingOrderId === order.id ? "Checking…" : approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) ? `Check approval #${order.number}` : `Confirm #${order.number}`}</button>
-                    <button type="button" className="sales-row-action" disabled={writeBusy || confirmingOrderId !== null} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
+                    <button type="button" className="sales-row-action" disabled={writeBusy || !createScopeReady || confirmingOrderId !== null} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
                   </>}{order.status === "confirmed" && <>
-                    <button type="button" disabled={writeBusy} onClick={() => setOrderActionTarget({ action: "deliver", order })}>Deliver #{order.number}</button>
-                    <button type="button" className="sales-row-action" disabled={writeBusy} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
+                    <button type="button" disabled={writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "deliver", order })}>Deliver #{order.number}</button>
+                    <button type="button" className="sales-row-action" disabled={writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
                   </>}</td>
                 </tr>
               ))}</tbody>
@@ -569,8 +589,8 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
               ? "This delivers all remaining reserved quantities, including service lines, and creates an invoice for those delivered lines."
               : "This withdraws the order and releases its remaining stock reservations. Delivered or partially delivered orders must be reversed through the invoice."}</p>
             <div className="sales-write-actions">
-              <button type="button" className="sales-write-secondary" disabled={writeBusy} onClick={() => setOrderActionTarget(null)}>Keep order</button>
-              <button type="button" className="sales-write-primary" disabled={writeBusy} onClick={() => void handleOrderAction()}>{writeBusy ? "Working…" : orderActionTarget.action === "deliver" ? "Deliver all and invoice" : "Cancel order"}</button>
+              <button type="button" className="sales-write-secondary" disabled={writeBusy || !createScopeReady} onClick={() => setOrderActionTarget(null)}>Keep order</button>
+              <button type="button" className="sales-write-primary" disabled={writeBusy || !createScopeReady} onClick={() => void handleOrderAction()}>{writeBusy ? "Working…" : orderActionTarget.action === "deliver" ? "Deliver all and invoice" : "Cancel order"}</button>
             </div>
           </section>
         </div>

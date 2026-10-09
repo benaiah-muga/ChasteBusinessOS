@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SalesPage } from "./SalesPage";
 import { submitSalesOrderWrite } from "../api/sales";
@@ -130,6 +130,58 @@ describe("Vite sales page", () => {
       input: { orderId: orders[2]!.id, allowBackorder: true },
       intentId: expect.any(String),
     });
+  });
+
+  it("ignores a confirmation response from the prior organization", async () => {
+    const orgBOrder = {
+      ...orders[2]!,
+      id: "10000000-0000-4000-8000-000000000099",
+      number: 99,
+    };
+    let activeOrganization = "org-1";
+    let releaseOrgA: ((response: Response) => void) | undefined;
+    let releaseOrgB: ((response: Response) => void) | undefined;
+    const orgAResponse = new Promise<Response>((resolve) => { releaseOrgA = resolve; });
+    const orgBResponse = new Promise<Response>((resolve) => { releaseOrgB = resolve; });
+    let writes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders: activeOrganization === "org-1" ? orders : [orgBOrder] });
+      if (input === "/api/capabilities/execute") {
+        writes += 1;
+        return writes === 1 ? orgAResponse : orgBResponse;
+      }
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
+    await waitFor(() => expect(writes).toBe(1));
+
+    activeOrganization = "org-2";
+    view.rerender(<SalesPage actorId="actor-1" organizationId="org-2" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm #99" }));
+    await waitFor(() => expect(writes).toBe(2));
+    expect(screen.getByRole("button", { name: "Checking…" })).not.toBeNull();
+
+    await act(async () => {
+      releaseOrgA?.(Response.json({ ok: true, data: { confirmed: true, backordered: false, reservedThousandths: 0 } }));
+      await orgAResponse;
+    });
+
+    expect(screen.getByRole("button", { name: "Checking…" })).not.toBeNull();
+    expect(screen.queryByText("Order #43 confirmed.")).toBeNull();
+    expect(within(screen.getByRole("row", { name: /#99/ })).getByRole("cell", { name: "Draft" })).not.toBeNull();
+
+    await act(async () => {
+      releaseOrgB?.(Response.json({ ok: true, data: { confirmed: true, backordered: false, reservedThousandths: 0 } }));
+      await orgBResponse;
+    });
+    expect(await screen.findByText("Order #99 confirmed.")).not.toBeNull();
+    expect(within(screen.getByRole("row", { name: /#99/ })).getByRole("cell", { name: "Confirmed" })).not.toBeNull();
   });
 
   it("retains the create draft while approval is pending, then clears it on success", async () => {
@@ -273,6 +325,31 @@ describe("Vite sales page", () => {
       capabilityId: "sales.createOrder",
       input: { customerId: customers.customers[1]!.id, lines: [{ description: "Org B draft" }] },
     });
+  });
+
+  it("drops a stale order action target and reloads rows when organization scope changes", async () => {
+    let activeOrganization = "org-1";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders: activeOrganization === "org-1" ? orders : [] });
+      if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { status: "cancelled", releasedThousandths: 1000 } });
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+
+    const row = await screen.findByRole("row", { name: /#41/ });
+    fireEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("dialog").textContent).toContain("Order #41");
+
+    activeOrganization = "org-2";
+    view.rerender(<SalesPage actorId="actor-1" organizationId="org-2" />);
+
+    expect(await screen.findByText("No sales orders yet")).not.toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => input === "/api/capabilities/execute")).toBe(false);
   });
 
   it("ignores a prior-scope create response after restoring the active scope's pending draft", async () => {

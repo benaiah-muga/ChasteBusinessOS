@@ -1500,7 +1500,7 @@ new owners and the manifest shows zero legacy runtime paths.
      tests plus runtime database integration pass. The `/pos` page remains
      legacy-owned; this milestone moved the Vite API read only. Browser proof
      remains open.
-153. Route exact Vite `POST /api/pos/shift-summary`
+153. (Implemented) Route exact Vite `POST /api/pos/shift-summary`
      through Go's session-authenticated `pos.shiftSummary` capability and
      preserve the legacy response envelope. `GO_POS_SHIFT_SUMMARY_ROUTE` and
      `CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE` default on. Set
@@ -1511,21 +1511,21 @@ new owners and the manifest shows zero legacy runtime paths.
      typecheck, lint, route ownership checks, and contract checks pass.
      Authenticated browser proof remains open because the local environment
      does not provide `BETTER_AUTH_SECRET`.
-154. Route Vite POS register opening through the existing Go
+154. (Implemented) Route Vite POS register opening through the existing Go
      `pos.openSession` capability by default whenever
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
      `CHASTE_GO_POS_OPEN_SESSION_SLICE=0` to roll back this individual action;
      only a missing Go route falls back to legacy, reusing the same intent.
      Other POS actions and `/pos` page ownership remain unchanged. Focused
      selector and client tests pass; authenticated browser proof remains open.
-155. Route Vite POS register closing through the existing Go
+155. (Implemented) Route Vite POS register closing through the existing Go
      `pos.closeSession` capability by default whenever
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
      `CHASTE_GO_POS_CLOSE_SESSION_SLICE=0` to roll back this individual action;
      only a missing Go route falls back to legacy, reusing the same intent.
      Other POS actions and `/pos` page ownership remain unchanged. Focused
      selector and client tests pass; authenticated browser proof remains open.
-156. Route only Vite POS customer lookup through a direct Go session-authenticated
+156. (Implemented) Route only Vite POS customer lookup through a direct Go session-authenticated
      `GET /api/pos/customers` reader, independently of the generic session-
      capability route. Preserve the legacy POS authorization rule:
      verified organization members with either `crm.read` or `pos.sell` may
@@ -1535,7 +1535,7 @@ new owners and the manifest shows zero legacy runtime paths.
      only a missing Go route falls back automatically. Set
      `GO_POS_CUSTOMERS_ROUTE=0` to unmount the endpoint. CRM and Support callers
      remain unchanged. Focused Go/Vite tests pass; browser proof remains open.
-157. Route Vite POS quick product creation and opening stock adjustment through
+157. (Implemented) Route Vite POS quick product creation and opening stock adjustment through
      the existing Go `inventory.createItem` and `inventory.adjustStock`
      capabilities when `CHASTE_GO_INVENTORY_ITEM_SLICE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the inventory item selector to
@@ -1543,38 +1543,46 @@ new owners and the manifest shows zero legacy runtime paths.
      payloads, approval reasons, and separate fresh intent IDs unchanged.
      Other POS actions and page ownership remain unchanged. Focused Vite API
      tests pass; browser proof remains open.
-158. Route Vite inventory transfer creation and confirmation through the Go
+158. (Implemented) Route Vite inventory transfer creation and confirmation through the Go
      `inventory.createTransfer` and `inventory.confirmTransfer` capabilities
      when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
      `CHASTE_GO_INVENTORY_TRANSFER_WRITES=0` to restore both actions to
      `/api/inventory`. Preserve transfer inputs and pending approval reasons;
      scope persistent retry identities to the active actor and organization,
      retain them through pending or uncertain outcomes, and clear them on
-     success or terminal 4xx. A missing Go capability route falls back to the
-     legacy action with the same intent. Reject duplicate partial-confirmation
+     success or definitive 4xx; 408, 429, and 5xx retain the attempt. Corrupt
+     markers fail closed. A missing Go capability route falls back to the
+     legacy action with the same intent, and selector rollback preserves the
+     scoped attempt. Reject duplicate partial-confirmation
      line IDs at the Go boundary. Other inventory actions and page ownership
      remain unchanged. Focused Vite and Go parser checks pass; browser proof
      remains open.
-159. Route Vite stock location creation and reservation/release through Go's
+159. (Implemented) Route Vite stock location creation and reservation/release through Go's
      `inventory.createLocation`, `inventory.reserveStock`, and
      `inventory.releaseReservation` capabilities when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
      `CHASTE_GO_INVENTORY_LOCATION_RESERVATION_WRITES=0` to restore these
      actions to `/api/inventory`. Preserve the response and pending envelope,
      scope persisted retry intents to the active actor and organization, retain
-     an intent after approval-pending responses, and use in-memory retry
-     identity when scope or WebCrypto is unavailable. Normalize location codes
-     by trimming and uppercasing before Go validates their length. Other
-     inventory actions and page ownership remain unchanged. Focused Vite and
-     Go tests pass; browser proof remains open.
-160. Route Vite cycle-count barcode lookup through Go's session-authenticated
+     an intent after approval-pending responses, and fail closed if Go scope is
+     absent or incomplete. Selector rollback checks action and scope markers,
+     including when scope is temporarily unavailable; corrupt markers fail
+     closed. Go writes require WebCrypto and durable browser storage for both
+     the action and scope markers; unavailable hashing or storage fails before
+     the request. Normalize location codes by trimming and uppercasing before
+     Go validates their length. Other inventory actions and page ownership
+     remain unchanged. Focused Vite and Go tests pass; browser proof remains
+     open.
+160. (Implemented) Route Vite cycle-count barcode lookup through Go's session-authenticated
      `inventory.lookupByBarcode` capability when
      `CHASTE_GO_INVENTORY_BARCODE_LOOKUP=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the barcode selector to `0`
      to use the legacy `/api/inventory` action; a missing Go capability route
      falls back automatically. Preserve the `{ sku, name } | null` result and
      existing error behavior. Other cycle-count actions remain unchanged.
-161. Route only Vite CRM deal stage changes through Go's session-authenticated
+     Focused Go and Vite tests, Vite typecheck, and focused lint pass; browser
+     proof remains open.
+161. (Implemented) Route only Vite CRM deal stage changes through Go's session-authenticated
      `crm.moveDealStage` capability when `CHASTE_GO_CRM_DEAL_STAGE_MOVE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the selector to `0` to restore
      `/api/deals`; all other CRM mutations stay on their existing routes. Keep
@@ -1582,10 +1590,12 @@ new owners and the manifest shows zero legacy runtime paths.
      rollback, and the reason draft after pending or failed responses. Scope
      persisted retry intents to the active actor and organization, retain the
      intent across pending and uncertain retries, and clear it on success or a
-     terminal 4xx. A missing Go capability route falls back with the same
-     intent. Focused Vite tests pass; browser proof remains open.
-162. Route only Vite purchase order creation through Go's session-authenticated
-     `purchasing.createPurchaseOrder` capability when
+     definitive 4xx. 408 and 429 responses retain the exact retry intent. A missing Go capability route falls back with the same
+     actor/org-scoped intent; other Go failures do not fall back. Focused Go
+     parser/dispatch and Vite API/UI tests pass; authenticated browser proof
+     remains open.
+162. (Implemented; local Go/Vite default-on) Route only Vite purchase order
+     creation through Go's session-authenticated `purchasing.createPurchaseOrder` capability when
      `CHASTE_GO_PURCHASING_CREATE_ORDER=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the selector to `0` to restore
      `/api/purchasing`; a missing capability route falls back with the same
@@ -1595,8 +1605,8 @@ new owners and the manifest shows zero legacy runtime paths.
      draft on pending or failed responses, validate positive safe-integer
      quantities and valid non-negative prices, and preserve other purchasing
      actions. Focused Vite checks pass; browser proof remains open.
-163. Route Vite receiving-desk submissions through Go's session-authenticated
-     `purchasing.receiveGoods` capability when
+163. (Implemented; local Go/Vite default-on) Route Vite receiving-desk
+     submissions through Go's session-authenticated `purchasing.receiveGoods` capability when
      `CHASTE_GO_PURCHASING_RECEIVE_GOODS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the selector to `0` to restore
      `/api/purchasing`; a missing Go capability route falls back with the same
@@ -1606,7 +1616,7 @@ new owners and the manifest shows zero legacy runtime paths.
      pending and error responses, and validate quantities, aggregate limits,
      rejection reasons, and overreceipt authority against Go's contract.
      Focused Vite checks pass; browser proof remains open.
-164. Route Vite work order create, release, completion, and cancellation through
+164. (Implemented) Route Vite work order create, release, completion, and cancellation through
      Go's session-authenticated `manufacturing.createWorkOrder`,
      `manufacturing.releaseWorkOrder`, `manufacturing.completeWorkOrder`, and
      `manufacturing.cancelWorkOrder` capabilities when
@@ -1616,18 +1626,21 @@ new owners and the manifest shows zero legacy runtime paths.
      writes remain unchanged. Persist exact-action retry identity by actor and
      organization through pending and uncertain results, require scope before
      Go requests, and validate UUIDs, quantities, yield, work center, note, and
-     lot code against the capability contract. Focused Vite checks pass;
-     browser proof remains open.
-165. Route Vite BOM production and production-run reversal through Go's
+     lot code against the capability contract. Selector rollback blocks while
+     a Go action is unresolved. The page resets old-scope inputs and ignores
+     stale reads and writes after an actor or organization change. Focused Vite
+     checks pass; browser proof remains open.
+165. (Implemented) Route Vite BOM production and production-run reversal through Go's
      `manufacturing.produceFromBom` and `manufacturing.reverseProductionRun`
      capabilities when `CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep the legacy manufacturing
      route as a 404-only fallback with the same intent, persist exact-action
      retries by actor and organization through pending or uncertain outcomes,
      and validate capability output schemas. Go reversals lock affected stock
-     before checking prior reversals or available finished stock. Browser proof
-     remains open.
-166. Add Vite Sales order creation, deliver-all, and cancellation through Go's
+     before checking prior reversals or available finished stock. Selector
+     rollback blocks unresolved Go writes; stale reads and writes are ignored
+     after scope changes. Focused Vite checks pass; browser proof remains open.
+166. (Implemented) Add Vite Sales order creation, deliver-all, and cancellation through Go's
      session-authenticated `sales.createOrder`, `sales.deliverOrder`, and
      `sales.cancelOrder` capabilities when `CHASTE_GO_SALES_ORDER_WRITES=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep confirmation on its existing
@@ -1639,10 +1652,11 @@ new owners and the manifest shows zero legacy runtime paths.
      all remaining reserved quantities, including service lines, matching the
      existing Next flow; partial line delivery and catalog quick-create remain
      outside this Vite form. Go rejects duplicate delivery line IDs and the
-     internal deliver-all sentinel as explicit quantities. Focused checks pass;
-     browser proof remains open.
-167. Route Vite vendor returns and purchase order closing through Go's
-     session-authenticated `purchasing.returnGoods` and
+     internal deliver-all sentinel as explicit quantities. Confirmation and
+     delivery/cancellation results are ignored after a scope change; stale
+     targets are cleared. Focused checks pass; browser proof remains open.
+167. (Implemented; local Go/Vite default-on) Route Vite vendor returns and
+     purchase order closing through Go's session-authenticated `purchasing.returnGoods` and
      `purchasing.closePurchaseOrder` capabilities when
      `CHASTE_GO_PURCHASING_RETURN_CLOSE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Preserve `/api/purchasing` as the
@@ -1651,9 +1665,11 @@ new owners and the manifest shows zero legacy runtime paths.
      results, and open dialogs on pending or failure. Match Go's positive
      int32 quantity and reference bounds and return-reason limits. Receipt
      returns allocate oldest receipt numbers first, and explicit receipt scope
-     cannot fall through to purchase-order history. Browser proof remains open.
-168. Route Vite vendor creation, bill recording, bill payments, and bill credits
-     through Go's session-authenticated `purchasing.createVendor`,
+     cannot fall through to purchase-order history. Focused Go and Vite checks
+     pass; browser proof remains open.
+168. (Implemented; local Go/Vite default-on) Route Vite vendor creation, bill
+     recording, bill payments, and bill credits through Go's session-authenticated
+     `purchasing.createVendor`,
      `purchasing.createBill`, `purchasing.payBill`, and
      `purchasing.billCreditNote` capabilities when
      `CHASTE_GO_PURCHASING_FINANCE_WRITES=1` and
@@ -1663,10 +1679,11 @@ new owners and the manifest shows zero legacy runtime paths.
      organization through pending or uncertain outcomes. Fail closed until
      scope is available. Capability-side validation mirrors Go bill and
      payment and credit constraints; existing bill form fields and tax
-     behavior remain aligned with the Vite workspace. Browser proof remains
-     open.
-169. Route Vite purchase requests, request decisions, RFQ creation, quote
-     recording, and quote awards through Go's session-authenticated
+     behavior remain aligned with the Vite workspace. Focused Go and Vite checks
+     pass; browser proof remains open.
+169. (Implemented; local Go/Vite default-on) Route Vite purchase requests,
+     request decisions, RFQ creation, quote recording, and quote awards through
+     Go's session-authenticated
      `purchasing.createPurchaseRequest`, `purchasing.decidePurchaseRequest`,
      `purchasing.createRfq`, `purchasing.recordQuote`, and
      `purchasing.selectWinningQuote` capabilities when
@@ -1677,8 +1694,8 @@ new owners and the manifest shows zero legacy runtime paths.
      outcomes, validate each Go output shape, and restore scope-hashed form
      drafts and request targets after reload until an action completes. Go serializes decisions and
      quote actions on the parent request and rejects duplicate vendor IDs in
-     RFQ creation. Browser proof remains open.
-170. Route only Vite Marketing campaign creation and sends through Go's
+     RFQ creation. Focused Go and Vite checks pass; browser proof remains open.
+170. (Implemented) Route only Vite Marketing campaign creation and sends through Go's
      session-authenticated `marketing.createCampaign` and `marketing.sendCampaign`
      capabilities when `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Preserve the legacy route as the
@@ -1690,8 +1707,10 @@ new owners and the manifest shows zero legacy runtime paths.
      network, 408, 429, and 5xx uncertainty; block changed payloads until the
      original create is resolved. Segment creation, analytics, and reads remain
      unchanged.
-     Disable send after the campaign snapshot reports queued. Browser proof
-     remains open.
+     Disable send after the campaign snapshot reports queued. Selector rollback
+     blocks unresolved Go attempts, and scoped campaign, send-log, analytics,
+     draft, and action state is cleared or hidden while a new scope loads.
+     Focused Vite checks pass; browser proof remains open.
 171. (Implemented; local Go/Vite default-on) Route Vite CRM task creation and
      completion through Go's session-authenticated `crm.createTask` and
      `crm.completeTask` capabilities. The local template enables both

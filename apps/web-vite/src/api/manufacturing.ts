@@ -257,15 +257,17 @@ const productionActions = new Set(["produceFromBom", "reverseProductionRun"]);
 const manufacturingAttemptPrefix = "chaste:manufacturing-work-order-attempt:";
 
 function parseManufacturingAttempt(value: string | null): { fingerprint: string; intentId: string } | null {
-  if (!value) return null;
+  if (value === null) return null;
   try {
     const parsed: unknown = JSON.parse(value);
-    if (typeof parsed !== "object" || parsed === null) return null;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("invalid saved manufacturing attempt");
     const attempt = parsed as { fingerprint?: unknown; intentId?: unknown };
-    return typeof attempt.fingerprint === "string" && typeof attempt.intentId === "string"
-      ? { fingerprint: attempt.fingerprint, intentId: attempt.intentId }
-      : null;
-  } catch { return null; }
+    if (
+      typeof attempt.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(attempt.fingerprint) ||
+      typeof attempt.intentId !== "string" || !z.string().uuid().safeParse(attempt.intentId).success
+    ) throw new Error("invalid saved manufacturing attempt");
+    return { fingerprint: attempt.fingerprint, intentId: attempt.intentId };
+  } catch { throw new Error("invalid saved manufacturing attempt"); }
 }
 
 async function manufacturingDigest(value: string): Promise<string> {
@@ -302,6 +304,34 @@ async function createManufacturingAttempt(action: ManufacturingWriteAction, scop
     return { ...attempt, intentId: persisted.intentId };
   } catch {
     throw new ManufacturingApiError(0, "Enable browser storage before changing manufacturing data so an uncertain action can be retried safely.");
+  }
+}
+
+async function assertNoUnresolvedManufacturingAttempt(scope?: ManufacturingRetryScope): Promise<void> {
+  const actorId = scope?.actorId?.trim() ?? "";
+  const organizationId = scope?.organizationId?.trim() ?? "";
+  try {
+    if (actorId && organizationId) {
+      const scopeDigest = await manufacturingDigest(JSON.stringify({ actorId, organizationId }));
+      if (parseManufacturingAttempt(window.localStorage.getItem(`${manufacturingAttemptPrefix}${scopeDigest}`))) {
+        throw new ManufacturingApiError(0, "A previous manufacturing result is unresolved. Restore Go manufacturing writes and retry that exact action before using the legacy route.");
+      }
+      return;
+    }
+
+    let hasUnscopedMarker = false;
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      if (window.localStorage.key(index)?.startsWith(manufacturingAttemptPrefix)) {
+        hasUnscopedMarker = true;
+        break;
+      }
+    }
+    if (hasUnscopedMarker) {
+      throw new ManufacturingApiError(0, "A previous manufacturing result may be unresolved. Wait for your account and organization to load, then restore Go manufacturing writes and retry it.");
+    }
+  } catch (error) {
+    if (error instanceof ManufacturingApiError) throw error;
+    throw new ManufacturingApiError(0, "Enable browser storage before changing manufacturing data so an uncertain action cannot be routed through the legacy service.");
   }
 }
 
@@ -381,6 +411,9 @@ export async function submitManufacturingAction(
   const useGoWorkOrders = (options.useGoWorkOrders ?? configuredWorkOrders) && workOrderActions.has(parsed.data.action);
   const configuredProductionActions = typeof __GO_MANUFACTURING_PRODUCTION_WRITES__ !== "undefined" && __GO_MANUFACTURING_PRODUCTION_WRITES__;
   const useGoProductionActions = (options.useGoProductionActions ?? configuredProductionActions) && productionActions.has(parsed.data.action);
+  if (!useGoWorkOrders && !useGoProductionActions && (workOrderActions.has(parsed.data.action) || productionActions.has(parsed.data.action))) {
+    await assertNoUnresolvedManufacturingAttempt(options.retryScope);
+  }
   if (useGoProductionActions && parsed.data.action === "reverseProductionRun" && !z.string().uuid().safeParse(parsed.data.runId).success) {
     throw new ManufacturingApiError(0, "Select a production run with a valid ID before reversing it.");
   }

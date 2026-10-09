@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarketingPage } from "./MarketingPage";
 
@@ -195,6 +195,58 @@ describe("Vite marketing page", () => {
     expect(await screen.findByText(/2 provider-confirmed deliveries/)).not.toBeNull();
   }, PAGE_TEST_TIMEOUT);
 
+  it("hides the previous organization campaign data and analytics while reloading the new scope", async () => {
+    let marketingReads = 0;
+    let finishNextSnapshot!: (response: Response) => void;
+    const nextSnapshot = new Promise<Response>((resolve) => { finishNextSnapshot = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return modules();
+      if (path === "/api/marketing" && init?.method === "POST") {
+        return Response.json({ ok: true, data: { campaignName: "Org A analytics", sentCount: 1, queuedAt: null } });
+      }
+      if (path === "/api/marketing") {
+        marketingReads += 1;
+        if (marketingReads <= 2) {
+          return snapshot({
+            campaigns: [{ ...draftCampaign, name: "Org A campaign" }],
+            recentSends: [{
+              id: "9b4fae02-ccbf-4c53-9b4d-a9a25b99ca8f",
+              campaignId,
+              customerName: "Org A contact",
+              customerEmail: "a@example.test",
+              queuedAt: "2026-09-20T09:30:00.000Z",
+              status: "sent",
+              sentAt: "2026-09-20T09:31:00.000Z",
+            }],
+          });
+        }
+        if (marketingReads === 3) return nextSnapshot;
+        return snapshot({ campaigns: [{ ...draftCampaign, name: "Org B campaign" }] });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<MarketingPage actorId={actorId} organizationId={organizationId} />);
+    expect(await screen.findByText("Org A campaign")).not.toBeNull();
+    expect(screen.getByText(/Org A contact/)).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Analytics" }));
+    expect(await screen.findByText(/Org A analytics: 1 provider-confirmed delivery/)).not.toBeNull();
+
+    const nextOrganizationId = "aa8c635d-405e-4488-824c-a557b1c1fbe1";
+    view.rerender(<MarketingPage actorId={actorId} organizationId={nextOrganizationId} />);
+    expect(screen.queryByText("Org A campaign")).toBeNull();
+    expect(screen.queryByText(/Org A contact/)).toBeNull();
+    expect(screen.queryByText(/Org A analytics/)).toBeNull();
+    await waitFor(() => expect(marketingReads).toBe(3));
+
+    finishNextSnapshot(snapshot({ campaigns: [{ ...draftCampaign, name: "Org B campaign" }] }));
+    expect(await screen.findByText("Org B campaign")).not.toBeNull();
+    expect(screen.queryByText("Org A campaign")).toBeNull();
+    expect(screen.queryByText(/Org A contact/)).toBeNull();
+    expect(screen.queryByText(/Org A analytics/)).toBeNull();
+  }, PAGE_TEST_TIMEOUT);
+
   it("restores an uncertain campaign draft after reload and retries with the same intent", async () => {
     vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
     let postAttempts = 0;
@@ -248,8 +300,105 @@ describe("Vite marketing page", () => {
 
     const nextActorId = "aa8c635d-405e-4488-824c-a557b1c1fbe1";
     view.rerender(<MarketingPage actorId={nextActorId} organizationId={organizationId} />);
-    expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByLabelText("Campaign name")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Checking whether marketing is available");
     await waitFor(() => expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(false));
+  }, PAGE_TEST_TIMEOUT);
+
+  it("does not let a stale create response overwrite the next organization draft", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const finishCreates: Array<(response: Response) => void> = [];
+    let createRequestsStarted = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return modules();
+      if (path === "/api/marketing" && init?.method !== "POST") return snapshot();
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        createRequestsStarted += 1;
+        return new Promise<Response>((resolve) => { finishCreates.push(resolve); });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<MarketingPage actorId={actorId} organizationId={organizationId} />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Segment"), { target: { value: segmentId } });
+    fireEvent.change(screen.getByLabelText("Campaign name"), { target: { value: "Organization A campaign" } });
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Organization A subject" } });
+    fireEvent.change(screen.getByLabelText("Body"), { target: { value: "Organization A body" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
+    await waitFor(() => expect(createRequestsStarted).toBe(1));
+
+    const nextActorId = "aa8c635d-405e-4488-824c-a557b1c1fbe1";
+    const nextScopeIdentity = JSON.stringify({ actorId: nextActorId, organizationId });
+    const nextScopeHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(nextScopeIdentity));
+    const nextScopeHex = Array.from(new Uint8Array(nextScopeHash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    window.localStorage.setItem(`chaste.marketing.campaign-draft.v1:${nextScopeHex}`, JSON.stringify({
+      campaignForm: { segmentId, name: "Organization B campaign", subject: "Organization B subject", body: "Organization B body" },
+      unresolved: false,
+    }));
+    view.rerender(<MarketingPage actorId={nextActorId} organizationId={organizationId} />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("Organization B campaign"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
+    await waitFor(() => expect(createRequestsStarted).toBe(2));
+    expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(true);
+
+    finishCreates[0]?.(Response.json({ ok: true, data: { campaignId } }));
+    await waitFor(() => expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(true));
+    expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("Organization B campaign");
+    expect((screen.getByLabelText("Body") as HTMLTextAreaElement).value).toBe("Organization B body");
+    expect(screen.queryByText("Campaign drafted. Nothing goes out until you press Send.")).toBeNull();
+
+    finishCreates[1]?.(Response.json({ ok: false, pendingApproval: true, reason: "Org B needs approval" }, { status: 202 }));
+    expect(await screen.findByText("Org B needs approval")).not.toBeNull();
+    expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("Organization B campaign");
+  }, PAGE_TEST_TIMEOUT);
+
+  it("keeps an old A response stale after switching A to B to A", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const nextActorId = "aa8c635d-405e-4488-824c-a557b1c1fbe1";
+    const finishCreates: Array<(response: Response) => void> = [];
+    let createRequestsStarted = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return modules();
+      if (path === "/api/marketing" && init?.method !== "POST") return snapshot();
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        createRequestsStarted += 1;
+        return new Promise<Response>((resolve) => { finishCreates.push(resolve); });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<MarketingPage actorId={actorId} organizationId={organizationId} />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Segment"), { target: { value: segmentId } });
+    fireEvent.change(screen.getByLabelText("Campaign name"), { target: { value: "Organization A campaign" } });
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Organization A subject" } });
+    fireEvent.change(screen.getByLabelText("Body"), { target: { value: "Organization A body" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
+    await waitFor(() => expect(createRequestsStarted).toBe(1));
+
+    view.rerender(<MarketingPage actorId={nextActorId} organizationId={organizationId} />);
+    await screen.findByRole("heading", { name: "Marketing", level: 1 });
+    view.rerender(<MarketingPage actorId={actorId} organizationId={organizationId} />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("Organization A campaign"));
+    expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retry campaign attempt" }));
+    await waitFor(() => expect(createRequestsStarted).toBe(2));
+    const campaignForm = within(screen.getByLabelText("Campaign name").closest("form")!);
+    expect(campaignForm.getByRole("button", { name: "Working…" })).not.toBeNull();
+
+    finishCreates[0]?.(Response.json({ ok: true, data: { campaignId } }));
+    await waitFor(() => expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("Organization A campaign"));
+    expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(true);
+    expect(campaignForm.getByRole("button", { name: "Working…" })).not.toBeNull();
+    expect(screen.queryByText("Campaign drafted. Nothing goes out until you press Send.")).toBeNull();
+
+    finishCreates[1]?.(Response.json({ ok: false, pendingApproval: true, reason: "Current A needs approval" }, { status: 202 }));
+    expect(await screen.findByText("Current A needs approval")).not.toBeNull();
+    expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("Organization A campaign");
   }, PAGE_TEST_TIMEOUT);
 
   it("routes campaign sends through Go and preserves the queued-not-delivered result", async () => {

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InventoryItem, InventoryLocation } from "../api/inventory";
 import {
@@ -32,6 +32,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 describe("inventory location and reservation API", () => {
@@ -83,6 +84,36 @@ describe("InventoryLocationsReservationsPanel", () => {
     expect((await screen.findByRole("status")).textContent).toContain("waiting for approval");
     expect(screen.getByRole("status").textContent).toContain("manager approval required");
     expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("ignores a Go write response after the active organization changes", async () => {
+    vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", true);
+    let resolveWrite: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolveWrite = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const props = {
+      items,
+      locations,
+      reservations,
+      onChanged,
+      retryScope: { actorId: "actor-1", organizationId: "org-1" },
+    };
+    const { rerender } = render(<InventoryLocationsReservationsPanel {...props} />);
+    fireEvent.change(screen.getByLabelText("Location code"), { target: { value: "wh-b" } });
+    fireEvent.change(screen.getByLabelText("Location name"), { target: { value: "Back store" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create location" }));
+    await waitFor(() => expect(resolveWrite).toBeDefined());
+
+    rerender(<InventoryLocationsReservationsPanel {...props} retryScope={{ actorId: "actor-1", organizationId: "org-2" }} />);
+    await act(async () => {
+      resolveWrite?.(jsonResponse({ ok: true, data: { locationId: "loc-new" } }));
+    });
+
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(screen.queryByText("Stock location created.")).toBeNull();
+    expect((screen.getByLabelText("Location code") as HTMLInputElement).value).toBe("wh-b");
+    expect((screen.getByRole("button", { name: "Create location" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("reserves stock with exact thousandths and releases open reservations", async () => {

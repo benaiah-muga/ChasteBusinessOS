@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import "./ManufacturingPage.css";
 import {
@@ -233,7 +233,15 @@ function ShortfallTable({ lines, byItemId }: { lines: Array<{ key?: string; sku:
 
 export function ManufacturingPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const currency = baseCurrency || "USD";
+  const scopeKey = `${actorId ?? ""}:${organizationId ?? ""}`;
+  const scopeGeneration = useRef(0);
+  const currentScopeKey = useRef(scopeKey);
+  if (currentScopeKey.current !== scopeKey) {
+    currentScopeKey.current = scopeKey;
+    scopeGeneration.current += 1;
+  }
   const [state, setState] = useState<PageState>({ status: "loading" });
+  const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -260,17 +268,25 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
   const [reverseRunId, setReverseRunId] = useState("");
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const generation = scopeGeneration.current;
+    setLoadedScopeKey(null);
+    setState({ status: "loading" });
     try {
       const enabled = await fetchManufacturingEnabled(signal);
-      if (signal?.aborted) return;
+      if (signal?.aborted || generation !== scopeGeneration.current) return;
       if (!enabled) {
+        setLoadedScopeKey(scopeKey);
         setState({ status: "disabled" });
         return;
       }
       const report = await fetchManufacturingReport(signal);
-      if (!signal?.aborted) setState({ status: "ready", report });
+      if (!signal?.aborted && generation === scopeGeneration.current) {
+        setLoadedScopeKey(scopeKey);
+        setState({ status: "ready", report });
+      }
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || generation !== scopeGeneration.current) return;
+      setLoadedScopeKey(scopeKey);
       setState({
         status: "failed",
         error: error instanceof ManufacturingApiError
@@ -278,54 +294,85 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
           : new ManufacturingApiError(0, "Could not reach the manufacturing service. Check your connection and try again."),
       });
     }
-  }, []);
+  }, [scopeKey]);
 
   useEffect(() => {
     const controller = new AbortController();
+    setLoadedScopeKey(null);
+    setState({ status: "loading" });
+    setNotice(null);
+    setRefreshError(null);
+    setBusy(false);
+    setBomAssemblySku("");
+    setBomComponents([{ sku: "", quantityThousandths: "1", scrapPct: "0" }]);
+    setOpenTree(null);
+    setUnitsInput("1");
+    setFeasibility(null);
+    setBomReport(null);
+    setProduceAssemblySku("");
+    setProduceUnits("1");
+    setProduceLotCode("");
+    setPreview(null);
+    setWoAssemblySku("");
+    setWoPlannedUnits("10");
+    setWoYieldPct("100");
+    setWoNote("");
+    setWoCompletion({});
+    setReverseRunId("");
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (expectedGeneration = scopeGeneration.current) => {
+    if (expectedGeneration !== scopeGeneration.current) return;
     setRefreshError(null);
     try {
       const report = await fetchManufacturingReport();
+      if (expectedGeneration !== scopeGeneration.current) return;
       setState({ status: "ready", report });
     } catch (error) {
+      if (expectedGeneration !== scopeGeneration.current) return;
       setRefreshError(errorText(error, "The action completed, but manufacturing could not refresh. Reload the page to see the latest status."));
     }
-  }, []);
+  }, [scopeKey]);
 
   async function run(action: ManufacturingWriteAction, label: string): Promise<boolean> {
+    const requestGeneration = scopeGeneration.current;
     setBusy(true);
     setNotice(null);
     try {
       const result = await submitManufacturingAction(action, undefined, { retryScope: { actorId, organizationId } });
+      if (requestGeneration !== scopeGeneration.current) return false;
       if (result.kind === "pending") {
         setNotice({ tone: "pending", text: `${label} requires approval. ${result.reason}` });
         return false;
       }
       setNotice({ tone: "success", text: `${label} done.` });
-      await refresh();
+      await refresh(requestGeneration);
       return true;
     } catch (error) {
+      if (requestGeneration !== scopeGeneration.current) return false;
       setNotice({ tone: "error", text: errorText(error, `${label} failed. Try again.`) });
       return false;
     } finally {
-      setBusy(false);
+      if (requestGeneration === scopeGeneration.current) setBusy(false);
     }
   }
 
   async function read<T>(work: () => Promise<T>, onSuccess: (result: T) => void, onFailure: () => void, fallback: string) {
+    const requestGeneration = scopeGeneration.current;
     setBusy(true);
     setNotice(null);
     try {
-      onSuccess(await work());
+      const result = await work();
+      if (requestGeneration !== scopeGeneration.current) return;
+      onSuccess(result);
     } catch (error) {
+      if (requestGeneration !== scopeGeneration.current) return;
       onFailure();
       setNotice({ tone: "error", text: errorText(error, fallback) });
     } finally {
-      setBusy(false);
+      if (requestGeneration === scopeGeneration.current) setBusy(false);
     }
   }
 
@@ -450,7 +497,7 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
   const lots = report?.lots ?? [];
   const assembliesWithBoms = useMemo(() => [...new Set(boms.map((edge) => edge.assemblySku))], [boms]);
 
-  if (state.status === "loading") return <main className="manufacturing-page"><p role="status">Loading bills of materials, work orders, and production runs…</p></main>;
+  if (loadedScopeKey !== scopeKey || state.status === "loading") return <main className="manufacturing-page"><p role="status">Loading bills of materials, work orders, and production runs…</p></main>;
 
   if (state.status === "disabled") {
     return (

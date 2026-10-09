@@ -45,7 +45,7 @@ const report = {
 type PostedBody = Record<string, unknown>;
 
 interface StubOptions {
-  onPost?: (body: PostedBody) => Response;
+  onPost?: (body: PostedBody) => Response | Promise<Response>;
   payload?: unknown;
   enabled?: boolean;
 }
@@ -80,6 +80,7 @@ function postedActions(fetchMock: ReturnType<typeof manufacturingFetch>): Posted
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
   window.history.replaceState(null, "", "/manufacturing");
 });
 
@@ -270,6 +271,129 @@ describe("Vite manufacturing page", () => {
     const retriedBody = JSON.parse(String((fetchMock.mock.calls.find(([url], index) => url === "/api/capabilities/execute" && index > 0)?.[1] as RequestInit).body)) as PostedBody;
     expect(retriedBody.intentId).toBe(firstBody.intentId);
     expect((screen.getByLabelText("Work order assembly SKU") as HTMLInputElement).value).toBe("");
+  });
+
+  it("does not apply a Go write response or refresh after the active organization changes", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_WORK_ORDER_WRITES__", true);
+    let resolveWrite: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/capabilities/execute" && init?.method === "POST") {
+        return new Promise<Response>((resolve) => { resolveWrite = resolve; });
+      }
+      return Response.json(report);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: /^Work orders/ }));
+    fireEvent.change(screen.getByLabelText("Work order assembly SKU"), { target: { value: "DESK-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    await waitFor(() => expect(resolveWrite).toBeDefined());
+
+    rerender(<ManufacturingPage actorId="actor-1" organizationId="org-2" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    await act(async () => {
+      resolveWrite?.(Response.json({ ok: true, data: {
+        workOrderId: "33333333-3333-4333-8333-333333333333", number: 10, expectedGoodThousandths: 4000,
+      } }));
+    });
+
+    expect(await screen.findByRole("heading", { name: "Manufacturing" })).not.toBeNull();
+    expect(screen.queryByText("Create WO for DESK-1 done.")).toBeNull();
+    const reportReads = fetchMock.mock.calls.filter(([input, init]) => input === "/api/manufacturing" && init?.method !== "POST");
+    expect(reportReads).toHaveLength(2);
+  });
+
+  it.each([
+    ["Check feasibility", "checkProductionFeasibility", {
+      producible: false,
+      maxProducibleThousandths: 0,
+      estimatedLeadTimeDays: 2,
+      lines: [{ itemId: "old-org-item", requiredThousandths: 1000, onHandThousandths: 0, shortfallThousandths: 1000 }],
+    }],
+    ["BOM report", "bomReport", {
+      producible: false,
+      totalShortfallThousandths: 1000,
+      lines: [{ sku: "OLD-ORG", name: "Old organization item", requiredThousandths: 1000, onHandThousandths: 0, shortfallThousandths: 1000 }],
+    }],
+  ] as const)("ignores a deferred %s result after the organization changes", async (buttonName, actionName, result) => {
+    let resolveRead: ((response: Response) => void) | undefined;
+    const fetchMock = manufacturingFetch({
+      onPost: (body) => body.action === actionName
+        ? new Promise<Response>((resolve) => { resolveRead = resolve; })
+        : Response.json({ ok: true, data: {} }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: /^BOMs/ }));
+    fireEvent.click(screen.getByRole("button", { name: buttonName }));
+    await waitFor(() => expect(resolveRead).toBeDefined());
+
+    rerender(<ManufacturingPage actorId="actor-1" organizationId="org-2" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    await act(async () => {
+      resolveRead?.(Response.json({ ok: true, data: result }));
+    });
+
+    expect(screen.queryByText("short of parts")).toBeNull();
+    expect(screen.queryByText(/scrap-adjusted requirements/)).toBeNull();
+    expect(screen.queryByText("OLD-ORG")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it("ignores deferred cost previews and resets production targets on an organization change", async () => {
+    let resolvePreview: ((response: Response) => void) | undefined;
+    const fetchMock = manufacturingFetch({
+      onPost: (body) => body.action === "costPreview"
+        ? new Promise<Response>((resolve) => { resolvePreview = resolve; })
+        : Response.json({ ok: true, data: {} }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: "Produce" }));
+    fireEvent.change(screen.getByLabelText("Produce assembly SKU"), { target: { value: "DESK-1" } });
+    fireEvent.change(screen.getByLabelText("Units to build"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Lot code"), { target: { value: "OLD-LOT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview cost" }));
+    await waitFor(() => expect(resolvePreview).toBeDefined());
+
+    rerender(<ManufacturingPage actorId="actor-1" organizationId="org-2" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    expect((screen.getByLabelText("Produce assembly SKU") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Units to build") as HTMLInputElement).value).toBe("1");
+    expect((screen.getByLabelText("Lot code") as HTMLInputElement).value).toBe("");
+    await act(async () => {
+      resolvePreview?.(Response.json({ ok: true, data: {
+        producible: true,
+        lines: [{ sku: "OLD-ORG", name: "Old organization item", requiredThousandths: 1000, unitCostMinor: 10, costMinor: 10 }],
+        totalCostMinor: 10,
+        resultingAvgFinishedUnitCostMinor: 10,
+      } }));
+    });
+
+    expect(screen.queryByText("producible")).toBeNull();
+    expect(screen.queryByText("OLD-ORG")).toBeNull();
+  });
+
+  it("resets prior organization form values and manual run target after scope changes", async () => {
+    vi.stubGlobal("fetch", manufacturingFetch());
+    const { rerender } = render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: /^Work orders/ }));
+    fireEvent.change(screen.getByLabelText("Work order assembly SKU"), { target: { value: "OLD-DESK" } });
+    fireEvent.change(screen.getByLabelText("Work order note"), { target: { value: "Old organization note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Runs & lots" }));
+    fireEvent.change(screen.getByLabelText("Run id to reverse"), { target: { value: "old-org-run" } });
+
+    rerender(<ManufacturingPage actorId="actor-1" organizationId="org-2" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    expect((screen.getByLabelText("Run id to reverse") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: /^Work orders/ }));
+    expect((screen.getByLabelText("Work order assembly SKU") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Work order note") as HTMLInputElement).value).toBe("");
   });
 
   it("keeps production input and reversal target through Go approval pending", async () => {
