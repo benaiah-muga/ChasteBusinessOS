@@ -249,9 +249,22 @@ const BudgetScenarioSchema = z.object({
   isCurrent: z.boolean(),
 }).strict();
 
-const ScenariosSchema = z.object({
-  ok: z.literal(true),
-  scenarios: z.object({ scenarios: z.array(BudgetScenarioSchema) }).strict(),
+const GoBudgetScenarioSchema = BudgetScenarioSchema.extend({
+  id: z.string().uuid(),
+  key: z.string().min(1),
+  currency,
+  assumptions: z.object({
+    collectionDelayDays: z.number().int().safe(),
+    spendUpliftBasisPoints: z.number().int().safe(),
+    expectedMonthlyInflowMinor: minor,
+    expectedMonthlyOutflowMinor: minor,
+    minimumCashBufferMinor: minor,
+  }).strict(),
+  createdAt: timestamp,
+}).strict();
+
+const GoBudgetScenariosSchema = z.object({
+  scenarios: z.array(GoBudgetScenarioSchema),
 }).strict();
 
 const CashBasisSchema = z.object({
@@ -683,10 +696,41 @@ export async function fetchAccountingTaxCodes(signal?: AbortSignal): Promise<Acc
 }
 
 export async function fetchAccountingBudgetScenarios(signal?: AbortSignal): Promise<AccountingBudgetScenario[]> {
-  const { response, body } = await getJson("/api/accounting/budgets", { method: "GET" }, signal);
-  if (!response.ok) return [];
-  const parsed = ScenariosSchema.safeParse(body);
-  return parsed.success ? parsed.data.scenarios.scenarios : [];
+  const result = await readGoAccountingCapability(
+    "accounting.listBudgetScenarios",
+    {},
+    GoBudgetScenariosSchema,
+    "load budget scenarios",
+    signal,
+  );
+  return result.scenarios.map(({ id, name, fiscalYear, version, isCurrent }) => ({ id, name, fiscalYear, version, isCurrent }));
+}
+
+async function readGoAccountingCapability<T>(
+  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios",
+  input: Record<string, unknown>,
+  schema: z.ZodType<T>,
+  context: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const { response, body } = await getJson("/api/capabilities/execute", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (response.status === 422) {
+    const error = CapabilityErrorSchema.safeParse(body);
+    if (!error.success) throw new AccountingApiError(503, "The Go Accounting service returned an unexpected response.");
+    throw new AccountingApiError(500, error.data.error.slice(0, 240));
+  }
+  if (response.status !== 200) {
+    throw new AccountingApiError(response.status, errorMessage(response.status, body, context));
+  }
+  const envelope = EnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected response.");
+  const parsed = schema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected result.");
+  return parsed.data;
 }
 
 async function readCapability<T>(
@@ -705,8 +749,12 @@ async function readCapability<T>(
 }
 
 export async function fetchCashForecast(budgetScenarioId: string, signal?: AbortSignal): Promise<AccountingForecast> {
-  return readCapability(
-    { action: "cashForecast", ...(budgetScenarioId ? { budgetScenarioId } : {}) },
+  if (budgetScenarioId && !z.string().uuid().safeParse(budgetScenarioId).success) {
+    throw new AccountingApiError(400, "Choose a valid budget scenario.");
+  }
+  return readGoAccountingCapability(
+    "accounting.cashForecast",
+    budgetScenarioId ? { budgetScenarioId } : {},
     ForecastSchema,
     "compute the cash forecast",
     signal,

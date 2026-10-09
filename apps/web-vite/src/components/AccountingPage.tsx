@@ -3125,6 +3125,8 @@ function CashSection({
   const [forecastError, setForecastError] = useState<string | null>(null);
   const [forecastAttempt, setForecastAttempt] = useState(0);
   const [scenarios, setScenarios] = useState<AccountingBudgetScenario[]>([]);
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
+  const [scenarioAttempt, setScenarioAttempt] = useState(0);
   const [budgetScenarioId, setBudgetScenarioId] = useState("");
   const [reminders, setReminders] = useState<AccountingReminder[] | null>(null);
   const [reminderError, setReminderError] = useState<string | null>(null);
@@ -3138,16 +3140,23 @@ function CashSection({
 
   useEffect(() => {
     const controller = new AbortController();
+    setScenarioError(null);
     void fetchAccountingBudgetScenarios(controller.signal)
       .then((rows) => {
         if (controller.signal.aborted) return;
         setScenarios(rows);
         setBudgetScenarioId((current) => current || rows.find((row) => row.isCurrent)?.id || "");
       })
-      // No scenario list only means the picker stays empty; the forecast still runs.
-      .catch(() => undefined);
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setScenarioError(
+          error instanceof AccountingApiError
+            ? error.message
+            : "Could not load budget scenarios. Try again.",
+        );
+      });
     return () => controller.abort();
-  }, []);
+  }, [scenarioAttempt]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -3223,6 +3232,16 @@ function CashSection({
             <span className="accounting-badge accounting-badge-blue">{forecast.scenarioName}</span>
           )}
         </header>
+        {scenarioError && (
+          <div className="accounting-button-row">
+            <p className="accounting-callout accounting-callout-danger" role="alert">
+              {scenarioError}
+            </p>
+            <button type="button" onClick={() => setScenarioAttempt((attempt) => attempt + 1)}>
+              Retry scenarios
+            </button>
+          </div>
+        )}
         {scenarios.length > 0 && (
           <label className="accounting-label accounting-block-divider">
             Forecast assumptions
@@ -3503,21 +3522,31 @@ function CashSection({
 function BudgetsSection({ baseCurrency }: { baseCurrency: string }) {
   const [scenarios, setScenarios] = useState<AccountingBudgetScenario[]>([]);
   const [scenarioId, setScenarioId] = useState("");
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
+  const [scenarioAttempt, setScenarioAttempt] = useState(0);
   const [forecast, setForecast] = useState<AccountingForecast | null>(null);
   const [forecastError, setForecastError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
+    setScenarioError(null);
     void fetchAccountingBudgetScenarios(controller.signal)
       .then((rows) => {
         if (controller.signal.aborted) return;
         setScenarios(rows);
         setScenarioId((current) => current || rows.find((row) => row.isCurrent)?.id || "");
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setScenarioError(
+          error instanceof AccountingApiError
+            ? error.message
+            : "Could not load budget scenarios. Try again.",
+        );
+      });
     return () => controller.abort();
-  }, []);
+  }, [scenarioAttempt]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -3544,7 +3573,16 @@ function BudgetsSection({ baseCurrency }: { baseCurrency: string }) {
         Each scenario is a saved set of assumptions. Project one against open invoices and unpaid
         bills to see whether it holds cash.
       </p>
-      {scenarios.length === 0 ? (
+      {scenarioError ? (
+        <div className="accounting-button-row">
+          <p className="accounting-callout accounting-callout-danger" role="alert">
+            {scenarioError}
+          </p>
+          <button type="button" onClick={() => setScenarioAttempt((value) => value + 1)}>
+            Retry scenarios
+          </button>
+        </div>
+      ) : scenarios.length === 0 ? (
         <p className="accounting-quiet">
           No saved scenarios yet. The operational forecast runs on live due dates.
         </p>

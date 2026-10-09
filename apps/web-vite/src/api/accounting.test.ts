@@ -338,9 +338,71 @@ describe("accounting API: auxiliary reads never blank the books", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  it("returns no scenarios when budgets are unreadable", async () => {
-    stubFetch(() => Response.json({ error: "nope" }, { status: 500 }));
-    await expect(fetchAccountingBudgetScenarios()).resolves.toEqual([]);
+  it("loads budget scenarios from the Go capability and keeps the UI summary shape", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: { scenarios: [{
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      key: "base",
+      name: "Base plan",
+      fiscalYear: 2026,
+      version: 2,
+      currency: "USD",
+      isCurrent: true,
+      assumptions: {
+        collectionDelayDays: 14,
+        spendUpliftBasisPoints: 0,
+        expectedMonthlyInflowMinor: 100_000,
+        expectedMonthlyOutflowMinor: 75_000,
+        minimumCashBufferMinor: 10_000,
+      },
+      createdAt: "2026-09-28T10:00:00.000Z",
+    }] } }));
+
+    await expect(fetchAccountingBudgetScenarios()).resolves.toEqual([{
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      name: "Base plan",
+      fiscalYear: 2026,
+      version: 2,
+      isCurrent: true,
+    }]);
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      body: expect.any(String),
+    }));
+    expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.listBudgetScenarios",
+      input: {},
+      intentId: expect.any(String),
+    });
+  });
+
+  it.each([
+    { label: "unavailable", response: () => Response.json({ error: "nope" }, { status: 500 }), status: 500 },
+    { label: "malformed envelope", response: () => Response.json({ unexpected: true }), status: 200 },
+    { label: "invalid scenario UUID", response: () => Response.json({ ok: true, data: { scenarios: [{
+      id: "scenario-1",
+      key: "base",
+      name: "Base plan",
+      fiscalYear: 2026,
+      version: 2,
+      currency: "USD",
+      isCurrent: true,
+      assumptions: {
+        collectionDelayDays: 14,
+        spendUpliftBasisPoints: 0,
+        expectedMonthlyInflowMinor: 100_000,
+        expectedMonthlyOutflowMinor: 75_000,
+        minimumCashBufferMinor: 10_000,
+      },
+      createdAt: "2026-09-28T10:00:00.000Z",
+    }] } }), status: 200 },
+  ])("surfaces Go budget-scenario $label responses", async ({ response, status }) => {
+    const mock = stubFetch(response);
+    await expect(fetchAccountingBudgetScenarios()).rejects.toMatchObject({ name: "AccountingApiError", status });
+    expect(mock.mock.calls).toHaveLength(1);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
   it("keeps only active output tax codes, since invoices cannot use the others", async () => {
@@ -372,14 +434,45 @@ describe("accounting API: capability reads", () => {
   it("passes the budget scenario only when one is chosen", async () => {
     const mock = stubFetch(() => Response.json({ ok: true, data: forecast }));
     await expect(fetchCashForecast("")).resolves.toEqual(forecast);
-    expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({
-      body: JSON.stringify({ action: "cashForecast" }),
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
     }));
+    expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.cashForecast",
+      input: {},
+      intentId: expect.any(String),
+    });
 
-    await fetchCashForecast("scenario-1");
-    expect(mock).toHaveBeenLastCalledWith("/api/accounting", expect.objectContaining({
-      body: JSON.stringify({ action: "cashForecast", budgetScenarioId: "scenario-1" }),
-    }));
+    await fetchCashForecast("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    expect(JSON.parse(String(mock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.cashForecast",
+      input: { budgetScenarioId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("rejects invalid budget scenario IDs before calling Go", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: forecast }));
+    await expect(fetchCashForecast("scenario-1")).rejects.toMatchObject({
+      name: "AccountingApiError",
+      status: 400,
+      message: "Choose a valid budget scenario.",
+    });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "pending", response: () => Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 }), status: 202 },
+    { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }), status: 404 },
+    { label: "malformed", response: () => Response.json({ ok: true, data: { finalMinor: "12000" } }), status: 200 },
+    { label: "capability error", response: () => Response.json({ ok: false, error: "Forecast failed" }, { status: 422 }), status: 500 },
+  ])("fails closed on Go cash forecast $label responses", async ({ response, status }) => {
+    const mock = stubFetch(response);
+    await expect(fetchCashForecast("")).rejects.toMatchObject({ name: "AccountingApiError", status });
+    expect(mock.mock.calls).toHaveLength(1);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
   it("unwraps reminder drafts from the envelope", async () => {

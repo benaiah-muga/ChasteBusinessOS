@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite's Accounting budgets screen loads budget scenarios and the 13-week cash
+  forecast directly through Go's `accounting.listBudgetScenarios` and
+  `accounting.cashForecast` capabilities. Scenario rows and IDs are validated
+  and projected into the existing UI summary shape. Scenario-list failures
+  expose a retry action, and invalid scenario IDs are rejected before dispatch;
+  neither read retries through the legacy Accounting API.
+
 - Vite Sales order lists and refreshes can read through Go's session-authenticated
   `sales.listOrders` capability behind paired `CHASTE_GO_SALES_ORDER_READS=1`
   and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go derives organization

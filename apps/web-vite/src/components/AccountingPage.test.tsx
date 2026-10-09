@@ -133,6 +133,8 @@ interface StubOptions {
   goBankUnmatchResponse?: () => Response;
   goPurchasingPayBillResponse?: () => Response;
   goCustomerStatementResponse?: () => Response;
+  goBudgetScenarioResponse?: () => Response;
+  goCashForecastResponse?: () => Response;
   goReportResponse?: (capabilityId: string) => Response;
 }
 
@@ -151,6 +153,21 @@ function stubAccounting(options: StubOptions = {}) {
     }
     if (url === "/api/capabilities/execute") {
       const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
+      if (capabilityId === "accounting.listBudgetScenarios") {
+        return options.goBudgetScenarioResponse?.() ?? Response.json({ ok: true, data: { scenarios: [] } });
+      }
+      if (capabilityId === "accounting.cashForecast") {
+        return options.goCashForecastResponse?.() ?? Response.json({ ok: true, data: {
+          startMinor: 10_000,
+          finalMinor: 12_000,
+          lowestCloseMinor: 8_000,
+          lowestWeekIndex: 0,
+          scenarioName: null,
+          minimumCashBufferMinor: 5_000,
+          unsupportedCurrencies: [],
+          weeks: [{ weekStart: "2026-10-05T00:00:00.000Z", inflowMinor: 3_000, outflowMinor: 1_000, closeMinor: 12_000 }],
+        } });
+      }
       if (capabilityId && [
         "accounting.incomeStatement",
         "accounting.balanceSheet",
@@ -219,22 +236,6 @@ function stubAccounting(options: StubOptions = {}) {
       if (action === "cashBasis") {
         if (options.rejectCashBasis) throw new TypeError("Network unavailable");
         return Response.json({ ok: true, data: cashBasis });
-      }
-      if (action === "cashForecast") {
-        return Response.json({
-          ok: true,
-          data: {
-            startMinor: 10_000,
-            finalMinor: 12_000,
-            lowestCloseMinor: 8_000,
-            lowestWeekIndex: 0,
-            scenarioName: null,
-            minimumCashBufferMinor: 5_000,
-            weeks: [
-              { weekStart: "2026-10-05T00:00:00.000Z", inflowMinor: 3_000, outflowMinor: 1_000, closeMinor: 12_000 },
-            ],
-          },
-        });
       }
       if (action === "buildReminders") {
         return Response.json({ ok: true, data: { reminders: [] } });
@@ -1141,6 +1142,30 @@ describe("AccountingPage tabs", () => {
     expect(await screen.findByRole("table", { name: "Weekly cash forecast" })).toBeTruthy();
   });
 
+  it("shows budget-scenario read failures on the cash tab and retries Go", async () => {
+    let scenarioReads = 0;
+    const { calls } = stubAccounting({
+      goBudgetScenarioResponse: () => {
+        scenarioReads += 1;
+        return scenarioReads === 1
+          ? Response.json({ ok: true, data: { invalid: true } })
+          : Response.json({ ok: true, data: { scenarios: [] } });
+      },
+    });
+    await renderReady();
+
+    fireEvent.click(screen.getByRole("button", { name: /Cash & collections/ }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry scenarios" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry scenarios" }));
+
+    await waitFor(() => expect(scenarioReads).toBe(2));
+    await screen.findByRole("table", { name: "Weekly cash forecast" });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.listBudgetScenarios"))).toHaveLength(2);
+    expect(calls.some((call) => call.url === "/api/accounting/budgets")).toBe(false);
+  });
+
   it("loads a customer statement on demand and explains a failure", async () => {
     stubAccounting();
     await renderReady();
@@ -1171,7 +1196,7 @@ describe("AccountingPage tabs", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load statement" }));
 
     expect(await screen.findByText("1042")).toBeTruthy();
-    const call = calls.find((entry) => entry.url === "/api/capabilities/execute");
+    const call = calls.find((entry) => entry.url === "/api/capabilities/execute" && entry.body?.includes("accounting.customerStatement"));
     expect(call).toBeTruthy();
     expect(JSON.parse(call!.body!)).toMatchObject({
       capabilityId: "accounting.customerStatement",
@@ -1181,10 +1206,83 @@ describe("AccountingPage tabs", () => {
   });
 
   it("shows budget scenarios and their projected cash", async () => {
-    stubAccounting();
+    const scenarioID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const { calls } = stubAccounting({
+      goBudgetScenarioResponse: () => Response.json({ ok: true, data: { scenarios: [{
+        id: scenarioID,
+        key: "base",
+        name: "Base plan",
+        fiscalYear: 2026,
+        version: 2,
+        currency: "USD",
+        isCurrent: true,
+        assumptions: {
+          collectionDelayDays: 14,
+          spendUpliftBasisPoints: 0,
+          expectedMonthlyInflowMinor: 100_000,
+          expectedMonthlyOutflowMinor: 75_000,
+          minimumCashBufferMinor: 10_000,
+        },
+        createdAt: "2026-09-28T10:00:00.000Z",
+      }] } }),
+      goCashForecastResponse: () => Response.json({ ok: true, data: {
+        startMinor: 10_000,
+        finalMinor: 12_000,
+        lowestCloseMinor: 8_000,
+        lowestWeekIndex: 0,
+        scenarioName: "Base plan",
+        minimumCashBufferMinor: 5_000,
+        unsupportedCurrencies: [],
+        weeks: [{ weekStart: "2026-10-05T00:00:00.000Z", inflowMinor: 3_000, outflowMinor: 1_000, closeMinor: 12_000 }],
+      } }),
+    });
     await renderReady();
 
     fireEvent.click(screen.getByRole("button", { name: /Budgets/ }));
-    expect(await screen.findByText("No saved scenarios yet. The operational forecast runs on live due dates.")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Base plan.*2026.*Current/ })).toBeTruthy();
+    expect(await screen.findByText("Closing cash in 13 weeks")).toBeTruthy();
+    await waitFor(() => {
+      const forecastCalls = calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.cashForecast"));
+      expect(forecastCalls.some((call) => call.body?.includes(scenarioID))).toBe(true);
+    });
+    expect(calls.some((call) => call.url === "/api/accounting/budgets" || call.body?.includes('"action":"cashForecast"'))).toBe(false);
+  });
+
+  it("shows budget-scenario read failures instead of claiming no scenarios and retries Go", async () => {
+    const scenarioID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let scenarioReads = 0;
+    stubAccounting({
+      goBudgetScenarioResponse: () => {
+        scenarioReads += 1;
+        return scenarioReads === 1
+          ? Response.json({ error: "Go is unavailable" }, { status: 503 })
+          : Response.json({ ok: true, data: { scenarios: [{
+            id: scenarioID,
+            key: "base",
+            name: "Base plan",
+            fiscalYear: 2026,
+            version: 2,
+            currency: "USD",
+            isCurrent: true,
+            assumptions: {
+              collectionDelayDays: 14,
+              spendUpliftBasisPoints: 0,
+              expectedMonthlyInflowMinor: 100_000,
+              expectedMonthlyOutflowMinor: 75_000,
+              minimumCashBufferMinor: 10_000,
+            },
+            createdAt: "2026-09-28T10:00:00.000Z",
+          }] } });
+      },
+    });
+    await renderReady();
+
+    fireEvent.click(screen.getByRole("button", { name: /Budgets/ }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.queryByText("No saved scenarios yet. The operational forecast runs on live due dates.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry scenarios" }));
+
+    expect(await screen.findByRole("button", { name: /Base plan.*2026.*Current/ })).toBeTruthy();
+    await waitFor(() => expect(scenarioReads).toBe(2));
   });
 });
