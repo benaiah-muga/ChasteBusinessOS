@@ -1932,3 +1932,14 @@ new owners and the manifest shows zero legacy runtime paths.
      Go 404 without falling back to `/api/hr`. Keep all other HR tabs on their
      existing routes. Add focused API, proxy selector, and HrPage coverage;
      authenticated browser proof remains open.
+191. Route only Vite invoice `recordPayment` writes through Go's
+     session-authenticated `accounting.recordPayment` capability behind paired
+     `CHASTE_GO_ACCOUNTING_RECORD_PAYMENT=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the payment selector
+     to `0` for explicit legacy rollback. Scope durable exact payment intents
+     by actor and organization, recover 202 approvals and uncertain writes after
+     reload, block legacy fallback while unresolved, and fail closed on Go 404.
+     Keep all other accounting operations on their current route. Add focused
+     API, proxy selector, and AccountingPage tests; the existing Go payment
+     executor integration test remains the contract proof. Authenticated
+     browser proof remains open.

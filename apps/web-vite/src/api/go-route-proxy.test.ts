@@ -26,6 +26,7 @@ import {
   goSalesOrderWritesFromEnv,
   goHrExpensesFromEnv,
   goHrLeaveFromEnv,
+  goAccountingRecordPaymentFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -154,6 +155,15 @@ describe("HR Leave Go selector", () => {
     expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_LEAVE: "0" })).toBe(false);
     expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_LEAVE: "1" })).toBe(false);
+  });
+});
+
+describe("accounting invoice payment Go selector", () => {
+  it("requires both the payment selector and session capability route", () => {
+    expect(goAccountingRecordPaymentFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_RECORD_PAYMENT: "1" })).toBe(true);
+    expect(goAccountingRecordPaymentFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goAccountingRecordPaymentFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_RECORD_PAYMENT: "0" })).toBe(false);
+    expect(goAccountingRecordPaymentFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_RECORD_PAYMENT: "1" })).toBe(false);
   });
 });
 

@@ -292,7 +292,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                               : purchasingReceivingPage
                                                 ? <PurchasingReceivingPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                                 : accountingPage
-                                                  ? <AccountingPage key={organizationRevision} />
+                                                  ? <AccountingPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                                                   : messagesPage
                                                     ? <MessagesPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                                                     : settingsPage

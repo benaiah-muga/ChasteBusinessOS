@@ -13,6 +13,8 @@ import {
   fetchCashForecast,
   fetchCustomerStatement,
   fetchPaymentReminders,
+  goAccountingRecordPaymentUseGo,
+  readPendingAccountingRecordPayment,
   submitAccountingAction,
   type AccountingAging,
   type AccountingBill,
@@ -24,6 +26,8 @@ import {
   type AccountingForecast,
   type AccountingInvoice,
   type AccountingPayment,
+  type AccountingPaymentRetryScope,
+  type AccountingRecordPaymentAction,
   type AccountingReminder,
   type AccountingReports,
   type AccountingStatement,
@@ -329,7 +333,7 @@ const EMPTY_LINE: InvoiceLineDraft = {
   taxCodeId: "",
 };
 
-export function AccountingPage() {
+export function AccountingPage({ actorId = null, organizationId = null }: { actorId?: string | null; organizationId?: string | null }) {
   const [tab, setTab] = useState<TabId>(() => readTabParam(window.location.search));
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -337,7 +341,9 @@ export function AccountingPage() {
   const [search, setSearch] = useState("");
   const [payTarget, setPayTarget] = useState<AccountingBill | null>(null);
   const [reverseTarget, setReverseTarget] = useState<AccountingEntry | null>(null);
+  const [pendingRecordPayment, setPendingRecordPayment] = useState<AccountingRecordPaymentAction | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const paymentRetryScope: AccountingPaymentRetryScope = { actorId, organizationId };
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState((current) => (current.status === "ready" ? current : { status: "loading" }));
@@ -376,6 +382,25 @@ export function AccountingPage() {
     return () => controller.abort();
   }, [load]);
 
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    let active = true;
+    void readPendingAccountingRecordPayment(paymentRetryScope).then((action) => {
+      if (!active) return;
+      setPendingRecordPayment(action);
+      if (action) {
+        setNotice({ tone: "pending", text: goAccountingRecordPaymentUseGo()
+          ? "An invoice payment is unresolved. Retry the exact payment to recover its result."
+          : "A Go invoice payment is unresolved. Restore the Go payment route and retry that exact payment before using legacy payments." });
+      }
+    }).catch((error) => {
+      if (active && goAccountingRecordPaymentUseGo()) {
+        setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved invoice payment." });
+      }
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
   const changeTab = useCallback((next: string) => {
     const resolved = readTabParam(`?tab=${next}`);
     setTab(resolved);
@@ -401,9 +426,16 @@ export function AccountingPage() {
       payload: Record<string, unknown>,
       label: string,
     ): Promise<boolean> => {
+      const isRecordPayment = path === "/api/accounting" && payload.action === "recordPayment";
+      const goRecordPayment = isRecordPayment && goAccountingRecordPaymentUseGo();
       setBusy(true);
       try {
-        const outcome = await submitAccountingAction(path, payload);
+        const outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
+        if (goRecordPayment) {
+          setPendingRecordPayment(outcome.kind === "pending"
+            ? await readPendingAccountingRecordPayment(paymentRetryScope)
+            : null);
+        }
         // A 202 is a queued approval, never a completed write: say so plainly.
         setNotice(
           outcome.kind === "pending"
@@ -411,8 +443,12 @@ export function AccountingPage() {
             : { tone: "success", text: `${label} done.` },
         );
         void load();
-        return true;
+        return !(goRecordPayment && outcome.kind === "pending");
       } catch (error) {
+        if (goRecordPayment) {
+          try { setPendingRecordPayment(await readPendingAccountingRecordPayment(paymentRetryScope)); }
+          catch { setPendingRecordPayment(payload as unknown as AccountingRecordPaymentAction); }
+        }
         setNotice({
           tone: "error",
           text: error instanceof AccountingApiError
@@ -424,7 +460,7 @@ export function AccountingPage() {
         setBusy(false);
       }
     },
-    [load],
+    [load, actorId, organizationId],
   );
 
   const filteredEntries = useMemo(
@@ -502,6 +538,16 @@ export function AccountingPage() {
               role={notice.tone === "error" ? "alert" : "status"}
             >
               <span>{notice.text}</span>
+              {pendingRecordPayment && <button
+                type="button"
+                className="accounting-button accounting-button-small"
+                disabled={busy || !goAccountingRecordPaymentUseGo()}
+                onClick={() => void runAction(
+                  "/api/accounting",
+                  { ...pendingRecordPayment },
+                  `Payment on invoice #${pendingRecordPayment.invoiceNumber}`,
+                )}
+              >{goAccountingRecordPaymentUseGo() ? "Retry exact payment" : "Enable Go payment route to retry"}</button>}
               <button
                 type="button"
                 className="accounting-notice-dismiss"
@@ -566,6 +612,7 @@ export function AccountingPage() {
               payments={state.data.payments}
               customers={state.data.customers}
               busy={busy}
+              pendingPayment={pendingRecordPayment}
               onAction={runAction}
             />
           )}
@@ -1155,6 +1202,7 @@ function ReceivablesSection({
   payments,
   customers,
   busy,
+  pendingPayment,
   onAction,
 }: {
   aging: AccountingAging;
@@ -1164,6 +1212,7 @@ function ReceivablesSection({
   payments: AccountingPayment[];
   customers: AccountingCustomer[];
   busy: boolean;
+  pendingPayment: AccountingRecordPaymentAction | null;
   onAction: (
     path: "/api/accounting" | "/api/banking",
     payload: Record<string, unknown>,
@@ -1198,6 +1247,17 @@ function ReceivablesSection({
   );
   const enteredPayMinor = payFor ? toMinorUnits(payFor.currency, payAmount) : Number.NaN;
   const enteredCreditMinor = creditFor ? toMinorUnits(creditFor.currency, creditForm.amount) : Number.NaN;
+
+  useEffect(() => {
+    if (!pendingPayment) return;
+    const invoice = invoices.find((candidate) => candidate.number === pendingPayment.invoiceNumber);
+    if (!invoice) return;
+    setPayFor(invoice);
+    setPayAmount(minorToInput(invoice.currency, pendingPayment.amountMinor));
+    setPayMethod(pendingPayment.method);
+  }, [pendingPayment, invoices]);
+
+  const retryingExactPayment = pendingPayment !== null && pendingPayment.invoiceNumber === payFor?.number;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1370,7 +1430,7 @@ function ReceivablesSection({
                                 <button
                                   type="button"
                                   className="accounting-button accounting-button-small"
-                                  disabled={busy}
+                                  disabled={busy || pendingPayment !== null}
                                   onClick={() => {
                                     setPayFor(invoice);
                                     setPayAmount(minorToInput(currency, invoice.outstandingMinor));
@@ -1698,10 +1758,10 @@ function ReceivablesSection({
         open={payFor !== null}
         title={`Record payment on invoice #${payFor?.number ?? ""}`}
         description="Posts cash to the ledger and settles the invoice balance. Payments above the policy threshold wait for approval."
-        onClose={() => setPayFor(null)}
+        onClose={() => { if (!retryingExactPayment) setPayFor(null); }}
         footer={
           <>
-            <button type="button" disabled={busy} onClick={() => setPayFor(null)}>
+            <button type="button" disabled={busy || retryingExactPayment} onClick={() => setPayFor(null)}>
               Cancel
             </button>
             <button
@@ -1711,7 +1771,7 @@ function ReceivablesSection({
                 busy ||
                 !Number.isSafeInteger(enteredPayMinor) ||
                 enteredPayMinor <= 0 ||
-                (payFor !== null && enteredPayMinor > payFor.outstandingMinor)
+                (payFor !== null && enteredPayMinor > payFor.outstandingMinor && !retryingExactPayment)
               }
               onClick={() => {
                 if (!payFor) return;
@@ -1729,7 +1789,7 @@ function ReceivablesSection({
                 });
               }}
             >
-              Record payment
+              {retryingExactPayment ? "Retry exact payment in dialog" : "Record payment"}
             </button>
           </>
         }
@@ -1740,6 +1800,7 @@ function ReceivablesSection({
             <input
               className="accounting-money-input"
               inputMode="decimal"
+              disabled={retryingExactPayment}
               value={payAmount}
               onChange={(event) => setPayAmount(event.target.value)}
             />
@@ -1747,6 +1808,7 @@ function ReceivablesSection({
           <label className="accounting-label">
             Method
             <select
+              disabled={retryingExactPayment}
               value={payMethod}
               onChange={(event) => setPayMethod(event.target.value as typeof payMethod)}
             >
@@ -1761,7 +1823,7 @@ function ReceivablesSection({
             </p>
           )}
         </div>
-        {payFor && Number.isSafeInteger(enteredPayMinor) && enteredPayMinor > payFor.outstandingMinor && (
+        {payFor && !retryingExactPayment && Number.isSafeInteger(enteredPayMinor) && enteredPayMinor > payFor.outstandingMinor && (
           <p className="accounting-callout accounting-callout-danger" role="alert">
             Payment exceeds this invoice outstanding balance.
           </p>

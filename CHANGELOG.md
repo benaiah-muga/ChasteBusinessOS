@@ -13,6 +13,16 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite invoice `recordPayment` writes can use Go's session-authenticated
+  `accounting.recordPayment` capability behind the paired
+  `CHASTE_GO_ACCOUNTING_RECORD_PAYMENT=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
+  payment attempts and pending approval recovery survive reload; Go 404 and
+  uncertain results never fall back to the legacy writer. An unresolved Go
+  payment blocks legacy rollback and remains retryable from the global notice,
+  even if the invoice is absent from the refreshed list. Other Accounting
+  operations keep their existing routes. Set the selector to `0` for explicit
+  legacy rollback.
 - Go leave requests now verify that the employee belongs to the caller's
   organization before inserting a request. Missing and cross-organization
   employee IDs are rejected without creating leave records.

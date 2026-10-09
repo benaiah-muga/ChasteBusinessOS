@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { submitAccountingAction } from "../api/accounting";
 import {
   AccountingPage,
   filterByAgingRange,
@@ -19,6 +20,7 @@ import {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   vi.unstubAllGlobals();
   window.history.replaceState(null, "", "/accounting");
 });
@@ -123,6 +125,7 @@ interface StubOptions {
   rejectBanking?: boolean;
   taxCodes?: unknown;
   actionResponse?: Response | (() => Response);
+  goPaymentResponse?: () => Response;
 }
 
 function stubAccounting(options: StubOptions = {}) {
@@ -137,6 +140,13 @@ function stubAccounting(options: StubOptions = {}) {
         catalog: [{ id: "accounting" }],
         enabledModules: options.enabled === false ? [] : ["accounting"],
       });
+    }
+    if (url === "/api/capabilities/execute") {
+      return options.goPaymentResponse?.() ?? Response.json({ ok: true, data: {
+        paymentId: "33333333-3333-4333-8333-333333333333",
+        entryId: "44444444-4444-4444-8444-444444444444",
+        fullyPaid: false,
+      } });
     }
     if (url === "/api/accounting" && method === "POST") {
       const action = body ? (JSON.parse(body) as { action?: string }).action : undefined;
@@ -195,8 +205,11 @@ function stubAccounting(options: StubOptions = {}) {
 }
 
 /** Renders and waits for the initial books load so tab clicks land on a live nav. */
-async function renderReady() {
-  render(<AccountingPage />);
+async function renderReady(props: { actorId?: string | null; organizationId?: string | null } = {
+  actorId: "55555555-5555-4555-8555-555555555555",
+  organizationId: "66666666-6666-4666-8666-666666666666",
+}) {
+  render(<AccountingPage {...props} />);
   return screen.findByRole("navigation", { name: "Accounting sections" });
 }
 
@@ -449,6 +462,74 @@ describe("AccountingPage governed writes", () => {
       const write = calls.find((call) => call.body?.includes("recordPayment"));
       expect(JSON.parse(write!.body!) as { amountMinor: number }).toMatchObject({ amountMinor: 5_000 });
     });
+  });
+
+  it("routes invoice payments to Go and restores the exact pending payment after reload", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", true);
+    const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    const { calls } = stubAccounting({
+      goPaymentResponse: () => {
+        const body = JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        sent.push(body);
+        return sent.length === 1
+          ? Response.json({ pendingApproval: true, reason: "Payment approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { paymentId: "33333333-3333-4333-8333-333333333333", entryId: "44444444-4444-4444-8444-444444444444", fullyPaid: false } });
+      },
+    });
+    const first = render(<AccountingPage {...ids} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+    fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Pay" }));
+    fireEvent.change(screen.getByLabelText("Amount received"), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+
+    expect(await screen.findByRole("button", { name: "Retry exact payment" })).not.toBeNull();
+    expect((screen.getByLabelText("Amount received") as HTMLInputElement).disabled).toBe(true);
+    expect(sent[0]).toMatchObject({ capabilityId: "accounting.recordPayment", input: { invoiceNumber: 1042, amountMinor: 5_000, method: "bank_transfer" } });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("recordPayment"))).toBe(false);
+
+    first.unmount();
+    render(<AccountingPage {...ids} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact payment" }));
+    expect(await screen.findByText(/^Payment on invoice #1042 done\.$/)).not.toBeNull();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.input).toEqual(sent[0]?.input);
+    expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
+  });
+
+  it("offers exact recovery from the global notice when the invoice is absent after reload", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", true);
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    const action = { action: "recordPayment", invoiceNumber: 1042, amountMinor: 5_000, method: "cash" };
+    const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    let attempt = 0;
+    const { calls } = stubAccounting({
+      accounting: { ...overview, invoices: [] },
+      goPaymentResponse: () => {
+        const body = JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        sent.push(body);
+        attempt += 1;
+        return attempt === 1
+          ? Response.json({ pendingApproval: true, reason: "Payment approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { paymentId: "33333333-3333-4333-8333-333333333333", entryId: "44444444-4444-4444-8444-444444444444", fullyPaid: true } });
+      },
+    });
+    await expect(submitAccountingAction("/api/accounting", action, undefined, ids)).resolves.toMatchObject({ kind: "pending" });
+    render(<AccountingPage {...ids} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact payment" }));
+    expect(await screen.findByText(/^Payment on invoice #1042 done\.$/)).not.toBeNull();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.input).toEqual(sent[0]?.input);
+    expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("recordPayment"))).toBe(false);
   });
 
   it("guards a credit note behind a positive amount and a real reason", async () => {

@@ -303,6 +303,27 @@ const PendingSchema = z.object({
   reason: z.string().optional(),
   error: z.string().optional(),
 }).strict();
+const RecordPaymentActionSchema = z.object({
+  action: z.literal("recordPayment"),
+  invoiceNumber: z.number().int().positive().safe(),
+  amountMinor: z.number().int().positive().safe(),
+  method: z.enum(["cash", "bank_transfer", "card"]),
+  settleFxRate: z.string().optional(),
+}).strict();
+const StoredRecordPaymentSchema = z.object({
+  action: RecordPaymentActionSchema,
+  intentId: z.string().uuid(),
+  fingerprint: z.string().length(64),
+}).strict();
+const RecordPaymentOutputSchema = z.object({
+  paymentId: z.string().uuid(),
+  entryId: z.string().uuid(),
+  fullyPaid: z.boolean(),
+  gainLossMinor: minor.optional(),
+  baseEntryId: z.string().uuid().optional(),
+  foreignEntryId: z.string().uuid().optional(),
+}).strict();
+const RECORD_PAYMENT_ATTEMPT_PREFIX = "chaste:accounting:record-payment:go:attempt:v1:";
 
 export type AccountingEntry = z.infer<typeof EntrySchema>;
 export type AccountingAging = z.infer<typeof AgingSchema>;
@@ -322,7 +343,7 @@ export type AccountingReminder = z.infer<typeof ReminderSchema>;
 export type AccountingStatement = z.infer<typeof StatementSchema>;
 
 export class AccountingApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly requestMayHaveReachedServer = false) {
     super(message);
     this.name = "AccountingApiError";
   }
@@ -332,6 +353,23 @@ export class AccountingApiError extends Error {
 export type AccountingActionOutcome =
   | { kind: "completed" }
   | { kind: "pending"; reason: string };
+
+export type AccountingRecordPaymentAction = z.infer<typeof RecordPaymentActionSchema>;
+export type AccountingPaymentRetryScope = { actorId: string | null; organizationId: string | null };
+
+export function goAccountingRecordPaymentUseGo(): boolean {
+  return typeof __GO_ACCOUNTING_RECORD_PAYMENT__ !== "undefined" && __GO_ACCOUNTING_RECORD_PAYMENT__;
+}
+
+export async function readPendingAccountingRecordPayment(scope: AccountingPaymentRetryScope): Promise<AccountingRecordPaymentAction | null> {
+  const { scopeHash } = await accountingPaymentScope(scope);
+  const storageKey = `${RECORD_PAYMENT_ATTEMPT_PREFIX}${scopeHash}`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new AccountingApiError(0, "Enable browser storage to recover an unresolved invoice payment.", true); }
+  if (raw === null) return null;
+  return parseStoredRecordPayment(raw).action;
+}
 
 function signalWithTimeout(signal?: AbortSignal, timeoutMs = 15_000): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
@@ -478,7 +516,17 @@ export async function submitAccountingAction(
   path: "/api/accounting" | "/api/banking",
   payload: Record<string, unknown>,
   signal?: AbortSignal,
+  retryScope?: AccountingPaymentRetryScope,
 ): Promise<AccountingActionOutcome> {
+  if (path === "/api/accounting" && payload.action === "recordPayment") {
+    const action = RecordPaymentActionSchema.safeParse(payload);
+    if (!action.success) throw new AccountingApiError(400, "Enter a valid invoice payment before submitting.");
+    const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
+    if (goAccountingRecordPaymentUseGo()) return submitGoAccountingRecordPayment(action.data, scoped, signal);
+    if (await readPendingAccountingRecordPayment(retryScope ?? { actorId: null, organizationId: null })) {
+      throw new AccountingApiError(0, "A Go invoice payment is unresolved. Restore the Go payment route and retry that exact payment before using the legacy route.", true);
+    }
+  }
   const { response, body } = await getJson(path, { method: "POST", body: JSON.stringify(payload) }, signal);
   if (response.status === 202) {
     const parsed = PendingSchema.safeParse(body);
@@ -489,6 +537,106 @@ export async function submitAccountingAction(
   const envelope = EnvelopeSchema.safeParse(body);
   if (!envelope.success) throw new AccountingApiError(response.status, "The Accounting service returned an unexpected action response.");
   return { kind: "completed" };
+}
+
+async function submitGoAccountingRecordPayment(
+  action: AccountingRecordPaymentAction,
+  scope: { actorId: string; organizationId: string; scopeHash: string },
+  signal?: AbortSignal,
+): Promise<AccountingActionOutcome> {
+  const attempt = await accountingRecordPaymentAttempt(action, scope.scopeHash);
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await getJson("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "accounting.recordPayment", input: recordPaymentCapabilityInput(action), intentId: attempt.intentId }),
+    }, signal));
+  } catch (error) {
+    if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
+    throw new AccountingApiError(0, "The Go Accounting service could not confirm this payment. Retry the same payment to recover its result.", true);
+  }
+  if (response.status === 202) {
+    const parsed = PendingSchema.safeParse(body);
+    if (!parsed.success) throw new AccountingApiError(202, "The Go Accounting service returned an invalid payment approval response.", true);
+    return { kind: "pending", reason: parsed.data.reason ?? parsed.data.error ?? "This payment is waiting for approval." };
+  }
+  if (!response.ok) {
+    const uncertain = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
+    if (!uncertain) await clearAccountingRecordPaymentAttempt(attempt.storageKey);
+    throw new AccountingApiError(response.status, errorMessage(response.status, body, "record this invoice payment"), uncertain);
+  }
+  const envelope = EnvelopeSchema.safeParse(body);
+  const output = envelope.success ? RecordPaymentOutputSchema.safeParse(envelope.data.data) : null;
+  if (response.status !== 200 || !output?.success) {
+    throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected payment response.", true);
+  }
+  await clearAccountingRecordPaymentAttempt(attempt.storageKey);
+  return { kind: "completed" };
+}
+
+function recordPaymentCapabilityInput(action: AccountingRecordPaymentAction): Record<string, unknown> {
+  const { action: _action, ...input } = action;
+  return input;
+}
+
+async function accountingPaymentScope(scope: AccountingPaymentRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
+  const actorId = scope.actorId?.trim() ?? "";
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+    throw new AccountingApiError(0, "Invoice payments are waiting for your account and organization details. Wait for your organization to finish loading, then try again.");
+  }
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
+    return { actorId, organizationId, scopeHash: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("") };
+  } catch {
+    throw new AccountingApiError(0, "Could not prepare a durable payment retry. Check browser security settings and try again.");
+  }
+}
+
+async function accountingRecordPaymentAttempt(action: AccountingRecordPaymentAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
+  const storageKey = `${RECORD_PAYMENT_ATTEMPT_PREFIX}${scopeHash}`;
+  const fingerprint = await accountingPaymentFingerprint(action);
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new AccountingApiError(0, "Enable browser storage before recording a payment so it can be retried safely."); }
+  if (raw !== null) {
+    const stored = parseStoredRecordPayment(raw);
+    if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous invoice payment is unresolved. Retry its exact details before recording another payment.", true);
+    return { storageKey, intentId: stored.intentId };
+  }
+  const stored = { action, intentId: crypto.randomUUID(), fingerprint };
+  const serialized = JSON.stringify(stored);
+  try {
+    window.localStorage.setItem(storageKey, serialized);
+    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("payment retry marker did not persist");
+  } catch {
+    throw new AccountingApiError(0, "Enable browser storage before recording a payment so it can be retried safely.");
+  }
+  return { storageKey, intentId: stored.intentId };
+}
+
+async function accountingPaymentFingerprint(action: AccountingRecordPaymentAction): Promise<string> {
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(action)));
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    throw new AccountingApiError(0, "Could not prepare a durable payment retry. Check browser security settings and try again.");
+  }
+}
+
+function parseStoredRecordPayment(raw: string): z.infer<typeof StoredRecordPaymentSchema> {
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new AccountingApiError(0, "An unresolved invoice payment marker is malformed. Contact an administrator before retrying.", true); }
+  const parsed = StoredRecordPaymentSchema.safeParse(decoded);
+  if (!parsed.success) throw new AccountingApiError(0, "An unresolved invoice payment marker is malformed. Contact an administrator before retrying.", true);
+  return parsed.data;
+}
+
+async function clearAccountingRecordPaymentAttempt(storageKey: string): Promise<void> {
+  try { window.localStorage.removeItem(storageKey); }
+  catch { throw new AccountingApiError(0, "The payment completed, but its retry marker could not be cleared. Reload before recording another payment.", true); }
 }
 
 export async function emailInvoice(invoiceNumber: number, to: string, signal?: AbortSignal): Promise<{ urlPath: string | null }> {
