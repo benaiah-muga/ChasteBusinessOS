@@ -231,9 +231,13 @@ describe("Vite inventory page", () => {
       const path = String(input);
       if (path === "/api/modules") return Response.json(switchboard);
       if ((init?.method ?? "GET") === "POST") {
-        const body = JSON.parse(String(init?.body)) as { action: string };
-        postActions.push(body.action);
-        return body.action === "createLocation"
+        const body = JSON.parse(String(init?.body)) as { action?: string; capabilityId?: string };
+        const action = body.action ?? ({
+          "inventory.createLocation": "createLocation",
+          "inventory.createCycleCount": "createCycleCount",
+        } as const)[body.capabilityId as "inventory.createLocation" | "inventory.createCycleCount"];
+        postActions.push(action ?? "unknown");
+        return action === "createLocation"
           ? Response.json({ ok: true, data: { locationId: "location-2" } })
           : Response.json({ ok: true, data: { countId: "count-1", lineCount: 2 } });
       }
@@ -242,7 +246,7 @@ describe("Vite inventory page", () => {
       if (reportReads === 2) return new Promise<Response>((resolve) => { resolveOlderReport = resolve; });
       return new Promise<Response>((resolve) => { resolveNewerReport = resolve; });
     }));
-    render(<InventoryPage />);
+    render(<InventoryPage actorId="actor-1" organizationId="org-1" />);
     expect(await screen.findByRole("heading", { name: "Inventory" })).not.toBeNull();
 
     const locationForm = screen.getByRole("heading", { name: "Create a stock location" }).closest("form");

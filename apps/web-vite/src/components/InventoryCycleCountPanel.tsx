@@ -3,6 +3,7 @@ import {
   lookupInventoryBarcode,
   submitInventoryCycleCountAction,
   type InventoryCycleCountAction,
+  type InventoryCycleCountRetryScope,
 } from "../api/inventory-cycle-count";
 import type { InventoryCycleCount, InventoryItem, InventoryLocation } from "../api/inventory";
 
@@ -23,9 +24,10 @@ export interface InventoryCycleCountPanelProps {
   locations: InventoryLocation[];
   counts: InventoryCycleCount[];
   onChanged: () => void | Promise<void>;
+  retryScope?: InventoryCycleCountRetryScope;
 }
 
-export function InventoryCycleCountPanel({ items, locations, counts, onChanged }: InventoryCycleCountPanelProps) {
+export function InventoryCycleCountPanel({ items, locations, counts, onChanged, retryScope }: InventoryCycleCountPanelProps) {
   const [countAllItems, setCountAllItems] = useState(true);
   const [selectedSkus, setSelectedSkus] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -50,7 +52,7 @@ export function InventoryCycleCountPanel({ items, locations, counts, onChanged }
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitInventoryCycleCountAction(input);
+      const result = await submitInventoryCycleCountAction(input, undefined, undefined, retryScope);
       if (result.kind === "pending") {
         setNotice({ tone: "pending", text: `${label} requires approval.` });
         return false;

@@ -8,6 +8,7 @@ const items: InventoryItem[] = [
   { sku: "SERVICE", name: "Delivery service", kind: "service", unitLabel: "service", onHandThousandths: 0, reservedThousandths: 0, availableThousandths: 0, totalValueMinor: 0, reorderPointThousandths: 0, reorderNeeded: false },
 ];
 const locations: InventoryLocation[] = [{ id: "location-1", code: "MAIN", name: "Main warehouse" }];
+let retryScope = { actorId: "actor-1", organizationId: "org-1" };
 const openCount: InventoryCycleCount = {
   id: "d2b53ec3-1b61-4f05-a56f-4a0f9d4d3571",
   status: "open",
@@ -19,15 +20,21 @@ const openCount: InventoryCycleCount = {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  retryScope = { actorId: `actor-${crypto.randomUUID()}`, organizationId: `org-${crypto.randomUUID()}` };
   vi.unstubAllGlobals();
 });
 
 describe("InventoryCycleCountPanel", () => {
+  function renderPanel(props: { items: InventoryItem[]; locations: InventoryLocation[]; counts: InventoryCycleCount[]; onChanged: () => void | Promise<void> }) {
+    return render(<InventoryCycleCountPanel {...props} retryScope={retryScope} />);
+  }
+
   it("creates a location snapshot for selected items and refreshes after success", async () => {
     const onChanged = vi.fn();
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { countId: openCount.id, lineCount: 1 } }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryCycleCountPanel items={items} locations={locations} counts={[]} onChanged={onChanged} />);
+    renderPanel({ items, locations, counts: [], onChanged });
 
     fireEvent.click(screen.getByRole("checkbox", { name: /Count every stocked item/ }));
     fireEvent.change(screen.getByLabelText("Count location"), { target: { value: "location-1" } });
@@ -37,12 +44,15 @@ describe("InventoryCycleCountPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start count sheet" }));
 
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
-    expect(fetchMock).toHaveBeenCalledWith("/api/inventory", expect.objectContaining({
+    const writesUseGo = typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__;
+    expect(fetchMock).toHaveBeenCalledWith(writesUseGo ? "/api/capabilities/execute" : "/api/inventory", expect.objectContaining({
       method: "POST",
       credentials: "same-origin",
     }));
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(requestBody).toMatchObject({ action: "createCycleCount", skus: ["MUG-1"], locationId: "location-1", note: "Aisle 4" });
+    expect(requestBody).toMatchObject(writesUseGo
+      ? { capabilityId: "inventory.createCycleCount", input: { skus: ["MUG-1"], locationId: "location-1", note: "Aisle 4" } }
+      : { action: "createCycleCount", skus: ["MUG-1"], locationId: "location-1", note: "Aisle 4" });
     expect(requestBody.intentId).toEqual(expect.any(String));
     expect((await screen.findByRole("status")).textContent).toContain("Open stock count done.");
   });
@@ -50,15 +60,16 @@ describe("InventoryCycleCountPanel", () => {
   it("looks up a barcode, records a quantity, and keeps approval-pending edits", async () => {
     let nextResponse: Response = Response.json({ ok: true, data: { item: { sku: "MUG-1", name: "Ceramic mug" } } });
     const onChanged = vi.fn();
-    const fetchMock = vi.fn(async () => nextResponse);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => nextResponse);
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryCycleCountPanel items={items} locations={locations} counts={[openCount]} onChanged={onChanged} />);
+    renderPanel({ items, locations, counts: [openCount], onChanged });
 
     fireEvent.click(screen.getByRole("checkbox", { name: /Count every stocked item/ }));
     fireEvent.change(screen.getByLabelText("Scan a barcode into the count"), { target: { value: "MUG-CODE" } });
     fireEvent.click(screen.getByRole("button", { name: "Add scan" }));
     expect(await screen.findByText("Ceramic mug added to this count.")).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledWith("/api/inventory", expect.objectContaining({ body: JSON.stringify({ action: "lookupByBarcode", barcode: "MUG-CODE" }) }));
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/inventory" && init?.body === JSON.stringify({ action: "lookupByBarcode", barcode: "MUG-CODE" })
+      || path === "/api/capabilities/execute" && init?.body === JSON.stringify({ capabilityId: "inventory.lookupByBarcode", input: { barcode: "MUG-CODE" } }))).toBe(true);
 
     const quantityInput = screen.getByLabelText("Counted quantity") as HTMLInputElement;
     fireEvent.change(quantityInput, { target: { value: "3.75" } });
@@ -77,7 +88,7 @@ describe("InventoryCycleCountPanel", () => {
     const onChanged = vi.fn();
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: false, error: "stock moved since the snapshot" }), { status: 422 }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryCycleCountPanel items={items} locations={locations} counts={[completeCount]} onChanged={onChanged} />);
+    renderPanel({ items, locations, counts: [completeCount], onChanged });
 
     fireEvent.click(screen.getByRole("button", { name: "Review & post" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
@@ -90,9 +101,9 @@ describe("InventoryCycleCountPanel", () => {
   });
 
   it("rejects blank counts but allows an intentional zero", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { recorded: true } }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { recorded: 1 } }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryCycleCountPanel items={items} locations={locations} counts={[openCount]} onChanged={vi.fn()} />);
+    renderPanel({ items, locations, counts: [openCount], onChanged: vi.fn() });
 
     fireEvent.change(screen.getByLabelText("Counted quantity"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Counted quantity"), { target: { value: "" } });
@@ -104,33 +115,55 @@ describe("InventoryCycleCountPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({ action: "recordCycleCounts", counts: [{ sku: "MUG-1", countedThousandths: 0 }] });
+    const writesUseGo = typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__;
+    expect(body).toMatchObject(writesUseGo
+      ? { capabilityId: "inventory.recordCycleCounts", input: { counts: [{ sku: "MUG-1", countedThousandths: 0 }] } }
+      : { action: "recordCycleCounts", counts: [{ sku: "MUG-1", countedThousandths: 0 }] });
     expect(body.intentId).toEqual(expect.any(String));
   });
 
   it("records decimal quantities exactly in thousandths", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { recorded: true } }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { recorded: 1 } }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryCycleCountPanel items={items} locations={locations} counts={[openCount]} onChanged={vi.fn()} />);
+    renderPanel({ items, locations, counts: [openCount], onChanged: vi.fn() });
 
     fireEvent.change(screen.getByLabelText("Counted quantity"), { target: { value: "1.005" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({ action: "recordCycleCounts", counts: [{ sku: "MUG-1", countedThousandths: 1_005 }] });
+    const writesUseGo = typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__;
+    expect(body).toMatchObject(writesUseGo
+      ? { capabilityId: "inventory.recordCycleCounts", input: { counts: [{ sku: "MUG-1", countedThousandths: 1_005 }] } }
+      : { action: "recordCycleCounts", counts: [{ sku: "MUG-1", countedThousandths: 1_005 }] });
   });
 
   it("cancels an open sheet and refreshes the supplied inventory state", async () => {
     const onChanged = vi.fn();
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { cancelled: true } }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryCycleCountPanel items={items} locations={locations} counts={[openCount]} onChanged={onChanged} />);
+    renderPanel({ items, locations, counts: [openCount], onChanged });
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel count" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({ action: "cancelCycleCount", countId: openCount.id });
+    const writesUseGo = typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__;
+    expect(body).toMatchObject(writesUseGo
+      ? { capabilityId: "inventory.cancelCycleCount", input: { countId: openCount.id } }
+      : { action: "cancelCycleCount", countId: openCount.id });
     expect(body.intentId).toEqual(expect.any(String));
+  });
+
+  it("shows an uncertain write outcome so the operator can check history before retrying", async () => {
+    const onChanged = vi.fn();
+    const fetchMock = vi.fn(async () => { throw new DOMException("Timed out", "TimeoutError"); });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPanel({ items, locations, counts: [openCount], onChanged });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel count" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Check count history before retrying");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(onChanged).not.toHaveBeenCalled();
   });
 });

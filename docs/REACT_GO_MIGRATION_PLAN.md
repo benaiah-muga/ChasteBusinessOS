@@ -2135,3 +2135,15 @@ new owners and the manifest shows zero legacy runtime paths.
      current value. Fail closed while actor or organization scope is loading.
      Add focused API, proxy, page, parser, receipt replay, guard, and tenant
      tests. Browser proof remains open.
+209. (Implemented) Route Vite cycle-count create, record, post, and cancel
+     through Go's session-authenticated `inventory.createCycleCount`,
+     `inventory.recordCycleCounts`, `inventory.postCycleCount`, and
+     `inventory.cancelCycleCount` capabilities behind paired
+     `CHASTE_GO_INVENTORY_CYCLE_COUNT_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Persist retry markers
+     per actor and organization for the exact action; keep them across approval
+     pending and uncertain outcomes, and block legacy rollback while unresolved.
+     Do not retry a missing Go route through `/api/inventory`. Keep the legacy
+     selector for rollback when no Go action is unresolved, and pass the active
+     workspace scope from InventoryPage. Focused Vite API/UI and Go capability
+     tests pass; browser proof remains open.

@@ -13,6 +13,14 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite cycle-count create, record, post, and cancel use Go's session capability
+  route when paired Vite and API selectors are enabled. Exact retry markers are
+  scoped to the active actor and organization and retained through pending
+  approvals and uncertain outcomes. Go errors never retry through
+  `/api/inventory`; legacy rollback also requires loaded actor and organization
+  scope and is blocked while a Go action is unresolved. Inventory permission,
+  module, approval, and intent-receipt checks remain enforced.
+
 - Vite Projects can route create, archive, task creation, task movement, and task
   assignment through Go capabilities behind paired `CHASTE_GO_PROJECTS_WRITES=1`
   and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go derives actor and
