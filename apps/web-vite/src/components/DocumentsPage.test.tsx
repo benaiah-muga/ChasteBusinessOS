@@ -6,6 +6,7 @@ const rows = [
   { id: "doc-1", title: "Supplier invoice", status: "parsed", sourceType: "upload", createdAt: "2026-09-28T10:00:00.000Z", folder: "Finance" },
   { id: "doc-2", title: "Warehouse notes", status: "queued", sourceType: "text", createdAt: "2026-09-27T08:00:00.000Z", folder: null },
 ];
+const goDocumentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 function detail(id: string, title: string, status: string, parsedMarkdown: string | null) {
   return {
@@ -38,6 +39,7 @@ describe("Vite documents page", () => {
   });
 
   it("shows the existing library, selected document details, extracted text, and file link", async () => {
+    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", false);
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
@@ -59,6 +61,67 @@ describe("Vite documents page", () => {
     expect(screen.queryByRole("button", { name: /Supplier invoice/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Warehouse notes/ }));
     expect(await screen.findByText("Text extraction is in progress.")).not.toBeNull();
+  });
+
+  it("shows the library and preview detail from Go while keeping uploaded content links unchanged", async () => {
+    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+    const goRow = { ...rows[0]!, id: goDocumentId };
+    const goDocument = {
+      ...goRow,
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      parseError: null,
+      parsedMarkdown: "Invoice number: 42",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+      expect(request.capabilityId).toBe("documents.listIngestedDocuments");
+      return request.input.id === undefined
+        ? Response.json({ ok: true, data: { documents: [goRow], vendors: [] } })
+        : Response.json({ ok: true, data: { document: goDocument } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
+    expect(screen.getByText("Invoice number: 42")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe(`/api/documents/${goDocumentId}/content`);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/documents")).toBe(false);
+  });
+
+  it("shows selected Go list errors without retrying the legacy document route", async () => {
+    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/modules"
+      ? Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] })
+      : Response.json({ error: "Go route unavailable" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Could not load documents" })).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
+  });
+
+  it("shows a selected Go preview error without retrying the legacy detail route", async () => {
+    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+    const goRow = { ...rows[0]!, id: goDocumentId };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      const request = JSON.parse(String(init?.body)) as { input: Record<string, unknown> };
+      if (request.input.id === undefined) return Response.json({ ok: true, data: { documents: [goRow], vendors: [] } });
+      return Response.json({ error: "The document was not found." }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Could not load this document" })).not.toBeNull();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/modules",
+      "/api/capabilities/execute",
+      "/api/capabilities/execute",
+    ]);
   });
 
   it("announces loading and empty library states", async () => {

@@ -25,6 +25,7 @@ import {
   goPurchasingFinanceWritesFromEnv,
   goPurchasingPaymentRunsFromEnv,
   goPurchasingAPAgingReadsFromEnv,
+  goDocumentsIngestedReadsFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
   goPurchasingIntelReadsFromEnv,
   goPurchasingSourcingWritesFromEnv,
@@ -354,6 +355,15 @@ describe("Purchasing A/P aging Go selector", () => {
     expect(goPurchasingAPAgingReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_AP_AGING_READS: "1" })).toBe(true);
     expect(goPurchasingAPAgingReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingAPAgingReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_AP_AGING_READS: "1" })).toBe(false);
+  });
+});
+
+describe("ingested documents Go selector", () => {
+  it("requires both the document selector and session capability route", () => {
+    expect(goDocumentsIngestedReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENT_INGESTED_READS: "1" })).toBe(true);
+    expect(goDocumentsIngestedReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goDocumentsIngestedReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENT_INGESTED_READS: "0" })).toBe(false);
+    expect(goDocumentsIngestedReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_DOCUMENT_INGESTED_READS: "1" })).toBe(false);
   });
 });
 

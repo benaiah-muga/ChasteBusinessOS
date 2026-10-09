@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Documents library list and preview detail can use Go's authenticated
+  `documents.listIngestedDocuments` capability behind
+  `CHASTE_GO_DOCUMENT_INGESTED_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API enforces
+  `GO_DOCUMENT_INGESTED_READS=1` for all callers. Go output is strictly
+  validated, and selected-Go errors do not retry through legacy.
+
 - Vite inventory item history can use the authenticated Go session reader via
   the existing paired `CHASTE_GO_INVENTORY_READ_ROUTE=1` and
   `GO_INVENTORY_READ_ROUTE=1` selectors. It preserves the `{ movements }`

@@ -38,6 +38,7 @@ declare const __GO_PURCHASING_PAYMENT_RUNS__: boolean;
 declare const __GO_PURCHASING_SUPPLIER_STATEMENT_READS__: boolean;
 declare const __GO_PURCHASING_INTEL_READS__: boolean;
 declare const __GO_PURCHASING_AP_AGING_READS__: boolean;
+declare const __GO_DOCUMENT_INGESTED_READS__: boolean;
 declare const __GO_PURCHASING_SOURCING_WRITES__: boolean;
 declare const __GO_PURCHASING_VENDOR_SLICE__: boolean;
 declare const __GO_MARKETING_SEGMENT_SLICE__: boolean;

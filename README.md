@@ -314,6 +314,11 @@ the default; the flag defaults to `0`.
 preserves the list, vendors, detail, and `preview=1` projections, and excludes
 stored raw text and base64 content. Unavailable or invalid Go results fail
 closed. TypeScript remains the default; the flag defaults to `0`.
+The Vite library can select the direct session-capability route by setting
+`CHASTE_GO_DOCUMENT_INGESTED_READS=1` and
+`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API feature flag above is enforced
+inside the capability route for all callers. List and preview detail keep the
+same projections, and uploaded-content links remain on their existing path.
 `GO_DOCUMENTS_VERSION_READS=1` opts authored document version history and
 single-version reads on `GET /api/docs/:id` into the signed Go
 `documents.listDocVersions` and `documents.getDocVersion` capabilities. It

@@ -443,3 +443,27 @@ func TestSessionCapabilityHandlerCanGateManufacturingDefineBom(t *testing.T) {
 		}
 	})
 }
+
+func TestSessionCapabilityHandlerCanGateIngestedDocumentsRead(t *testing.T) {
+	body := `{"capabilityId":"documents.listIngestedDocuments","input":{},"intentId":"documents-list-read"}`
+	t.Run("default off", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"documents":[],"vendors":[]}`)}}
+		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, DocumentsIngestedDisabledCapabilities(false))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+		if response.Code != http.StatusServiceUnavailable || executor.calls != 0 {
+			t.Fatalf("status=%d executor=%d body=%s", response.Code, executor.calls, response.Body.String())
+		}
+	})
+	t.Run("opted in", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"documents":[],"vendors":[]}`)}}
+		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, DocumentsIngestedDisabledCapabilities(true))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+		if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != "documents.listIngestedDocuments" {
+			t.Fatalf("status=%d capability=%q executor=%d body=%s", response.Code, executor.capID, executor.calls, response.Body.String())
+		}
+	})
+}
