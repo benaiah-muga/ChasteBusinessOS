@@ -28,6 +28,7 @@ import {
   goSalesOrderWritesFromEnv,
   goHrExpensesFromEnv,
   goHrHiringFromEnv,
+  goHrEmployeeWritesFromEnv,
   goHrLeaveFromEnv,
   goHrPayrollFromEnv,
   goHrTimeFromEnv,
@@ -191,6 +192,15 @@ describe("HR Hiring Go selector", () => {
     expect(goHrHiringFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goHrHiringFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_HIRING: "0" })).toBe(false);
     expect(goHrHiringFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_HIRING: "1" })).toBe(false);
+  });
+});
+
+describe("HR employee write Go selector", () => {
+  it("requires both the employee write selector and session capability route", () => {
+    expect(goHrEmployeeWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_EMPLOYEE_WRITES: "1" })).toBe(true);
+    expect(goHrEmployeeWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goHrEmployeeWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_EMPLOYEE_WRITES: "0" })).toBe(false);
+    expect(goHrEmployeeWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_EMPLOYEE_WRITES: "1" })).toBe(false);
   });
 });
 

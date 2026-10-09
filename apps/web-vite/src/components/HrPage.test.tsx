@@ -70,6 +70,60 @@ afterEach(() => {
 });
 
 describe("Vite People page", () => {
+  it("retries an employee hire with the same intent after reload and clears the form", async () => {
+    window.history.replaceState(null, "", "/hr?tab=people");
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const actorId = "22222222-2222-4222-8222-222222222222";
+    const organizationId = "33333333-3333-4333-8333-333333333333";
+    const intents: string[] = [];
+    const hireInputs: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/hr") return Response.json(report);
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        expect(body.capabilityId).toBe("hr.hireEmployee");
+        intents.push(body.intentId);
+        hireInputs.push(body.input);
+        return intents.length === 1
+          ? Response.json({ pendingApproval: true, reason: "HR approval required." }, { status: 202 })
+          : Response.json({ ok: true, data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+      }
+      throw new Error(`Unexpected employee hire route: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
+    await screen.findByRole("heading", { name: "Hire an employee" });
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Mira Patel" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "mira@example.com" } });
+    fireEvent.change(screen.getByLabelText("Job title"), { target: { value: "Field technician" } });
+    fireEvent.change(screen.getByLabelText("Monthly salary (UGX)"), { target: { value: "125000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add employee" }));
+    expect(await screen.findByRole("button", { name: "Retry exact employee hire" })).not.toBeNull();
+    expect((screen.getByLabelText("Full name") as HTMLInputElement).disabled).toBe(true);
+    first.unmount();
+
+    render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact employee hire" }));
+    expect(await screen.findByText("Employee hire completed.")).not.toBeNull();
+    expect((screen.getByLabelText("Full name") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Job title") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Monthly salary (UGX)") as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "Add employee" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(intents).toHaveLength(2);
+    expect(intents[1]).toBe(intents[0]);
+    expect(hireInputs).toEqual([
+      { name: "Mira Patel", email: "mira@example.com", title: "Field technician", monthlySalaryMinor: 125000 },
+      { name: "Mira Patel", email: "mira@example.com", title: "Field technician", monthlySalaryMinor: 125000 },
+    ]);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
+  });
+
   it("uses Go for the Hiring report and all exposed pipeline changes, with exact retry after reload", async () => {
     window.history.replaceState(null, "", "/hr?tab=hiring");
     vi.stubGlobal("__GO_HR_HIRING__", true);
@@ -300,7 +354,7 @@ describe("Vite People page", () => {
       throw new Error(`Unexpected route: ${path}`);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<HrPage baseCurrency="UGX" />);
+    render(<HrPage baseCurrency="UGX" actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await screen.findByRole("heading", { name: "People" });
     fireEvent.click(screen.getByRole("tab", { name: "People" }));
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Grace Nambasa" } });

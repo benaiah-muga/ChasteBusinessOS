@@ -2061,3 +2061,13 @@ new owners and the manifest shows zero legacy runtime paths.
      unavailable responses as errors rather than empty statements. Keep other
      Purchasing flows unchanged. Add focused Vite API, page, proxy selector,
      and Go parser/executor contract tests.
+203. Route only existing Vite People employee creation through Go's
+     session-authenticated `hr.hireEmployee` capability behind paired
+     `CHASTE_GO_HR_EMPLOYEE_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Preserve salary in
+     integer minor units and Go's employee field limits/defaults. Scope durable
+     exact attempts by actor and organization, recover approvals and uncertain
+     outcomes after reload, block legacy fallback while unresolved, and fail
+     closed on Go 404. Reset the form after recovered success. Keep other HR
+     actions unchanged; add focused Vite API, page, proxy selector, and Go
+     parser/executor contract tests.

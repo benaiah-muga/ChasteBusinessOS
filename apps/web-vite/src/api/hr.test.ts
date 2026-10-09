@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
 import type { HrApiError } from "./hr";
 
 const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
@@ -18,6 +18,63 @@ afterEach(() => {
 });
 
 describe("Vite People API", () => {
+  it("keeps an exact actor/org employee hire intent through approval and recovery", async () => {
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "hireEmployee" as const, name: "Mira Patel", email: "mira@example.com", title: "Field technician", monthlySalaryMinor: 125_000 };
+    const calls: Array<{ path: string; capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (path: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      calls.push({ path: String(path), capabilityId: body.capabilityId, input: body.input, intentId: body.intentId });
+      return calls.length === 1
+        ? Response.json({ pendingApproval: true, reason: "HR approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeHireAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingHrEmployeeHireAction(scope)).resolves.toEqual(action);
+    await expect(submitHrEmployeeHireAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    await expect(readPendingHrEmployeeHireAction(scope)).resolves.toBeNull();
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ path: "/api/capabilities/execute", capabilityId: "hr.hireEmployee", input: { name: "Mira Patel", email: "mira@example.com", title: "Field technician", monthlySalaryMinor: 125_000 } });
+    expect(calls[1]?.intentId).toBe(calls[0]?.intentId);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("blocks legacy rollback after a pending or uncertain Go employee hire", async () => {
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "hireEmployee" as const, name: "Amina", monthlySalaryMinor: 100_000 };
+    const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeHireAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", false);
+    await expect(submitHrEmployeeHireAction(action, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(readPendingHrEmployeeHireAction(scope)).resolves.toEqual(action);
+  });
+
+  it("retains the exact marker after Go 404 and rejects output that violates the UUID contract", async () => {
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "hireEmployee" as const, name: "Amina", monthlySalaryMinor: 100_000 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "capability not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { employeeId: "employee-1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeHireAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingHrEmployeeHireAction(scope)).resolves.toEqual(action);
+    await expect(submitHrEmployeeHireAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrEmployeeHireAction(scope)).resolves.toEqual(action);
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", false);
+    await expect(submitHrEmployeeHireAction(action, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
   it("validates the module switchboard and employee report responses", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => input === "/api/modules"
       ? Response.json(switchboard)

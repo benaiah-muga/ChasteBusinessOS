@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite employee creation can use Go's session-authenticated `hr.hireEmployee`
+  capability behind paired `CHASTE_GO_HR_EMPLOYEE_WRITES=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Salary remains integer
+  minor units, and actor/org scoped exact attempts survive pending approvals,
+  uncertain responses, and reloads. Go 404 does not fall back to the legacy
+  writer; successful recovery clears the matching form to prevent duplicates.
+  Other People actions retain their current routes.
 - Vite supplier statements can read through Go's session-authenticated
   `purchasing.supplierStatement` capability behind paired
   `CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS=1` and
