@@ -136,6 +136,7 @@ interface StubOptions {
   goPaymentReminderResponse?: () => Response;
   goBudgetScenarioResponse?: () => Response;
   goCashForecastResponse?: () => Response;
+  goCashBasisResponse?: () => Response;
   goReportResponse?: (capabilityId: string) => Response;
 }
 
@@ -154,6 +155,16 @@ function stubAccounting(options: StubOptions = {}) {
     }
     if (url === "/api/capabilities/execute") {
       const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
+      if (capabilityId === "accounting.cashBasisReport") {
+        return options.goCashBasisResponse?.() ?? Response.json({ ok: true, data: {
+          cashInMinor: cashBasis.cashInMinor,
+          cashOutMinor: cashBasis.cashOutMinor,
+          netCashMinor: cashBasis.netCashMinor,
+          accrualRevenueMinor: cashBasis.accrualRevenueMinor,
+          accrualExpenseMinor: 2_000,
+          uncollectedMinor: cashBasis.uncollectedMinor,
+        } });
+      }
       if (capabilityId === "accounting.listBudgetScenarios") {
         return options.goBudgetScenarioResponse?.() ?? Response.json({ ok: true, data: { scenarios: [] } });
       }
@@ -468,6 +479,41 @@ describe("AccountingPage states", () => {
     expect(await screen.findByText("Net income · to date")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
     expect(await screen.findByText("Bank feeds could not load")).toBeTruthy();
+  });
+});
+
+describe("AccountingPage cash-basis summary", () => {
+  it("uses the selected Go read and keeps its extra field out of the current UI shape", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", true);
+    const { calls } = stubAccounting({
+      goCashBasisResponse: () => Response.json({ ok: true, data: {
+        cashInMinor: 5_500,
+        cashOutMinor: 1_000,
+        netCashMinor: 4_500,
+        accrualRevenueMinor: 9_000,
+        accrualExpenseMinor: 2_000,
+        uncollectedMinor: 1_000,
+      } }),
+    });
+    await renderReady();
+
+    expect(await screen.findByText("Net income · to date")).toBeTruthy();
+    const cashRead = calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.cashBasisReport"));
+    expect(cashRead).toBeTruthy();
+    expect(JSON.parse(cashRead!.body!)).toMatchObject({
+      capabilityId: "accounting.cashBasisReport",
+      input: { year: expect.any(Number) },
+    });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("cashBasis"))).toBe(false);
+  });
+
+  it("keeps the books visible when the selected Go cash-basis report fails", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", true);
+    const { calls } = stubAccounting({ goCashBasisResponse: () => Response.json({ error: "unavailable" }, { status: 503 }) });
+    await renderReady();
+
+    expect(await screen.findByText("Net income · to date")).toBeTruthy();
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("cashBasis"))).toBe(false);
   });
 });
 

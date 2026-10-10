@@ -46,6 +46,10 @@ The full v1 changelog is preserved at the bottom of this file.
   `accounting.buildReminders` capability by default when session routing is
   enabled. Strict response validation rejects malformed Go results, and
   `CHASTE_GO_ACCOUNTING_PAYMENT_REMINDERS=0` restores the legacy read.
+- Vite cash-basis summaries now read through the session-authenticated Go
+  `accounting.cashBasisReport` capability by default when session routing is
+  enabled. Go's additional accrual expense total is validated and omitted from
+  the current UI shape; unavailable or malformed Go results stay nullable.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.

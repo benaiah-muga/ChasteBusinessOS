@@ -275,6 +275,15 @@ const CashBasisSchema = z.object({
   uncollectedMinor: minor,
 }).strict();
 
+const GoCashBasisSchema = z.object({
+  cashInMinor: minor,
+  cashOutMinor: minor,
+  netCashMinor: minor,
+  accrualRevenueMinor: minor,
+  accrualExpenseMinor: minor,
+  uncollectedMinor: minor,
+}).strict();
+
 const ForecastSchema = z.object({
   startMinor: minor,
   finalMinor: minor,
@@ -502,6 +511,10 @@ export function goAccountingPaymentRemindersUseGo(): boolean {
   return typeof __GO_ACCOUNTING_PAYMENT_REMINDERS__ !== "undefined" && __GO_ACCOUNTING_PAYMENT_REMINDERS__;
 }
 
+export function goAccountingCashBasisUseGo(): boolean {
+  return typeof __GO_ACCOUNTING_CASH_BASIS__ !== "undefined" && __GO_ACCOUNTING_CASH_BASIS__;
+}
+
 export function goAccountingBankReconciliationWritesUseGo(): boolean {
   return typeof __GO_BANK_RECONCILIATION_WRITES__ !== "undefined" && __GO_BANK_RECONCILIATION_WRITES__;
 }
@@ -674,6 +687,28 @@ export async function fetchAccountingCashBasis(year: number, signal?: AbortSigna
   if (!Number.isSafeInteger(year) || year < 2000 || year > 2100) {
     throw new AccountingApiError(400, "Choose a valid reporting year.");
   }
+  if (goAccountingCashBasisUseGo()) {
+    try {
+      const result = await readGoAccountingCapability(
+        "accounting.cashBasisReport",
+        { year },
+        GoCashBasisSchema,
+        "load the cash-basis summary",
+        signal,
+      );
+      const projected = CashBasisSchema.safeParse({
+        cashInMinor: result.cashInMinor,
+        cashOutMinor: result.cashOutMinor,
+        netCashMinor: result.netCashMinor,
+        accrualRevenueMinor: result.accrualRevenueMinor,
+        uncollectedMinor: result.uncollectedMinor,
+      });
+      return projected.success ? projected.data : null;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return null;
+    }
+  }
   const { response, body } = await getJson("/api/accounting", {
     method: "POST",
     body: JSON.stringify({ action: "cashBasis", year }),
@@ -711,7 +746,7 @@ export async function fetchAccountingBudgetScenarios(signal?: AbortSignal): Prom
 }
 
 async function readGoAccountingCapability<T>(
-  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.buildReminders",
+  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.buildReminders" | "accounting.cashBasisReport",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   context: string,

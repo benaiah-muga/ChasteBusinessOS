@@ -2443,3 +2443,10 @@ new owners and the manifest shows zero legacy runtime paths.
      focused Vite API, selector, and Accounting page coverage. Go's binary
      customer-name tie ordering can differ from browser locale ordering for
      some names; reminder contents and grouping are unchanged.
+244. (Vite implementation complete; browser proof pending) Route Vite
+     cash-basis summary reads through the session-authenticated
+     `accounting.cashBasisReport` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the Go response,
+     including its `accrualExpenseMinor` field, then project to the existing
+     five-field UI shape. Keep failures nullable and do not fall back after a
+     selected Go request; set `CHASTE_GO_ACCOUNTING_CASH_BASIS=0` for rollback.

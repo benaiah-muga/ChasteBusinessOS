@@ -13,6 +13,7 @@ import {
   fetchCustomerStatement,
   goAccountingCustomerStatementReadsUseGo,
   fetchPaymentReminders,
+  goAccountingCashBasisUseGo,
   goAccountingPaymentRemindersUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
@@ -331,6 +332,58 @@ describe("accounting API: auxiliary reads never blank the books", () => {
       method: "POST",
       body: JSON.stringify({ action: "cashBasis", year: 2026 }),
     }));
+  });
+
+  it("uses the strict Go cash-basis contract and projects to the existing UI shape", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: {
+      cashInMinor: 5_000,
+      cashOutMinor: 1_000,
+      netCashMinor: 4_000,
+      accrualRevenueMinor: 9_000,
+      accrualExpenseMinor: 2_000,
+      uncollectedMinor: 1_000,
+    } }));
+
+    expect(goAccountingCashBasisUseGo()).toBe(true);
+    await expect(fetchAccountingCashBasis(2026)).resolves.toEqual({
+      cashInMinor: 5_000,
+      cashOutMinor: 1_000,
+      netCashMinor: 4_000,
+      accrualRevenueMinor: 9_000,
+      uncollectedMinor: 1_000,
+    });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.cashBasisReport",
+      input: { year: 2026 },
+      intentId: expect.any(String),
+    });
+  });
+
+  it.each([
+    { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }) },
+    { label: "capability rejection", response: () => Response.json({ ok: false, error: "Cash basis failed" }, { status: 422 }) },
+    { label: "missing Go-only expense", response: () => Response.json({ ok: true, data: { cashInMinor: 1, cashOutMinor: 0, netCashMinor: 1, accrualRevenueMinor: 1, uncollectedMinor: 0 } }) },
+    { label: "unsafe integer", response: () => Response.json({ ok: true, data: { cashInMinor: Number.MAX_SAFE_INTEGER + 1, cashOutMinor: 0, netCashMinor: 1, accrualRevenueMinor: 1, accrualExpenseMinor: 0, uncollectedMinor: 0 } }) },
+    { label: "unknown field", response: () => Response.json({ ok: true, data: { cashInMinor: 1, cashOutMinor: 0, netCashMinor: 1, accrualRevenueMinor: 1, accrualExpenseMinor: 0, uncollectedMinor: 0, extra: true } }) },
+  ])("keeps Go cash-basis $label nullable without legacy fallback", async ({ response }) => {
+    vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", true);
+    const mock = stubFetch(response);
+    await expect(fetchAccountingCashBasis(2026)).resolves.toBeNull();
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("preserves caller cancellation for a selected Go cash-basis read", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", true);
+    const controller = new AbortController();
+    controller.abort();
+    const mock = stubFetch(() => { throw new DOMException("Aborted", "AbortError"); });
+    await expect(fetchAccountingCashBasis(2026, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
   it("rejects an out-of-range reporting year before making a request", async () => {
