@@ -60,6 +60,7 @@ declare const __GO_MESSAGING_DELETE_SLICE__: boolean;
 declare const __GO_MESSAGING_PEOPLE_READS__: boolean;
 declare const __GO_MESSAGING_CONVERSATION_LIST__: boolean;
 declare const __GO_MESSAGING_CONVERSATION_CREATE__: boolean;
+declare const __GO_MESSAGING_CONVERSATION_UPDATE__: boolean;
 declare const __GO_MESSAGING_THREAD_READ__: boolean;
 declare const __GO_MESSAGING_READ_CURSOR__: boolean;
 declare const __GO_MESSAGING_REACTIONS__: boolean;

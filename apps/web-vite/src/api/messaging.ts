@@ -163,6 +163,15 @@ const GoCreateConversationEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ conversationId: z.string().uuid() }).strict(),
 }).strict();
+const UpdateConversationInputSchema = z.object({
+  conversationId: z.string().uuid(),
+  title: z.string().trim().min(1).max(80).optional(),
+  agentEnabled: z.boolean().optional(),
+}).strict();
+const GoUpdateConversationEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ conversationId: z.string().uuid() }).strict(),
+}).strict();
 const SendMessageSchema = z.object({ ok: z.literal(true), agentReply: z.string().nullable() }).strict();
 export type SendMessageResult = z.infer<typeof SendMessageSchema>;
 const GoSendMessageEnvelopeSchema = z.object({
@@ -730,11 +739,49 @@ export function changeConversation(
   conversationId: string,
   action: ConversationLifecycleAction,
   signal?: AbortSignal,
+  options: { intentId?: string } = {},
 ): Promise<MessagingOutcome<{ ok: true }>> {
+  const intentId = options.intentId === undefined ? newIntentId() : z.string().uuid().parse(options.intentId);
+  const goUpdateOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_UPDATE__?: boolean }).__GO_MESSAGING_CONVERSATION_UPDATE__;
+  const goUpdateSelected = goUpdateOverride ?? (typeof __GO_MESSAGING_CONVERSATION_UPDATE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_UPDATE__);
+  if (action.action === "update" && goUpdateSelected) {
+    const parsedInput = UpdateConversationInputSchema.safeParse({
+      conversationId,
+      ...(action.title !== undefined ? { title: action.title } : {}),
+      ...(action.agentEnabled !== undefined ? { agentEnabled: action.agentEnabled } : {}),
+    });
+    if (!parsedInput.success || (parsedInput.data.title === undefined && parsedInput.data.agentEnabled === undefined)) {
+      throw new MessagingApiError(400, "Enter a valid conversation id and at least one conversation setting to update.");
+    }
+    return updateConversationThroughGo(parsedInput.data, intentId, signal);
+  }
   return governed(`/api/conversations/${encodeURIComponent(conversationId)}`, {
     method: "PATCH",
-    body: JSON.stringify({ ...action, intentId: newIntentId() }),
+    body: JSON.stringify({ ...action, intentId }),
   }, `apply "${action.action}"`, OkEnvelopeSchema, "This change is waiting for approval.", signal);
+}
+
+async function updateConversationThroughGo(
+  input: z.infer<typeof UpdateConversationInputSchema>,
+  intentId: string,
+  signal?: AbortSignal,
+): Promise<MessagingOutcome<{ ok: true }>> {
+  const { response, body } = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "messaging.updateConversation", input, intentId }),
+  }, "update this conversation", signal);
+  if (response.status === 202) {
+    const parsed = PendingApprovalSchema.safeParse(body);
+    if (!parsed.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to update this conversation.");
+    return {
+      kind: "pending",
+      reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? "Updating this conversation is waiting for approval.",
+    };
+  }
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "update this conversation"));
+  const parsed = GoUpdateConversationEnvelopeSchema.safeParse(body);
+  if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected response to update this conversation.");
+  return { kind: "completed", data: { ok: true } };
 }
 
 export async function searchMessages(query: string, signal?: AbortSignal): Promise<MessageSearchResult[]> {

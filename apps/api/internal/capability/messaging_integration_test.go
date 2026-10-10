@@ -510,6 +510,56 @@ func TestMessagingCreateConversationPersistsChannelStateAndCreatorMembership(t *
 	}
 }
 
+func TestMessagingUpdateConversationMatchesViteContractAndReplaysReceipt(t *testing.T) {
+	fx := newMessagingFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'messaging.write', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	channel := fx.createChannel(t, fx.userID, "settings channel")
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE conversations SET agent_enabled=true WHERE id=$1::uuid AND org_id=$2::uuid`, channel, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+
+	input := `{"conversationId":"` + channel + `","title":"Updated settings","agentEnabled":false,"extra":"ignored like the Vite capability schema"}`
+	result, err := executeMessagingCapability(fx, messagingUpdateConversationCapabilityID, input, "messaging-update-vite-contract")
+	if err != nil || !result.OK {
+		t.Fatalf("update conversation result=%+v err=%v", result, err)
+	}
+	if string(result.Data) != `{"conversationId":"`+channel+`"}` {
+		t.Fatalf("update conversation output=%s, want the Vite {conversationId} contract", result.Data)
+	}
+	var title string
+	var agentEnabled bool
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT title, agent_enabled FROM conversations WHERE id=$1::uuid AND org_id=$2::uuid`, channel, fx.orgID).Scan(&title, &agentEnabled); err != nil {
+		t.Fatal(err)
+	}
+	if title != "Updated settings" || agentEnabled {
+		t.Fatalf("updated conversation title=%q agentEnabled=%v, want Updated settings and false", title, agentEnabled)
+	}
+
+	replayed, err := executeMessagingCapability(fx, messagingUpdateConversationCapabilityID, input, "messaging-update-vite-contract")
+	var replayedOutput MessagingConversationIDOutput
+	if unmarshalErr := json.Unmarshal(replayed.Data, &replayedOutput); unmarshalErr != nil {
+		t.Fatal(unmarshalErr)
+	}
+	if err != nil || !replayed.OK || !replayed.Replayed || replayedOutput.ConversationID != channel {
+		t.Fatalf("same-intent update receipt replay=%+v err=%v, want the original Vite output", replayed, err)
+	}
+
+	// Explicit false is a real update; omission must preserve the existing setting.
+	agentOnly := `{"conversationId":"` + channel + `","agentEnabled":true}`
+	agentResult, err := executeMessagingCapability(fx, messagingUpdateConversationCapabilityID, agentOnly, "messaging-update-vite-agent-toggle")
+	if err != nil || !agentResult.OK || string(agentResult.Data) != `{"conversationId":"`+channel+`"}` {
+		t.Fatalf("agent-only update result=%+v err=%v", agentResult, err)
+	}
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT title, agent_enabled FROM conversations WHERE id=$1::uuid AND org_id=$2::uuid`, channel, fx.orgID).Scan(&title, &agentEnabled); err != nil {
+		t.Fatal(err)
+	}
+	if title != "Updated settings" || !agentEnabled {
+		t.Fatalf("agent-only update changed title or missed toggle: title=%q agentEnabled=%v", title, agentEnabled)
+	}
+}
+
 func TestMessagingDirectMessagesRefuseChannelOperations(t *testing.T) {
 	fx := newMessagingFixture(t)
 	direct, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingConversationIDOutput, error) {

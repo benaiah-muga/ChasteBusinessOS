@@ -858,7 +858,7 @@ func parseMessagingUpdateConversationInput(raw json.RawMessage) (MessagingUpdate
 	if input.ConversationID, err = messagingRequiredString(fields, "conversationId"); err != nil {
 		return MessagingUpdateConversationInput{}, err
 	}
-	if input.Title, err = messagingTrimsToString(fields, "title", 1, messagingTitleMax); err != nil {
+	if input.Title, err = messagingOptionalBoundedString(fields, "title", 1, messagingTitleMax); err != nil {
 		return MessagingUpdateConversationInput{}, err
 	}
 	if input.AgentEnabled, err = messagingOptionalBool(fields, "agentEnabled"); err != nil {
@@ -955,11 +955,12 @@ func parseMessagingRestoreMessageEditInput(raw json.RawMessage) (MessagingRestor
 }
 
 func messagingOptionalBoundedString(fields map[string]json.RawMessage, key string, minLength, maxLength int) (*string, error) {
-	value, err := optionalString(fields, key)
+	value, err := messagingOptionalString(fields, key)
 	if err != nil || value == nil {
 		return value, err
 	}
-	if len(*value) < minLength || len(*value) > maxLength {
+	length := utf16Length(*value)
+	if length < minLength || length > maxLength {
 		return nil, fmt.Errorf("%s must contain between %d and %d characters", key, minLength, maxLength)
 	}
 	return value, nil

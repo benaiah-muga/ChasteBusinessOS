@@ -33,6 +33,7 @@ import {
   goMessagingPeopleReadsFromEnv,
   goMessagingConversationListFromEnv,
   goMessagingConversationCreateFromEnv,
+  goMessagingConversationUpdateFromEnv,
   goMessagingThreadReadsFromEnv,
   goMessagingReadCursorFromEnv,
   goMessagingReactionsFromEnv,
@@ -458,6 +459,15 @@ describe("messaging conversation-create Go selector", () => {
     expect(goMessagingConversationCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_CREATE: "0" })).toBe(false);
     expect(goMessagingConversationCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_CREATE: "1" })).toBe(false);
     expect(goMessagingConversationCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_LIST: "0" })).toBe(true);
+  });
+});
+
+describe("messaging conversation-update Go selector", () => {
+  it("requires session capability routing, defaults on, and supports its own rollback", () => {
+    expect(goMessagingConversationUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingConversationUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_UPDATE: "0" })).toBe(false);
+    expect(goMessagingConversationUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_UPDATE: "1" })).toBe(false);
+    expect(goMessagingConversationUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_CREATE: "0" })).toBe(true);
   });
 });
 

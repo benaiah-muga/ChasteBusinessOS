@@ -218,6 +218,12 @@ export function goSendIntentStorageKey(me: string | null, conversationId: string
 type GoSendIntent = { storageKey: string; fingerprint: string; intentId: string };
 type GoSendIntentRef = { current: GoSendIntent | null };
 type PendingCreateIntent = { fingerprint: string; intentId: string; title: string; agentEnabled: boolean };
+type PendingConversationUpdate = {
+  conversationId: string;
+  action: Extract<Parameters<typeof changeConversation>[1], { action: "update" }>;
+  fingerprint: string;
+  intentId: string;
+};
 
 function createIntentStorageKey(actorId: string, organizationId: string): string {
   return `chaste:conversation-create:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}`;
@@ -263,6 +269,78 @@ function clearPendingCreateIntent(actorId: string | null, organizationId: string
   if (!actorId || !organizationId) return;
   try {
     window.sessionStorage.removeItem(createIntentStorageKey(actorId, organizationId));
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
+}
+
+function conversationUpdateIntentStorageKey(actorId: string, organizationId: string, conversationId: string): string {
+  return `chaste:conversation-update:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}:${encodeURIComponent(conversationId)}`;
+}
+
+function conversationUpdateFingerprint(conversationId: string, action: PendingConversationUpdate["action"]): string {
+  return JSON.stringify([conversationId, action]);
+}
+
+function parsePendingConversationUpdate(value: unknown): PendingConversationUpdate | null {
+  if (typeof value !== "object" || value === null) return null;
+  const stored = value as Partial<PendingConversationUpdate>;
+  if (
+    typeof stored.conversationId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.conversationId)
+    || typeof stored.intentId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.intentId)
+    || typeof stored.fingerprint !== "string"
+    || typeof stored.action !== "object"
+    || stored.action === null
+    || stored.action.action !== "update"
+  ) return null;
+  const action = stored.action as PendingConversationUpdate["action"];
+  if (
+    (action.title !== undefined && (typeof action.title !== "string" || action.title.trim().length < 1 || action.title.trim().length > 80))
+    || (action.agentEnabled !== undefined && typeof action.agentEnabled !== "boolean")
+    || (action.title === undefined && action.agentEnabled === undefined)
+  ) return null;
+  if (stored.fingerprint !== conversationUpdateFingerprint(stored.conversationId, action)) return null;
+  return { conversationId: stored.conversationId, action, fingerprint: stored.fingerprint, intentId: stored.intentId };
+}
+
+function readPendingConversationUpdate(actorId: string, organizationId: string, conversationId: string): PendingConversationUpdate | null {
+  try {
+    return parsePendingConversationUpdate(JSON.parse(window.sessionStorage.getItem(conversationUpdateIntentStorageKey(actorId, organizationId, conversationId)) ?? "null"));
+  } catch {
+    return null;
+  }
+}
+
+function readPendingConversationUpdateForScope(actorId: string, organizationId: string): PendingConversationUpdate | null {
+  const prefix = `chaste:conversation-update:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}:`;
+  try {
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const pending = parsePendingConversationUpdate(JSON.parse(window.sessionStorage.getItem(key) ?? "null"));
+      if (pending) return pending;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function persistPendingConversationUpdate(actorId: string | null, organizationId: string | null, update: PendingConversationUpdate): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.setItem(conversationUpdateIntentStorageKey(actorId, organizationId, update.conversationId), JSON.stringify(update));
+  } catch {
+    // The in-memory intent still protects retries for this page session.
+  }
+}
+
+function clearPendingConversationUpdate(actorId: string | null, organizationId: string | null, conversationId: string): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.removeItem(conversationUpdateIntentStorageKey(actorId, organizationId, conversationId));
   } catch {
     // Storage can be unavailable in restricted browser contexts.
   }
@@ -628,6 +706,8 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const [memberResults, setMemberResults] = useState<Person[]>([]);
   const [addUserId, setAddUserId] = useState("");
   const [dialogNotice, setDialogNotice] = useState<Notice | null>(null);
+  const [pendingConversationUpdate, setPendingConversationUpdate] = useState<PendingConversationUpdate | null>(null);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [confirmDeleteConversation, setConfirmDeleteConversation] = useState(false);
   const [confirmDeleteMessageId, setConfirmDeleteMessageId] = useState<string | null>(null);
   const [confirmDeleteMessageScope, setConfirmDeleteMessageScope] = useState<string | null>(null);
@@ -640,6 +720,8 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const draftOwnerRef = useRef<string | null>(null);
   const createIntentRef = useRef<PendingCreateIntent | null>(null);
   const creatingRef = useRef(false);
+  const lifecycleBusyRef = useRef(false);
+  const pendingConversationUpdateRef = useRef<PendingConversationUpdate | null>(null);
   const goSendIntentRef = useRef<GoSendIntent | null>(null);
   const aroundTargetRef = useRef<string | null>(null);
   const wideRef = useRef(wide);
@@ -663,6 +745,20 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     setNewAgent(pending.agentEnabled);
     setComposerOpen(true);
     setNotice({ tone: "pending", text: "An earlier channel creation is unresolved. Submit the saved details to check the same request." });
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    pendingConversationUpdateRef.current = null;
+    setPendingConversationUpdate(null);
+    if (!actorId || !organizationId) return;
+    const pending = readPendingConversationUpdateForScope(actorId, organizationId);
+    if (!pending) return;
+    pendingConversationUpdateRef.current = pending;
+    setPendingConversationUpdate(pending);
+    setActiveId(pending.conversationId);
+    setRenameValue(pending.action.title ?? "");
+    setSettingsOpen(true);
+    setDialogNotice({ tone: "pending", text: "An earlier conversation update is unresolved. Retry the saved change to check the same request." });
   }, [actorId, organizationId]);
 
   const activeConv = conversations?.find((conversation) => conversation.id === activeId) ?? null;
@@ -1126,12 +1222,49 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
 
   const runLifecycle = useCallback(async (action: Parameters<typeof changeConversation>[1]): Promise<boolean> => {
     if (!activeId) return false;
+    if (lifecycleBusyRef.current) return false;
+    lifecycleBusyRef.current = true;
+    setLifecycleBusy(true);
     setDialogNotice(null);
+    const goUpdateEnabled = typeof __GO_MESSAGING_CONVERSATION_UPDATE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_UPDATE__;
+    let updateIntent: PendingConversationUpdate | null = null;
     try {
-      const outcome = await changeConversation(activeId, action);
+      if (goUpdateEnabled && action.action === "update") {
+        if (!actorId?.trim() || !organizationId?.trim()) {
+          setDialogNotice({ tone: "error", text: "Conversation updates are paused until the actor and organization are resolved." });
+          return false;
+        }
+        const fingerprint = conversationUpdateFingerprint(activeId, action);
+        const retained = pendingConversationUpdateRef.current?.conversationId === activeId
+          ? pendingConversationUpdateRef.current
+          : readPendingConversationUpdate(actorId, organizationId, activeId);
+        if (retained && retained.fingerprint !== fingerprint) {
+          pendingConversationUpdateRef.current = retained;
+          setPendingConversationUpdate(retained);
+          setDialogNotice({ tone: "pending", text: "An earlier conversation update is unresolved. Retry the saved change before starting another update." });
+          return false;
+        }
+        updateIntent = retained ?? {
+          conversationId: activeId,
+          action,
+          fingerprint,
+          intentId: crypto.randomUUID(),
+        };
+        pendingConversationUpdateRef.current = updateIntent;
+        setPendingConversationUpdate(updateIntent);
+        persistPendingConversationUpdate(actorId, organizationId, updateIntent);
+      }
+      const outcome = updateIntent
+        ? await changeConversation(activeId, action, undefined, { intentId: updateIntent.intentId })
+        : await changeConversation(activeId, action);
       if (outcome.kind === "pending") {
         setDialogNotice({ tone: "pending", text: outcome.reason });
         return false;
+      }
+      if (updateIntent) {
+        clearPendingConversationUpdate(actorId, organizationId, activeId);
+        pendingConversationUpdateRef.current = null;
+        setPendingConversationUpdate(null);
       }
       setDialogNotice(null);
       await loadConversations();
@@ -1139,8 +1272,11 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     } catch (error) {
       setDialogNotice({ tone: "error", text: errorText(error, "That change did not go through.") });
       return false;
+    } finally {
+      lifecycleBusyRef.current = false;
+      setLifecycleBusy(false);
     }
-  }, [activeId, loadConversations]);
+  }, [activeId, actorId, loadConversations, organizationId]);
 
   const saveEdit = useCallback(async () => {
     if (!editingId || !editingBody.trim()) return;
@@ -1835,6 +1971,19 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
             </p>
           )}
 
+          {pendingConversationUpdate?.conversationId === activeConv.id && (
+            <div className="messages-dialog-section">
+              <button
+                type="button"
+                className="messages-button messages-button-primary"
+                disabled={lifecycleBusy}
+                onClick={() => { void runLifecycle(pendingConversationUpdate.action); }}
+              >
+                {lifecycleBusy ? "Checking update…" : "Retry update"}
+              </button>
+            </div>
+          )}
+
           {activeConv.kind === "channel" && (
             <div className="messages-dialog-section">
               <span className="messages-dialog-field">
@@ -1842,14 +1991,17 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
                 <span className="messages-dialog-row">
                   <input
                     type="text"
-                    value={renameValue}
+                    value={pendingConversationUpdate?.conversationId === activeConv.id && pendingConversationUpdate.action.title
+                      ? pendingConversationUpdate.action.title
+                      : renameValue}
+                    disabled={pendingConversationUpdate?.conversationId === activeConv.id}
                     onChange={(event) => setRenameValue(event.target.value)}
                     aria-label="Channel name"
                   />
                   <button
                     type="button"
                     className="messages-button messages-button-primary"
-                    disabled={!renameValue.trim() || renameValue.trim() === activeConv.title}
+                    disabled={lifecycleBusy || pendingConversationUpdate?.conversationId === activeConv.id || !renameValue.trim() || renameValue.trim() === activeConv.title}
                     onClick={() => { void runLifecycle({ action: "update", title: renameValue.trim() }); }}
                   >
                     Rename
@@ -1866,7 +2018,9 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
             </span>
             <Toggle
               label="Chaste participates"
-              checked={activeConv.agentEnabled}
+              checked={pendingConversationUpdate?.conversationId === activeConv.id && pendingConversationUpdate.action.agentEnabled !== undefined
+                ? pendingConversationUpdate.action.agentEnabled
+                : activeConv.agentEnabled}
               onChange={(next) => { void runLifecycle({ action: "update", agentEnabled: next }); }}
             />
           </div>
@@ -1887,7 +2041,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
                   <button
                     type="button"
                     className="messages-button messages-button-primary"
-                    disabled={!addUserId}
+                    disabled={lifecycleBusy || !addUserId}
                     onClick={async () => {
                       if (await runLifecycle({ action: "addMember", userId: addUserId })) {
                         setAddUserId("");
@@ -1926,6 +2080,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
               <button
                 type="button"
                 className="messages-button messages-button-quiet"
+                disabled={lifecycleBusy}
                 onClick={async () => {
                   if (await runLifecycle({ action: "archive", archived: !activeConv.archivedAt })) setSettingsOpen(false);
                 }}
@@ -1933,7 +2088,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
                 {activeConv.archivedAt ? "Restore" : "Archive"}
               </button>
             )}
-            <button type="button" className="messages-button messages-button-quiet" onClick={() => { void leaveConversation(); }}>Leave</button>
+            <button type="button" className="messages-button messages-button-quiet" disabled={lifecycleBusy} onClick={() => { void leaveConversation(); }}>Leave</button>
             {activeConv.kind === "channel" && activeConv.createdByMe && (
               <button type="button" className="messages-button messages-button-danger" onClick={() => setConfirmDeleteConversation(true)}>Delete channel</button>
             )}

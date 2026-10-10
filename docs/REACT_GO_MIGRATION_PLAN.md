@@ -2391,3 +2391,10 @@ new owners and the manifest shows zero legacy runtime paths.
      receipt, retain the exact request intent across reloads within the actor
      and organization session scope, and set
      `CHASTE_GO_MESSAGING_CONVERSATION_CREATE=0` for legacy rollback.
+237. (Vite implementation complete; browser proof pending) Route conversation
+     settings updates through the session-authenticated
+     `messaging.updateConversation` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the Go receipt, reject
+     empty updates before dispatch, retain the exact pending settings and
+     intent across reloads within the actor, organization, and conversation
+     scope, and set `CHASTE_GO_MESSAGING_CONVERSATION_UPDATE=0` for rollback.

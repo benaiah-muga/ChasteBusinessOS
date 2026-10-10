@@ -1537,6 +1537,69 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     expect(screen.getByRole("dialog", { name: /general/ })).not.toBeNull();
   });
 
+  it("keeps a Go conversation update pending and retries the saved details with one stable intent", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_UPDATE__", true);
+    const updates: Record<string, unknown>[] = [];
+    const legacyPatches: string[] = [];
+    let releaseFirst: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") {
+        const title = updates.length >= 2 ? "operations" : "general";
+        return Response.json({ conversations: [conversation({ title })], me });
+      }
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        updates.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (updates.length === 1) return new Promise<Response>((resolve) => { releaseFirst = resolve; });
+        return Response.json({ ok: true, data: { conversationId: channelId } });
+      }
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
+        legacyPatches.push(path);
+        return Response.json({ error: "unexpected legacy update" }, { status: 500 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const scope = { actorId: me, organizationId: "conversation-update-org" };
+    const firstMount = render(<MessagesPage {...scope} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.change(screen.getByLabelText("Channel name"), { target: { value: "operations" } });
+    const rename = screen.getByRole("button", { name: "Rename" });
+    await act(async () => {
+      fireEvent.click(rename);
+      fireEvent.click(rename);
+    });
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      capabilityId: "messaging.updateConversation",
+      input: { conversationId: channelId, title: "operations" },
+      intentId: expect.any(String),
+    });
+    await act(async () => {
+      releaseFirst?.(Response.json({ pendingApproval: true, hint: "Waiting for approval." }, { status: 202 }));
+    });
+    expect((await screen.findByRole("status")).textContent).toContain("Waiting for approval.");
+    expect((screen.getByLabelText("Channel name") as HTMLInputElement).value).toBe("operations");
+    firstMount.unmount();
+
+    render(<MessagesPage {...scope} />);
+    const restoredName = await screen.findByLabelText("Channel name");
+    expect((restoredName as HTMLInputElement).value).toBe("operations");
+    expect((await screen.findByRole("status")).textContent).toMatch(/earlier conversation update is unresolved/i);
+    fireEvent.click(screen.getByRole("button", { name: "Retry update" }));
+    await waitFor(() => expect(updates).toHaveLength(2));
+    expect(updates[1]?.intentId).toBe(updates[0]?.intentId);
+    expect(updates[1]?.input).toEqual({ conversationId: channelId, title: "operations" });
+    await waitFor(() => expect(screen.getByRole("dialog", { name: /#operations/ })).not.toBeNull());
+    expect(legacyPatches).toHaveLength(0);
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
   it("deletes a message through the governed route after a confirmation", async () => {
     const deletes: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

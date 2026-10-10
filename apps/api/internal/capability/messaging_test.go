@@ -97,6 +97,7 @@ func TestMessagingParsersAcceptEveryValidManifestPayload(t *testing.T) {
 		{messagingCreateConversationCapabilityID, `{"title":"ops"}`, `{"title":"ops","kind":"channel","agentEnabled":false}`},
 		{messagingCreateConversationCapabilityID, `{"title":"dm","kind":"dm","agentEnabled":true}`, `{"title":"dm","kind":"dm","agentEnabled":true}`},
 		{messagingUpdateConversationCapabilityID, `{"conversationId":"conv-1","title":"renamed"}`, `{"conversationId":"conv-1","title":"renamed"}`},
+		{messagingUpdateConversationCapabilityID, `{"conversationId":"conv-1","title":"  renamed  "}`, `{"conversationId":"conv-1","title":"  renamed  "}`},
 		{messagingUpdateConversationCapabilityID, `{"conversationId":"conv-1","agentEnabled":false}`, `{"conversationId":"conv-1","agentEnabled":false}`},
 		{messagingArchiveConversationCapabilityID, `{"conversationId":"conv-1"}`, `{"conversationId":"conv-1","archived":true}`},
 		{messagingArchiveConversationCapabilityID, `{"conversationId":"conv-1","archived":false}`, `{"conversationId":"conv-1","archived":false}`},

@@ -849,6 +849,52 @@ describe("messaging API client", () => {
       .resolves.toEqual({ kind: "pending", reason: "This change waits for approval in the Approvals inbox." });
   });
 
+  it("updates conversations through Go with a stable intent and exact capability contract", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_UPDATE__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { conversationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "update", title: "  ops  ", agentEnabled: false }, undefined, { intentId }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({
+      capabilityId: "messaging.updateConversation",
+      input: { conversationId, title: "ops", agentEnabled: false },
+      intentId,
+    });
+  });
+
+  it("handles Go update approval and rejects malformed receipts without legacy fallback", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_UPDATE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, hint: "Waiting for approval." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { conversationId: "not-a-uuid" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "update", title: "ops" }))
+      .resolves.toEqual({ kind: "pending", reason: "Waiting for approval." });
+    await expect(changeConversation(conversationId, { action: "update", title: "ops" }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("validates selected Go update inputs before dispatch and keeps unrelated lifecycle actions legacy", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_UPDATE__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(() => changeConversation("bad-id", { action: "update", title: "ops" })).toThrow(MessagingApiError);
+    expect(() => changeConversation(conversationId, { action: "update", title: "  " })).toThrow(MessagingApiError);
+    expect(() => changeConversation(conversationId, { action: "update", title: "x".repeat(81) })).toThrow(MessagingApiError);
+    expect(() => changeConversation(conversationId, { action: "update" })).toThrow("at least one conversation setting");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await changeConversation(conversationId, { action: "archive", archived: true });
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
+  });
+
   it("creates a conversation from the 201 body and reports a pending create", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", false);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ conversationId }, { status: 201 }));

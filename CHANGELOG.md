@@ -17,6 +17,10 @@ The full v1 changelog is preserved at the bottom of this file.
   `messaging.createConversation` capability by default when session routing is
   enabled. The pending form and idempotency key survive reloads within the
   actor and organization session scope.
+- Vite conversation settings updates now route through the session-authenticated
+  Go `messaging.updateConversation` capability by default when session routing
+  is enabled. Pending settings and their idempotency key survive reloads within
+  the actor, organization, and conversation scope.
 
 ### Changed
 
