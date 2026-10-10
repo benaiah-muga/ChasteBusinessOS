@@ -389,7 +389,9 @@ The full v1 changelog is preserved at the bottom of this file.
   attempts and approval recovery survive reload; Go 404 and uncertain outcomes
   never fall back to the legacy writer. Go checks the locked invoice's live
   balance before posting, and an unresolved attempt blocks legacy rollback.
-  Other Accounting actions retain their existing routes.
+  Browser-wide Web Locks serialize retry reservations across tabs; browsers
+  without Web Locks fail closed before applying a credit. Other Accounting
+  actions retain their existing routes.
 - Vite manual/general journal reversals can use Go's session-authenticated
   `accounting.reverseEntry` capability behind the paired
   `CHASTE_GO_ACCOUNTING_REVERSE_ENTRY=1` and

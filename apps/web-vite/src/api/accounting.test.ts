@@ -970,6 +970,38 @@ describe("accounting API: Go credit notes", () => {
     invoiceBalanceMinor: 8000,
   };
 
+  beforeEach(stubPaymentLocks);
+
+  it("serializes cross-tab credit reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    const mock = stubFetch(() => Response.json({ pendingApproval: true }, { status: 202 }));
+    const alternateCredit = { ...action, reason: "Correction credit" };
+
+    const outcomes = await Promise.allSettled([
+      submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope),
+      submitAccountingAction("/api/accounting", alternateCredit, undefined, paymentRetryScope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(mock).toHaveBeenCalledTimes(1);
+    const stored = await readPendingAccountingCreditNote(paymentRetryScope);
+    expect([action, alternateCredit]).toContainEqual(stored);
+  });
+
+  it("fails closed when browser-wide credit locks are unavailable", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const mock = stubFetch(() => Response.json({ ok: true, data: output }));
+
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a credit note"),
+    });
+    expect(mock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
   it("keeps other Accounting operations on their existing endpoint", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
     const mock = stubFetch(() => Response.json({ ok: true, data: {} }));

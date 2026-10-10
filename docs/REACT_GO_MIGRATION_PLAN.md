@@ -1997,7 +1997,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Locks fail closed. Vite API/page/proxy tests, typecheck, lint, and the Go
      invoice creation integration test pass. Authenticated browser proof
      remains open.
-193. Route only Vite `creditNote` writes through Go's session-authenticated
+193. (Vite/Go implementation complete; browser proof pending) Route only Vite `creditNote` writes through Go's session-authenticated
      `accounting.creditNote` capability behind paired
      `CHASTE_GO_ACCOUNTING_CREDIT_NOTE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the credit-note
@@ -2007,8 +2007,11 @@ new owners and the manifest shows zero legacy runtime paths.
      Go 404. Keep other Accounting operations on their current route. The Go
      executor remains authoritative for the locked invoice's current balance.
      Add focused API, proxy selector, and AccountingPage tests; the existing Go
-     credit-note integration test remains the contract proof. Authenticated
-     browser proof remains open.
+     credit-note integration test remains the contract proof. Atomic
+     browser-wide reservations prevent cross-tab intent races, and browsers
+     without Web Locks fail closed. Vite API/page/proxy tests, typecheck, lint,
+     and the Go credit-note contract test pass. Authenticated browser proof
+     remains open.
 194. Route only Vite manual/general `reverse` writes through Go's
      session-authenticated `accounting.reverseEntry` capability behind paired
      `CHASTE_GO_ACCOUNTING_REVERSE_ENTRY=1` and
