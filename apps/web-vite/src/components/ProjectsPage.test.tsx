@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectsPage } from "./ProjectsPage";
 
 const projectId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
@@ -48,6 +48,29 @@ function projectModules(enabled = true) {
     usingDefaults: false,
   });
 }
+
+function stubProjectWriteLocks() {
+  const tails = new Map<string, Promise<void>>();
+  const request = vi.fn(async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+    const previous = tails.get(name) ?? Promise.resolve();
+    let release = (): void => {};
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    tails.set(name, current);
+    await previous;
+    try { return await callback(); }
+    finally {
+      release();
+      if (tails.get(name) === current) tails.delete(name);
+    }
+  });
+  const testNavigator = Object.create(navigator) as Navigator;
+  Object.defineProperty(testNavigator, "locks", { configurable: true, value: { request } });
+  vi.stubGlobal("navigator", testNavigator);
+}
+
+beforeEach(() => {
+  stubProjectWriteLocks();
+});
 
 afterEach(() => {
   cleanup();

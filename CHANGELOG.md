@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Projects direct Go writes now reserve and clear retry intents under a
+  cross-tab Web Lock. Project actions fail closed before dispatch when Web
+  Locks are unavailable, preventing concurrent tabs from creating competing
+  intent IDs for the same action.
+
 - Vite HR Time Go writes now reserve their actor and organization retry marker
   atomically across tabs. Browsers without Web Locks fail closed before a time
   action is sent.

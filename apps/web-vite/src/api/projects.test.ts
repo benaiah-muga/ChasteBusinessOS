@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchProjectBoard,
   fetchProjectMembers,
@@ -14,6 +14,28 @@ const taskId = "9b73995f-15a4-49d1-94fd-ef35e2276104";
 const memberId = "a9d822e7-5518-4a0f-9850-607e4a226668";
 
 afterEach(() => vi.unstubAllGlobals());
+
+function stubProjectWriteLocks() {
+  const tails = new Map<string, Promise<void>>();
+  const request = vi.fn(async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+    const previous = tails.get(name) ?? Promise.resolve();
+    let release = (): void => {};
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    tails.set(name, current);
+    await previous;
+    try { return await callback(); }
+    finally {
+      release();
+      if (tails.get(name) === current) tails.delete(name);
+    }
+  });
+  const testNavigator = Object.create(navigator) as Navigator;
+  Object.defineProperty(testNavigator, "locks", { configurable: true, value: { request } });
+  vi.stubGlobal("navigator", testNavigator);
+  return request;
+}
+
+beforeEach(() => { stubProjectWriteLocks(); });
 
 const retryScope = { actorId: "c0f4707d-1e6c-4627-9ce5-a80b7b95a16e", organizationId: "3196834e-9b90-4a20-9263-a3391fdc4329" };
 
@@ -204,6 +226,51 @@ describe("projects API client", () => {
       expect(JSON.parse(String(init?.body))).toEqual({ capabilityId, input, intentId: expect.any(String) });
     }
     expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it("serializes matching Go intent reservations across tabs", async () => {
+    localStorage.clear();
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    const lockRequest = stubProjectWriteLocks();
+    let releaseResponses!: () => void;
+    const bothRequestsStarted = new Promise<void>((resolve) => { releaseResponses = resolve; });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      if (fetchMock.mock.calls.length === 2) releaseResponses();
+      await bothRequestsStarted;
+      return Response.json({ ok: true, data: { projectId } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "createProject", name: "Website relaunch" } as const;
+
+    await expect(Promise.all([
+      submitProjectAction(action, retryScope),
+      submitProjectAction(action, retryScope),
+    ])).resolves.toEqual([
+      { kind: "completed", data: { projectId } },
+      { kind: "completed", data: { projectId } },
+    ]);
+
+    const intentIds = fetchMock.mock.calls.map(([, init]) => (JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+    expect(new Set(intentIds).size).toBe(1);
+    const reservations = lockRequest.mock.calls.slice(0, 2);
+    expect(reservations).toHaveLength(2);
+    expect(reservations[0]?.[0]).toBe(reservations[1]?.[0]);
+    expect(reservations.every(([, options]) => options.mode === "exclusive")).toBe(true);
+  });
+
+  it("fails closed before Go dispatch when Web Locks are unavailable", async () => {
+    localStorage.clear();
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, "locks", { configurable: true, value: undefined });
+    vi.stubGlobal("navigator", testNavigator);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitProjectAction({ action: "createProject", name: "Website relaunch" }, retryScope))
+      .rejects.toThrow("Web Locks enabled");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
   });
 
   it("recovers the exact pending project action after reload and clears its marker on success", async () => {

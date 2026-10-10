@@ -2232,6 +2232,14 @@ new owners and the manifest shows zero legacy runtime paths.
      The Go capability pipeline enforces authenticated active organization
      membership and `projects.write`. Existing focused API, proxy, page, parser,
      receipt replay, guard, and tenant tests cover the behavior; browser proof
+     remains open. The focused Projects API/page/proxy suite passed all 182
+     tests; Go capability contract, parser, lifecycle, reciprocal inverse,
+     permission, identity, organization isolation, approval, and rollback tests
+     passed with runtime integration required. Vite typecheck and lint passed.
+     Retry marker lookup, reservation, and cleanup now share a per-scope Web
+     Lock; tests prove concurrent identical submissions reuse an intent and
+     missing Web Locks prevent dispatch. Independent review found no remaining
+     issues. The in-app browser was unavailable, so browser runtime proof
      remains open.
 209. (Implemented) Route Vite cycle-count create, record, post, and cancel
      through Go's session-authenticated `inventory.createCycleCount`,

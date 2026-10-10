@@ -147,6 +147,19 @@ async function projectScope(scope: ProjectsRetryScope): Promise<{ actorId: strin
   }
 }
 
+async function withProjectAttemptLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new ProjectsApiError(0, "This browser cannot safely reserve a project action. Open it in a browser with Web Locks enabled before changing projects.");
+  }
+  try {
+    return await lockManager.request(`chaste:projects-write-marker-lock:${storageKey}`, { mode: "exclusive" }, reserve);
+  } catch (error) {
+    if (error instanceof ProjectsApiError) throw error;
+    throw new ProjectsApiError(0, "The browser could not safely coordinate this project action across tabs. Close other Projects tabs and try again.", true);
+  }
+}
+
 function parseProjectAttempt(raw: string, storageKey: string): ProjectAttempt {
   let value: unknown;
   try { value = JSON.parse(raw) as unknown; }
@@ -159,40 +172,43 @@ function parseProjectAttempt(raw: string, storageKey: string): ProjectAttempt {
 async function createProjectAttempt(action: ProjectAction, scope: ProjectsRetryScope, retry?: PendingProjectAction): Promise<ProjectAttempt> {
   const scoped = await projectScope(scope);
   const fingerprint = await projectDigest(JSON.stringify({ actorId: scoped.actorId, organizationId: scoped.organizationId, action }));
-  if (retry) {
-    const prefix = `${PROJECT_ATTEMPT_PREFIX}${scoped.hash}:`;
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (!key?.startsWith(prefix)) continue;
-      const candidate = parseProjectAttempt(window.localStorage.getItem(key) ?? "", key);
-      if (candidate.intentId === retry.intentId && candidate.fingerprint === fingerprint && JSON.stringify(candidate.action) === JSON.stringify(action)) return candidate;
-    }
-    throw new ProjectsApiError(0, "The saved project action could not be verified. Check the board before trying again.", true);
-  }
   const prefix = `${PROJECT_ATTEMPT_PREFIX}${scoped.hash}:`;
   const storageKey = `${prefix}${fingerprint}`;
-  try {
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (!key?.startsWith(prefix)) continue;
-      const candidate = parseProjectAttempt(window.localStorage.getItem(key) ?? "", key);
-      if (candidate.fingerprint === fingerprint && JSON.stringify(candidate.action) === JSON.stringify(action)) return candidate;
+  return withProjectAttemptLock(storageKey, async () => {
+    if (retry) {
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (!key?.startsWith(prefix)) continue;
+        const candidate = parseProjectAttempt(window.localStorage.getItem(key) ?? "", key);
+        if (candidate.intentId === retry.intentId && candidate.fingerprint === fingerprint && JSON.stringify(candidate.action) === JSON.stringify(action)) return candidate;
+      }
+      throw new ProjectsApiError(0, "The saved project action could not be verified. Check the board before trying again.", true);
     }
-    const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID(), action };
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, action }));
-    const persisted = parseProjectAttempt(window.localStorage.getItem(storageKey) ?? "", storageKey);
-    if (persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId) throw new Error("attempt did not persist");
-    return persisted;
-  } catch (error) {
-    if (error instanceof ProjectsApiError) throw error;
-    throw new ProjectsApiError(0, "Enable browser storage before changing projects so an uncertain action can be retried safely.");
-  }
+    try {
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (!key?.startsWith(prefix)) continue;
+        const candidate = parseProjectAttempt(window.localStorage.getItem(key) ?? "", key);
+        if (candidate.fingerprint === fingerprint && JSON.stringify(candidate.action) === JSON.stringify(action)) return candidate;
+      }
+      const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID(), action };
+      window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, action }));
+      const persisted = parseProjectAttempt(window.localStorage.getItem(storageKey) ?? "", storageKey);
+      if (persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId) throw new Error("attempt did not persist");
+      return persisted;
+    } catch (error) {
+      if (error instanceof ProjectsApiError) throw error;
+      throw new ProjectsApiError(0, "Enable browser storage before changing projects so an uncertain action can be retried safely.");
+    }
+  });
 }
 
-function clearProjectAttempt(attempt: ProjectAttempt): void {
+async function clearProjectAttempt(attempt: ProjectAttempt): Promise<void> {
   try {
-    const saved = parseProjectAttempt(window.localStorage.getItem(attempt.storageKey) ?? "", attempt.storageKey);
-    if (saved.fingerprint === attempt.fingerprint && saved.intentId === attempt.intentId) window.localStorage.removeItem(attempt.storageKey);
+    await withProjectAttemptLock(attempt.storageKey, async () => {
+      const saved = parseProjectAttempt(window.localStorage.getItem(attempt.storageKey) ?? "", attempt.storageKey);
+      if (saved.fingerprint === attempt.fingerprint && saved.intentId === attempt.intentId) window.localStorage.removeItem(attempt.storageKey);
+    });
   } catch { /* Retain the marker when storage cannot verify its identity. */ }
 }
 
@@ -402,7 +418,7 @@ export async function submitProjectAction<Action extends ProjectAction>(
   }
   if (!response.ok) {
     const mayHaveReachedServer = Boolean(attempt) && (response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429);
-    if (attempt && !mayHaveReachedServer) clearProjectAttempt(attempt);
+    if (attempt && !mayHaveReachedServer) await clearProjectAttempt(attempt);
     throw new ProjectsApiError(response.status, errorMessage(response.status, raw), mayHaveReachedServer);
   }
 
@@ -412,6 +428,6 @@ export async function submitProjectAction<Action extends ProjectAction>(
   if (!envelope.success) throw new ProjectsApiError(response.status, "The projects service returned an unexpected action response.", Boolean(attempt));
   const output = ProjectActionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
   if (!output.success) throw new ProjectsApiError(response.status, "The projects service returned an unexpected action result.", Boolean(attempt));
-  if (attempt) clearProjectAttempt(attempt);
+  if (attempt) await clearProjectAttempt(attempt);
   return { kind: "completed", data: output.data as ProjectActionOutput<Action> };
 }
