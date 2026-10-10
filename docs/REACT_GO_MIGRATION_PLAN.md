@@ -2192,7 +2192,13 @@ new owners and the manifest shows zero legacy runtime paths.
      routes unchanged, validate request and response schemas, and surface
      pending, malformed, and unavailable results without falling back to
      `/api/manufacturing`. Add focused Vite API, page, proxy selector, and Go
-     parser/executor contract tests.
+     parser/executor contract tests. (Vite/Go implementation complete; browser
+     proof pending) The focused Vite API/page/proxy suite passed all 222 tests;
+     four DB-backed Go parser, feasibility, governed execution, and permission
+     tests passed with runtime integration required, including permission
+     denial and foreign-SKU isolation for all three reads; Vite typecheck and
+     lint passed. Expired Go sessions now show sign-in guidance. Browser
+     runtime proof remains open. Independent review found no remaining issues.
 207. Route the existing Vite customer statement read through Go's
      session-authenticated `accounting.customerStatement` capability behind
      paired `CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1` and

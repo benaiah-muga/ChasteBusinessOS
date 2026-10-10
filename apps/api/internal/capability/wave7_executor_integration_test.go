@@ -96,6 +96,52 @@ func TestGoWave7ManufacturingGovernedExecutorPath(t *testing.T) {
 	if err != nil || !feasibility.OK {
 		t.Fatalf("checkProductionFeasibility result=%+v err=%v", feasibility, err)
 	}
+	costInput := json.RawMessage(`{"assemblySku":"CHAIR","quantityThousandths":1000}`)
+	costPreview, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, manufacturingCostPreviewCapabilityID, "manufacturing.read", costInput, "human", "", "wave7-cost-preview"), manufacturingCostPreviewCapabilityID, costInput)
+	if err != nil || !costPreview.OK {
+		t.Fatalf("costPreview result=%+v err=%v", costPreview, err)
+	}
+	bomReportInput := json.RawMessage(`{"assemblySku":"CHAIR","quantityThousandths":1000}`)
+	bomReport, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, manufacturingBomReportCapabilityID, "manufacturing.read", bomReportInput, "human", "", "wave7-bom-report"), manufacturingBomReportCapabilityID, bomReportInput)
+	if err != nil || !bomReport.OK {
+		t.Fatalf("bomReport result=%+v err=%v", bomReport, err)
+	}
+	for _, read := range []struct {
+		id    string
+		input json.RawMessage
+	}{
+		{manufacturingCheckProductionFeasibilityCapabilityID, feasibilityInput},
+		{manufacturingCostPreviewCapabilityID, costInput},
+		{manufacturingBomReportCapabilityID, bomReportInput},
+	} {
+		deniedRead, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, read.id, "crm.read", read.input, "human", "", "wave7-denied-"+read.id), read.id, read.input)
+		if err != nil || deniedRead.OK || !strings.Contains(deniedRead.Error, "forbidden: missing permission: manufacturing.read") {
+			t.Fatalf("%s denied result=%+v err=%v, want manufacturing.read permission failure", read.id, deniedRead, err)
+		}
+	}
+	foreignAssemblyID := seedInventoryValuationItem(t, fx, fx.otherOrgID, "FOREIGN-CHAIR", "goods", 0, 0, nil)
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(fx.ctx, `DELETE FROM items WHERE org_id=$1::uuid AND id=$2::uuid`, fx.otherOrgID, foreignAssemblyID); err != nil {
+			t.Errorf("delete foreign manufacturing fixture item: %v", err)
+		}
+	})
+	for _, read := range []struct {
+		id    string
+		input json.RawMessage
+	}{
+		{manufacturingCheckProductionFeasibilityCapabilityID, json.RawMessage(`{"assemblySku":"FOREIGN-CHAIR","desiredUnitsThousandths":1000}`)},
+		{manufacturingCostPreviewCapabilityID, json.RawMessage(`{"assemblySku":"FOREIGN-CHAIR","quantityThousandths":1000}`)},
+		{manufacturingBomReportCapabilityID, json.RawMessage(`{"assemblySku":"FOREIGN-CHAIR","quantityThousandths":1000}`)},
+	} {
+		foreignRead, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, read.id, "manufacturing.read", read.input, "human", "", "wave7-foreign-"+read.id), read.id, read.input)
+		message := foreignRead.Error
+		if err != nil {
+			message = err.Error()
+		}
+		if foreignRead.OK || !strings.Contains(strings.ToLower(message), "no item with sku foreign-chair") {
+			t.Fatalf("%s foreign organization result=%+v err=%v, want the foreign SKU to remain hidden", read.id, foreignRead, err)
+		}
+	}
 	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2`, fx.orgID, manufacturingReleaseWorkOrderCapabilityID); got != 1 {
 		t.Fatalf("release audit events=%d, want one", got)
 	}

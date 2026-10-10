@@ -99,6 +99,12 @@ The full v1 changelog is preserved at the bottom of this file.
   Go `messaging.leaveConversation` capability by default when session routing
   is enabled, with an independent rollback selector and exact receipt checks.
 
+### Fixed
+
+- Vite Manufacturing now gives expired sessions and denied permissions clear
+  guidance when Go planning reads fail. Active Manufacturing tabs also update
+  their border without conflicting shorthand styles.
+
 ### Changed
 
 - Go message attachment uploads keep the `messaging.write` permission and

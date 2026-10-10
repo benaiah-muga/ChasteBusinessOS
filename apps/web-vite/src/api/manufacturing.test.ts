@@ -80,7 +80,7 @@ describe("manufacturing API", () => {
 
   it("surfaces the server message when the report cannot be loaded", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "manufacturing.write missing" }, { status: 403 })));
-    await expect(fetchManufacturingReport()).rejects.toThrow("manufacturing.write missing");
+    await expect(fetchManufacturingReport()).rejects.toThrow("You do not have permission to use manufacturing.");
   });
 
   it("checks the manufacturing module switchboard", async () => {
@@ -175,6 +175,8 @@ describe("manufacturing API", () => {
   it.each([
     [202, { ok: false, pendingApproval: true, reason: "unexpected" }, "unexpectedly requires approval"],
     [200, { ok: true, data: { producible: "yes", lines: [] } }, "unexpected format"],
+    [401, { error: "unauthorized" }, "Your session has ended. Sign in again to continue."],
+    [403, { error: "manufacturing.read missing" }, "You do not have permission to use manufacturing."],
     [404, { error: "capability unavailable" }, "capability unavailable"],
   ])("fails closed on selected Go planning read response %i without legacy fallback", async (status, body, expected) => {
     vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);

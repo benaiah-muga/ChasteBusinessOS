@@ -351,11 +351,11 @@ function clearManufacturingAttempt(attempt: ManufacturingAttempt): void {
 }
 
 function messageFor(status: number, body: unknown, fallback: string): string {
-  const parsed = ErrorSchema.safeParse(body);
-  if (parsed.success) return parsed.data.error;
   if (status === 401) return "Your session has ended. Sign in again to continue.";
   if (status === 403) return "You do not have permission to use manufacturing.";
   if (status === 428) return "Finish setting up your workspace before running production.";
+  const parsed = ErrorSchema.safeParse(body);
+  if (parsed.success) return parsed.data.error;
   return fallback;
 }
 

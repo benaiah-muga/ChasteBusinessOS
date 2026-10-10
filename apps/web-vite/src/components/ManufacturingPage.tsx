@@ -50,7 +50,7 @@ const styles = {
   noticeError: { border: "1px solid #e5b6ae", background: "#fdf3f1" },
   tabs: { display: "flex", flexWrap: "wrap", gap: 6, borderBottom: "1px solid #e2dfd6", paddingBottom: 10 },
   tab: { border: "1px solid transparent", borderRadius: 8, padding: "6px 12px", background: "transparent", color: "#5f5e57", cursor: "pointer", fontSize: 12, fontWeight: 600 },
-  tabActive: { borderColor: "#d9d6cc", background: "#fff", color: "#2f342c" },
+  tabActive: { border: "1px solid #d9d6cc", background: "#fff", color: "#2f342c" },
   panel: { display: "grid", gap: 12, border: "1px solid #e2dfd6", borderRadius: 14, padding: 18, background: "rgb(255 255 255 / 76%)" },
   panelTitleRow: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10 },
   panelTitle: { margin: 0, fontSize: 15, letterSpacing: "-0.03em" },
