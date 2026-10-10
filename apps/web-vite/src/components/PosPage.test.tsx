@@ -460,6 +460,59 @@ describe("Vite POS register page", () => {
     expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/pos" && init?.method === "POST" && JSON.parse(String(init.body)).action === "sale")).toBe(false);
   });
 
+  it.each([true, false])("blocks the POS screen with a recovery message when the saved sale retry marker is damaged and Go is %s", async (useGoCompleteSale) => {
+    const actorId = `operator-damaged-sale-marker-${useGoCompleteSale}`;
+    const organizationId = "unresolved-org";
+    const scopeId = actorId;
+    const action = {
+      action: "sale" as const,
+      sessionId,
+      method: "cash" as const,
+      lines: [{ description: "Boda bread", quantity: 1000, unitPriceMinor: 2500, sku: "BRD-001" }],
+      tenders: [{ method: "cash" as const, amountMinor: 2500 }],
+      cashReceivedMinor: 2500,
+    };
+    const canonicalValue = (value: unknown): unknown => Array.isArray(value)
+      ? value.map(canonicalValue)
+      : value !== null && typeof value === "object"
+        ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, canonicalValue(child)]))
+        : value;
+    const canonical = JSON.stringify(canonicalValue({ scopeId, action }));
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+    const hexDigest = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const markerKey = `chaste.pos.sale-intent.v1:${hexDigest}`;
+    const markerValue = "{";
+    localStorage.setItem(markerKey, markerValue);
+    localStorage.setItem(`chaste.pos.cart.v2:${organizationId}:${actorId}`, JSON.stringify({
+      sessionId,
+      lines: action.lines,
+      customerId: "",
+      method: "cash",
+      cashReceived: "",
+      splitMode: false,
+      splitTenders: [{ method: "cash", amount: "" }, { method: "card", amount: "" }],
+      awaitingApproval: false,
+      attemptUncertain: true,
+      attemptIntentId: "40000000-0000-4000-8000-000000000025",
+    }));
+    const fetchMock = registerRoute((url, payload) => url === "/api/capabilities/execute" && payload?.capabilityId === "pos.completeSale"
+      ? Response.json({ error: "route not mounted" }, { status: 404 })
+      : null);
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/pos?tab=sell");
+    render(<PosPage baseCurrency="USD" actorId={actorId} useGoCompleteSale={useGoCompleteSale} />);
+    expect(await screen.findByText(/locked to the same attempt/)).not.toBeNull();
+    fireEvent.click(await completeSaleButton());
+
+    expect(await screen.findByText(/saved POS sale retry marker is damaged/)).not.toBeNull();
+    expect(await screen.findByText(/No request was sent\. Check Sales and Approvals/)).not.toBeNull();
+    const saleRequests = fetchMock.mock.calls.filter(([url, init]) => url === "/api/capabilities/execute"
+      && JSON.parse(String(init?.body)).capabilityId === "pos.completeSale");
+    expect(saleRequests).toHaveLength(0);
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/pos" && init?.method === "POST" && JSON.parse(String(init.body)).action === "sale")).toBe(false);
+    expect(localStorage.getItem(markerKey)).toBe(markerValue);
+  });
+
   it("surfaces a governed 202 as pending rather than as a posted sale", async () => {
     const fetchMock = registerRoute((url, payload) => url === "/api/pos" && payload?.action === "sale"
       ? Response.json({ ok: false, pendingApproval: true, reason: "needs a manager" }, { status: 202 })

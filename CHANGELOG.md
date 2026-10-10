@@ -89,8 +89,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite POS sales no longer retry through legacy `/api/pos` when the selected Go
   `pos.completeSale` capability returns 404. The actor-scoped exact sale intent
   is pinned to its route and kept for exact Go retry; selector rollback is
-  blocked while the Go attempt is unresolved. Selector-off sales remain on
-  legacy.
+  blocked while the Go attempt is unresolved. Corrupt retry markers now block
+  both routes without being overwritten or cleared, and the POS screen explains
+  how to recover safely. Selector-off sales remain on legacy.
 
 - Vite Projects create, archive, and task writes now use direct Go capabilities
   by default. Set `CHASTE_GO_PROJECTS_WRITES=0` to send them through the

@@ -1046,7 +1046,9 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       const definitiveRefusal = status >= 400 && status < 500 && status !== 404 && status !== 408;
       setSaleAttemptUncertain(!definitiveRefusal);
       if (definitiveRefusal) setSaleAttemptIntentId(null);
-      if (!definitiveRefusal) {
+      if (error instanceof PosApiError && error.message.includes("saved POS sale retry marker is damaged")) {
+        setNotice({ tone: "error", title: error.message, hint: "No request was sent. Check Sales and Approvals, then ask an administrator to repair this saved retry record before trying again." });
+      } else if (!definitiveRefusal) {
         setNotice({ tone: "error", title: "Sale status is not confirmed", hint: "The cart is locked to this attempt. Retry it with the same request identity, or check Sales and Approvals before abandoning it." });
       } else {
         setNotice(noticeFor(error, "Check the sale lines and payment amounts before submitting."));

@@ -533,6 +533,58 @@ describe("POS register session API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["malformed JSON", "{"],
+    ["invalid intent UUID", JSON.stringify({ intentId: "not-a-uuid", route: "go" })],
+    ["invalid pinned route", JSON.stringify({ intentId: "40000000-0000-4000-8000-000000000024", route: "other" })],
+  ])("blocks Go and legacy requests when the saved sale marker has %s", async (_description, invalidMarker) => {
+    const action = { ...saleAction(), cashReceivedMinor: 3230 };
+    const scopeId = `user-damaged-marker-${String(_description).replaceAll(" ", "-")}`;
+    const fetchMock = vi.fn(async () => Response.json({ error: "route not mounted" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const previousStorageKeys = new Set(Object.keys(localStorage));
+    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId })).rejects.toMatchObject({ status: 404 });
+    const [storageKey] = Object.keys(localStorage).filter((key) => key.startsWith("chaste.pos.sale-intent.v1:") && !previousStorageKeys.has(key));
+    expect(storageKey).toBeDefined();
+    localStorage.setItem(storageKey!, invalidMarker);
+
+    vi.resetModules();
+    const reloaded = await import("./pos-session");
+    const callerSuppliedIntent = "40000000-0000-4000-8000-000000000025";
+    for (const useGo of [true, false]) {
+      await expect(reloaded.submitPosSale(action, callerSuppliedIntent, undefined, { useGo, scopeId })).rejects.toMatchObject({
+        status: 0,
+        message: expect.stringContaining("saved POS sale retry marker is damaged"),
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(storageKey!)).toBe(invalidMarker);
+  });
+
+  it("rechecks a present marker before trusting the same-module Go retry cache", async () => {
+    const action = { ...saleAction(), cashReceivedMinor: 3240 };
+    const scopeId = "user-hot-cache-corrupt-marker";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "route not mounted" }, { status: 404 }))
+      .mockResolvedValue(Response.json({ ok: true, data: saleOutput }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const previousStorageKeys = new Set(Object.keys(localStorage));
+    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId })).rejects.toMatchObject({ status: 404 });
+    const [storageKey] = Object.keys(localStorage).filter((key) => key.startsWith("chaste.pos.sale-intent.v1:") && !previousStorageKeys.has(key));
+    expect(storageKey).toBeDefined();
+    localStorage.setItem(storageKey!, "{");
+
+    for (const useGo of [true, false]) {
+      await expect(submitPosSale(action, undefined, undefined, { useGo, scopeId })).rejects.toMatchObject({
+        status: 0,
+        message: expect.stringContaining("saved POS sale retry marker is damaged"),
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(storageKey!)).toBe("{");
+  });
+
   it.each([401, 403, 404, 422, 500, 503])("does not fall back to legacy after Go sale HTTP %s", async (status) => {
     const action = { ...saleAction(), cashReceivedMinor: 3300 };
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ error: "Go declined the sale" }, { status }));
