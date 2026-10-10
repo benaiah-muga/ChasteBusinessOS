@@ -2366,3 +2366,10 @@ new owners and the manifest shows zero legacy runtime paths.
      Serialize deletion with concurrent message sends by locking the row and
      rechecking that it is still pending and owned by the actor. Keep the
      attachment in the draft and show an error when selected Go deletion fails.
+233. (Vite implementation complete; browser proof pending) Route Vite message
+     reactions and pins through the session-authenticated
+     `messaging.setMessageReaction` and `messaging.setMessagePin` capabilities
+     when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep separate explicit
+     rollbacks with `CHASTE_GO_MESSAGING_REACTIONS=0` and
+     `CHASTE_GO_MESSAGING_PINS=0`; validate the exact output and requested
+     state before refreshing the thread.

@@ -710,6 +710,72 @@ describe("messaging API client", () => {
     expect(lastBody(fetchMock)).toMatchObject({ readAt: "2026-10-01T09:00:00.000Z", intentId: expect.any(String) });
   });
 
+  it("sets reactions and pins through their selected Go capabilities and validates their outputs", async () => {
+    const requests: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push(body);
+      if (body.capabilityId === "messaging.setMessageReaction") return Response.json({ ok: true, data: { previousActive: false, active: true } });
+      return Response.json({ ok: true, data: { previousPinned: false, pinned: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MESSAGING_REACTIONS__", true);
+    vi.stubGlobal("__GO_MESSAGING_PINS__", true);
+
+    await setMessageReaction(messageId, "👍", true);
+    await setMessagePin(messageId, true);
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({
+      capabilityId: "messaging.setMessageReaction",
+      input: { messageId, emoji: "👍", active: true },
+      intentId: expect.any(String),
+    });
+    expect(requests[1]).toMatchObject({
+      capabilityId: "messaging.setMessagePin",
+      input: { messageId, pinned: true },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.every(([path]) => String(path) === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("fails closed for Go reaction or pin errors, malformed output, and mismatched state", async () => {
+    vi.stubGlobal("__GO_MESSAGING_REACTIONS__", true);
+    vi.stubGlobal("__GO_MESSAGING_PINS__", true);
+    const failedFetch = vi.fn(async () => Response.json({ error: "write denied" }, { status: 403 }));
+    vi.stubGlobal("fetch", failedFetch);
+    await expect(setMessageReaction(messageId, "👍", true)).rejects.toMatchObject({ status: 403 });
+    await expect(setMessagePin(messageId, true)).rejects.toMatchObject({ status: 403 });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { previousActive: false, active: true, extra: true } })));
+    await expect(setMessageReaction(messageId, "👍", true)).rejects.toThrow("unexpected format");
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { previousPinned: false, pinned: false } })));
+    await expect(setMessagePin(messageId, true)).rejects.toThrow("unexpected format");
+
+    const invalidIdFetch = vi.fn(async () => Response.json({ ok: true, data: { previousActive: false, active: true } }));
+    vi.stubGlobal("fetch", invalidIdFetch);
+    await expect(setMessageReaction("not-a-uuid", "👍", true)).rejects.toThrow();
+    await expect(setMessagePin("not-a-uuid", true)).rejects.toThrow();
+    expect(invalidIdFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps reaction and pin writes on legacy routes when their Go selectors are rolled back", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MESSAGING_REACTIONS__", false);
+    vi.stubGlobal("__GO_MESSAGING_PINS__", false);
+
+    await setMessageReaction(messageId, "👍", true);
+    await setMessagePin(messageId, true);
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(`/api/messages/${messageId}/reactions`);
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
+    expect(lastBody(fetchMock, 0)).toMatchObject({ emoji: "👍", active: true, intentId: expect.any(String) });
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`/api/messages/${messageId}/pin`);
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).method).toBe("PATCH");
+    expect(lastBody(fetchMock, 1)).toMatchObject({ pinned: true, intentId: expect.any(String) });
+  });
+
   it("uses a fresh intent id per write so retries never collide", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);

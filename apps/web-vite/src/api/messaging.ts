@@ -106,6 +106,14 @@ const GoReadCursorEnvelopeSchema = z.object({
     previousReadAt: IsoTimestampSchema.nullable(),
   }).strict(),
 }).strict();
+const GoMessageReactionEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ previousActive: z.boolean(), active: z.boolean() }).strict(),
+}).strict();
+const GoMessagePinEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ previousPinned: z.boolean(), pinned: z.boolean() }).strict(),
+}).strict();
 
 const ConversationThreadSchema = z.object({
   conversation: z.object({
@@ -840,6 +848,25 @@ async function deleteMessageThroughGo(
 }
 
 export async function setMessageReaction(messageId: string, emoji: string, active: boolean, signal?: AbortSignal): Promise<void> {
+  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_REACTIONS__?: boolean }).__GO_MESSAGING_REACTIONS__;
+  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_REACTIONS__ !== "undefined" && __GO_MESSAGING_REACTIONS__);
+  if (goSelected) {
+    const validatedMessageId = z.string().uuid().parse(messageId);
+    const { response, body } = await send("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({
+        capabilityId: "messaging.setMessageReaction",
+        input: { messageId: validatedMessageId, emoji, active },
+        intentId: newIntentId(),
+      }),
+    }, "save that reaction", signal);
+    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "save that reaction"));
+    const parsed = GoMessageReactionEnvelopeSchema.safeParse(body);
+    if (!parsed.success || parsed.data.data.active !== active) {
+      throw new MessagingApiError(response.status, "The messaging service returned that reaction in an unexpected format.");
+    }
+    return;
+  }
   await acknowledge(`/api/messages/${encodeURIComponent(messageId)}/reactions`, {
     method: "POST",
     body: JSON.stringify({ emoji, active, intentId: newIntentId() }),
@@ -847,6 +874,25 @@ export async function setMessageReaction(messageId: string, emoji: string, activ
 }
 
 export async function setMessagePin(messageId: string, pinned: boolean, signal?: AbortSignal): Promise<void> {
+  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_PINS__?: boolean }).__GO_MESSAGING_PINS__;
+  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_PINS__ !== "undefined" && __GO_MESSAGING_PINS__);
+  if (goSelected) {
+    const validatedMessageId = z.string().uuid().parse(messageId);
+    const { response, body } = await send("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({
+        capabilityId: "messaging.setMessagePin",
+        input: { messageId: validatedMessageId, pinned },
+        intentId: newIntentId(),
+      }),
+    }, "pin that message", signal);
+    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "pin that message"));
+    const parsed = GoMessagePinEnvelopeSchema.safeParse(body);
+    if (!parsed.success || parsed.data.data.pinned !== pinned) {
+      throw new MessagingApiError(response.status, "The messaging service returned that pin in an unexpected format.");
+    }
+    return;
+  }
   await acknowledge(`/api/messages/${encodeURIComponent(messageId)}/pin`, {
     method: "PATCH",
     body: JSON.stringify({ pinned, intentId: newIntentId() }),

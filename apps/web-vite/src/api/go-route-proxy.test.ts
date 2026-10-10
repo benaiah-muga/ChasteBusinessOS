@@ -34,6 +34,8 @@ import {
   goMessagingConversationListFromEnv,
   goMessagingThreadReadsFromEnv,
   goMessagingReadCursorFromEnv,
+  goMessagingReactionsFromEnv,
+  goMessagingPinsFromEnv,
   goMessagingAttachmentDownloadsFromEnv,
   goMessagingAttachmentDeleteFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
@@ -460,6 +462,22 @@ describe("messaging read-cursor Go selector", () => {
     expect(goMessagingReadCursorFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingReadCursorFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_READ_CURSOR: "0" })).toBe(false);
     expect(goMessagingReadCursorFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_READ_CURSOR: "1" })).toBe(false);
+  });
+});
+
+describe("messaging reaction Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goMessagingReactionsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingReactionsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_REACTIONS: "0" })).toBe(false);
+    expect(goMessagingReactionsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_REACTIONS: "1" })).toBe(false);
+  });
+});
+
+describe("messaging pin Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goMessagingPinsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingPinsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_PINS: "0" })).toBe(false);
+    expect(goMessagingPinsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_PINS: "1" })).toBe(false);
   });
 });
 
