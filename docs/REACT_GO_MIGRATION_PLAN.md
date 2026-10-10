@@ -2130,7 +2130,7 @@ new owners and the manifest shows zero legacy runtime paths.
      API tests (5), page tests (7), proxy tests (152), typecheck, lint, and Go
      period-close parser/workbench tests pass. Authenticated browser proof
      remains open.
-202. Route the existing Vite supplier statement read through the
+202. (Vite/Go implementation complete; browser proof pending) Route the existing Vite supplier statement read through the
      session-authenticated `purchasing.supplierStatement` capability behind
      paired `CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Require UUID vendor IDs
@@ -2138,7 +2138,10 @@ new owners and the manifest shows zero legacy runtime paths.
      session-derived organization scope, and surface pending, malformed, and
      unavailable responses as errors rather than empty statements. Keep other
      Purchasing flows unchanged. Add focused Vite API, page, proxy selector,
-     and Go parser/executor contract tests.
+     and Go parser/executor contract tests. The focused Vite API/page/proxy
+     suite passes (267 tests), as do Go parser, supplier statement reader and
+     executor tests, Vite typecheck, and Vite lint. Independent review found no
+     authorization or tenant-scope issues. Browser runtime proof remains open.
 203. Route only existing Vite People employee creation through Go's
      session-authenticated `hr.hireEmployee` capability behind paired
      `CHASTE_GO_HR_EMPLOYEE_WRITES=1` and

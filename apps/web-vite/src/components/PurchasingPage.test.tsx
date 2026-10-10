@@ -142,8 +142,28 @@ function capabilityPosts(fetchMock: ReturnType<typeof purchasingFetch>): Record<
     .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
 }
 
+function stubPurchasingLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  const locks = {
+    request: async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+      const previous = tails.get(name) ?? Promise.resolve();
+      let release = (): void => {};
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      tails.set(name, current);
+      await previous;
+      try { return await callback(); }
+      finally {
+        release();
+        if (tails.get(name) === current) tails.delete(name);
+      }
+    },
+  };
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
+}
+
 beforeEach(() => {
   window.history.replaceState(null, "", "/purchasing");
+  stubPurchasingLocks();
 });
 
 afterEach(() => {
