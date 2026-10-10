@@ -1261,11 +1261,13 @@ func messagingSendMessage(
 		if userID == nil || actorType != "human" {
 			return MessagingSendMessageOutput{}, errors.New("only people can attach files")
 		}
+		attachmentIDs := uniqueMessagingIDs(input.AttachmentIDs)
 		rows, err := tx.Query(ctx, `
 			SELECT id::text FROM message_attachments
 			WHERE id = ANY($2::uuid[]) AND org_id = $1::uuid
-			  AND conversation_id = $3::uuid AND uploaded_by_user_id = $4::uuid AND message_id IS NULL`,
-			orgID, input.AttachmentIDs, input.ConversationID, *userID)
+			  AND conversation_id = $3::uuid AND uploaded_by_user_id = $4::uuid AND message_id IS NULL
+			ORDER BY id FOR UPDATE`,
+			orgID, attachmentIDs, input.ConversationID, *userID)
 		if err != nil {
 			return MessagingSendMessageOutput{}, err
 		}
@@ -1282,13 +1284,19 @@ func messagingSendMessage(
 			return MessagingSendMessageOutput{}, err
 		}
 		rows.Close()
-		if owned != len(uniqueMessagingIDs(input.AttachmentIDs)) {
+		if owned != len(attachmentIDs) {
 			return MessagingSendMessageOutput{}, errors.New("one or more attachments expired or are unavailable")
 		}
-		if _, err := tx.Exec(ctx, `
+		linked, err := tx.Exec(ctx, `
 			UPDATE message_attachments SET message_id = $3::uuid
-			WHERE id = ANY($2::uuid[]) AND org_id = $1::uuid`, orgID, input.AttachmentIDs, messageID); err != nil {
+			WHERE id = ANY($2::uuid[]) AND org_id = $1::uuid
+			  AND conversation_id = $4::uuid AND uploaded_by_user_id = $5::uuid AND message_id IS NULL`,
+			orgID, attachmentIDs, messageID, input.ConversationID, *userID)
+		if err != nil {
 			return MessagingSendMessageOutput{}, err
+		}
+		if linked.RowsAffected() != int64(len(attachmentIDs)) {
+			return MessagingSendMessageOutput{}, errors.New("one or more attachments expired or are unavailable")
 		}
 	}
 	if len(input.Mentions) > 0 && actorType == "human" {
@@ -2513,7 +2521,7 @@ func messagingDeletePendingAttachment(
 	err := tx.QueryRow(ctx, `
 		SELECT id::text, conversation_id::text FROM message_attachments
 		WHERE id = $2::uuid AND org_id = $1::uuid AND uploaded_by_user_id = $3::uuid AND message_id IS NULL
-		LIMIT 1`, orgID, input.AttachmentID, *userID).Scan(&attachmentID, &conversationID)
+		LIMIT 1 FOR UPDATE`, orgID, input.AttachmentID, *userID).Scan(&attachmentID, &conversationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return MessagingDeletePendingAttachmentOutput{}, errors.New("pending attachment not found")
 	}
@@ -2527,9 +2535,15 @@ func messagingDeletePendingAttachment(
 	if !member {
 		return MessagingDeletePendingAttachmentOutput{}, errors.New("pending attachment not found")
 	}
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM message_attachments WHERE id = $2::uuid AND org_id = $1::uuid`, orgID, attachmentID); err != nil {
+	deleted, err := tx.Exec(ctx, `
+		DELETE FROM message_attachments
+		WHERE id = $2::uuid AND org_id = $1::uuid AND uploaded_by_user_id = $3::uuid AND message_id IS NULL`,
+		orgID, attachmentID, *userID)
+	if err != nil {
 		return MessagingDeletePendingAttachmentOutput{}, err
+	}
+	if deleted.RowsAffected() != 1 {
+		return MessagingDeletePendingAttachmentOutput{}, errors.New("pending attachment not found")
 	}
 	return MessagingDeletePendingAttachmentOutput{Removed: true}, nil
 }

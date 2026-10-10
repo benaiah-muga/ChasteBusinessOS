@@ -1074,6 +1074,87 @@ it("reports typing presence after the debounce and clears it on the mount heartb
     expect(composer.value).toBe("");
   });
 
+  it("removes an uploaded draft attachment through Go without legacy DELETE traffic", async () => {
+    vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_DELETE__", true);
+    const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method;
+      let body: Record<string, unknown> | undefined;
+      if (typeof init?.body === "string") body = JSON.parse(init.body) as Record<string, unknown>;
+      requests.push({ path, method, body });
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/attachments") && method !== "DELETE") return Response.json({ attachmentId: "72b99920-8c21-463a-9c5b-479216017501", filename: "brief.pdf", mimeType: "application/pdf", sizeBytes: 10 });
+      if (path === "/api/capabilities/execute" && body?.capabilityId === "messaging.sendMessage") return Response.json({ ok: false, pendingApproval: true, reason: "Manager review required." }, { status: 202 });
+      if (path === "/api/capabilities/execute" && body?.capabilityId === "messaging.deletePendingAttachment") return Response.json({ ok: true, data: { removed: true } });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "unexpected legacy request" }, { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<MessagesPage />);
+
+    expect(await screen.findByLabelText("Message general")).not.toBeNull();
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, { target: { files: [new File(["brief"], "brief.pdf", { type: "application/pdf" })] } });
+    expect(await screen.findByText("brief.pdf")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Manager review required.");
+    await waitFor(() => expect(requests.some(({ path, method }) => path.endsWith("/attachments") && method === "POST")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Remove brief.pdf" }));
+
+    await waitFor(() => expect(requests.some(({ body }) => body?.capabilityId === "messaging.deletePendingAttachment")).toBe(true));
+    const deletion = requests.find(({ body }) => body?.capabilityId === "messaging.deletePendingAttachment")!;
+    expect(deletion).toMatchObject({
+      path: "/api/capabilities/execute",
+      method: "POST",
+      body: { input: { attachmentId: "72b99920-8c21-463a-9c5b-479216017501" }, intentId: expect.any(String) },
+    });
+    expect(requests.some(({ path, method }) => path.includes("/attachments") && method === "DELETE")).toBe(false);
+    expect(screen.queryByText("brief.pdf")).toBeNull();
+  });
+
+  it("keeps an uploaded draft attachment when Go deletion fails", async () => {
+    vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_DELETE__", true);
+    const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method;
+      let body: Record<string, unknown> | undefined;
+      if (typeof init?.body === "string") body = JSON.parse(init.body) as Record<string, unknown>;
+      requests.push({ path, method, body });
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/attachments") && method !== "DELETE") return Response.json({ attachmentId: "72b99920-8c21-463a-9c5b-479216017501", filename: "brief.pdf", mimeType: "application/pdf", sizeBytes: 10 });
+      if (path === "/api/capabilities/execute" && body?.capabilityId === "messaging.sendMessage") return Response.json({ ok: false, pendingApproval: true, reason: "Manager review required." }, { status: 202 });
+      if (path === "/api/capabilities/execute" && body?.capabilityId === "messaging.deletePendingAttachment") return Response.json({ error: "Attachment could not be removed." }, { status: 500 });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "unexpected legacy request" }, { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<MessagesPage />);
+
+    expect(await screen.findByLabelText("Message general")).not.toBeNull();
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, { target: { files: [new File(["brief"], "brief.pdf", { type: "application/pdf" })] } });
+    expect(await screen.findByText("brief.pdf")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Manager review required.");
+    await waitFor(() => expect(requests.some(({ path, method }) => path.endsWith("/attachments") && method === "POST")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Remove brief.pdf" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Attachment could not be removed.");
+    expect(screen.getByText("brief.pdf")).not.toBeNull();
+    expect(requests.some(({ path, method }) => path.includes("/attachments") && method === "DELETE")).toBe(false);
+    expect(requests.some(({ body }) => body?.capabilityId === "messaging.deletePendingAttachment")).toBe(true);
+  });
+
   it("keeps the draft visible when a Go message is pending approval", async () => {
     vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
     const intentIds: string[] = [];

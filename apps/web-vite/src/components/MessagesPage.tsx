@@ -1001,11 +1001,16 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   }, [pendingAttachments.length]);
 
   const removeAttachment = useCallback(async (attachment: PendingAttachment) => {
-    if (attachment.attachmentId && activeId) {
+    if (attachment.attachmentId) {
+      if (!activeId) {
+        setComposerError("Could not remove the uploaded attachment because no conversation is selected.");
+        return;
+      }
       try {
         await deletePendingAttachment(activeId, attachment.attachmentId);
-      } catch {
-        // A tombstone the server already dropped is not worth blocking the composer over.
+      } catch (error) {
+        setComposerError(errorText(error, "Could not remove the uploaded attachment. Please try again."));
+        return;
       }
     }
     setPendingAttachments((current) => current.filter((item) => item.key !== attachment.key));

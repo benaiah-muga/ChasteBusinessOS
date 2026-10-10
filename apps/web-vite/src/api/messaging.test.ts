@@ -648,6 +648,49 @@ describe("messaging API client", () => {
     }
   });
 
+  it("deletes pending attachments through the selected Go capability with strict IDs and output", async () => {
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_DELETE__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { removed: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deletePendingAttachment(conversationId, messageId);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({
+      capabilityId: "messaging.deletePendingAttachment",
+      input: { attachmentId: messageId },
+      intentId: expect.any(String),
+    });
+    expect(Object.keys((lastBody(fetchMock).input as Record<string, unknown>))).toEqual(["attachmentId"]);
+  });
+
+  it("fails closed on invalid IDs, a Go error, or a malformed Go delete response", async () => {
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_DELETE__", true);
+    const fetchMock = vi.fn(async () => Response.json({ error: "Go route unavailable" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deletePendingAttachment("bad-conversation", messageId)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(deletePendingAttachment(conversationId, messageId)).rejects.toMatchObject({ status: 503 });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { removed: true, extra: "unexpected" } })));
+    await expect(deletePendingAttachment(conversationId, messageId)).rejects.toThrow("unexpected response");
+  });
+
+  it("keeps the legacy pending attachment DELETE transport when the Go selector is rolled back", async () => {
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_DELETE__", false);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deletePendingAttachment(conversationId, messageId);
+
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/attachments`);
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("DELETE");
+    expect(lastBody(fetchMock)).toMatchObject({ attachmentId: messageId, intentId: expect.any(String) });
+  });
+
   it("fails closed when the Go read-cursor capability returns an error or malformed output", async () => {
     vi.stubGlobal("__GO_MESSAGING_READ_CURSOR__", true);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true }, { status: 200 })));

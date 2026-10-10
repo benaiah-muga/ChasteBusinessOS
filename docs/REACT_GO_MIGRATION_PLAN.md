@@ -2361,3 +2361,8 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
      `CHASTE_GO_MESSAGING_READ_CURSOR=0` for explicit legacy rollback. Validate
      the strict capability result and fail closed on selected Go errors.
+232. (Go/Vite implementation complete; browser proof pending) Route Vite
+     pending attachment removal through `messaging.deletePendingAttachment`.
+     Serialize deletion with concurrent message sends by locking the row and
+     rechecking that it is still pending and owned by the actor. Keep the
+     attachment in the draft and show an error when selected Go deletion fails.

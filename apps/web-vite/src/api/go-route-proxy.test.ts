@@ -35,6 +35,7 @@ import {
   goMessagingThreadReadsFromEnv,
   goMessagingReadCursorFromEnv,
   goMessagingAttachmentDownloadsFromEnv,
+  goMessagingAttachmentDeleteFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
   goPurchasingWorkflowReadsFromEnv,
   goPurchasingIntelReadsFromEnv,
@@ -468,6 +469,14 @@ describe("messaging attachment download Go selector", () => {
     expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD: "0" })).toBe(false);
     expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
     expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD: "1" })).toBe(false);
+  });
+});
+
+describe("messaging pending attachment delete Go selector", () => {
+  it("requires session capability routing, defaults on, and supports explicit rollback", () => {
+    expect(goMessagingAttachmentDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingAttachmentDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_ATTACHMENT_DELETE: "0" })).toBe(false);
+    expect(goMessagingAttachmentDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_ATTACHMENT_DELETE: "1" })).toBe(false);
   });
 });
 

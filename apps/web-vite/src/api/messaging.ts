@@ -146,6 +146,10 @@ const GoSendMessageEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ messageId: z.string().min(1) }).strict(),
 }).strict();
+const GoDeletePendingAttachmentEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ removed: z.literal(true) }).strict(),
+}).strict();
 
 const AttachmentUploadSchema = z.object({
   attachmentId: z.string().min(1),
@@ -492,6 +496,24 @@ export async function uploadConversationAttachment(conversationId: string, file:
 }
 
 export async function deletePendingAttachment(conversationId: string, attachmentId: string, signal?: AbortSignal): Promise<void> {
+  if (typeof __GO_MESSAGING_ATTACHMENT_DELETE__ !== "undefined" && __GO_MESSAGING_ATTACHMENT_DELETE__) {
+    z.string().uuid().parse(conversationId);
+    const validatedAttachmentId = z.string().uuid().parse(attachmentId);
+    const { response, body } = await send("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({
+        capabilityId: "messaging.deletePendingAttachment",
+        input: { attachmentId: validatedAttachmentId },
+        intentId: newIntentId(),
+      }),
+    }, "that pending file", signal);
+    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "that pending file"));
+    const parsed = GoDeletePendingAttachmentEnvelopeSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new MessagingApiError(response.status, "The messaging service returned an unexpected response while removing that pending file.");
+    }
+    return;
+  }
   await acknowledge(`/api/conversations/${encodeURIComponent(conversationId)}/attachments`, {
     method: "DELETE",
     body: JSON.stringify({ attachmentId, intentId: newIntentId() }),

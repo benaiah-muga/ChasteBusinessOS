@@ -1069,6 +1069,244 @@ func TestMessagingAttachmentsArePrivateAndPendingOnly(t *testing.T) {
 	}
 }
 
+func TestMessagingDeletePendingAttachmentSerializesWithSend(t *testing.T) {
+	fx := newMessagingFixture(t)
+	channel := fx.createChannel(t, fx.userID, "attachment-delete-race")
+	upload := func() string {
+		t.Helper()
+		pending, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingUploadMessageAttachmentOutput, error) {
+			return messagingUploadMessageAttachment(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingUploadMessageAttachmentInput{
+				ConversationID: channel, Filename: "draft.txt", MimeType: "text/plain", ContentBase64: "ZHJhZnQ=",
+			})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pending.AttachmentID
+	}
+	backendPID := func(tx pgx.Tx) (int32, error) {
+		var pid int32
+		err := tx.QueryRow(fx.ctx, `SELECT pg_backend_pid()`).Scan(&pid)
+		return pid, err
+	}
+	waitForLockHolder := func(t *testing.T, pid int32) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			var waitType string
+			if err := fx.owner.QueryRow(fx.ctx, `
+				SELECT COALESCE(wait_event_type, '') FROM pg_stat_activity WHERE pid = $1`, pid).Scan(&waitType); err != nil {
+				t.Fatalf("inspect blocked PostgreSQL backend %d: %v", pid, err)
+			}
+			if waitType == "Lock" {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("PostgreSQL backend %d did not enter a lock wait", pid)
+	}
+
+	t.Run("send locks before delete", func(t *testing.T) {
+		attachmentID := upload()
+		type sendResult struct {
+			output MessagingSendMessageOutput
+			err    error
+		}
+		type startResult struct {
+			pid int32
+			err error
+		}
+		sendReady := make(chan error, 1)
+		releaseSend := make(chan struct{})
+		sendReleased, sendFinished := false, false
+		releaseSendTx := func() {
+			if !sendReleased {
+				close(releaseSend)
+				sendReleased = true
+			}
+		}
+		sendDone := make(chan sendResult, 1)
+		deleteLaunched, deleteFinished := false, false
+		deleteDone := make(chan error, 1)
+		defer func() {
+			releaseSendTx()
+			if !sendFinished {
+				<-sendDone
+			}
+			if deleteLaunched && !deleteFinished {
+				<-deleteDone
+			}
+		}()
+		go func() {
+			output, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingSendMessageOutput, error) {
+				result, err := messagingSendMessage(fx.ctx, tx, fx.orgID, "human", messagingUserPointer(fx.userID), MessagingSendMessageInput{
+					ConversationID: channel, Body: "Send owns attachment", AttachmentIDs: []string{attachmentID},
+				})
+				sendReady <- err
+				if err != nil {
+					return result, err
+				}
+				<-releaseSend
+				return result, nil
+			})
+			sendDone <- sendResult{output: output, err: err}
+		}()
+		select {
+		case err := <-sendReady:
+			if err != nil {
+				t.Fatalf("messagingSendMessage before readiness: %v", err)
+			}
+		case result := <-sendDone:
+			sendFinished = true
+			if result.err != nil {
+				t.Fatalf("messagingSendMessage before readiness: %v", result.err)
+			}
+			t.Fatal("messagingSendMessage completed without entering the lock-holding section")
+		}
+
+		deleteStart := make(chan startResult, 1)
+		deleteLaunched = true
+		go func() {
+			_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingDeletePendingAttachmentOutput, error) {
+				pid, err := backendPID(tx)
+				if err != nil {
+					deleteStart <- startResult{err: err}
+					return MessagingDeletePendingAttachmentOutput{}, err
+				}
+				deleteStart <- startResult{pid: pid}
+				return messagingDeletePendingAttachment(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingDeletePendingAttachmentInput{
+					AttachmentID: attachmentID,
+				})
+			})
+			deleteDone <- err
+		}()
+		var deletePID int32
+		select {
+		case started := <-deleteStart:
+			if started.err != nil {
+				t.Fatalf("start delete transaction: %v", started.err)
+			}
+			deletePID = started.pid
+		case err := <-deleteDone:
+			deleteFinished = true
+			t.Fatalf("delete completed before acquiring the send-held row: %v", err)
+		}
+		waitForLockHolder(t, deletePID)
+		releaseSendTx()
+		sent := <-sendDone
+		sendFinished = true
+		if sent.err != nil {
+			t.Fatalf("messagingSendMessage: %v", sent.err)
+		}
+		if err := <-deleteDone; err == nil || err.Error() != "pending attachment not found" {
+			deleteFinished = true
+			t.Fatalf("delete after send err=%v, want pending attachment not found", err)
+		}
+		deleteFinished = true
+		if fx.count(`SELECT count(*) FROM message_attachments WHERE id=$1::uuid AND message_id=$2::uuid`, attachmentID, sent.output.MessageID) != 1 {
+			t.Fatal("delete removed an attachment committed by messagingSendMessage")
+		}
+	})
+
+	t.Run("delete locks before send", func(t *testing.T) {
+		attachmentID := upload()
+		type startResult struct {
+			pid int32
+			err error
+		}
+		delReady := make(chan error, 1)
+		releaseDelete := make(chan struct{})
+		deleteReleased, deleteFinished := false, false
+		releaseDeleteTx := func() {
+			if !deleteReleased {
+				close(releaseDelete)
+				deleteReleased = true
+			}
+		}
+		deleteDone := make(chan error, 1)
+		sendLaunched, sendFinished := false, false
+		sendDone := make(chan error, 1)
+		defer func() {
+			releaseDeleteTx()
+			if !deleteFinished {
+				<-deleteDone
+			}
+			if sendLaunched && !sendFinished {
+				<-sendDone
+			}
+		}()
+		go func() {
+			_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingDeletePendingAttachmentOutput, error) {
+				removed, err := messagingDeletePendingAttachment(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingDeletePendingAttachmentInput{
+					AttachmentID: attachmentID,
+				})
+				delReady <- err
+				if err != nil {
+					return removed, err
+				}
+				<-releaseDelete
+				return removed, nil
+			})
+			deleteDone <- err
+		}()
+		select {
+		case err := <-delReady:
+			if err != nil {
+				t.Fatalf("messagingDeletePendingAttachment before readiness: %v", err)
+			}
+		case err := <-deleteDone:
+			deleteFinished = true
+			t.Fatalf("messagingDeletePendingAttachment completed before readiness: %v", err)
+		}
+
+		sendStart := make(chan startResult, 1)
+		sendLaunched = true
+		go func() {
+			_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingSendMessageOutput, error) {
+				pid, err := backendPID(tx)
+				if err != nil {
+					sendStart <- startResult{err: err}
+					return MessagingSendMessageOutput{}, err
+				}
+				sendStart <- startResult{pid: pid}
+				return messagingSendMessage(fx.ctx, tx, fx.orgID, "human", messagingUserPointer(fx.userID), MessagingSendMessageInput{
+					ConversationID: channel, Body: "Send loses attachment race", AttachmentIDs: []string{attachmentID},
+				})
+			})
+			sendDone <- err
+		}()
+		var sendPID int32
+		select {
+		case started := <-sendStart:
+			if started.err != nil {
+				t.Fatalf("start send transaction: %v", started.err)
+			}
+			sendPID = started.pid
+		case err := <-sendDone:
+			sendFinished = true
+			t.Fatalf("send completed before blocking on delete-held row: %v", err)
+		}
+		waitForLockHolder(t, sendPID)
+		releaseDeleteTx()
+		if err := <-deleteDone; err != nil {
+			deleteFinished = true
+			t.Fatalf("messagingDeletePendingAttachment: %v", err)
+		}
+		deleteFinished = true
+		if err := <-sendDone; err == nil || err.Error() != "one or more attachments expired or are unavailable" {
+			sendFinished = true
+			t.Fatalf("send after delete err=%v, want unavailable attachment", err)
+		}
+		sendFinished = true
+		if fx.count(`SELECT count(*) FROM message_attachments WHERE id=$1::uuid`, attachmentID) != 0 {
+			t.Fatal("messagingSendMessage affected a deleted attachment")
+		}
+		if fx.count(`SELECT count(*) FROM messages WHERE org_id=$1::uuid AND conversation_id=$2::uuid AND body='Send loses attachment race'`, fx.orgID, channel) != 0 {
+			t.Fatal("messagingSendMessage committed a message after its attachment was deleted")
+		}
+	})
+}
+
 func TestMessagingRefusesCrossOrganizationConversations(t *testing.T) {
 	fx := newMessagingFixture(t)
 	var foreignID string
