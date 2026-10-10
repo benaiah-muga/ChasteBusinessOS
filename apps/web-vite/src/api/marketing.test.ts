@@ -455,4 +455,38 @@ describe("marketing campaign Go routing", () => {
     expect(JSON.parse(String(calls[0]?.[1].body)).intentId).not.toBe(JSON.parse(String(calls[1]?.[1].body)).intentId);
     expect(JSON.parse(String(calls[2]?.[1].body))).toMatchObject({ capabilityId: "marketing.createSegment" });
   });
+
+  it("loads the strict overview through the selected Go capability", async () => {
+    vi.stubGlobal("__GO_MARKETING_OVERVIEW_READS__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: snapshot() }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const loaded = await fetchMarketingSnapshot();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      body: expect.stringContaining('"capabilityId":"marketing.overviewSnapshot"'),
+    }));
+    expect(loaded.recentSends[0]?.status).toBe("sent");
+  });
+
+  it("rejects malformed Go report rows", async () => {
+    vi.stubGlobal("__GO_MARKETING_OVERVIEW_READS__", true);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { ...snapshot(), unexpected: true } })));
+
+    await expect(fetchMarketingSnapshot()).rejects.toMatchObject({
+      name: "MarketingApiError",
+      message: "The marketing service returned data in an unexpected format.",
+    });
+  });
+
+  it("fails closed when the selected Go report request fails", async () => {
+    vi.stubGlobal("__GO_MARKETING_OVERVIEW_READS__", true);
+    const fetchMock = vi.fn(async () => Response.json({ error: "unavailable" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMarketingSnapshot()).rejects.toMatchObject({ status: 503 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
 });

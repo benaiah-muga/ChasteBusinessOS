@@ -193,7 +193,35 @@ export async function fetchMarketingEnabled(signal?: AbortSignal): Promise<boole
 }
 
 export async function fetchMarketingSnapshot(signal?: AbortSignal): Promise<MarketingSnapshot> {
-  const parsed = SnapshotSchema.safeParse(await getJson("/api/marketing", signal));
+  const goReads = typeof __GO_MARKETING_OVERVIEW_READS__ !== "undefined" && __GO_MARKETING_OVERVIEW_READS__;
+  let raw: unknown;
+  if (!goReads) {
+    raw = await getJson("/api/marketing", signal);
+  } else {
+    let response: Response;
+    try {
+      response = await fetch("/api/capabilities/execute", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ capabilityId: "marketing.overviewSnapshot", input: {}, intentId: crypto.randomUUID() }),
+        signal: requestSignal(signal),
+      });
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        throw new MarketingApiError(0, "The marketing service took too long to respond. Try again.");
+      }
+      throw new MarketingApiError(0, "Could not reach the marketing service. Check your connection and try again.");
+    }
+    const responseBody = await readJson(response);
+    if (!response.ok) throw new MarketingApiError(response.status, errorMessage(response.status, responseBody));
+    const envelope = SuccessSchema.safeParse(responseBody);
+    if (!envelope.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected report response.");
+    raw = envelope.data.data;
+  }
+  const parsed = SnapshotSchema.safeParse(raw);
   if (!parsed.success) throw new MarketingApiError(200, "The marketing service returned data in an unexpected format.");
   return parsed.data;
 }

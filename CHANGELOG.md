@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Marketing overview reads can now use Go's `marketing.overviewSnapshot`
+  capability. The response retains the strict segments, campaigns, provider
+  send counts, and recent delivery log contract, with all reads scoped to the
+  active organization.
+
 - Vite Manufacturing overview reports can now read through Go's
   `manufacturing.overviewReport` capability. Go returns the existing strict
   report shape from organization-scoped reads, including BOMs, assemblies,

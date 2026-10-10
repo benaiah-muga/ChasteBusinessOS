@@ -15,6 +15,7 @@ import {
   goSupportTicketWritesFromEnv,
   goPosCloseSessionSliceFromEnv,
   goMarketingCampaignWritesFromEnv,
+  goMarketingOverviewReadsFromEnv,
   goProjectsWritesFromEnv,
   goSessionCapabilityRouteFromEnv,
   goInventoryTransferWritesFromEnv,
@@ -103,6 +104,15 @@ describe("Marketing campaign Go selector", () => {
     expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_CAMPAIGN_WRITES: "0" })).toBe(false);
     expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MARKETING_CAMPAIGN_WRITES: "1" })).toBe(false);
     expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+  });
+});
+
+describe("Marketing overview Go selector", () => {
+  it("requires the explicit overview read flag and session capability route", () => {
+    expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_OVERVIEW_READS: "1" })).toBe(true);
+    expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_OVERVIEW_READS: "0" })).toBe(false);
+    expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MARKETING_OVERVIEW_READS: "1" })).toBe(false);
+    expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
   });
 });
 

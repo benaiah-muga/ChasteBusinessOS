@@ -16,6 +16,7 @@ const (
 	marketingCreateCampaignCapabilityID    = "marketing.createCampaign"
 	marketingSendCampaignCapabilityID      = "marketing.sendCampaign"
 	marketingCampaignAnalyticsCapabilityID = "marketing.campaignAnalytics"
+	marketingOverviewSnapshotCapabilityID  = "marketing.overviewSnapshot"
 )
 
 type MarketingCreateSegmentInput struct {
@@ -57,6 +58,47 @@ type MarketingCampaignAnalyticsOutput struct {
 	CampaignName string  `json:"campaignName"`
 	SentCount    int64   `json:"sentCount"`
 	QueuedAt     *string `json:"queuedAt"`
+}
+
+type MarketingOverviewSnapshotInput struct{}
+
+type MarketingOverviewSegment struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	MinSpendMinor int64  `json:"minSpendMinor"`
+	CreatedAt     string `json:"createdAt"`
+}
+
+type MarketingOverviewCampaign struct {
+	ID        string  `json:"id"`
+	SegmentID string  `json:"segmentId"`
+	Name      string  `json:"name"`
+	Subject   string  `json:"subject"`
+	Body      string  `json:"body"`
+	QueuedAt  *string `json:"queuedAt"`
+	CreatedAt string  `json:"createdAt"`
+}
+
+type MarketingOverviewSendCount struct {
+	CampaignID string `json:"campaignId"`
+	Count      int64  `json:"count"`
+}
+
+type MarketingOverviewRecentSend struct {
+	ID            string  `json:"id"`
+	CampaignID    string  `json:"campaignId"`
+	CustomerName  string  `json:"customerName"`
+	CustomerEmail *string `json:"customerEmail"`
+	QueuedAt      string  `json:"queuedAt"`
+	Status        string  `json:"status"`
+	SentAt        *string `json:"sentAt"`
+}
+
+type MarketingOverviewSnapshotOutput struct {
+	Segments    []MarketingOverviewSegment    `json:"segments"`
+	Campaigns   []MarketingOverviewCampaign   `json:"campaigns"`
+	SendCounts  []MarketingOverviewSendCount  `json:"sendCounts"`
+	RecentSends []MarketingOverviewRecentSend `json:"recentSends"`
 }
 
 func ParseMarketingCreateSegmentInput(raw json.RawMessage) (MarketingCreateSegmentInput, error) {
@@ -124,6 +166,17 @@ func ParseMarketingCampaignAnalyticsInput(raw json.RawMessage) (MarketingCampaig
 	return input, nil
 }
 
+func ParseMarketingOverviewSnapshotInput(raw json.RawMessage) (MarketingOverviewSnapshotInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return MarketingOverviewSnapshotInput{}, err
+	}
+	if len(fields) != 0 {
+		return MarketingOverviewSnapshotInput{}, errors.New("does not accept fields")
+	}
+	return MarketingOverviewSnapshotInput{}, nil
+}
+
 func parseMarketingCampaignInput(capabilityID string, raw json.RawMessage) (any, error) {
 	switch capabilityID {
 	case marketingCreateSegmentCapabilityID:
@@ -134,6 +187,8 @@ func parseMarketingCampaignInput(capabilityID string, raw json.RawMessage) (any,
 		return ParseMarketingSendCampaignInput(raw)
 	case marketingCampaignAnalyticsCapabilityID:
 		return ParseMarketingCampaignAnalyticsInput(raw)
+	case marketingOverviewSnapshotCapabilityID:
+		return ParseMarketingOverviewSnapshotInput(raw)
 	default:
 		return nil, errors.New("unsupported marketing capability")
 	}

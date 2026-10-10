@@ -2608,3 +2608,15 @@ new owners and the manifest shows zero legacy runtime paths.
      and route-selector suite passed all 205 tests; Vite typecheck and lint
      passed. `graft build` completed. Independent review found no actionable
      issues. (Go/Vite implementation complete; browser proof open)
+
+253. Route the Vite Marketing overview read through the new
+     `marketing.overviewSnapshot` Go capability behind the explicit
+     `CHASTE_GO_MARKETING_OVERVIEW_READS` selector. Preserve the strict
+     segments, campaigns, provider-confirmed send counts, and recent delivery
+     log response. All four reads and all joined records are constrained to
+     the active organization inside `dbx.WithOrgTx`. The DB-backed test passed
+     with runtime integration required and verifies authorization, exact
+     report fields, provider state, and cross-organization isolation. The
+     focused Vite marketing API and selector suite passed all 190 tests;
+     typecheck and lint passed. `graft build` completed. Browser proof remains
+     open.

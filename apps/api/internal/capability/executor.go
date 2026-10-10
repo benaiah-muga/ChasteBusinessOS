@@ -293,6 +293,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	marketingCreateCampaignCapabilityID:                 {module: "marketing", permission: "marketing.write", risk: "write"},
 	marketingSendCampaignCapabilityID:                   {module: "marketing", permission: "marketing.write", risk: "write"},
 	marketingCampaignAnalyticsCapabilityID:              {module: "marketing", permission: "marketing.read", risk: "read"},
+	marketingOverviewSnapshotCapabilityID:               {module: "marketing", permission: "marketing.read", risk: "read"},
 	hrCreateOpeningCapabilityID:                         {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.closeOpening"},
 	hrCloseOpeningCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write"},
 	iamSetModulesCapabilityID:                           {module: "iam", permission: "iam.admin", risk: "identity", inverseCapabilityID: "iam.restoreModules"},
@@ -494,7 +495,7 @@ func supportedCapability(capabilityID string) bool {
 		manufacturingProductionRunsCapabilityID,
 		manufacturingOverviewReportCapabilityID,
 		marketingCreateSegmentCapabilityID, marketingCreateCampaignCapabilityID, marketingSendCampaignCapabilityID,
-		marketingCampaignAnalyticsCapabilityID,
+		marketingCampaignAnalyticsCapabilityID, marketingOverviewSnapshotCapabilityID,
 		hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID,
 		iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
 		iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID,
@@ -1263,7 +1264,7 @@ func (e *Executor) executeWithFinalizer(
 			}
 			input = parsed
 		case marketingCreateSegmentCapabilityID, marketingCreateCampaignCapabilityID, marketingSendCampaignCapabilityID,
-			marketingCampaignAnalyticsCapabilityID:
+			marketingCampaignAnalyticsCapabilityID, marketingOverviewSnapshotCapabilityID:
 			parsed, err := parseMarketingCampaignInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -3131,6 +3132,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case MarketingOverviewSnapshotInput:
+			output, err := marketingOverviewSnapshot(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case HRCreateOpeningInput:
 			output, err := hrCreateOpening(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -3543,7 +3550,7 @@ func canonicalInputHash(input any) (string, error) {
 		ManufacturingProduceFromBomInput,
 		ManufacturingDefineBomInput, ManufacturingDeleteBomInput, ManufacturingBomTreeInput, ManufacturingBomReportInput,
 		ManufacturingCostPreviewInput, ManufacturingLotTraceInput, ManufacturingProductionRunsInput, ManufacturingOverviewReportInput,
-		MarketingCreateSegmentInput, MarketingCreateCampaignInput, MarketingSendCampaignInput, MarketingCampaignAnalyticsInput,
+		MarketingCreateSegmentInput, MarketingCreateCampaignInput, MarketingSendCampaignInput, MarketingCampaignAnalyticsInput, MarketingOverviewSnapshotInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, RestoreProjectInput,
 		CreateProjectTaskInput, DeleteProjectTaskInput, RestoreProjectTaskInput,
 		MoveProjectTaskInput, RestoreProjectTaskPlacementInput,
