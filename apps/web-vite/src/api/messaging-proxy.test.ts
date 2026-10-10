@@ -42,7 +42,7 @@ async function startViteProxy(): Promise<{ server: ViteDevServer; origin: string
 }
 
 describe("Messaging capability proxy", () => {
-  it("defaults edits and deletions to Go with session routing and preserves independent selector rollbacks", async () => {
+  it("defaults messaging thread reads, edits, and deletions to Go with session routing and preserves independent selector rollbacks", async () => {
     const go = routeRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolveClose, reject) => go.close((error) => error ? reject(error) : resolveClose())) });
@@ -56,6 +56,7 @@ describe("Messaging capability proxy", () => {
     const goProxy = await startViteProxy();
     expect(goProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("true");
     expect(goProxy.server.config.define?.__GO_MESSAGING_DELETE_SLICE__).toBe("true");
+    expect(goProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("true");
     const goResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await goResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     await goProxy.server.close();
@@ -63,9 +64,11 @@ describe("Messaging capability proxy", () => {
 
     vi.stubEnv("CHASTE_GO_MESSAGING_EDIT_SLICE", "0");
     vi.stubEnv("CHASTE_GO_MESSAGING_DELETE_SLICE", "0");
+    vi.stubEnv("CHASTE_GO_MESSAGING_THREAD_READ", "0");
     const rollbackProxy = await startViteProxy();
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("false");
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_DELETE_SLICE__).toBe("false");
+    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("false");
     const rollbackResponse = await fetch(`${rollbackProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await rollbackResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     const legacyEditResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1`, { method: "PATCH" });
@@ -81,6 +84,7 @@ describe("Messaging capability proxy", () => {
     const legacyProxy = await startViteProxy();
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("false");
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_DELETE_SLICE__).toBe("false");
+    expect(legacyProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("false");
     const legacyResponse = await fetch(`${legacyProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await legacyResponse.json()).toEqual({ target: "legacy", path: "/api/capabilities/execute" });
   });

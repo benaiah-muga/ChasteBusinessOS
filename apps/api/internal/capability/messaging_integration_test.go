@@ -1158,7 +1158,7 @@ func TestMessagingRefusesCrossOrganizationConversations(t *testing.T) {
 	}
 }
 
-func TestMessagingReadMessagesPreservesLegacyOrderingAndLimit(t *testing.T) {
+func TestMessagingReadMessagesReturnsLatestWindowInDisplayOrder(t *testing.T) {
 	fx := newMessagingFixture(t)
 	channel := fx.createChannel(t, fx.userID, "ordering")
 	for index := 0; index < 5; index++ {
@@ -1180,10 +1180,13 @@ func TestMessagingReadMessagesPreservesLegacyOrderingAndLimit(t *testing.T) {
 		})
 	})
 	if err != nil || len(limited.Messages) != 2 {
-		t.Fatalf("readMessages limit=2 returned %d rows err=%v, want the two oldest", len(limited.Messages), err)
+		t.Fatalf("readMessages limit=2 returned %d rows err=%v, want the two latest", len(limited.Messages), err)
 	}
-	if limited.Messages[0].CreatedAt != "2026-09-01T08:00:00.000Z" || limited.Messages[1].CreatedAt == limited.Messages[0].CreatedAt {
-		t.Fatalf("readMessages order=%+v, want ascending created order", limited.Messages)
+	if limited.Messages[0].CreatedAt == "2026-09-01T08:00:00.000Z" || limited.Messages[1].CreatedAt <= limited.Messages[0].CreatedAt {
+		t.Fatalf("readMessages order=%+v, want the latest two in ascending display order", limited.Messages)
+	}
+	if !limited.HasMore || limited.NextCursor == nil || *limited.NextCursor != limited.Messages[0].ID || limited.Me != fx.userID {
+		t.Fatalf("readMessages pagination/actor=%+v, want latest-page cursor and current actor", limited)
 	}
 	full, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
 		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingReadMessagesInput{
@@ -1192,6 +1195,9 @@ func TestMessagingReadMessagesPreservesLegacyOrderingAndLimit(t *testing.T) {
 	})
 	if err != nil || len(full.Messages) != 5 {
 		t.Fatalf("readMessages returned %d rows err=%v, want five", len(full.Messages), err)
+	}
+	if full.HasMore || full.NextCursor != nil || len(full.Readers) != 1 || full.Readers[0].UserID != fx.userID || full.Conversation.ID != channel {
+		t.Fatalf("readMessages full contract=%+v, want conversation, member readers, and no older page", full)
 	}
 	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
 		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.nonMemberID), MessagingReadMessagesInput{

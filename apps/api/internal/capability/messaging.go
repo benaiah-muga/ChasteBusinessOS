@@ -54,7 +54,7 @@ const (
 	messagingNotificationBodyMax    = 200
 	messagingConversationListLimit  = 100
 	messagingPeopleListLimit        = 50
-	messagingReadMessagesDefLimit   = 30
+	messagingReadMessagesDefLimit   = 60
 	messagingListItemLimitMax       = 100
 	messagingTypingWindow           = 8 * time.Second
 	messagingWorkmateID             = "workmate"
@@ -173,16 +173,67 @@ type MessagingReadMessagesInput struct {
 	Limit          int64  `json:"limit"`
 }
 
+type MessagingConversationSnapshot struct {
+	ID              string  `json:"id"`
+	OrgID           string  `json:"orgId"`
+	Kind            string  `json:"kind"`
+	Title           string  `json:"title"`
+	AgentEnabled    bool    `json:"agentEnabled"`
+	CreatedByUserID *string `json:"createdByUserId"`
+	CreatedAt       string  `json:"createdAt"`
+	ArchivedAt      *string `json:"archivedAt"`
+	DeletedAt       *string `json:"deletedAt"`
+}
+
+type MessagingMessageAttachment struct {
+	ID        string `json:"id"`
+	Filename  string `json:"filename"`
+	MimeType  string `json:"mimeType"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Href      string `json:"href"`
+}
+
+type MessagingMessageReaction struct {
+	Emoji       string   `json:"emoji"`
+	Count       int64    `json:"count"`
+	ReactedByMe bool     `json:"reactedByMe"`
+	Names       []string `json:"names"`
+}
+
 type MessagingMessageSnapshot struct {
-	SenderType   string  `json:"senderType"`
-	SenderUserID *string `json:"senderUserId"`
-	Body         string  `json:"body"`
-	CreatedAt    string  `json:"createdAt"`
-	EditedAt     *string `json:"editedAt"`
+	ID              string                       `json:"id"`
+	SenderType      string                       `json:"senderType"`
+	SenderUserID    *string                      `json:"senderUserId"`
+	Body            string                       `json:"body"`
+	CreatedAt       string                       `json:"createdAt"`
+	EditedAt        *string                      `json:"editedAt"`
+	ParentMessageID *string                      `json:"parentMessageId"`
+	PinnedAt        *string                      `json:"pinnedAt"`
+	Mentions        json.RawMessage              `json:"mentions"`
+	Attachments     []MessagingMessageAttachment `json:"attachments"`
+	Reactions       []MessagingMessageReaction   `json:"reactions"`
+}
+
+type MessagingReaderSnapshot struct {
+	UserID     string  `json:"userId"`
+	Name       string  `json:"name"`
+	LastReadAt *string `json:"lastReadAt"`
+}
+
+type MessagingPinnedMessageSnapshot struct {
+	ID       string `json:"id"`
+	Body     string `json:"body"`
+	PinnedAt string `json:"pinnedAt"`
 }
 
 type MessagingReadMessagesOutput struct {
-	Messages []MessagingMessageSnapshot `json:"messages"`
+	Conversation   MessagingConversationSnapshot    `json:"conversation"`
+	Messages       []MessagingMessageSnapshot       `json:"messages"`
+	Me             string                           `json:"me"`
+	Readers        []MessagingReaderSnapshot        `json:"readers"`
+	PinnedMessages []MessagingPinnedMessageSnapshot `json:"pinnedMessages"`
+	HasMore        bool                             `json:"hasMore"`
+	NextCursor     *string                          `json:"nextCursor"`
 }
 
 type MessagingListPeopleInput struct {
@@ -1367,6 +1418,9 @@ func messagingListConversations(
 func messagingReadMessages(
 	ctx context.Context, tx pgx.Tx, orgID string, userID *string, input MessagingReadMessagesInput,
 ) (MessagingReadMessagesOutput, error) {
+	if userID == nil || strings.TrimSpace(*userID) == "" {
+		return MessagingReadMessagesOutput{}, errors.New("conversation not found")
+	}
 	conversation, err := messagingLoadConversation(ctx, tx, orgID, input.ConversationID)
 	if err != nil {
 		return MessagingReadMessagesOutput{}, err
@@ -1377,32 +1431,233 @@ func messagingReadMessages(
 	if err := messagingRequireMember(ctx, tx, orgID, conversation.ID, userID); err != nil {
 		return MessagingReadMessagesOutput{}, err
 	}
+	var conversationSnapshot MessagingConversationSnapshot
+	var conversationCreatedAt time.Time
+	var conversationArchivedAt, conversationDeletedAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT id::text, org_id::text, kind, title, agent_enabled, created_by_user_id::text,
+		       created_at, archived_at, deleted_at
+		FROM conversations
+		WHERE id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL`,
+		orgID, input.ConversationID,
+	).Scan(
+		&conversationSnapshot.ID, &conversationSnapshot.OrgID, &conversationSnapshot.Kind,
+		&conversationSnapshot.Title, &conversationSnapshot.AgentEnabled,
+		&conversationSnapshot.CreatedByUserID, &conversationCreatedAt,
+		&conversationArchivedAt, &conversationDeletedAt,
+	); err != nil {
+		return MessagingReadMessagesOutput{}, err
+	}
+	conversationSnapshot.CreatedAt = messagingFormatTime(conversationCreatedAt)
+	conversationSnapshot.ArchivedAt = messagingFormatOptionalTime(conversationArchivedAt)
+	conversationSnapshot.DeletedAt = messagingFormatOptionalTime(conversationDeletedAt)
+
 	rows, err := tx.Query(ctx, `
-		SELECT sender_type, sender_user_id::text, body, created_at, edited_at
+		SELECT id::text, sender_type, sender_user_id::text, body, created_at, edited_at,
+		       parent_message_id::text, pinned_at, mentions
 		FROM messages
 		WHERE conversation_id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL
-		ORDER BY created_at ASC
-		LIMIT $3`, orgID, input.ConversationID, input.Limit)
+		ORDER BY created_at DESC, id DESC
+		LIMIT $3`, orgID, input.ConversationID, input.Limit+1)
 	if err != nil {
 		return MessagingReadMessagesOutput{}, err
 	}
 	defer rows.Close()
-	output := MessagingReadMessagesOutput{Messages: []MessagingMessageSnapshot{}}
+	output := MessagingReadMessagesOutput{
+		Conversation:   conversationSnapshot,
+		Messages:       []MessagingMessageSnapshot{},
+		Me:             *userID,
+		Readers:        []MessagingReaderSnapshot{},
+		PinnedMessages: []MessagingPinnedMessageSnapshot{},
+	}
 	for rows.Next() {
 		var message MessagingMessageSnapshot
 		var createdAt time.Time
-		var editedAt *time.Time
-		if err := rows.Scan(&message.SenderType, &message.SenderUserID, &message.Body, &createdAt, &editedAt); err != nil {
+		var editedAt, pinnedAt *time.Time
+		if err := rows.Scan(
+			&message.ID, &message.SenderType, &message.SenderUserID, &message.Body,
+			&createdAt, &editedAt, &message.ParentMessageID, &pinnedAt, &message.Mentions,
+		); err != nil {
 			return MessagingReadMessagesOutput{}, err
 		}
 		message.CreatedAt = messagingFormatTime(createdAt)
 		message.EditedAt = messagingFormatOptionalTime(editedAt)
+		message.PinnedAt = messagingFormatOptionalTime(pinnedAt)
+		message.Mentions, err = messagingNormalizeMentions(message.Mentions)
+		if err != nil {
+			return MessagingReadMessagesOutput{}, err
+		}
+		message.Attachments = []MessagingMessageAttachment{}
+		message.Reactions = []MessagingMessageReaction{}
 		output.Messages = append(output.Messages, message)
 	}
 	if err := rows.Err(); err != nil {
 		return MessagingReadMessagesOutput{}, err
 	}
+	if int64(len(output.Messages)) > input.Limit {
+		output.HasMore = true
+		output.Messages = output.Messages[:input.Limit]
+	}
+	for left, right := 0, len(output.Messages)-1; left < right; left, right = left+1, right-1 {
+		output.Messages[left], output.Messages[right] = output.Messages[right], output.Messages[left]
+	}
+	if output.HasMore && len(output.Messages) > 0 {
+		cursor := output.Messages[0].ID
+		output.NextCursor = &cursor
+	}
+	rows.Close()
+
+	messageIDs := make([]string, 0, len(output.Messages))
+	messageIndex := make(map[string]int, len(output.Messages))
+	for index := range output.Messages {
+		messageIDs = append(messageIDs, output.Messages[index].ID)
+		messageIndex[output.Messages[index].ID] = index
+	}
+	if len(messageIDs) > 0 {
+		attachmentRows, err := tx.Query(ctx, `
+			SELECT id::text, message_id::text, filename, mime_type, size_bytes
+			FROM message_attachments
+			WHERE org_id = $1::uuid AND conversation_id = $2::uuid AND message_id = ANY($3::uuid[])
+			ORDER BY created_at ASC, id ASC`, orgID, input.ConversationID, messageIDs)
+		if err != nil {
+			return MessagingReadMessagesOutput{}, err
+		}
+		for attachmentRows.Next() {
+			var attachment MessagingMessageAttachment
+			var messageID string
+			if err := attachmentRows.Scan(&attachment.ID, &messageID, &attachment.Filename, &attachment.MimeType, &attachment.SizeBytes); err != nil {
+				attachmentRows.Close()
+				return MessagingReadMessagesOutput{}, err
+			}
+			attachment.Href = "/api/message-attachments/" + attachment.ID
+			if index, ok := messageIndex[messageID]; ok {
+				output.Messages[index].Attachments = append(output.Messages[index].Attachments, attachment)
+			}
+		}
+		if err := attachmentRows.Err(); err != nil {
+			attachmentRows.Close()
+			return MessagingReadMessagesOutput{}, err
+		}
+		attachmentRows.Close()
+
+		reactionRows, err := tx.Query(ctx, `
+			SELECT mr.message_id::text, mr.emoji, mr.user_id::text, COALESCE(u.name, u.email)
+			FROM message_reactions mr
+			JOIN users u ON u.id = mr.user_id
+			WHERE mr.org_id = $1::uuid AND mr.message_id = ANY($2::uuid[])
+			ORDER BY mr.message_id, mr.emoji, COALESCE(u.name, u.email), mr.user_id`, orgID, messageIDs)
+		if err != nil {
+			return MessagingReadMessagesOutput{}, err
+		}
+		type reactionKey struct{ messageID, emoji string }
+		reactionIndexes := make(map[reactionKey]int)
+		for reactionRows.Next() {
+			var messageID, emoji, reactorID, name string
+			if err := reactionRows.Scan(&messageID, &emoji, &reactorID, &name); err != nil {
+				reactionRows.Close()
+				return MessagingReadMessagesOutput{}, err
+			}
+			index, ok := messageIndex[messageID]
+			if !ok {
+				continue
+			}
+			key := reactionKey{messageID: messageID, emoji: emoji}
+			reactionPosition, exists := reactionIndexes[key]
+			if !exists {
+				reactionPosition = len(output.Messages[index].Reactions)
+				reactionIndexes[key] = reactionPosition
+				output.Messages[index].Reactions = append(output.Messages[index].Reactions, MessagingMessageReaction{
+					Emoji: emoji,
+					Names: []string{},
+				})
+			}
+			reaction := &output.Messages[index].Reactions[reactionPosition]
+			reaction.Count++
+			reaction.ReactedByMe = reaction.ReactedByMe || reactorID == *userID
+			reaction.Names = append(reaction.Names, name)
+		}
+		if err := reactionRows.Err(); err != nil {
+			reactionRows.Close()
+			return MessagingReadMessagesOutput{}, err
+		}
+		reactionRows.Close()
+	}
+
+	readerRows, err := tx.Query(ctx, `
+		SELECT cm.user_id::text, COALESCE(u.name, u.email), cm.last_read_at
+		FROM conversation_members cm
+		JOIN users u ON u.id = cm.user_id
+		WHERE cm.conversation_id = $1::uuid
+		ORDER BY COALESCE(u.name, u.email), cm.user_id`, input.ConversationID)
+	if err != nil {
+		return MessagingReadMessagesOutput{}, err
+	}
+	for readerRows.Next() {
+		var reader MessagingReaderSnapshot
+		var lastReadAt *time.Time
+		if err := readerRows.Scan(&reader.UserID, &reader.Name, &lastReadAt); err != nil {
+			readerRows.Close()
+			return MessagingReadMessagesOutput{}, err
+		}
+		reader.LastReadAt = messagingFormatOptionalTime(lastReadAt)
+		output.Readers = append(output.Readers, reader)
+	}
+	if err := readerRows.Err(); err != nil {
+		readerRows.Close()
+		return MessagingReadMessagesOutput{}, err
+	}
+	readerRows.Close()
+
+	pinnedRows, err := tx.Query(ctx, `
+		SELECT id::text, body, pinned_at
+		FROM messages
+		WHERE org_id = $1::uuid AND conversation_id = $2::uuid AND deleted_at IS NULL AND pinned_at IS NOT NULL
+		ORDER BY pinned_at DESC, id DESC
+		LIMIT 20`, orgID, input.ConversationID)
+	if err != nil {
+		return MessagingReadMessagesOutput{}, err
+	}
+	for pinnedRows.Next() {
+		var pinned MessagingPinnedMessageSnapshot
+		var pinnedAt time.Time
+		if err := pinnedRows.Scan(&pinned.ID, &pinned.Body, &pinnedAt); err != nil {
+			pinnedRows.Close()
+			return MessagingReadMessagesOutput{}, err
+		}
+		pinned.PinnedAt = messagingFormatTime(pinnedAt)
+		output.PinnedMessages = append(output.PinnedMessages, pinned)
+	}
+	if err := pinnedRows.Err(); err != nil {
+		pinnedRows.Close()
+		return MessagingReadMessagesOutput{}, err
+	}
+	pinnedRows.Close()
 	return output, nil
+}
+
+func messagingNormalizeMentions(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return json.RawMessage("null"), nil
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(trimmed, &entries); err != nil {
+		return nil, fmt.Errorf("invalid persisted message mentions: %w", err)
+	}
+	mentions := make([]MessagingMention, 0, len(entries))
+	for _, entry := range entries {
+		decoder := json.NewDecoder(bytes.NewReader(entry))
+		decoder.DisallowUnknownFields()
+		var mention MessagingMention
+		if err := decoder.Decode(&mention); err != nil {
+			return nil, fmt.Errorf("invalid persisted message mention: %w", err)
+		}
+		if (mention.Type != "user" && mention.Type != "agent") || len([]rune(mention.ID)) < 1 || len([]rune(mention.ID)) > 80 {
+			return nil, errors.New("invalid persisted message mention")
+		}
+		mentions = append(mentions, mention)
+	}
+	return json.Marshal(mentions)
 }
 
 func messagingListPeople(

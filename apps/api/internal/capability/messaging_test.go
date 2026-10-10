@@ -88,7 +88,7 @@ func TestMessagingParsersAcceptEveryValidManifestPayload(t *testing.T) {
 		{messagingListConversationsCapabilityID, `{}`, `{"limit":100}`},
 		{messagingListConversationsCapabilityID, `{"query":"  ops  ","limit":10}`, `{"query":"ops","limit":10}`},
 		{messagingListConversationsCapabilityID, `{"query":""}`, `{"query":"","limit":100}`},
-		{messagingReadMessagesCapabilityID, `{"conversationId":"conv-1"}`, `{"conversationId":"conv-1","limit":30}`},
+		{messagingReadMessagesCapabilityID, `{"conversationId":"conv-1"}`, `{"conversationId":"conv-1","limit":60}`},
 		{messagingReadMessagesCapabilityID, `{"conversationId":"conv-1","limit":100}`, `{"conversationId":"conv-1","limit":100}`},
 		{messagingListPeopleCapabilityID, `{}`, `{}`},
 		{messagingListPeopleCapabilityID, `{"query":" chaste ","limit":5}`, `{"query":"chaste","limit":5}`},
@@ -296,7 +296,7 @@ func TestMessagingParsersStripUnknownKeysLikeZod(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{messagingListConversationsCapabilityID, `{"unknown":true,"nested":{"a":1}}`, `{"limit":50}`},
+		{messagingListConversationsCapabilityID, `{"unknown":true,"nested":{"a":1}}`, `{"limit":100}`},
 		{messagingListPeopleCapabilityID, `{"unknown":[1,2],"query":"ann"}`, `{"query":"ann"}`},
 		{messagingSendMessageCapabilityID, `{"conversationId":"c","body":"b","extra":true}`, `{"conversationId":"c","body":"b"}`},
 		{messagingSendMessageCapabilityID,
@@ -398,7 +398,7 @@ func TestMessagingOutputShapesMatchTheManifest(t *testing.T) {
 		{messagingListConversationsCapabilityID, MessagingListConversationsOutput{Conversations: []MessagingConversationListItem{{}}},
 			[]string{"conversations", "me"}},
 		{messagingReadMessagesCapabilityID, MessagingReadMessagesOutput{Messages: []MessagingMessageSnapshot{{}}},
-			[]string{"messages"}},
+			[]string{"conversation", "messages", "me", "readers", "pinnedMessages", "hasMore", "nextCursor"}},
 		{messagingListPeopleCapabilityID, MessagingListPeopleOutput{People: []MessagingPerson{{}}},
 			[]string{"people"}},
 	}
@@ -430,11 +430,15 @@ func TestMessagingOutputShapesMatchTheManifest(t *testing.T) {
 	if string(encoded) != `{"conversations":[{"id":"c","kind":"","title":"","agentEnabled":false,"archivedAt":null,"createdByMe":false,"unreadCount":0,"lastMessage":null}],"me":""}` {
 		t.Errorf("listConversations wire shape=%s", encoded)
 	}
-	encoded, err = marshalJS(MessagingReadMessagesOutput{Messages: []MessagingMessageSnapshot{{SenderType: "human"}}})
+	encoded, err = marshalJS(MessagingReadMessagesOutput{
+		Conversation: MessagingConversationSnapshot{ID: "c"},
+		Messages:     []MessagingMessageSnapshot{{ID: "m", SenderType: "human", Attachments: []MessagingMessageAttachment{}, Reactions: []MessagingMessageReaction{}}},
+		Me:           "u", Readers: []MessagingReaderSnapshot{}, PinnedMessages: []MessagingPinnedMessageSnapshot{}, NextCursor: nil,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) != `{"messages":[{"senderType":"human","senderUserId":null,"body":"","createdAt":"","editedAt":null}]}` {
+	if string(encoded) != `{"conversation":{"id":"c","orgId":"","kind":"","title":"","agentEnabled":false,"createdByUserId":null,"createdAt":"","archivedAt":null,"deletedAt":null},"messages":[{"id":"m","senderType":"human","senderUserId":null,"body":"","createdAt":"","editedAt":null,"parentMessageId":null,"pinnedAt":null,"mentions":null,"attachments":[],"reactions":[]}],"me":"u","readers":[],"pinnedMessages":[],"hasMore":false,"nextCursor":null}` {
 		t.Errorf("readMessages wire shape=%s", encoded)
 	}
 	encoded, err = marshalJS(MessagingListPeopleOutput{People: []MessagingPerson{{Type: "agent", ID: "workmate", Name: messagingWorkmateName}}})
@@ -477,6 +481,37 @@ func TestMessagingTimestampsUseJavaScriptDateFormat(t *testing.T) {
 		if _, err := messagingParseDateTime(value); err == nil {
 			t.Errorf("messagingParseDateTime(%q) accepted an invalid datetime", value)
 		}
+	}
+}
+
+func TestMessagingNormalizeMentionsRejectsMalformedPersistedValues(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+		bad  bool
+	}{
+		{name: "null", raw: `null`, want: `null`},
+		{name: "empty", raw: `[]`, want: `[]`},
+		{name: "valid", raw: `[ {"type":"user","id":"u-1"} ]`, want: `[{"type":"user","id":"u-1"}]`},
+		{name: "unknown type", raw: `[{"type":"robot","id":"u-1"}]`, bad: true},
+		{name: "extra property", raw: `[{"type":"user","id":"u-1","role":"admin"}]`, bad: true},
+		{name: "missing id", raw: `[{"type":"user"}]`, bad: true},
+		{name: "non-array", raw: `{"type":"user","id":"u-1"}`, bad: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := messagingNormalizeMentions(json.RawMessage(test.raw))
+			if test.bad {
+				if err == nil {
+					t.Fatalf("normalize(%s)=%s, want validation error", test.raw, got)
+				}
+				return
+			}
+			if err != nil || string(got) != test.want {
+				t.Fatalf("normalize(%s)=%s err=%v, want %s", test.raw, got, err, test.want)
+			}
+		})
 	}
 }
 

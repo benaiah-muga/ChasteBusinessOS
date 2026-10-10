@@ -58,7 +58,17 @@ function message(overrides: Record<string, unknown> = {}) {
 
 function thread(overrides: Record<string, unknown> = {}) {
   return {
-    conversation: { id: conversationId },
+    conversation: {
+      id: conversationId,
+      orgId: "8e5cb82c-5b5c-47f5-9e8a-089f6f482126",
+      kind: "channel",
+      title: "general",
+      agentEnabled: true,
+      createdByUserId: "user-1",
+      createdAt: "2026-10-01T08:00:00.000Z",
+      archivedAt: null,
+      deletedAt: null,
+    },
     messages: [message()],
     me: "user-1",
     readers: [{ userId: "user-1", name: "Ada", lastReadAt: null }],
@@ -145,6 +155,52 @@ describe("messaging API client", () => {
   it("rejects a message list that is not a strict match for the legacy shape", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(thread({ messages: [message({ extra: true })] }))));
     await expect(fetchConversationThread(conversationId)).rejects.toBeInstanceOf(MessagingApiError);
+  });
+
+  it("routes initial and refresh thread reads through Go and validates the complete thread result", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: thread() }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchConversationThread(conversationId)).resolves.toEqual(thread());
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({
+      capabilityId: "messaging.readMessages",
+      input: { conversationId, limit: 60 },
+      intentId: expect.any(String),
+    });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: thread({
+      conversation: { id: conversationId },
+    }) })));
+    await expect(fetchConversationThread(conversationId)).rejects.toBeInstanceOf(MessagingApiError);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: thread({ messages: [message({ extra: true })] }) })));
+    await expect(fetchConversationThread(conversationId)).rejects.toMatchObject({
+      status: 200,
+      message: "The messaging service returned this conversation in an unexpected format.",
+    });
+  });
+
+  it("fails closed when the selected Go thread read fails", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+    const fetchMock = vi.fn(async () => Response.json({ error: "capability unavailable" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchConversationThread(conversationId)).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+  });
+
+  it("keeps around and older-page windows on the existing transport when Go thread reads are selected", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json(thread()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchConversationThread(conversationId, { aroundId: messageId });
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/messages?around=${messageId}`);
+    await fetchOlderMessages(conversationId, messageId);
+    expect(lastUrl(fetchMock, 1)).toBe(`/api/conversations/${conversationId}/messages?before=${messageId}`);
   });
 
   it("encodes thread cursors for the around and before windows", async () => {

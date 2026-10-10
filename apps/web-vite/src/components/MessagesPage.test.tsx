@@ -70,7 +70,17 @@ const people: Person[] = [
 
 function threadBody(overrides: Record<string, unknown> = {}) {
   return {
-    conversation: { id: channelId },
+    conversation: {
+      id: channelId,
+      orgId: "8e5cb82c-5b5c-47f5-9e8a-089f6f482126",
+      kind: "channel",
+      title: "general",
+      agentEnabled: true,
+      createdByUserId: me,
+      createdAt: "2026-10-01T08:00:00.000Z",
+      archivedAt: null,
+      deletedAt: null,
+    },
     messages: [message()],
     me,
     readers: [] as MessageReader[],
@@ -239,6 +249,31 @@ describe("messages page states", () => {
     expect(alert.textContent).toContain("Could not load your conversations");
     fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Morning all")).not.toBeNull();
+  });
+
+  it("renders the initial thread returned by the selected Go read capability", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const request = JSON.parse(String(init.body)) as { capabilityId?: string; input?: { conversationId?: string; limit?: number } };
+        if (request.capabilityId !== "messaging.readMessages") return Response.json({ error: "unexpected capability" }, { status: 400 });
+        expect(request.input).toEqual({ conversationId: channelId, limit: 60 });
+        return Response.json({ ok: true, data: threadBody() });
+      }
+      return Response.json({ error: "unexpected legacy thread read" }, { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MessagesPage />);
+
+    expect(await screen.findByText("Morning all")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/capabilities/execute")).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/conversations/${channelId}/messages`)).toBe(false);
   });
 
   it("shows selected Go mention-people failures instead of silently using an empty list", async () => {
@@ -824,7 +859,7 @@ describe("messages page states", () => {
       },
       {
         match: (path) => (path.startsWith("/api/conversations/") && path.endsWith("/messages")
-          ? Response.json(threadBody({ conversation: { id: channelId } }))
+          ? Response.json(threadBody())
           : null),
       },
     ]);

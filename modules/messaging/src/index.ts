@@ -263,21 +263,49 @@ const readMessages = (deps: ModuleDeps) =>
     module: "messaging",
     risk: "read",
     permission: "messaging.read",
-    input: z.object({ conversationId: z.string(), limit: z.number().int().min(1).max(100).default(30) }),
+    input: z.object({ conversationId: z.string(), limit: z.number().int().min(1).max(100).default(60) }),
     output: z.object({
+      conversation: z.object({
+        id: z.string(),
+        orgId: z.string(),
+        kind: z.string(),
+        title: z.string(),
+        agentEnabled: z.boolean(),
+        createdByUserId: z.string().nullable(),
+        createdAt: z.string().datetime(),
+        archivedAt: z.string().datetime().nullable(),
+        deletedAt: z.string().datetime().nullable(),
+      }).strict(),
       messages: z.array(
         z.object({
+          id: z.string(),
           senderType: z.string(),
           senderUserId: z.string().nullable(),
           body: z.string(),
           createdAt: z.string(),
           editedAt: z.string().nullable(),
+          parentMessageId: z.string().nullable(),
+          pinnedAt: z.string().nullable(),
+          mentions: z.array(mentionSchema).nullable(),
+          attachments: z.array(z.object({
+            id: z.string(), filename: z.string(), mimeType: z.string(), sizeBytes: z.number().int().nonnegative(), href: z.string(),
+          })),
+          reactions: z.array(z.object({
+            emoji: z.string(), count: z.number().int().nonnegative(), reactedByMe: z.boolean(), names: z.array(z.string()),
+          })),
         }),
       ),
+      me: z.string(),
+      readers: z.array(z.object({ userId: z.string(), name: z.string(), lastReadAt: z.string().nullable() })),
+      pinnedMessages: z.array(z.object({ id: z.string(), body: z.string(), pinnedAt: z.string() })),
+      hasMore: z.boolean(),
+      nextCursor: z.string().nullable(),
     }),
     execute: async (ctx, input) => {
+      const actorId = ctx.actor.id;
+      if (!actorId) throw new Error("conversation not found");
       const [conv] = await deps.db
-        .select({ id: conversations.id })
+        .select()
         .from(conversations)
         .where(
           and(
@@ -288,10 +316,10 @@ const readMessages = (deps: ModuleDeps) =>
         )
         .limit(1);
       if (!conv) throw new Error("conversation not found");
-      if (!(await isMember(deps.db, conv.id, ctx.actor.id))) {
+      if (!(await isMember(deps.db, conv.id, actorId))) {
         throw new Error("you are not a member of this conversation");
       }
-      const rows = await deps.db
+      const newestFirst = await deps.db
         .select()
         .from(messages)
         .where(
@@ -301,16 +329,91 @@ const readMessages = (deps: ModuleDeps) =>
             isNull(messages.deletedAt),
           ),
         )
-        .orderBy(asc(messages.createdAt))
-        .limit(input.limit ?? 50);
+        .orderBy(desc(messages.createdAt), desc(messages.id))
+        .limit((input.limit ?? 60) + 1);
+      const hasMore = newestFirst.length > (input.limit ?? 60);
+      const page = newestFirst.slice(0, input.limit ?? 60).reverse();
+      const messageIds = page.map((message) => message.id);
+      const [attachments, reactions, readerRows, pinnedMessages] = await Promise.all([
+        messageIds.length
+          ? deps.db.select({
+              id: messageAttachments.id, messageId: messageAttachments.messageId,
+              filename: messageAttachments.filename, mimeType: messageAttachments.mimeType, sizeBytes: messageAttachments.sizeBytes,
+            }).from(messageAttachments).where(and(
+              eq(messageAttachments.orgId, ctx.actor.orgId),
+              eq(messageAttachments.conversationId, input.conversationId),
+              inArray(messageAttachments.messageId, messageIds),
+            )).orderBy(asc(messageAttachments.createdAt), asc(messageAttachments.id))
+          : Promise.resolve([]),
+        messageIds.length
+          ? deps.db.select({
+              messageId: messageReactions.messageId, emoji: messageReactions.emoji,
+              userId: messageReactions.userId, name: users.name, email: users.email,
+            }).from(messageReactions).innerJoin(users, eq(users.id, messageReactions.userId)).where(and(
+              eq(messageReactions.orgId, ctx.actor.orgId), inArray(messageReactions.messageId, messageIds),
+            )).orderBy(asc(messageReactions.messageId), asc(messageReactions.emoji), asc(users.name), asc(messageReactions.userId))
+          : Promise.resolve([]),
+        deps.db.select({
+          userId: conversationMembers.userId, name: users.name, email: users.email, lastReadAt: conversationMembers.lastReadAt,
+        }).from(conversationMembers).innerJoin(users, eq(users.id, conversationMembers.userId))
+          .where(eq(conversationMembers.conversationId, input.conversationId)).orderBy(asc(users.name), asc(conversationMembers.userId)),
+        deps.db.select({ id: messages.id, body: messages.body, pinnedAt: messages.pinnedAt }).from(messages).where(and(
+          eq(messages.orgId, ctx.actor.orgId), eq(messages.conversationId, input.conversationId),
+          isNull(messages.deletedAt), sql`${messages.pinnedAt} IS NOT NULL`,
+        )).orderBy(desc(messages.pinnedAt), desc(messages.id)).limit(20),
+      ]);
+      const attachmentsByMessage = new Map<string, typeof attachments>();
+      for (const attachment of attachments) {
+        if (!attachment.messageId) continue;
+        attachmentsByMessage.set(attachment.messageId, [...(attachmentsByMessage.get(attachment.messageId) ?? []), attachment]);
+      }
+      const reactionsByMessage = new Map<string, Map<string, { emoji: string; count: number; reactedByMe: boolean; names: string[] }>>();
+      for (const reaction of reactions) {
+        let byEmoji = reactionsByMessage.get(reaction.messageId);
+        if (!byEmoji) { byEmoji = new Map(); reactionsByMessage.set(reaction.messageId, byEmoji); }
+        const item = byEmoji.get(reaction.emoji) ?? { emoji: reaction.emoji, count: 0, reactedByMe: false, names: [] };
+        item.count += 1;
+        item.reactedByMe ||= reaction.userId === actorId;
+        item.names.push(reaction.name ?? reaction.email);
+        byEmoji.set(reaction.emoji, item);
+      }
       return {
-        messages: rows.map((m) => ({
+        conversation: {
+          id: conv.id,
+          orgId: conv.orgId,
+          kind: conv.kind,
+          title: conv.title,
+          agentEnabled: conv.agentEnabled,
+          createdByUserId: conv.createdByUserId,
+          createdAt: conv.createdAt.toISOString(),
+          archivedAt: conv.archivedAt?.toISOString() ?? null,
+          deletedAt: conv.deletedAt?.toISOString() ?? null,
+        },
+        messages: page.map((m) => ({
+          id: m.id,
           senderType: m.senderType,
           senderUserId: m.senderUserId,
           body: m.body,
           createdAt: m.createdAt.toISOString(),
           editedAt: m.editedAt?.toISOString() ?? null,
+          parentMessageId: m.parentMessageId,
+          pinnedAt: m.pinnedAt?.toISOString() ?? null,
+          mentions: z.array(mentionSchema).nullable().parse(m.mentions),
+          attachments: (attachmentsByMessage.get(m.id) ?? []).map((attachment) => ({
+            id: attachment.id, filename: attachment.filename, mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes, href: `/api/message-attachments/${attachment.id}`,
+          })),
+          reactions: [...(reactionsByMessage.get(m.id)?.values() ?? [])],
         })),
+        me: actorId,
+        readers: readerRows.map((reader) => ({
+          userId: reader.userId, name: reader.name ?? reader.email, lastReadAt: reader.lastReadAt?.toISOString() ?? null,
+        })),
+        pinnedMessages: pinnedMessages.map((message) => ({
+          id: message.id, body: message.body, pinnedAt: message.pinnedAt!.toISOString(),
+        })),
+        hasMore,
+        nextCursor: hasMore ? page[0]?.id ?? null : null,
       };
     },
   });

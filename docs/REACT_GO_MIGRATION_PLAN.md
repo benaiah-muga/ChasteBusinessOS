@@ -2335,3 +2335,13 @@ new owners and the manifest shows zero legacy runtime paths.
      fields, including up to 100 conversations, unread counts, last-message previews, and the current
      user ID. Selected Go failures fail closed; thread reads and message search
      remain outside this slice.
+227. (Go/Vite implementation complete; browser proof pending) Route initial and
+     refreshed Vite Messaging threads through the session-authenticated
+     `messaging.readMessages` capability. Return the latest 60-message window
+     in display order with the current full thread contract, reader and pin
+     state, and older-page cursor. Search-jump and older-page requests stay on
+     their current routes; message attachment download remains a separate Go
+     route migration.
+228. (Open) Serve Vite Messaging attachment downloads directly from Go with the
+     current same-org, membership, ownership, and tombstone checks so the Vite
+     thread flow no longer depends on the Next attachment route.
