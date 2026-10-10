@@ -1105,6 +1105,76 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     expect(composer.value).toBe("");
   });
 
+  it("keeps the attachment draft and shows an error when the selected Go upload fails", async () => {
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_UPLOAD__", true);
+    const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method;
+      let body: Record<string, unknown> | undefined;
+      if (typeof init?.body === "string") body = JSON.parse(init.body) as Record<string, unknown>;
+      requests.push({ path, method, body });
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && body?.capabilityId === "messaging.uploadMessageAttachment") {
+        return Response.json({ error: "Go upload unavailable." }, { status: 503 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "unexpected legacy request" }, { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<MessagesPage />);
+
+    expect(await screen.findByLabelText("Message general")).not.toBeNull();
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, { target: { files: [new File(["brief"], "brief.txt", { type: "text/plain" })] } });
+    expect(await screen.findByText("brief.txt")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Go upload unavailable.");
+    expect(screen.getByText("brief.txt")).not.toBeNull();
+    expect(requests.filter(({ body }) => body?.capabilityId === "messaging.uploadMessageAttachment")).toHaveLength(1);
+    expect(requests.some(({ path, method }) => path.endsWith("/attachments") && method === "POST")).toBe(false);
+    expect(requests.some(({ body }) => body?.capabilityId === "messaging.sendMessage")).toBe(false);
+  });
+
+  it("keeps a Go upload pending approval visible and tells the user to retry after approval", async () => {
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_UPLOAD__", true);
+    const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      let body: Record<string, unknown> | undefined;
+      if (typeof init?.body === "string") body = JSON.parse(init.body) as Record<string, unknown>;
+      requests.push({ path, method: init?.method, body });
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && body?.capabilityId === "messaging.uploadMessageAttachment") {
+        return Response.json({ ok: false, pendingApproval: true, reason: "Manager review required." }, { status: 202 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "unexpected legacy request" }, { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<MessagesPage />);
+
+    expect(await screen.findByLabelText("Message general")).not.toBeNull();
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, { target: { files: [new File(["brief"], "brief.txt", { type: "text/plain" })] } });
+    expect(await screen.findByText("brief.txt")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    const notice = await screen.findByRole("alert");
+    expect(notice.textContent).toMatch(/waiting for approval.*remains in your draft.*retry after approval/i);
+    expect(screen.getByText("brief.txt")).not.toBeNull();
+    expect(requests.filter(({ body }) => body?.capabilityId === "messaging.uploadMessageAttachment")).toHaveLength(1);
+    expect(requests.some(({ path, method }) => path.endsWith("/attachments") && method === "POST")).toBe(false);
+    expect(requests.some(({ body }) => body?.capabilityId === "messaging.sendMessage")).toBe(false);
+  });
+
   it("removes an uploaded draft attachment through Go without legacy DELETE traffic", async () => {
     vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
     vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_DELETE__", true);

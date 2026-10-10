@@ -71,6 +71,7 @@ type capabilitySpec struct {
 	module              string
 	permission          string
 	risk                string
+	approvalExempt      bool
 	executionScope      string
 	moneyThresholdMinor int64
 	inverseCapabilityID string
@@ -388,6 +389,7 @@ func init() {
 			module:              spec.Module,
 			permission:          spec.Permission,
 			risk:                spec.Risk,
+			approvalExempt:      spec.ApprovalExempt,
 			moneyThresholdMinor: spec.MoneyThresholdMinor,
 			inverseCapabilityID: spec.InverseCapabilityID,
 			inverseInputSource:  spec.InverseInputSource,
@@ -3344,7 +3346,9 @@ func (e *Executor) executeWithFinalizer(
 			return Result{}, err
 		}
 		var auditInput any = input
-		if parsed, ok := input.(SCIMProvisionUserInput); ok {
+		if spec.risk == "secret" {
+			auditInput = "[REDACTED: secret-class]"
+		} else if parsed, ok := input.(SCIMProvisionUserInput); ok {
 			if parsed.Email != "" {
 				var provisioned SCIMProvisionUserOutput
 				if err := json.Unmarshal(data, &provisioned); err != nil {
@@ -3721,6 +3725,9 @@ type policyRule struct {
 }
 
 func requiresApproval(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, capabilityID string, spec capabilitySpec, input any) (bool, string, error) {
+	if spec.approvalExempt {
+		return false, "private reversible draft staging; final message send remains governed", nil
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT capability_pattern, max_risk_autonomous, money_threshold_minor, requires_approval_for
 		FROM policies WHERE org_id = $1::uuid`, claims.OrganizationID)

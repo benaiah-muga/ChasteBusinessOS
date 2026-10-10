@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,26 @@ import (
 const capabilityTestUserID = "11111111-1111-4111-8111-111111111111"
 const capabilityTestOrgID = "22222222-2222-4222-8222-222222222222"
 const capabilityTestInput = `{"name":"Acme","preferredContactMethod":"email","doNotContact":false}`
+
+func messageUploadInputAtLimit(t *testing.T) json.RawMessage {
+	t.Helper()
+	content := base64.StdEncoding.EncodeToString(make([]byte, 5*1024*1024))
+	input, err := json.Marshal(struct {
+		ConversationID string `json:"conversationId"`
+		Filename       string `json:"filename"`
+		MimeType       string `json:"mimeType"`
+		ContentBase64  string `json:"contentBase64"`
+	}{
+		ConversationID: "33333333-3333-4333-8333-333333333333",
+		Filename:       "upload.bin",
+		MimeType:       "application/octet-stream",
+		ContentBase64:  content,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return input
+}
 
 type fakeCapabilityExecutor struct {
 	calls  int
@@ -129,6 +150,101 @@ func TestGoCapabilityHandlerRejectsCapabilityMismatchAndMalformedBody(t *testing
 			}
 		})
 	}
+}
+
+func TestGoCapabilityHandlerUsesSignedCapabilityForUploadBodyLimit(t *testing.T) {
+	t.Run("maximum upload envelope accepted", func(t *testing.T) {
+		input := messageUploadInputAtLimit(t)
+		hash, err := capability.InputHash(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims := validCapabilityClaims(t, string(input))
+		claims.CapabilityID = messagingUploadCapabilityID
+		claims.InputSHA256 = hash
+		body := `{"capabilityId":"` + messagingUploadCapabilityID + `","input":` + string(input) + `}`
+		executor := &fakeCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+		request := httptest.NewRequest(http.MethodPost, "/__go/capability/execute", strings.NewReader(body))
+		request.Header.Set(sessionAssertionHeader, signedCapabilityAssertion(t, claims))
+		response := httptest.NewRecorder()
+		NewGoCapabilityHandler(assertionSecret, executor, nil).ServeHTTP(response, request)
+		if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != messagingUploadCapabilityID {
+			t.Fatalf("status=%d calls=%d capability=%q body=%q", response.Code, executor.calls, executor.capID, response.Body.String())
+		}
+	})
+
+	t.Run("upload envelope above hard ceiling rejected", func(t *testing.T) {
+		input := `{"contentBase64":"` + strings.Repeat("A", messagingUploadBodyLimit) + `"}`
+		claims := validCapabilityClaims(t, input)
+		claims.CapabilityID = messagingUploadCapabilityID
+		hash, err := capability.InputHash(json.RawMessage(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims.InputSHA256 = hash
+		body := `{"capabilityId":"` + messagingUploadCapabilityID + `","input":` + input + `}`
+		executor := &fakeCapabilityExecutor{}
+		request := httptest.NewRequest(http.MethodPost, "/__go/capability/execute", strings.NewReader(body))
+		request.Header.Set(sessionAssertionHeader, signedCapabilityAssertion(t, claims))
+		response := httptest.NewRecorder()
+		NewGoCapabilityHandler(assertionSecret, executor, nil).ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest || executor.calls != 0 {
+			t.Fatalf("status=%d calls=%d body=%q, want upload beyond hard ceiling rejected", response.Code, executor.calls, response.Body.String())
+		}
+	})
+
+	t.Run("ordinary capability stays below 64 KiB", func(t *testing.T) {
+		input := `{"blob":"` + strings.Repeat("x", capabilityBodyLimit) + `"}`
+		claims := validCapabilityClaims(t, input)
+		body := `{"capabilityId":"crm.createCustomer","input":` + input + `}`
+		executor := &fakeCapabilityExecutor{}
+		request := httptest.NewRequest(http.MethodPost, "/__go/capability/execute", strings.NewReader(body))
+		request.Header.Set(sessionAssertionHeader, signedCapabilityAssertion(t, claims))
+		response := httptest.NewRecorder()
+		NewGoCapabilityHandler(assertionSecret, executor, nil).ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest || executor.calls != 0 {
+			t.Fatalf("status=%d calls=%d body=%q, want oversized ordinary capability rejected", response.Code, executor.calls, response.Body.String())
+		}
+	})
+
+	t.Run("body cannot spoof upload against ordinary assertion", func(t *testing.T) {
+		input := messageUploadInputAtLimit(t)
+		claims := validCapabilityClaims(t, string(input))
+		hash, err := capability.InputHash(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims.InputSHA256 = hash
+		body := `{"capabilityId":"` + messagingUploadCapabilityID + `","input":` + string(input) + `}`
+		executor := &fakeCapabilityExecutor{}
+		request := httptest.NewRequest(http.MethodPost, "/__go/capability/execute", strings.NewReader(body))
+		request.Header.Set(sessionAssertionHeader, signedCapabilityAssertion(t, claims))
+		response := httptest.NewRecorder()
+		NewGoCapabilityHandler(assertionSecret, executor, nil).ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest || executor.calls != 0 {
+			t.Fatalf("status=%d calls=%d body=%q, want signed ordinary action to retain the small limit", response.Code, executor.calls, response.Body.String())
+		}
+	})
+
+	t.Run("upload assertion cannot execute a different oversized action", func(t *testing.T) {
+		input := json.RawMessage(`{"blob":"` + strings.Repeat("x", capabilityBodyLimit) + `"}`)
+		claims := validCapabilityClaims(t, string(input))
+		claims.CapabilityID = messagingUploadCapabilityID
+		hash, err := capability.InputHash(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims.InputSHA256 = hash
+		body := `{"capabilityId":"crm.createCustomer","input":` + string(input) + `}`
+		executor := &fakeCapabilityExecutor{}
+		request := httptest.NewRequest(http.MethodPost, "/__go/capability/execute", strings.NewReader(body))
+		request.Header.Set(sessionAssertionHeader, signedCapabilityAssertion(t, claims))
+		response := httptest.NewRecorder()
+		NewGoCapabilityHandler(assertionSecret, executor, nil).ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized || executor.calls != 0 {
+			t.Fatalf("status=%d calls=%d body=%q, want capability mismatch rejected", response.Code, executor.calls, response.Body.String())
+		}
+	})
 }
 
 func TestGoCapabilityHandlerMapsPendingApprovalToExistingResponse(t *testing.T) {

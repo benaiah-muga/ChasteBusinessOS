@@ -873,6 +873,106 @@ describe("messaging API client", () => {
     expect((init.headers as Record<string, string>)["content-type"]).toBeUndefined();
   });
 
+  it("uploads attachment bytes through Go with the exact capability contract", async () => {
+    const attachmentId = "72b99920-8c21-463a-9c5b-479216017501";
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { attachmentId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_UPLOAD__", true);
+    const file = new File(["hello"], "brief.txt", { type: "text/plain" });
+
+    await expect(uploadConversationAttachment(conversationId, file)).resolves.toEqual({
+      attachmentId,
+      filename: "brief.txt",
+      mimeType: "text/plain",
+      sizeBytes: 5,
+    });
+
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({
+      capabilityId: "messaging.uploadMessageAttachment",
+      input: { conversationId, filename: "brief.txt", mimeType: "text/plain", contentBase64: "aGVsbG8=" },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("reuses the same intent id when retrying a Go upload for the same file object", async () => {
+    const attachmentId = "72b99920-8c21-463a-9c5b-479216017501";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "Go upload unavailable" }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { attachmentId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_UPLOAD__", true);
+    const file = new File(["hello"], "brief.txt", { type: "text/plain" });
+
+    await expect(uploadConversationAttachment(conversationId, file)).rejects.toMatchObject({ status: 503 });
+    await expect(uploadConversationAttachment(conversationId, file)).resolves.toMatchObject({ attachmentId });
+
+    const intentIds = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).intentId);
+    expect(intentIds).toHaveLength(2);
+    expect(intentIds[0]).toEqual(expect.any(String));
+    expect(intentIds[1]).toBe(intentIds[0]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+  });
+
+  it("reports a valid Go upload approval response as pending and retains the retry path", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      ok: false,
+      pendingApproval: true,
+      approvalId: "550e8400-e29b-41d4-a716-446655440000",
+      reason: "Manager review required.",
+    }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_UPLOAD__", true);
+
+    await expect(uploadConversationAttachment(conversationId, new File(["hello"], "brief.txt", { type: "text/plain" })))
+      .rejects.toMatchObject({
+        status: 202,
+        message: expect.stringMatching(/waiting for approval.*remains in your draft.*retry after approval/i),
+      });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+  });
+
+  it("encodes the maximum five megabyte upload without overflowing the argument stack", async () => {
+    const attachmentId = "72b99920-8c21-463a-9c5b-479216017501";
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { attachmentId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_UPLOAD__", true);
+    const file = new File([new Uint8Array(MAX_ATTACHMENT_BYTES)], "large.bin");
+
+    await uploadConversationAttachment(conversationId, file);
+
+    const input = lastBody(fetchMock).input as Record<string, unknown>;
+    const contentBase64 = input.contentBase64 as string;
+    expect(contentBase64).toHaveLength(4 * Math.ceil(MAX_ATTACHMENT_BYTES / 3));
+    expect(atob(contentBase64)).toHaveLength(MAX_ATTACHMENT_BYTES);
+    expect(input.mimeType).toBe("application/octet-stream");
+  });
+
+  it("rejects invalid Go upload input before sending a request", async () => {
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_UPLOAD__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { attachmentId: "72b99920-8c21-463a-9c5b-479216017501" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(uploadConversationAttachment(conversationId, new File([], "empty.bin"))).rejects.toThrow("between 1 byte and 5 MB");
+    await expect(uploadConversationAttachment(conversationId, new File([new Uint8Array(MAX_ATTACHMENT_BYTES + 1)], "large.bin"))).rejects.toThrow("between 1 byte and 5 MB");
+    await expect(uploadConversationAttachment(conversationId, new File(["a"], "f".repeat(256)))).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on Go upload errors and malformed receipts without using the legacy route", async () => {
+    vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_UPLOAD__", true);
+    const file = new File(["hello"], "brief.txt", { type: "text/plain" });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "Go upload unavailable" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(uploadConversationAttachment(conversationId, file)).rejects.toMatchObject({ status: 503 });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { attachmentId: "not-a-uuid" } })));
+    await expect(uploadConversationAttachment(conversationId, file)).rejects.toThrow("unexpected upload response");
+  });
+
   it("rejects an upload receipt that does not carry an attachment id", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ filename: "brief.pdf" })));
     await expect(uploadConversationAttachment(conversationId, new File(["x"], "brief.pdf"))).rejects.toBeInstanceOf(MessagingApiError);

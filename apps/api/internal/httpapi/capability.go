@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,17 @@ import (
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 )
+
+const capabilityBodyLimit = 64 << 10
+const messagingUploadBodyLimit = 7_000_000 + capabilityBodyLimit
+const messagingUploadCapabilityID = "messaging.uploadMessageAttachment"
+
+func capabilityBodyLimitFor(capabilityID string) int64 {
+	if capabilityID == messagingUploadCapabilityID {
+		return messagingUploadBodyLimit
+	}
+	return capabilityBodyLimit
+}
 
 type CapabilityExecutor interface {
 	Execute(context.Context, authbridge.CapabilityClaims, string, json.RawMessage) (capability.Result, error)
@@ -39,8 +51,12 @@ func (h *GoCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 65536)
-	decoder := json.NewDecoder(r.Body)
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, capabilityBodyLimitFor(claims.CapabilityID)))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
 	decoder.DisallowUnknownFields()
 	var body struct {
 		CapabilityID string          `json:"capabilityId"`

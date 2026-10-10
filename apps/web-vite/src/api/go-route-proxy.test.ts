@@ -37,6 +37,7 @@ import {
   goMessagingReactionsFromEnv,
   goMessagingPinsFromEnv,
   goMessagingPresenceFromEnv,
+  goMessagingAttachmentUploadFromEnv,
   goMessagingAttachmentDownloadsFromEnv,
   goMessagingAttachmentDeleteFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
@@ -487,6 +488,14 @@ describe("messaging presence Go selector", () => {
     expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_PRESENCE: "0" })).toBe(false);
     expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_PRESENCE: "1" })).toBe(false);
+  });
+});
+
+describe("messaging attachment upload Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD: "0" })).toBe(false);
+    expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD: "1" })).toBe(false);
   });
 });
 

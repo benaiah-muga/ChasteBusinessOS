@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Go message attachment uploads keep the `messaging.write` permission and
+  secret-class audit redaction, while private reversible draft staging skips
+  approval payloads that would serialize file bytes. Sending the message
+  remains governed separately.
+
 - Vite POS sales no longer retry through legacy `/api/pos` when the selected Go
   `pos.completeSale` capability returns 404. The actor-scoped exact sale intent
   is pinned to its route and kept for exact Go retry; selector rollback is
@@ -404,6 +409,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Messaging read receipts now use Go's `messaging.advanceReadCursor` capability when session capability routing is enabled. Set `CHASTE_GO_MESSAGING_READ_CURSOR=0` for explicit legacy rollback; selected Go errors and malformed results fail closed.
 - Vite message reactions and pins now use Go's session-authenticated `messaging.setMessageReaction` and `messaging.setMessagePin` capabilities when session capability routing is enabled. Set `CHASTE_GO_MESSAGING_REACTIONS=0` or `CHASTE_GO_MESSAGING_PINS=0` for separate legacy rollbacks; selected Go errors and malformed or mismatched results fail closed.
 - Vite typing and online presence heartbeats now use Go's session-authenticated `messaging.updateConversationPresence` capability when session capability routing is enabled. Set `CHASTE_GO_MESSAGING_PRESENCE=0` for explicit legacy rollback; invalid input, selected Go errors, and malformed output fail closed.
+- Vite message attachment uploads now use Go's session-authenticated `messaging.uploadMessageAttachment` capability when session capability routing is enabled. Set `CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD=0` for explicit legacy rollback. Go receives the original filename and MIME type with base64 file content, enforces the existing one byte to 5 MiB limit, and selected Go failures leave the draft attachment visible without legacy fallback.
 - Vite pending message-attachment removal now uses Go's `messaging.deletePendingAttachment` capability when session capability routing is enabled. Go locks and rechecks ownership/pending state before deletion; the page keeps the attachment visible and reports an error if deletion fails. Set `CHASTE_GO_MESSAGING_ATTACHMENT_DELETE=0` for explicit legacy rollback.
 - Vite message attachment downloads now route to Go's verified-session handler by default when session capability routing is enabled. Go requires `messaging.read`, active same-org conversation membership, a visible message, and uploader ownership for pending uploads before streaming bytes.
 - Vite Marketing campaign creation and sends can opt into Go's session-authenticated `marketing.createCampaign` and `marketing.sendCampaign` capabilities with `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Exact campaign drafts lock and restore across pending or uncertain outcomes, with actor/org scoped retry IDs retained through network, 408, 429, and 5xx uncertainty. Go's queued recipient and opt-out counts are validated, and already queued campaigns cannot be resent from the page. Segment creation and analytics keep their current behavior.

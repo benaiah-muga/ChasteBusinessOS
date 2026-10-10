@@ -33,7 +33,7 @@ func TestMessagingCapabilitySpecsMatchTheMigrationManifest(t *testing.T) {
 		messagingRestoreMessagePinCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingSetMessagePinCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
 		messagingUpdatePresenceCapabilityID:          {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestorePresenceCapabilityID, InverseInputSource: "input", InverseFields: []string{"conversationId"}},
 		messagingRestorePresenceCapabilityID:         {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingUpdatePresenceCapabilityID, InverseInputSource: "output", InverseFields: []string{"previousLastSeenAt", "previousTypingUntil"}},
-		messagingUploadAttachmentCapabilityID:        {Module: "messaging", Permission: "messaging.write", Risk: "secret", InverseCapabilityID: messagingDeletePendingAttachmentCapabilityID, InverseInputSource: "output", InverseFields: []string{"attachmentId"}},
+		messagingUploadAttachmentCapabilityID:        {Module: "messaging", Permission: "messaging.write", Risk: "secret", ApprovalExempt: true, InverseCapabilityID: messagingDeletePendingAttachmentCapabilityID, InverseInputSource: "output", InverseFields: []string{"attachmentId"}},
 		messagingDeletePendingAttachmentCapabilityID: {Module: "messaging", Permission: "messaging.write", Risk: "secret"},
 	}
 	if len(messagingCapabilitySpecs) != len(want) {
@@ -46,7 +46,7 @@ func TestMessagingCapabilitySpecsMatchTheMigrationManifest(t *testing.T) {
 			continue
 		}
 		if spec.Module != expected.Module || spec.Permission != expected.Permission ||
-			spec.Risk != expected.Risk || spec.MoneyThresholdMinor != 0 || spec.InverseCapabilityID != expected.InverseCapabilityID ||
+			spec.Risk != expected.Risk || spec.ApprovalExempt != expected.ApprovalExempt || spec.MoneyThresholdMinor != 0 || spec.InverseCapabilityID != expected.InverseCapabilityID ||
 			spec.InverseInputSource != expected.InverseInputSource || !reflect.DeepEqual(spec.InverseFields, expected.InverseFields) {
 			t.Errorf("messaging spec %s = %+v, want module=%s permission=%s risk=%s inverse=%q",
 				id, spec, expected.Module, expected.Permission, expected.Risk, expected.InverseCapabilityID)

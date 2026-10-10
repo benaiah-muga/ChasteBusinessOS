@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,7 +21,7 @@ import (
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
 
-const sessionCapabilityBodyLimit = 64 << 10
+const sessionCapabilityBodyLimit = capabilityBodyLimit
 
 const (
 	inventoryImportRateLimit      = 40
@@ -146,8 +147,12 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, sessionCapabilityBodyLimit)
-	decoder := json.NewDecoder(r.Body)
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, messagingUploadBodyLimit))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
 	decoder.DisallowUnknownFields()
 	var body sessionCapabilityInput
 	if decoder.Decode(&body) != nil || body.CapabilityID == "" || len(body.CapabilityID) > 200 || len(body.Input) == 0 || !json.Valid(body.Input) || len(body.IntentID) > 200 || strings.ContainsAny(body.IntentID, "\r\n\x00") {
@@ -156,6 +161,10 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 	var trailing any
 	if decoder.Decode(&trailing) != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if body.CapabilityID != messagingUploadCapabilityID && len(bodyBytes) > sessionCapabilityBodyLimit {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}

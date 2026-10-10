@@ -165,6 +165,11 @@ const GoDeletePendingAttachmentEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ removed: z.literal(true) }).strict(),
 }).strict();
+const GoUploadMessageAttachmentEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ attachmentId: z.string().uuid() }).strict(),
+}).strict();
+const attachmentUploadIntentIds = new WeakMap<File, Map<string, string>>();
 
 const AttachmentUploadSchema = z.object({
   attachmentId: z.string().min(1),
@@ -515,6 +520,40 @@ export async function reportConversationPresence(conversationId: string, typing:
 }
 
 export async function uploadConversationAttachment(conversationId: string, file: File, signal?: AbortSignal): Promise<AttachmentUpload> {
+  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_ATTACHMENT_UPLOAD__?: boolean }).__GO_MESSAGING_ATTACHMENT_UPLOAD__;
+  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_ATTACHMENT_UPLOAD__ !== "undefined" && __GO_MESSAGING_ATTACHMENT_UPLOAD__);
+  if (goSelected) {
+    const validatedConversationId = z.string().uuid().parse(conversationId);
+    const problem = checkAttachmentLimits(0, [file]);
+    if (problem) throw new MessagingApiError(400, problem);
+    const filename = z.string().min(1).max(255).parse(file.name);
+    const mimeType = z.string().min(1).max(120).parse(file.type || "application/octet-stream");
+    const contentBase64 = await attachmentToBase64(file);
+    const intentId = attachmentUploadIntentId(validatedConversationId, file);
+    const { response, body } = await send("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({
+        capabilityId: "messaging.uploadMessageAttachment",
+        input: { conversationId: validatedConversationId, filename, mimeType, contentBase64 },
+        intentId,
+      }),
+    }, `the upload of ${file.name}`, signal);
+    if (response.status === 202) {
+      const pending = PendingApprovalSchema.safeParse(body);
+      if (!pending.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to upload this attachment.");
+      throw new MessagingApiError(202, "This attachment is waiting for approval. It remains in your draft; retry after approval.");
+    }
+    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, `the upload of ${file.name}`));
+    const parsed = GoUploadMessageAttachmentEnvelopeSchema.safeParse(body);
+    if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected upload response.");
+    return {
+      attachmentId: parsed.data.data.attachmentId,
+      filename: file.name,
+      mimeType,
+      sizeBytes: file.size,
+    };
+  }
+
   const form = new FormData();
   form.append("file", file);
   const { response, body } = await send(
@@ -527,6 +566,33 @@ export async function uploadConversationAttachment(conversationId: string, file:
   const parsed = AttachmentUploadSchema.safeParse(body);
   if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected upload response.");
   return parsed.data;
+}
+
+function attachmentUploadIntentId(conversationId: string, file: File): string {
+  let byConversation = attachmentUploadIntentIds.get(file);
+  if (!byConversation) {
+    byConversation = new Map();
+    attachmentUploadIntentIds.set(file, byConversation);
+  }
+  let intentId = byConversation.get(conversationId);
+  if (!intentId) {
+    intentId = newIntentId();
+    byConversation.set(conversationId, intentId);
+  }
+  return intentId;
+}
+
+async function attachmentToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunkSize = 3 * 8192;
+  const encoded: string[] = [];
+  for (let start = 0; start < bytes.length; start += chunkSize) {
+    const end = Math.min(start + chunkSize, bytes.length);
+    let binary = "";
+    for (let index = start; index < end; index += 1) binary += String.fromCharCode(bytes[index]!);
+    encoded.push(btoa(binary));
+  }
+  return encoded.join("");
 }
 
 export async function deletePendingAttachment(conversationId: string, attachmentId: string, signal?: AbortSignal): Promise<void> {

@@ -86,6 +86,7 @@ type MessagingCapabilitySpec struct {
 	Module              string
 	Permission          string
 	Risk                string
+	ApprovalExempt      bool
 	MoneyThresholdMinor int64
 	InverseCapabilityID string
 	InverseInputSource  string
@@ -93,29 +94,31 @@ type MessagingCapabilitySpec struct {
 }
 
 var messagingCapabilitySpecs = map[string]MessagingCapabilitySpec{
-	messagingSendMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingDeleteMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
-	messagingListConversationsCapabilityID:       {Module: "messaging", Permission: "messaging.read", Risk: "read"},
-	messagingReadMessagesCapabilityID:            {Module: "messaging", Permission: "messaging.read", Risk: "read"},
-	messagingListPeopleCapabilityID:              {Module: "messaging", Permission: "messaging.read", Risk: "read"},
-	messagingCreateConversationCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write"},
-	messagingUpdateConversationCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write"},
-	messagingArchiveConversationCapabilityID:     {Module: "messaging", Permission: "messaging.write", Risk: "write"},
-	messagingDeleteConversationCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "destructive"},
-	messagingLeaveConversationCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write"},
-	messagingAddMemberCapabilityID:               {Module: "messaging", Permission: "messaging.write", Risk: "write"},
-	messagingEditMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageEditCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
-	messagingRestoreMessageEditCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingEditMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
-	messagingDeleteMessageCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageDeleteCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "deletedAt", "expectedDeletedAt"}},
-	messagingRestoreMessageDeleteCapabilityID:    {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingDeleteMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "expectedDeletedAt"}},
-	messagingAdvanceReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
-	messagingRestoreReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingAdvanceReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
-	messagingSetMessageReactionCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageReactionCapabilityID, InverseInputSource: "input", InverseFields: []string{"messageId", "emoji"}},
-	messagingRestoreMessageReactionCapabilityID:  {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingSetMessageReactionCapabilityID, InverseInputSource: "output", InverseFields: []string{"previousActive"}},
-	messagingSetMessagePinCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessagePinCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
-	messagingRestoreMessagePinCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingSetMessagePinCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
-	messagingUpdatePresenceCapabilityID:          {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestorePresenceCapabilityID, InverseInputSource: "input", InverseFields: []string{"conversationId"}},
-	messagingRestorePresenceCapabilityID:         {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingUpdatePresenceCapabilityID, InverseInputSource: "output", InverseFields: []string{"previousLastSeenAt", "previousTypingUntil"}},
-	messagingUploadAttachmentCapabilityID:        {Module: "messaging", Permission: "messaging.write", Risk: "secret", InverseCapabilityID: messagingDeletePendingAttachmentCapabilityID, InverseInputSource: "output", InverseFields: []string{"attachmentId"}},
+	messagingSendMessageCapabilityID:            {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingDeleteMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
+	messagingListConversationsCapabilityID:      {Module: "messaging", Permission: "messaging.read", Risk: "read"},
+	messagingReadMessagesCapabilityID:           {Module: "messaging", Permission: "messaging.read", Risk: "read"},
+	messagingListPeopleCapabilityID:             {Module: "messaging", Permission: "messaging.read", Risk: "read"},
+	messagingCreateConversationCapabilityID:     {Module: "messaging", Permission: "messaging.write", Risk: "write"},
+	messagingUpdateConversationCapabilityID:     {Module: "messaging", Permission: "messaging.write", Risk: "write"},
+	messagingArchiveConversationCapabilityID:    {Module: "messaging", Permission: "messaging.write", Risk: "write"},
+	messagingDeleteConversationCapabilityID:     {Module: "messaging", Permission: "messaging.write", Risk: "destructive"},
+	messagingLeaveConversationCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write"},
+	messagingAddMemberCapabilityID:              {Module: "messaging", Permission: "messaging.write", Risk: "write"},
+	messagingEditMessageCapabilityID:            {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageEditCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
+	messagingRestoreMessageEditCapabilityID:     {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingEditMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
+	messagingDeleteMessageCapabilityID:          {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageDeleteCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "deletedAt", "expectedDeletedAt"}},
+	messagingRestoreMessageDeleteCapabilityID:   {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingDeleteMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "expectedDeletedAt"}},
+	messagingAdvanceReadCursorCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
+	messagingRestoreReadCursorCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingAdvanceReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
+	messagingSetMessageReactionCapabilityID:     {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageReactionCapabilityID, InverseInputSource: "input", InverseFields: []string{"messageId", "emoji"}},
+	messagingRestoreMessageReactionCapabilityID: {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingSetMessageReactionCapabilityID, InverseInputSource: "output", InverseFields: []string{"previousActive"}},
+	messagingSetMessagePinCapabilityID:          {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessagePinCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
+	messagingRestoreMessagePinCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingSetMessagePinCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
+	messagingUpdatePresenceCapabilityID:         {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestorePresenceCapabilityID, InverseInputSource: "input", InverseFields: []string{"conversationId"}},
+	messagingRestorePresenceCapabilityID:        {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingUpdatePresenceCapabilityID, InverseInputSource: "output", InverseFields: []string{"previousLastSeenAt", "previousTypingUntil"}},
+	// Upload is private, uploader-only reversible draft staging. Message sending
+	// remains separately governed, so approval payloads never need file bytes.
+	messagingUploadAttachmentCapabilityID:        {Module: "messaging", Permission: "messaging.write", Risk: "secret", ApprovalExempt: true, InverseCapabilityID: messagingDeletePendingAttachmentCapabilityID, InverseInputSource: "output", InverseFields: []string{"attachmentId"}},
 	messagingDeletePendingAttachmentCapabilityID: {Module: "messaging", Permission: "messaging.write", Risk: "secret"},
 }
 

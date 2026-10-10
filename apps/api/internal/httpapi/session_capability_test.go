@@ -103,6 +103,44 @@ func TestSessionCapabilityHandlerBuildsClaimsFromResolvedSession(t *testing.T) {
 	}
 }
 
+func TestSessionCapabilityHandlerLimitsLargeBodiesToMessageUploads(t *testing.T) {
+	t.Run("maximum upload envelope accepted", func(t *testing.T) {
+		identity := directTestIdentity()
+		resolver := &fakeDirectSessionResolver{resolved: identity}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+		body := `{"capabilityId":"` + messagingUploadCapabilityID + `","input":` + string(messageUploadInputAtLimit(t)) + `,"intentId":"upload-intent"}`
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+		if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != messagingUploadCapabilityID {
+			t.Fatalf("status=%d calls=%d capability=%q body=%q", response.Code, executor.calls, executor.capID, response.Body.String())
+		}
+	})
+
+	t.Run("upload envelope above hard ceiling rejected", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+		input := `{"contentBase64":"` + strings.Repeat("A", messagingUploadBodyLimit) + `"}`
+		body := `{"capabilityId":"` + messagingUploadCapabilityID + `","input":` + input + `,"intentId":"upload-intent"}`
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+		if response.Code != http.StatusBadRequest || executor.calls != 0 {
+			t.Fatalf("status=%d calls=%d body=%q, want upload beyond hard ceiling rejected", response.Code, executor.calls, response.Body.String())
+		}
+	})
+
+	t.Run("ordinary capability with upload-shaped data stays below 64 KiB", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+		input := `{"contentBase64":"` + strings.Repeat("A", sessionCapabilityBodyLimit) + `"}`
+		body := `{"capabilityId":"crm.createCustomer","input":` + input + `,"intentId":"ordinary-intent"}`
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+		if response.Code != http.StatusBadRequest || executor.calls != 0 {
+			t.Fatalf("status=%d calls=%d body=%q, want oversized ordinary capability rejected", response.Code, executor.calls, response.Body.String())
+		}
+	})
+}
+
 func TestSessionCapabilityHandlerRateLimitsInventoryImportsPerOrganization(t *testing.T) {
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	limiter := newInventoryImportRateLimiter(func() time.Time { return now })

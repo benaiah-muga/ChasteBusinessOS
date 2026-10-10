@@ -2,6 +2,7 @@ package capability
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -1305,6 +1306,68 @@ func TestMessagingDeletePendingAttachmentSerializesWithSend(t *testing.T) {
 			t.Fatal("messagingSendMessage committed a message after its attachment was deleted")
 		}
 	})
+}
+
+func TestMessagingUploadRedactsAuditAndSkipsSecretRiskApprovalPayload(t *testing.T) {
+	fx := newMessagingFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'messaging.write', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	conversationID := fx.createChannel(t, fx.userID, "private upload audit")
+	content := []byte("private-attachment-canary-4d3b")
+	contentBase64 := base64.StdEncoding.EncodeToString(content)
+	input, err := json.Marshal(MessagingUploadMessageAttachmentInput{
+		ConversationID: conversationID,
+		Filename:       "private.txt",
+		MimeType:       "text/plain",
+		ContentBase64:  contentBase64,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.addPolicy(messagingUploadAttachmentCapabilityID, "read", []string{"secret"})
+	claims := fx.humanClaims(input, "messaging-private-upload-audit")
+	claims.CapabilityID = messagingUploadAttachmentCapabilityID
+	claims.Permissions = []string{"messaging.write"}
+	result, err := fx.executor.Execute(fx.ctx, claims, messagingUploadAttachmentCapabilityID, input)
+	if err != nil || !result.OK || result.PendingApproval {
+		t.Fatalf("upload result=%+v err=%v, want immediate private draft staging", result, err)
+	}
+	var output MessagingUploadMessageAttachmentOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatal(err)
+	}
+	var storedContent []byte
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT content FROM message_attachments WHERE id=$1::uuid AND org_id=$2::uuid`, output.AttachmentID, fx.orgID).Scan(&storedContent); err != nil {
+		t.Fatal(err)
+	}
+	if string(storedContent) != string(content) {
+		t.Fatal("upload did not preserve the private attachment bytes")
+	}
+	var auditPayload string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		SELECT payload::text FROM ledger_events
+		WHERE org_id=$1::uuid AND capability_id=$2 AND kind='capability.executed'
+		ORDER BY seq DESC LIMIT 1`, fx.orgID, messagingUploadAttachmentCapabilityID).Scan(&auditPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(auditPayload, `"input"`) || !strings.Contains(auditPayload, "[REDACTED: secret-class]") {
+		t.Fatalf("upload audit payload=%s, want the secret-class redaction marker", auditPayload)
+	}
+	for _, secret := range []string{contentBase64, string(content)} {
+		if strings.Contains(auditPayload, secret) {
+			t.Fatalf("upload audit payload leaks attachment content: %s", auditPayload)
+		}
+	}
+	if got := fx.count(`SELECT count(*) FROM approvals WHERE org_id=$1::uuid AND capability_id=$2`, fx.orgID, messagingUploadAttachmentCapabilityID); got != 0 {
+		t.Fatalf("upload created %d approval records under secret-risk policy, want none", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='approval.requested' AND capability_id=$2`, fx.orgID, messagingUploadAttachmentCapabilityID); got != 0 {
+		t.Fatalf("upload created %d approval audit events, want none", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM notifications WHERE org_id=$1::uuid AND kind='approval.requested'`, fx.orgID); got != 0 {
+		t.Fatalf("upload created %d approval notifications, want none", got)
+	}
 }
 
 func TestMessagingRefusesCrossOrganizationConversations(t *testing.T) {
