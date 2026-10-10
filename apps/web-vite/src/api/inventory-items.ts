@@ -35,30 +35,45 @@ const AdjustmentAttemptSchema = z.object({
   fingerprint: z.string().min(1),
   intentId: z.string().uuid(),
 }).strict();
+const CreateAttemptSchema = z.object({
+  action: CreateItemSchema,
+  fingerprint: z.string().min(1),
+  intentId: z.string().uuid(),
+}).strict();
 const adjustmentAttemptPrefix = "chaste.inventory.adjust-stock.pending.v1:";
+const createAttemptPrefix = "chaste.inventory.create-item.pending.v1:";
 
 export type CreateInventoryItem = z.infer<typeof CreateItemSchema>;
 export type AdjustInventoryStock = z.infer<typeof AdjustStockSchema>;
 export type InventoryItemAction = CreateInventoryItem | AdjustInventoryStock;
-export type InventoryItemActionResult = { kind: "completed" } | { kind: "pending"; reason: string };
+export type InventoryItemActionResult = { kind: "completed"; data: { itemId: string } | { onHandThousandths: number } } | { kind: "pending"; reason: string };
 export type InventoryAdjustmentRetryScope = { actorId: string | null; organizationId: string | null };
 
 type InventoryAdjustmentAttempt = z.infer<typeof AdjustmentAttemptSchema> & { storageKey: string };
+type InventoryCreateAttempt = z.infer<typeof CreateAttemptSchema> & { storageKey: string };
 
-async function adjustmentAttemptStorageKey(scope: InventoryAdjustmentRetryScope): Promise<string> {
+async function itemAttemptStorageKey(prefix: string, scope: InventoryAdjustmentRetryScope, operation: string): Promise<string> {
   const actorId = scope.actorId?.trim() ?? "";
   const organizationId = scope.organizationId?.trim() ?? "";
   if (!actorId || !organizationId) {
-    throw new InventoryItemActionError(0, "Wait for your account and organization to finish loading before adjusting stock.");
+    throw new InventoryItemActionError(0, `Wait for your account and organization to finish loading before ${operation}.`);
   }
   try {
     const identity = JSON.stringify({ actorId, organizationId });
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
     const hash = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
-    return `${adjustmentAttemptPrefix}${hash}`;
+    return `${prefix}${hash}`;
   } catch {
-    throw new InventoryItemActionError(0, "Stock adjustment retry protection is unavailable. Check browser security settings and try again.");
+    throw new InventoryItemActionError(0, `Inventory item retry protection is unavailable. Check browser security settings before ${operation}.`);
   }
+}
+
+async function adjustmentAttemptStorageKey(scope: InventoryAdjustmentRetryScope): Promise<string> {
+  return itemAttemptStorageKey(adjustmentAttemptPrefix, scope, "adjusting stock");
+}
+
+async function createAttemptStorageKey(scope: InventoryAdjustmentRetryScope): Promise<string> {
+  return itemAttemptStorageKey(createAttemptPrefix, scope, "creating an item");
 }
 
 function parseAdjustmentAttempt(raw: string | null): z.infer<typeof AdjustmentAttemptSchema> | null {
@@ -79,6 +94,46 @@ function parseAdjustmentAttempt(raw: string | null): z.infer<typeof AdjustmentAt
 
 function adjustmentFingerprint(action: AdjustInventoryStock): string {
   return JSON.stringify(action);
+}
+
+function parseCreateAttempt(raw: string | null): z.infer<typeof CreateAttemptSchema> | null {
+  if (raw === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new InventoryItemActionError(0, "A saved item creation could not be recovered safely. Check the catalog before starting another item.");
+  }
+  const result = CreateAttemptSchema.safeParse(parsed);
+  if (!result.success || result.data.fingerprint !== JSON.stringify(result.data.action)) {
+    throw new InventoryItemActionError(0, "A saved item creation could not be recovered safely. Check the catalog before starting another item.");
+  }
+  return result.data;
+}
+
+async function getOrCreateCreateAttempt(action: CreateInventoryItem, scope: InventoryAdjustmentRetryScope): Promise<InventoryCreateAttempt> {
+  const storageKey = await createAttemptStorageKey(scope);
+  const fingerprint = JSON.stringify(action);
+  let stored: ReturnType<typeof parseCreateAttempt>;
+  try {
+    stored = parseCreateAttempt(window.localStorage.getItem(storageKey));
+  } catch {
+    throw new InventoryItemActionError(0, "Enable browser storage before creating an item so an uncertain action can be retried safely.");
+  }
+  if (stored && stored.fingerprint !== fingerprint) {
+    throw new InventoryItemActionError(0, "A previous item creation is unresolved. Retry that exact item or check the catalog before creating another.");
+  }
+  if (stored) return { ...stored, storageKey };
+
+  const attempt = { action, fingerprint, intentId: crypto.randomUUID(), storageKey };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify({ action, fingerprint, intentId: attempt.intentId }));
+    const persisted = parseCreateAttempt(window.localStorage.getItem(storageKey));
+    if (!persisted || persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId) throw new Error("saved item creation did not persist");
+    return { ...persisted, storageKey };
+  } catch {
+    throw new InventoryItemActionError(0, "Enable browser storage before creating an item so an uncertain action can be retried safely.");
+  }
 }
 
 async function getOrCreateAdjustmentAttempt(
@@ -118,6 +173,15 @@ async function clearAdjustmentAttempt(attempt: InventoryAdjustmentAttempt): Prom
   }
 }
 
+async function clearCreateAttempt(attempt: InventoryCreateAttempt): Promise<void> {
+  try {
+    const stored = parseCreateAttempt(window.localStorage.getItem(attempt.storageKey));
+    if (stored?.intentId === attempt.intentId) window.localStorage.removeItem(attempt.storageKey);
+  } catch {
+    // Keep an unresolved item creation if storage cannot verify its identity.
+  }
+}
+
 export async function getPendingInventoryAdjustment(
   scope: InventoryAdjustmentRetryScope,
 ): Promise<AdjustInventoryStock | null> {
@@ -126,6 +190,17 @@ export async function getPendingInventoryAdjustment(
     return parseAdjustmentAttempt(window.localStorage.getItem(storageKey))?.action ?? null;
   } catch {
     throw new InventoryItemActionError(0, "Enable browser storage to recover the pending stock adjustment safely.");
+  }
+}
+
+export async function getPendingInventoryItemCreation(
+  scope: InventoryAdjustmentRetryScope,
+): Promise<CreateInventoryItem | null> {
+  const storageKey = await createAttemptStorageKey(scope);
+  try {
+    return parseCreateAttempt(window.localStorage.getItem(storageKey))?.action ?? null;
+  } catch {
+    throw new InventoryItemActionError(0, "Enable browser storage to recover the pending item creation safely.");
   }
 }
 
@@ -158,15 +233,27 @@ export async function submitInventoryItemAction(
 
   const useGo = typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
   let attempt: InventoryAdjustmentAttempt | null = null;
+  let createAttempt: InventoryCreateAttempt | null = null;
+  const scope = retryScope ?? { actorId: null, organizationId: null };
+  const hasRetryScope = Boolean(scope.actorId?.trim() && scope.organizationId?.trim());
   if (parsedAction.data.action === "adjustStock") {
-    const scope = retryScope ?? { actorId: null, organizationId: null };
     if (useGo) {
+      if (await getPendingInventoryItemCreation(scope)) {
+        throw new InventoryItemActionError(0, "A Go item creation is unresolved. Retry that exact item before adjusting stock.");
+      }
       attempt = await getOrCreateAdjustmentAttempt(parsedAction.data, scope);
-    } else if (await getPendingInventoryAdjustment(scope)) {
+    } else if (hasRetryScope && (await getPendingInventoryAdjustment(scope) || await getPendingInventoryItemCreation(scope))) {
       throw new InventoryItemActionError(0, "A Go stock adjustment is unresolved. Restore Go inventory item writes and retry the saved adjustment before using the legacy route.");
     }
+  } else if (useGo) {
+    if (await getPendingInventoryAdjustment(scope)) {
+      throw new InventoryItemActionError(0, "A Go stock adjustment is unresolved. Retry that exact adjustment before creating an item.");
+    }
+    createAttempt = await getOrCreateCreateAttempt(parsedAction.data, scope);
+  } else if (hasRetryScope && (await getPendingInventoryAdjustment(scope) || await getPendingInventoryItemCreation(scope))) {
+    throw new InventoryItemActionError(0, "A Go inventory item action is unresolved. Restore Go item writes and retry that exact action before using the legacy route.");
   }
-  const intentId = attempt?.intentId ?? crypto.randomUUID();
+  const intentId = attempt?.intentId ?? createAttempt?.intentId ?? crypto.randomUUID();
   const request = inventoryItemActionRequest(parsedAction.data, intentId, useGo);
 
   let response: Response;
@@ -180,9 +267,6 @@ export async function submitInventoryItemAction(
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
     });
     response = await send(request.url, request.body);
-    if (attempt && response.status === 404) {
-      response = await send("/api/inventory", { ...parsedAction.data, intentId: attempt.intentId });
-    }
   } catch (error) {
     if (signal?.aborted) throw error;
     if (error instanceof DOMException && error.name === "TimeoutError") {
@@ -200,8 +284,9 @@ export async function submitInventoryItemAction(
   if (!response.ok) {
     const error = z.object({ ok: z.literal(false), error: z.string() }).strict().safeParse(body);
     const plainError = z.object({ error: z.string() }).strict().safeParse(body);
-    if (attempt && response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
-      await clearAdjustmentAttempt(attempt);
+    if (response.status >= 400 && response.status < 500 && response.status !== 404 && response.status !== 408 && response.status !== 429) {
+      if (attempt) await clearAdjustmentAttempt(attempt);
+      if (createAttempt) await clearCreateAttempt(createAttempt);
     }
     throw new InventoryItemActionError(response.status, error.success ? error.data.error : plainError.success ? plainError.data.error : "The inventory action could not be completed.");
   }
@@ -213,7 +298,8 @@ export async function submitInventoryItemAction(
     : AdjustStockOutputSchema.safeParse(envelope.data.data);
   if (!output.success) throw new InventoryItemActionError(response.status, "The inventory service returned an unexpected action result.");
   if (attempt) await clearAdjustmentAttempt(attempt);
-  return { kind: "completed" };
+  if (createAttempt) await clearCreateAttempt(createAttempt);
+  return { kind: "completed", data: output.data };
 }
 
 export class InventoryItemActionError extends Error {

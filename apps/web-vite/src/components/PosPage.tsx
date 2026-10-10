@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { PosApiError, fetchPosShiftSummary, type PosShiftSummary } from "../api/pos";
+import { getPendingInventoryItemCreation } from "../api/inventory-items";
 import {
   adjustPosItemStock,
   clearPosSaleRetryIntent,
@@ -31,6 +32,9 @@ import "./PosPage.css";
 
 type Tab = "overview" | "sell" | "sessions";
 type PosRegisterAttempt = { action: PosOpenAction | PosCloseAction; intentId: string; status: "uncertain" | "pending" };
+function goInventoryItemWritesEnabled(): boolean {
+  return typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
+}
 const TABS: readonly Tab[] = ["overview", "sell", "sessions"];
 type PosStorageBucket = "cart" | "parked-carts" | "queued-sales";
 
@@ -284,6 +288,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
   const [queuedSaleBusyId, setQueuedSaleBusyId] = useState<string | null>(null);
   const [discardQueuedId, setDiscardQueuedId] = useState<string | null>(null);
   const [quickProductOpen, setQuickProductOpen] = useState(false);
+  const [quickProductRetryBlocked, setQuickProductRetryBlocked] = useState(false);
   const [quickProductAdvancedOpen, setQuickProductAdvancedOpen] = useState(false);
   const [quickProduct, setQuickProduct] = useState({ name: "", sku: "", barcode: "", price: "", openingStock: "", unitLabel: "unit" });
   const [returnTarget, setReturnTarget] = useState<PosSale | null>(null);
@@ -367,6 +372,33 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       .catch((error: unknown) => { if (!controller.signal.aborted) setModuleError(noticeFor(error, "The module switchboard could not be read. Try again.").title); });
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    setQuickProductRetryBlocked(false);
+    if (!actorId || !organizationId || !goInventoryItemWritesEnabled()) return;
+    let active = true;
+    void getPendingInventoryItemCreation({ actorId, organizationId }).then((action) => {
+      if (!active || !action) return;
+      setQuickProductRetryBlocked(true);
+      if (action.reorderPointThousandths !== 0 || action.tags.length > 0 || action.imageUrl) {
+        setNotice({ tone: "error", title: "An inventory item creation is unresolved", hint: "Retry that saved item from Inventory before starting another item action." });
+        return;
+      }
+      setQuickProduct({
+        name: action.name,
+        sku: action.sku,
+        barcode: action.barcode ?? "",
+        price: (action.salePriceMinor / scale).toFixed(digits),
+        openingStock: "",
+        unitLabel: action.unitLabel,
+      });
+      setQuickProductOpen(true);
+      setNotice({ tone: "pending", title: "An item creation is unresolved", hint: "The saved item and request identity are restored. Retry it to confirm whether it was created." });
+    }).catch((error: unknown) => {
+      if (active) setNotice({ tone: "error", title: noticeFor(error, "Could not restore the pending item creation.").title, hint: "Check the catalog before creating another item." });
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId, digits, scale]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1223,13 +1255,13 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         unitLabel,
         salePriceMinor: Math.max(0, toMinor(quickProduct.price, digits)),
         ...(barcode ? { barcode } : {}),
-      });
+      }, undefined, { actorId, organizationId });
       if (outcome.kind === "pending") {
-        setQuickProduct(blank);
-        setQuickProductOpen(false);
-        setNotice({ tone: "pending", title: `Adding ${name} is waiting for approval.`, hint: outcome.reason });
+        setQuickProductRetryBlocked(true);
+        setNotice({ tone: "pending", title: `Adding ${name} is waiting for approval.`, hint: `${outcome.reason} Retry this exact item after approval to confirm completion.` });
         return;
       }
+      setQuickProductRetryBlocked(false);
       setQuickProduct(blank);
       setQuickProductOpen(false);
       if (stockThousandths <= 0) {
@@ -1240,7 +1272,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
           sku,
           quantityDelta: stockThousandths,
           note: "Opening stock from POS quick add",
-        });
+        }, undefined, { actorId, organizationId });
         setNotice(stock.kind === "pending"
           ? { tone: "pending", title: `${name} was added.`, hint: "Its opening stock is waiting for approval before the item can be sold." }
           : { tone: "success", title: `${name} is in the catalog with ${stockUnits} ${unitLabel} in opening stock.`, hint: "Scan its barcode or search to add it to this sale." });
@@ -2878,6 +2910,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                         className="pos-input"
                         autoFocus
                         value={quickProduct.name}
+                        disabled={busy || quickProductRetryBlocked}
                         onChange={(event) => setQuickProduct((current) => ({ ...current, name: event.target.value }))}
                         maxLength={120}
                         required
@@ -2893,6 +2926,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                         step={digits === 0 ? "1" : "0.01"}
                         inputMode="decimal"
                         value={quickProduct.price}
+                        disabled={busy || quickProductRetryBlocked}
                         onChange={(event) => setQuickProduct((current) => ({ ...current, price: event.target.value }))}
                         required
                       />
@@ -2908,6 +2942,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                         inputMode="decimal"
                         placeholder="0"
                         value={quickProduct.openingStock}
+                        disabled={busy || quickProductRetryBlocked}
                         onChange={(event) => setQuickProduct((current) => ({ ...current, openingStock: event.target.value }))}
                       />
                       <small>Zero stock cannot be sold from this register.</small>
@@ -2918,6 +2953,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                         id="pos-quick-barcode"
                         className="pos-input"
                         value={quickProduct.barcode}
+                        disabled={busy || quickProductRetryBlocked}
                         onChange={(event) => setQuickProduct((current) => ({ ...current, barcode: event.target.value }))}
                         minLength={3}
                         maxLength={64}
@@ -2941,6 +2977,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                               id="pos-quick-unit"
                               className="pos-input"
                               value={quickProduct.unitLabel}
+                              disabled={busy || quickProductRetryBlocked}
                               onChange={(event) => setQuickProduct((current) => ({ ...current, unitLabel: event.target.value }))}
                               maxLength={20}
                             />
@@ -2952,6 +2989,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                               className="pos-input"
                               placeholder="Generated automatically if blank"
                               value={quickProduct.sku}
+                              disabled={busy || quickProductRetryBlocked}
                               onChange={(event) => setQuickProduct((current) => ({ ...current, sku: event.target.value }))}
                               maxLength={40}
                             />

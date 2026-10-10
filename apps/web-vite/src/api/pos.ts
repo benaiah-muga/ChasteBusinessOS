@@ -99,9 +99,6 @@ export async function fetchPosShiftSummary(sessionId: string, signal?: AbortSign
         intentId,
       })
       : await request("/api/pos", { action: "shiftSummary", sessionId, intentId });
-    if (useGoRoute && response.status === 404) {
-      response = await request("/api/pos", { action: "shiftSummary", sessionId, intentId });
-    }
   } catch (error) {
     if (signal?.aborted) throw error;
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";

@@ -33,15 +33,13 @@ describe("inventory barcode lookup", () => {
     });
   });
 
-  it("falls back to the legacy action when the Go capability route is missing", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { item: { sku: "SKU-1", name: "Widget" } } }));
+  it("does not fall back to the legacy action when the Go capability route is missing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: "not found" }, 404));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(lookupInventoryBarcode("12345", undefined, true)).resolves.toEqual({ sku: "SKU-1", name: "Widget" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/inventory");
+    await expect(lookupInventoryBarcode("12345", undefined, true)).rejects.toBeInstanceOf(InventoryCycleCountApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
   it("rejects an unexpected capability response", async () => {

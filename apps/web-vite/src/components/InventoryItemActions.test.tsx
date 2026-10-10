@@ -79,6 +79,39 @@ describe("InventoryItemActions", () => {
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
+  it("restores an unresolved Go item creation after reload and retries the saved identity", async () => {
+    const itemId = "6e5f92bb-83f1-45ed-a0b2-e04f2b1e3d43";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId } }));
+    const retryScope = { actorId: "actor-1", organizationId: "org-1" };
+    const onChanged = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+
+    await expect(submitInventoryItemAction({
+      action: "createItem",
+      sku: "BEANS-1KG",
+      name: "Coffee beans",
+      kind: "goods",
+      unitLabel: "unit",
+      salePriceMinor: 0,
+      reorderPointThousandths: 0,
+      tags: [],
+    }, undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Owner review" });
+
+    render(<InventoryItemActions items={[]} onChanged={onChanged} retryScope={retryScope} />);
+    expect(await screen.findByText("An item creation is unresolved. The saved item is restored; retry it to confirm completion.")).not.toBeNull();
+    expect(screen.getByLabelText("SKU")).toHaveProperty("value", "BEANS-1KG");
+    expect(screen.getByLabelText("Name")).toHaveProperty("value", "Coffee beans");
+    fireEvent.click(screen.getByRole("button", { name: "Create item" }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const retry = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(retry.intentId).toBe(first.intentId);
+  });
+
   it("records negative stock adjustments through the governed API and refreshes data", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { onHandThousandths: 6500 } }));
     const onChanged = vi.fn();

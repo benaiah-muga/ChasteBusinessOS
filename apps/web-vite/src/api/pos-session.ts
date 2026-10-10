@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PosApiError } from "./pos";
-import { inventoryItemActionRequest, type AdjustInventoryStock, type CreateInventoryItem } from "./inventory-items";
+import { submitInventoryItemAction, type InventoryAdjustmentRetryScope } from "./inventory-items";
 
 const uuid = z.string().uuid();
 const SALE_INTENT_STORAGE_PREFIX = "chaste.pos.sale-intent.v1:";
@@ -259,9 +259,6 @@ export async function fetchPosCustomers(signal?: AbortSignal, options: { useGo?:
   let result: { status: number; ok: boolean; body: unknown };
   if (useGo) {
     result = await readJson("/api/pos/customers", signal, "Customer lookup took too long to load. Try again.");
-    if (result.status === 404) {
-      result = await readJson("/api/customers", signal, "Customer lookup took too long to load. Try again.");
-    }
   } else {
     result = await readJson("/api/customers", signal, "Customer lookup took too long to load. Try again.");
   }
@@ -324,25 +321,6 @@ async function postPosRequest(
     throw unreachable(error, "The POS service took too long to respond. Check the register before trying again.");
   }
   return { status: response.status, body: await response.json().catch(() => null) };
-}
-
-function postPosInventoryAction(
-  payload: PosCreateItemAction | PosAdjustStockAction,
-  signal?: AbortSignal,
-): Promise<{ status: number; body: unknown }> {
-  const intentId = crypto.randomUUID();
-  const useGo = typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
-  if (!useGo) return postPosAction(payload, intentId, signal, "/api/inventory");
-
-  const inventoryAction: CreateInventoryItem | AdjustInventoryStock = payload.action === "createItem"
-    ? {
-      ...payload,
-      reorderPointThousandths: 0,
-      tags: [],
-    }
-    : payload;
-  const request = inventoryItemActionRequest(inventoryAction, intentId, true);
-  return postPosRequest(request.url, request.body, signal);
 }
 
 async function postGoPosCapability(
@@ -662,7 +640,17 @@ export async function openPosSession(
   const payload = parseOrThrow(PosOpenActionSchema, action, "Check the opening float and try again.");
   const configuredForGo = typeof __GO_POS_OPEN_SESSION_SLICE__ !== "undefined" && __GO_POS_OPEN_SESSION_SLICE__;
   const useGo = options.useGo ?? configuredForGo;
-  if (!useGo) return interpret(await postPosAction(payload, options.intentId ?? crypto.randomUUID(), signal), OpenOutputSchema, "Could not open the register.");
+  if (!useGo) {
+    const scopeId = options.scopeId?.trim();
+    if (scopeId) {
+      const storageKey = await registerAttemptStorageKey(scopeId);
+      assertRegisterScopeCurrent(options.isScopeCurrent);
+      const activeResult = readRegisterActiveAttempt(storageKey);
+      if (activeResult.kind === "corrupt") throw new PosApiError(0, "A saved register retry marker is damaged. Verify the register before starting another action.");
+      if (activeResult.kind === "valid") throw new PosApiError(0, "A Go register action is unresolved. Restore Go register routes and retry the saved action before using the legacy route.");
+    }
+    return interpret(await postPosAction(payload, options.intentId ?? crypto.randomUUID(), signal), OpenOutputSchema, "Could not open the register.");
+  }
 
   const scopeId = options.scopeId?.trim();
   if (!scopeId) throw new PosApiError(0, "Register opening requires an authenticated actor and organization scope.");
@@ -676,12 +664,14 @@ export async function openPosSession(
   if (active && active.fingerprint !== fingerprint) {
     throw new PosApiError(0, "A register action is unresolved. Retry the exact opening or verify the register before starting another action.");
   }
+  if (active && options.intentId && options.intentId !== active.intentId) {
+    throw new PosApiError(0, "This register opening must keep its saved attempt identity until its result is resolved.");
+  }
   const intentId = options.intentId ?? active?.intentId ?? crypto.randomUUID();
   rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "uncertain" }, true);
 
-  let result = await postGoPosCapability("pos.openSession", { openingFloatMinor: payload.openingFloatMinor }, intentId, signal);
-  if (result.status === 404) result = await postPosAction(payload, intentId, signal);
-  if (result.status >= 400 && result.status < 500 && result.status !== 408 && result.status !== 429) clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
+  const result = await postGoPosCapability("pos.openSession", { openingFloatMinor: payload.openingFloatMinor }, intentId, signal);
+  if (result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408 && result.status !== 429) clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
   const outcome = interpret(result, OpenOutputSchema, "Could not open the register.");
   if (outcome.kind === "completed") clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
   if (outcome.kind === "pending") rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "pending" });
@@ -754,7 +744,17 @@ export async function closePosSession(
   const payload = parseOrThrow(PosCloseActionSchema, action, "Check the counted cash and the variance note before closing.");
   const configuredForGo = typeof __GO_POS_CLOSE_SESSION_SLICE__ !== "undefined" && __GO_POS_CLOSE_SESSION_SLICE__;
   const useGo = options.useGo ?? configuredForGo;
-  if (!useGo) return interpret(await postPosAction(payload, options.intentId ?? crypto.randomUUID(), signal), CloseOutputSchema, "The register session could not be closed.");
+  if (!useGo) {
+    const scopeId = options.scopeId?.trim();
+    if (scopeId) {
+      const storageKey = await registerAttemptStorageKey(scopeId);
+      assertRegisterScopeCurrent(options.isScopeCurrent);
+      const activeResult = readRegisterActiveAttempt(storageKey);
+      if (activeResult.kind === "corrupt") throw new PosApiError(0, "A saved register retry marker is damaged. Verify the register before starting another action.");
+      if (activeResult.kind === "valid") throw new PosApiError(0, "A Go register action is unresolved. Restore Go register routes and retry the saved action before using the legacy route.");
+    }
+    return interpret(await postPosAction(payload, options.intentId ?? crypto.randomUUID(), signal), CloseOutputSchema, "The register session could not be closed.");
+  }
 
   const scopeId = options.scopeId?.trim();
   if (!scopeId) throw new PosApiError(0, "Register closing requires an authenticated actor and organization scope.");
@@ -768,6 +768,9 @@ export async function closePosSession(
   if (active && active.fingerprint !== fingerprint) {
     throw new PosApiError(0, "A register action is unresolved. Retry the exact close or verify the register before starting another action.");
   }
+  if (active && options.intentId && options.intentId !== active.intentId) {
+    throw new PosApiError(0, "This register close must keep its saved attempt identity until its result is resolved.");
+  }
   const intentId = options.intentId ?? active?.intentId ?? crypto.randomUUID();
   rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "uncertain" }, true);
 
@@ -776,9 +779,8 @@ export async function closePosSession(
     countedCashMinor: payload.countedCashMinor,
     ...(payload.varianceReason === undefined ? {} : { varianceReason: payload.varianceReason }),
   };
-  let result = await postGoPosCapability("pos.closeSession", input, intentId, signal);
-  if (result.status === 404) result = await postPosAction(payload, intentId, signal);
-  if (result.status >= 400 && result.status < 500 && result.status !== 408 && result.status !== 429) clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
+  const result = await postGoPosCapability("pos.closeSession", input, intentId, signal);
+  if (result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408 && result.status !== 429) clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
   const outcome = interpret(result, CloseOutputSchema, "The register session could not be closed.");
   if (outcome.kind === "completed") clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
   if (outcome.kind === "pending") rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "pending" });
@@ -812,13 +814,12 @@ export async function requestPosReturn(
   if (useGo) {
     const { action: _action, ...input } = payload;
     result = await postGoPosCapability("pos.returnSale", input, intentId, signal);
-    if (result.status === 404) result = await postPosAction(payload, intentId, signal);
   } else {
     result = await postPosAction(payload, intentId, signal);
   }
 
-  if (storageKey && result.status >= 400 && result.status < 500 && result.status !== 408) clearReturnIntent(storageKey, intentId);
-  if (activeAttemptKey && fingerprint && result.status >= 400 && result.status < 500 && result.status !== 408) clearReturnActiveAttempt(activeAttemptKey, fingerprint, intentId);
+  if (storageKey && result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408) clearReturnIntent(storageKey, intentId);
+  if (activeAttemptKey && fingerprint && result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408) clearReturnActiveAttempt(activeAttemptKey, fingerprint, intentId);
   const outcome = interpret(result, ReturnOutputSchema, "The return could not be submitted.");
   if (outcome.kind === "pending" && activeAttemptKey && fingerprint) rememberReturnActiveAttempt(activeAttemptKey, fingerprint, intentId, payload, "pending");
   if (storageKey && outcome.kind === "completed") clearReturnIntent(storageKey, intentId);
@@ -826,12 +827,28 @@ export async function requestPosReturn(
   return outcome;
 }
 
-export async function createPosQuickProduct(action: PosCreateItemAction, signal?: AbortSignal): Promise<PosActionOutcome<z.infer<typeof CreateItemOutputSchema>>> {
+export async function createPosQuickProduct(
+  action: PosCreateItemAction,
+  signal?: AbortSignal,
+  retryScope?: InventoryAdjustmentRetryScope,
+): Promise<PosActionOutcome<z.infer<typeof CreateItemOutputSchema>>> {
   const payload = parseOrThrow(PosCreateItemActionSchema, action, "Check the product name, SKU, and price before saving.");
-  return interpret(await postPosInventoryAction(payload, signal), CreateItemOutputSchema, "Could not add the product.");
+  const result = await submitInventoryItemAction({ ...payload, reorderPointThousandths: 0, tags: [] }, signal, retryScope);
+  if (result.kind === "pending") return result;
+  const output = CreateItemOutputSchema.safeParse(result.data);
+  if (!output.success) throw new PosApiError(200, "The inventory service returned an unexpected item result.");
+  return { kind: "completed", data: output.data };
 }
 
-export async function adjustPosItemStock(action: PosAdjustStockAction, signal?: AbortSignal): Promise<PosActionOutcome<z.infer<typeof AdjustStockOutputSchema>>> {
+export async function adjustPosItemStock(
+  action: PosAdjustStockAction,
+  signal?: AbortSignal,
+  retryScope?: InventoryAdjustmentRetryScope,
+): Promise<PosActionOutcome<z.infer<typeof AdjustStockOutputSchema>>> {
   const payload = parseOrThrow(PosAdjustStockActionSchema, action, "Check the opening stock quantity before recording it.");
-  return interpret(await postPosInventoryAction(payload, signal), AdjustStockOutputSchema, "Could not record the opening stock.");
+  const result = await submitInventoryItemAction(payload, signal, retryScope);
+  if (result.kind === "pending") return result;
+  const output = AdjustStockOutputSchema.safeParse(result.data);
+  if (!output.success) throw new PosApiError(200, "The inventory service returned an unexpected stock result.");
+  return { kind: "completed", data: output.data };
 }

@@ -332,10 +332,7 @@ export async function lookupInventoryBarcode(
   const request = useGo
     ? { path: "/api/capabilities/execute", input: { capabilityId: "inventory.lookupByBarcode", input: { barcode } } }
     : { path: "/api/inventory", input: { action: "lookupByBarcode", barcode } };
-  let body = await postInventory(request.path, request.input, signal);
-  if (useGo && body.response.status === 404) {
-    body = await postInventory("/api/inventory", { action: "lookupByBarcode", barcode }, signal);
-  }
+  const body = await postInventory(request.path, request.input, signal);
   if (!body.response.ok || body.response.status !== 200) {
     throw new InventoryCycleCountApiError(body.response.status, errorMessage(body.data));
   }

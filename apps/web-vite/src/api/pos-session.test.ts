@@ -10,9 +10,11 @@ import {
   openPosSession,
   requestPosReturn,
   restorePosRegisterAttempt,
+  restorePosReturnAttempt,
   submitPosSale,
 } from "./pos-session";
 import { PosApiError } from "./pos";
+import { getPendingInventoryItemCreation } from "./inventory-items";
 
 const openId = "10000000-0000-4000-8000-000000000001";
 const saleId = "20000000-0000-4000-8000-000000000002";
@@ -135,14 +137,12 @@ describe("POS register session API client", () => {
     }));
   });
 
-  it("falls back to legacy POS customer lookup only when the Go route is missing", async () => {
-    const customers = [{ id: "50000000-0000-4000-8000-000000000005", name: "Amina", email: "amina@example.test", purchaseCount: 3, lifetimeSpendMinor: 4500 }];
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ customers }));
-    fetchMock.mockImplementationOnce(async () => Response.json({ error: "route not mounted" }, { status: 404 }));
+  it("does not fall back to legacy POS customer lookup when the Go route is missing", async () => {
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ error: "route not mounted" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchPosCustomers(undefined, { useGo: true })).resolves.toEqual(customers);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/pos/customers", "/api/customers"]);
+    await expect(fetchPosCustomers(undefined, { useGo: true })).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/pos/customers"]);
   });
 
   it.each([401, 403, 500])("does not fall back after Go customer lookup HTTP %s", async (status) => {
@@ -180,7 +180,7 @@ describe("POS register session API client", () => {
     await expect(openPosSession({ action: "open", openingFloatMinor: 0 })).resolves.toEqual({ kind: "pending", reason: "needs a manager" });
   });
 
-  it("routes register opening through Go when opted in and retries a missing Go route with the same intent", async () => {
+  it("routes register opening through Go and fails closed when its route is missing", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: { sessionId: openId } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -198,16 +198,37 @@ describe("POS register session API client", () => {
     });
 
     fetchMock.mockImplementationOnce(async () => Response.json({ error: "route not mounted" }, { status: 404 }));
-    await expect(openPosSession({ action: "open", openingFloatMinor: 2500 }, undefined, { useGo: true, scopeId: "open-fallback" })).resolves.toEqual({
-      kind: "completed",
-      data: { sessionId: openId },
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await expect(openPosSession({ action: "open", openingFloatMinor: 2500 }, undefined, { useGo: true, scopeId: "open-fallback" })).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]![0]).toBe("/api/capabilities/execute");
-    expect(fetchMock.mock.calls[2]![0]).toBe("/api/pos");
     const goIntent = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body)).intentId;
-    const legacyBody = JSON.parse(String(fetchMock.mock.calls[2]![1]?.body));
-    expect(legacyBody).toEqual({ action: "open", openingFloatMinor: 2500, intentId: goIntent });
+    expect(goIntent).toEqual(expect.any(String));
+    await expect(restorePosRegisterAttempt("open-fallback")).resolves.toMatchObject({
+      action: { action: "open", openingFloatMinor: 2500 },
+      intentId: goIntent,
+      status: "uncertain",
+    });
+    await expect(openPosSession({ action: "open", openingFloatMinor: 2500 }, undefined, { useGo: false, scopeId: "open-fallback" }))
+      .rejects.toThrow("A Go register action is unresolved");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["open", "close"] as const)("rejects a caller-provided %s intent that differs from the unresolved attempt", async (kind) => {
+    const scopeId = `intent-mismatch-${kind}`;
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = kind === "open"
+      ? { action: "open" as const, openingFloatMinor: 3000 }
+      : { action: "close" as const, sessionId: openId, countedCashMinor: 14000 };
+    const submit = (intentId?: string) => kind === "open"
+      ? openPosSession(action as { action: "open"; openingFloatMinor: number }, undefined, { useGo: true, scopeId, intentId })
+      : closePosSession(action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { useGo: true, scopeId, intentId });
+
+    await expect(submit()).resolves.toMatchObject({ kind: "pending" });
+    const saved = await restorePosRegisterAttempt(scopeId);
+    await expect(submit(crypto.randomUUID())).rejects.toThrow("must keep its saved attempt identity");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(restorePosRegisterAttempt(scopeId)).resolves.toEqual(saved);
   });
 
   it("does not retry register opening through legacy after a non-404 Go failure", async () => {
@@ -540,7 +561,7 @@ describe("POS register session API client", () => {
   ])("blocks Go and legacy requests when the saved sale marker has %s", async (_description, invalidMarker) => {
     const action = { ...saleAction(), cashReceivedMinor: 3230 };
     const scopeId = `user-damaged-marker-${String(_description).replaceAll(" ", "-")}`;
-    const fetchMock = vi.fn(async () => Response.json({ error: "route not mounted" }, { status: 404 }));
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ error: "route not mounted" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
     const previousStorageKeys = new Set(Object.keys(localStorage));
     await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId })).rejects.toMatchObject({ status: 404 });
@@ -673,20 +694,19 @@ describe("POS register session API client", () => {
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
   });
 
-  it("falls back only on Go 404 and preserves the close intent identity", async () => {
-    const output = { expectedCashMinor: 14500, varianceMinor: 0, flagged: false };
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: output }));
+  it("fails closed when the Go close route is missing", async () => {
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ error: "route not mounted" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
-    fetchMock.mockImplementationOnce(async () => Response.json({ error: "route not mounted" }, { status: 404 }));
 
     await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 14500 }, undefined, { useGo: true, scopeId: "close-fallback" }))
-      .resolves.toEqual({ kind: "completed", data: output });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+      .rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
-    expect(fetchMock.mock.calls[1]![0]).toBe("/api/pos");
-    const goBody = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
-    const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body));
-    expect(legacyBody).toEqual({ action: "close", sessionId: openId, countedCashMinor: 14500, intentId: goBody.intentId });
+    const saved = await restorePosRegisterAttempt("close-fallback");
+    expect(saved).toMatchObject({ action: { action: "close", sessionId: openId, countedCashMinor: 14500 }, status: "uncertain" });
+    await expect(closePosSession(saved!.action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { useGo: false, scopeId: "close-fallback" }))
+      .rejects.toThrow("A Go register action is unresolved");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([403, 422, 503])("does not fall back to legacy after Go returns HTTP %s", async (status) => {
@@ -768,16 +788,17 @@ describe("POS register session API client", () => {
     expect(laterIntent).not.toBe(intents[2]);
   });
 
-  it("falls back only on Go 404 and preserves the same return intent", async () => {
-    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => url === "/api/capabilities/execute"
-      ? Response.json({ error: "not found" }, { status: 404 })
-      : Response.json({ ok: true, data: { refundEntryId: "e1", refundMinor: 1250, creditedMinor: 1250, restockedLines: 1, refundMethod: "cash" } }));
+  it("fails closed when the Go return route is missing", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ error: "not found" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "returnSale" as const, invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" as const, lines: [{ invoiceLineId: lineId, quantity: 500 }] };
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId: "org-1:actor-1" })).resolves.toMatchObject({ kind: "completed" });
-    const goIntent = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)).intentId;
-    const legacy = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body));
-    expect(legacy).toEqual({ ...action, intentId: goIntent });
+    const scopeId = "return-404:actor-1";
+    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId })).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(restorePosReturnAttempt(scopeId)).resolves.toMatchObject({ action, intentId: expect.any(String) });
+    await expect(requestPosReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { useGo: false, scopeId }))
+      .rejects.toThrow("previous return result is still unknown");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([401, 403, 422, 500])("does not fall back from Go return status %s", async (status) => {
@@ -892,9 +913,10 @@ describe("POS register session API client", () => {
 
   it("writes quick add products and their opening stock through the inventory route", async () => {
     let writes = 0;
+    const itemId = "40000000-0000-4000-8000-000000000004";
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
       writes += 1;
-      return writes === 1 ? Response.json({ ok: true, data: { itemId: "item-1" } }) : Response.json({ ok: true, data: { onHandThousandths: 5000 } });
+      return writes === 1 ? Response.json({ ok: true, data: { itemId } }) : Response.json({ ok: true, data: { onHandThousandths: 5000 } });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
@@ -906,22 +928,23 @@ describe("POS register session API client", () => {
       kind: "goods",
       unitLabel: "loaf",
       salePriceMinor: 2500,
-    })).resolves.toEqual({ kind: "completed", data: { itemId: "item-1" } });
+    }, undefined, { actorId: "actor-1", organizationId: "org-1" })).resolves.toEqual({ kind: "completed", data: { itemId } });
     await expect(adjustPosItemStock({
       action: "adjustStock",
       sku: "BRD-001",
       quantityDelta: 5000,
       note: "Opening stock from POS quick add",
-    })).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 5000 } });
+    }, undefined, { actorId: "actor-1", organizationId: "org-1" })).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 5000 } });
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/inventory", "/api/inventory"]);
   });
 
   it("routes POS quick add and opening stock through Go inventory capabilities when enabled", async () => {
     let writes = 0;
+    const itemId = "40000000-0000-4000-8000-000000000004";
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
       writes += 1;
       return writes === 1
-        ? Response.json({ ok: true, data: { itemId: "item-1" } })
+        ? Response.json({ ok: true, data: { itemId } })
         : Response.json({ ok: true, data: { onHandThousandths: 5000 } });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -934,13 +957,13 @@ describe("POS register session API client", () => {
       kind: "goods",
       unitLabel: "loaf",
       salePriceMinor: 2500,
-    })).resolves.toEqual({ kind: "completed", data: { itemId: "item-1" } });
+    }, undefined, { actorId: "actor-1", organizationId: "org-1" })).resolves.toEqual({ kind: "completed", data: { itemId } });
     await expect(adjustPosItemStock({
       action: "adjustStock",
       sku: "BRD-001",
       quantityDelta: 5000,
       note: "Opening stock from POS quick add",
-    })).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 5000 } });
+    }, undefined, { actorId: "actor-1", organizationId: "org-1" })).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 5000 } });
 
     const requests = fetchMock.mock.calls.map(([url, init]) => ({
       url,
@@ -971,14 +994,15 @@ describe("POS register session API client", () => {
     expect(requests[0]?.body.intentId).not.toBe(requests[1]?.body.intentId);
   });
 
-  it("keeps approval outcomes visible for Go inventory item actions", async () => {
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({
-      ok: false,
-      pendingApproval: true,
-      reason: "Manager approval is required.",
-    }, { status: 202 }));
+  it("recovers a pending POS quick-add item with the same Go intent before allowing another item action", async () => {
+    const itemId = "40000000-0000-4000-8000-000000000004";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Manager approval is required." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId } }))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Manager approval is required." }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+    const retryScope = { actorId: "actor-1", organizationId: "org-1" };
 
     await expect(createPosQuickProduct({
       action: "createItem",
@@ -987,14 +1011,26 @@ describe("POS register session API client", () => {
       kind: "goods",
       unitLabel: "loaf",
       salePriceMinor: 2500,
-    })).resolves.toEqual({ kind: "pending", reason: "Manager approval is required." });
+    }, undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Manager approval is required." });
+    await expect(getPendingInventoryItemCreation(retryScope)).resolves.toMatchObject({ sku: "BRD-001", name: "Boda bread" });
+    await expect(createPosQuickProduct({
+      action: "createItem",
+      sku: "BRD-001",
+      name: "Boda bread",
+      kind: "goods",
+      unitLabel: "loaf",
+      salePriceMinor: 2500,
+    }, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { itemId } });
     await expect(adjustPosItemStock({
       action: "adjustStock",
       sku: "BRD-001",
       quantityDelta: 5000,
       note: "Opening stock from POS quick add",
-    })).resolves.toEqual({ kind: "pending", reason: "Manager approval is required." });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    }, undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Manager approval is required." });
+    const createIntent = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
+    const retryIntent = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId;
+    expect(retryIntent).toBe(createIntent);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("turns an unreachable service and a malformed success body into readable errors", async () => {

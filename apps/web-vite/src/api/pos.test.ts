@@ -57,23 +57,14 @@ describe("POS API client", () => {
     });
   });
 
-  it("falls back to the legacy POS action only when the Go route is missing", async () => {
+  it("does not fall back to the legacy POS action when the Go route is missing", async () => {
     vi.stubGlobal("__GO_POS_SHIFT_SUMMARY_ROUTE__", true);
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(null, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: summary }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchPosShiftSummary(id)).resolves.toEqual(summary);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(fetchPosShiftSummary(id)).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/pos/shift-summary");
-    expect(fetchMock.mock.calls[1]![0]).toBe("/api/pos");
-    const first = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as { intentId: string };
-    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({
-      action: "shiftSummary",
-      sessionId: id,
-      intentId: first.intentId,
-    });
   });
 
   it("does not retry a Go response other than 404", async () => {

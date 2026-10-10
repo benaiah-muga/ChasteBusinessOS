@@ -161,6 +161,11 @@ The full v1 changelog is preserved at the bottom of this file.
   both routes without being overwritten or cleared, and the POS screen explains
   how to recover safely. Selector-off sales remain on legacy.
 
+- Vite POS session open/close and returns, plus inventory item and cycle-count
+  writes, now keep exact Go retry intents through uncertain outcomes. Selected
+  Go errors cannot fall through to legacy writes, and unresolved attempts block
+  selector rollback until the same action is retried or resolved.
+
 - Vite Projects create, archive, and task writes now use direct Go capabilities
   by default. Set `CHASTE_GO_PROJECTS_WRITES=0` to send them through the
   existing `POST /api/projects` route, which remains Go-backed while

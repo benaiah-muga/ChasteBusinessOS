@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { type InventoryItem } from "../api/inventory";
-import { getPendingInventoryAdjustment, InventoryItemActionError, submitInventoryItemAction as submitItemAction, type InventoryAdjustmentRetryScope, type InventoryItemActionResult } from "../api/inventory-items";
+import { getPendingInventoryAdjustment, getPendingInventoryItemCreation, InventoryItemActionError, submitInventoryItemAction as submitItemAction, type InventoryAdjustmentRetryScope, type InventoryItemActionResult } from "../api/inventory-items";
 import "./inventory-item-actions.css";
 
 type FormValues = {
@@ -66,25 +66,34 @@ export function InventoryItemActions({
   retryScope?: InventoryAdjustmentRetryScope;
 }) {
   const [form, setForm] = useState<FormValues>(blankForm);
+  const [createRetryLocked, setCreateRetryLocked] = useState(false);
   const [adjustment, setAdjustment] = useState<AdjustmentValues>({ sku: "", direction: "increase", quantity: "", note: "", lotCode: "", locationCode: "" });
   const [retryState, setRetryState] = useState<RetryState>(() => goItemWritesEnabled() ? "loading" : "clear");
   const [retryStateScopeIdentity, setRetryStateScopeIdentity] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const minorUnits = currencyMinorUnits(currency) ?? 2;
-  const retryScopeIdentity = `${retryScope?.actorId?.trim() ?? ""}:${retryScope?.organizationId?.trim() ?? ""}`;
+  const retryActorId = retryScope?.actorId?.trim() ?? "";
+  const retryOrganizationId = retryScope?.organizationId?.trim() ?? "";
+  const retryScopeIdentity = `${retryActorId}:${retryOrganizationId}`;
   const retryScopeIdentityRef = useRef(retryScopeIdentity);
+  const createSubmittedScopeIdentityRef = useRef<string | null>(null);
+  if (createSubmittedScopeIdentityRef.current && createSubmittedScopeIdentityRef.current !== retryScopeIdentity) {
+    createSubmittedScopeIdentityRef.current = null;
+  }
   retryScopeIdentityRef.current = retryScopeIdentity;
   const retryScopeChecked = retryStateScopeIdentity === retryScopeIdentity;
   const retryBlockedByRoute = retryState === "unresolved" && !goItemWritesEnabled();
 
   useEffect(() => {
     setBusy(false);
+    setForm(blankForm());
+    setCreateRetryLocked(false);
     setRetryState("loading");
     setRetryStateScopeIdentity(null);
     setNotice(null);
-    const actorId = retryScope?.actorId?.trim();
-    const organizationId = retryScope?.organizationId?.trim();
+    const actorId = retryActorId;
+    const organizationId = retryOrganizationId;
     if (!actorId || !organizationId) {
       setRetryState("failed");
       setNotice({ tone: "pending", message: "Loading the active workspace before stock adjustments are available." });
@@ -112,6 +121,33 @@ export function InventoryItemActions({
     return () => { active = false; };
   }, [retryScopeIdentity]);
 
+  useEffect(() => {
+    const actorId = retryActorId;
+    const organizationId = retryOrganizationId;
+    if (!actorId || !organizationId || !goItemWritesEnabled()) return;
+    let active = true;
+    void getPendingInventoryItemCreation({ actorId, organizationId }).then((action) => {
+      if (!active || !action || createSubmittedScopeIdentityRef.current === retryScopeIdentity) return;
+      setCreateRetryLocked(true);
+      setForm({
+        sku: action.sku,
+        name: action.name,
+        kind: action.kind,
+        unitLabel: action.unitLabel,
+        salePrice: (action.salePriceMinor / 10 ** minorUnits).toFixed(minorUnits),
+        reorder: (action.reorderPointThousandths / 1000).toString(),
+        openingQty: "",
+        barcode: action.barcode ?? "",
+        imageUrl: action.imageUrl ?? "",
+        tags: action.tags.join(", "),
+      });
+      setNotice({ tone: "pending", message: "An item creation is unresolved. The saved item is restored; retry it to confirm completion." });
+    }).catch((error: unknown) => {
+      if (active) setNotice({ tone: "error", message: error instanceof InventoryItemActionError ? error.message : "Item creation retry recovery is unavailable." });
+    });
+    return () => { active = false; };
+  }, [retryScopeIdentity, minorUnits, retryActorId, retryOrganizationId]);
+
   async function recoverAdjustmentRetryState(terminal: boolean, expectedScopeIdentity: string): Promise<void> {
     if (retryScopeIdentityRef.current !== expectedScopeIdentity) return;
     if (terminal) {
@@ -138,6 +174,7 @@ export function InventoryItemActions({
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const submittedScopeIdentity = retryScopeIdentity;
+    createSubmittedScopeIdentityRef.current = submittedScopeIdentity;
     const salePriceMinor = scaledInteger(form.salePrice, minorUnits);
     const reorderPointThousandths = form.kind === "goods" ? scaledInteger(form.reorder, 3) : 0;
     const openingQuantity = form.kind === "goods" ? scaledInteger(form.openingQty, 3) : 0;
@@ -160,14 +197,17 @@ export function InventoryItemActions({
         ...(form.barcode.trim() ? { barcode: form.barcode.trim() } : {}),
         ...(form.imageUrl.trim() ? { imageUrl: form.imageUrl.trim() } : {}),
         tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
-      });
+      }, undefined, retryScope);
       if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       if (created.kind === "pending") {
+        setCreateRetryLocked(true);
         setNotice({ tone: "pending", message: created.reason });
         return;
       }
+      setCreateRetryLocked(false);
     } catch (error) {
       if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
+      setCreateRetryLocked(error instanceof InventoryItemActionError && error.status === 0);
       if (error instanceof InventoryItemActionError && error.status === 0) await onChanged();
       if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       setNotice({ tone: "error", message: error instanceof InventoryItemActionError ? error.message : "The inventory action could not be completed." });
@@ -267,18 +307,18 @@ export function InventoryItemActions({
         <form className="inventory-item-form" onSubmit={(event) => void handleCreate(event)}>
           <h3>Add an item</h3>
           <div className="inventory-item-fields">
-            <label>SKU<input required maxLength={40} value={form.sku} onChange={(event) => setForm({ ...form, sku: event.currentTarget.value })} /></label>
-            <label>Name<input required maxLength={120} value={form.name} onChange={(event) => setForm({ ...form, name: event.currentTarget.value })} /></label>
-            <label>Item type<select value={form.kind} onChange={(event) => { const kind = event.currentTarget.value as FormValues["kind"]; setForm({ ...form, kind, unitLabel: kind === "service" && form.unitLabel === "unit" ? "hour" : kind === "goods" && form.unitLabel === "hour" ? "unit" : form.unitLabel }); }}><option value="goods">Goods</option><option value="service">Service</option></select></label>
-            <label>Unit<input maxLength={20} value={form.unitLabel} onChange={(event) => setForm({ ...form, unitLabel: event.currentTarget.value })} /></label>
-            <label>Selling price<input inputMode="decimal" value={form.salePrice} onChange={(event) => setForm({ ...form, salePrice: event.currentTarget.value })} placeholder="0.00" /></label>
+            <label>SKU<input required maxLength={40} value={form.sku} disabled={busy || createRetryLocked} onChange={(event) => setForm({ ...form, sku: event.currentTarget.value })} /></label>
+            <label>Name<input required maxLength={120} value={form.name} disabled={busy || createRetryLocked} onChange={(event) => setForm({ ...form, name: event.currentTarget.value })} /></label>
+            <label>Item type<select value={form.kind} disabled={busy || createRetryLocked} onChange={(event) => { const kind = event.currentTarget.value as FormValues["kind"]; setForm({ ...form, kind, unitLabel: kind === "service" && form.unitLabel === "unit" ? "hour" : kind === "goods" && form.unitLabel === "hour" ? "unit" : form.unitLabel }); }}><option value="goods">Goods</option><option value="service">Service</option></select></label>
+            <label>Unit<input maxLength={20} value={form.unitLabel} disabled={busy || createRetryLocked} onChange={(event) => setForm({ ...form, unitLabel: event.currentTarget.value })} /></label>
+            <label>Selling price<input inputMode="decimal" value={form.salePrice} disabled={busy || createRetryLocked} onChange={(event) => setForm({ ...form, salePrice: event.currentTarget.value })} placeholder="0.00" /></label>
             {form.kind === "goods" && <>
-              <label>Reorder point<input inputMode="decimal" value={form.reorder} onChange={(event) => setForm({ ...form, reorder: event.currentTarget.value })} placeholder="0" /></label>
-              <label>Opening stock<input inputMode="decimal" value={form.openingQty} onChange={(event) => setForm({ ...form, openingQty: event.currentTarget.value })} placeholder="0" /></label>
+              <label>Reorder point<input inputMode="decimal" value={form.reorder} disabled={busy || createRetryLocked} onChange={(event) => setForm({ ...form, reorder: event.currentTarget.value })} placeholder="0" /></label>
+              <label>Opening stock<input inputMode="decimal" value={form.openingQty} disabled={busy || createRetryLocked} onChange={(event) => setForm({ ...form, openingQty: event.currentTarget.value })} placeholder="0" /></label>
             </>}
-            <label>Barcode<input maxLength={64} value={form.barcode} onChange={(event) => setForm({ ...form, barcode: event.currentTarget.value })} /></label>
-            <label>Image URL<input type="url" value={form.imageUrl} onChange={(event) => setForm({ ...form, imageUrl: event.currentTarget.value })} /></label>
-            <label className="inventory-item-field-wide">Tags<input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.currentTarget.value })} placeholder="Separate tags with commas" /></label>
+            <label>Barcode<input maxLength={64} value={form.barcode} disabled={busy || createRetryLocked} onChange={(event) => setForm({ ...form, barcode: event.currentTarget.value })} /></label>
+            <label>Image URL<input type="url" value={form.imageUrl} disabled={busy || createRetryLocked} onChange={(event) => setForm({ ...form, imageUrl: event.currentTarget.value })} /></label>
+            <label className="inventory-item-field-wide">Tags<input value={form.tags} disabled={busy || createRetryLocked} onChange={(event) => setForm({ ...form, tags: event.currentTarget.value })} placeholder="Separate tags with commas" /></label>
           </div>
           <button className="shell-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create item"}</button>
         </form>
