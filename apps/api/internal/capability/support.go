@@ -516,6 +516,18 @@ func ParseSupportUpdateTicketInput(raw json.RawMessage) (SupportUpdateTicketInpu
 	if err != nil {
 		return SupportUpdateTicketInput{}, err
 	}
+	allowedFields := map[string]struct{}{
+		"conversationId": {},
+		"priority":       {},
+		"category":       {},
+		"assigneeUserId": {},
+		"slaDueAt":       {},
+	}
+	for key := range fields {
+		if _, ok := allowedFields[key]; !ok {
+			return SupportUpdateTicketInput{}, fmt.Errorf("unknown field: %s", key)
+		}
+	}
 	var input SupportUpdateTicketInput
 	if input.ConversationID, err = projectRequiredUUID(fields, "conversationId"); err != nil {
 		return SupportUpdateTicketInput{}, err
@@ -1043,6 +1055,18 @@ func supportUpdateTicket(ctx context.Context, tx pgx.Tx, orgID string, input Sup
 	}
 	if err != nil {
 		return SupportUpdateTicketOutput{}, err
+	}
+	if input.AssigneeUserID != nil {
+		var member bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM memberships WHERE org_id = $1::uuid AND user_id = $2::uuid
+			)`, orgID, *input.AssigneeUserID).Scan(&member); err != nil {
+			return SupportUpdateTicketOutput{}, err
+		}
+		if !member {
+			return SupportUpdateTicketOutput{}, errors.New("assignee is not a member of this organization")
+		}
 	}
 	sets := []string{"updated_at=" + "$2"}
 	args := []any{conversationID, now}

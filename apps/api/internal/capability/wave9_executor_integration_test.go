@@ -173,6 +173,14 @@ func TestGoWave9SupportGovernedExecutorPath(t *testing.T) {
 	if !isUUID(startedOut.ConversationID) {
 		t.Fatalf("startConversation output=%+v, want UUID conversationId", startedOut)
 	}
+	nonMemberID := executorUUID(t)
+	updateTicketInput := json.RawMessage(`{"conversationId":"` + startedOut.ConversationID + `","assigneeUserId":"` + nonMemberID + `"}`)
+	deniedAssignee, err := fx.executor.Execute(fx.ctx,
+		waveModuleClaims(fx, supportUpdateTicketCapabilityID, "support.write", updateTicketInput, "human", "", "wave9-support-ticket-nonmember"),
+		supportUpdateTicketCapabilityID, updateTicketInput)
+	if err == nil || deniedAssignee.OK || !strings.Contains(err.Error(), "assignee is not a member of this organization") {
+		t.Fatalf("updateTicket assigned non-member=%+v err=%v, want organization membership failure", deniedAssignee, err)
+	}
 	replay, err := fx.executor.Execute(fx.ctx, startClaims, supportStartConversationCapabilityID, startInput)
 	if err != nil || !replay.OK || !replay.Replayed {
 		t.Fatalf("startConversation replay=%+v err=%v, want governed receipt replay", replay, err)

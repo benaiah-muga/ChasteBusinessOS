@@ -78,6 +78,11 @@ The full v1 changelog is preserved at the bottom of this file.
   outcomes and reloads, and unresolved actions block legacy fallback. Staff
   can still record customer words, attributed to the signed-in actor. Set
   `CHASTE_GO_SUPPORT_CONVERSATION_WRITES=0` for explicit rollback.
+- Vite Support ticket priority, category, assignee, and SLA changes now use the
+  session-authenticated Go `support.updateTicket` capability by default when
+  session routing is enabled. Exact actor- and organization-scoped ticket
+  updates survive uncertain outcomes and block legacy fallback until resolved.
+  Set `CHASTE_GO_SUPPORT_TICKET_WRITES=0` for explicit rollback.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.

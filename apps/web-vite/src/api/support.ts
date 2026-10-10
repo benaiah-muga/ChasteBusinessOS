@@ -131,6 +131,10 @@ export function goSupportConversationWritesUseGo(): boolean {
   return typeof __GO_SUPPORT_CONVERSATION_WRITES__ !== "undefined" && __GO_SUPPORT_CONVERSATION_WRITES__;
 }
 
+export function goSupportTicketWritesUseGo(): boolean {
+  return typeof __GO_SUPPORT_TICKET_WRITES__ !== "undefined" && __GO_SUPPORT_TICKET_WRITES__;
+}
+
 export type SupportCannedResponseRetryScope = { actorId: string | null; organizationId: string | null };
 export type SupportConversationWriteRetryScope = SupportCannedResponseRetryScope;
 
@@ -487,6 +491,7 @@ export async function submitSupportAction<Action extends SupportWriteAction>(
 const GoSupportConversationInputSchema = z.discriminatedUnion("capabilityId", [
   z.object({ capabilityId: z.literal("support.startConversation"), input: z.object({ customerId: uuid, subject: z.string().min(1).max(200) }).strict() }).strict(),
   z.object({ capabilityId: z.literal("support.postMessage"), input: z.object({ conversationId: uuid, body: z.string().min(1).max(4000), from: z.enum(["customer", "staff"]) }).strict() }).strict(),
+  z.object({ capabilityId: z.literal("support.updateTicket"), input: z.object({ conversationId: uuid, priority: z.enum(["low", "normal", "high", "urgent"]).optional(), category: z.string().max(40).optional(), assigneeUserId: uuid.optional(), slaDueAt: z.string().datetime().optional() }).strict() }).strict(),
   z.object({ capabilityId: z.literal("support.escalateConversation"), input: z.object({ conversationId: uuid, reason: z.string().min(3).max(4000) }).strict() }).strict(),
   z.object({ capabilityId: z.literal("support.resolveConversation"), input: z.object({ conversationId: uuid }).strict() }).strict(),
   z.object({ capabilityId: z.literal("support.reopenConversation"), input: z.object({ conversationId: uuid }).strict() }).strict(),
@@ -494,7 +499,7 @@ const GoSupportConversationInputSchema = z.discriminatedUnion("capabilityId", [
 const GoSupportConversationRetryRecordSchema = z.object({
   version: z.literal(1),
   intentId: uuid,
-  capabilityId: z.enum(["support.startConversation", "support.postMessage", "support.escalateConversation", "support.resolveConversation", "support.reopenConversation"]),
+  capabilityId: z.enum(["support.startConversation", "support.postMessage", "support.updateTicket", "support.escalateConversation", "support.resolveConversation", "support.reopenConversation"]),
   input: z.record(z.string(), z.unknown()),
   fingerprint: z.string().min(1),
 }).strict();
@@ -504,6 +509,7 @@ const SUPPORT_CONVERSATION_RETRY_KEY = `${SUPPORT_CONVERSATION_RETRY_PREFIX}pend
 const GoSupportConversationOutputSchemas = {
   "support.startConversation": z.object({ conversationId: uuid }).strict(),
   "support.postMessage": z.object({ messageId: uuid, senderType: z.enum(["customer", "staff", "agent"]) }).strict(),
+  "support.updateTicket": z.object({ updated: z.literal(true) }).strict(),
   "support.escalateConversation": z.object({ status: z.literal("escalated") }).strict(),
   "support.resolveConversation": z.object({ status: z.literal("resolved") }).strict(),
   "support.reopenConversation": z.object({ status: z.literal("open") }).strict(),
@@ -513,6 +519,10 @@ export type PendingSupportConversationWrite = {
   capabilityId: z.infer<typeof GoSupportConversationInputSchema>["capabilityId"];
   input: Record<string, unknown>;
 };
+
+export function supportPendingWriteUsesGo(pending: PendingSupportConversationWrite): boolean {
+  return pending.capabilityId === "support.updateTicket" ? goSupportTicketWritesUseGo() : goSupportConversationWritesUseGo();
+}
 
 function supportConversationRetryStorageKey(scope: SupportConversationWriteRetryScope): string {
   const actorId = scope.actorId?.trim() ?? "";
@@ -560,6 +570,7 @@ export function supportWriteActionFromPending(pending: PendingSupportConversatio
   switch (parsed.data.capabilityId) {
     case "support.startConversation": return { action: "create", ...parsed.data.input };
     case "support.postMessage": return { action: "message", ...parsed.data.input };
+    case "support.updateTicket": return { action: "updateTicket", ...parsed.data.input };
     case "support.escalateConversation": return { action: "escalate", ...parsed.data.input };
     case "support.resolveConversation": return { action: "resolve", ...parsed.data.input };
     case "support.reopenConversation": return { action: "reopen", ...parsed.data.input };
@@ -611,6 +622,7 @@ function capabilityForSupportAction(action: SupportWriteAction): PendingSupportC
     case "create": return "support.startConversation";
     case "message":
     case "send": return "support.postMessage";
+    case "updateTicket": return "support.updateTicket";
     case "escalate": return "support.escalateConversation";
     case "resolve": return "support.resolveConversation";
     case "reopen": return "support.reopenConversation";
@@ -623,6 +635,7 @@ function inputForSupportCapability(action: SupportWriteAction): Record<string, u
     case "create": return { customerId: action.customerId, subject: action.subject };
     case "message": return { conversationId: action.conversationId, body: action.body, from: action.from };
     case "send": return { conversationId: action.conversationId, body: action.body, from: "staff" };
+    case "updateTicket": return Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action"));
     case "escalate": return { conversationId: action.conversationId, reason: action.reason };
     case "resolve":
     case "reopen": return { conversationId: action.conversationId };
@@ -640,19 +653,20 @@ export async function submitSupportConversationAction<Action extends SupportWrit
   const capabilityId = capabilityForSupportAction(parsedAction.data);
   if (!capabilityId) return submitSupportAction(parsedAction.data, undefined, signal) as Promise<SupportActionOutcome<SupportActionOutput<Action>>>;
   const input = inputForSupportCapability(parsedAction.data);
-  const useGo = goSupportConversationWritesUseGo();
+  const useGo = capabilityId === "support.updateTicket" ? goSupportTicketWritesUseGo() : goSupportConversationWritesUseGo();
   if (!useGo) {
+    const selectorName = capabilityId === "support.updateTicket" ? "Go ticket writes" : "Go conversation writes";
     try {
       const actorId = scope.actorId?.trim() ?? "";
       const organizationId = scope.organizationId?.trim() ?? "";
       if (uuid.safeParse(actorId).success && uuid.safeParse(organizationId).success) {
         if (readSupportConversationRetryRecord(supportConversationRetryStorageKey(scope))) {
-          throw new SupportApiError(0, "A Go conversation action is unresolved. Restore Go conversation writes and retry those exact details before using the legacy route.");
+          throw new SupportApiError(0, `A Go support action is unresolved. Restore ${selectorName} and retry those exact details before using the legacy route.`);
         }
       } else {
         for (let index = 0; index < window.localStorage.length; index += 1) {
           if (window.localStorage.key(index)?.startsWith(SUPPORT_CONVERSATION_RETRY_PREFIX)) {
-            throw new SupportApiError(0, "A Go conversation action is unresolved. Restore Go conversation writes and retry those exact details before using the legacy route.");
+            throw new SupportApiError(0, `A Go support action is unresolved. Restore ${selectorName} and retry those exact details before using the legacy route.`);
           }
         }
       }

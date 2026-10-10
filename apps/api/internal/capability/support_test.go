@@ -85,6 +85,13 @@ func TestParseSupportCreateCannedResponseRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestParseSupportUpdateTicketRejectsUnknownFields(t *testing.T) {
+	input := json.RawMessage(`{"conversationId":"11111111-1111-4111-8111-111111111111","orgId":"22222222-2222-4222-8222-222222222222"}`)
+	if _, err := ParseSupportUpdateTicketInput(input); err == nil {
+		t.Fatal("ParseSupportUpdateTicketInput accepted orgId override")
+	}
+}
+
 func TestParseSupportConversationIDInputLimit(t *testing.T) {
 	tests := []struct {
 		name    string

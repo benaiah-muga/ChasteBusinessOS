@@ -318,6 +318,49 @@ describe("Vite support page", () => {
     expect(await screen.findByRole("button", { name: "Retry saved action" })).not.toBeNull();
   }, SLOW);
 
+  it("restores and retries pending Go ticket metadata after reload", async () => {
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const organizationId = "66666666-6666-4666-8666-666666666666";
+    const storageKey = `chaste.support.conversation-write-intent.v1:pending:${actorId}:${organizationId}`;
+    const input = { conversationId, priority: "urgent", category: "billing", slaDueAt: "2026-10-12T12:00:00.000Z" };
+    const capabilityId = "support.updateTicket";
+    const intentId = "77777777-7777-4777-8777-777777777777";
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 1,
+      intentId,
+      capabilityId,
+      input,
+      fingerprint: JSON.stringify({ capabilityId, input }),
+    }));
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", false);
+    vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", true);
+    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
+    const { fetchMock, calls } = supportFetch({
+      execute: (payload) => {
+        if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
+        if (payload.capabilityId === "support.readConversation") return Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } });
+        if (payload.capabilityId === "support.updateTicket") return Response.json({ ok: true, data: { updated: true } });
+        return Response.json({ error: "unexpected capability" }, { status: 400 });
+      },
+    });
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+
+    await screen.findByRole("button", { name: "Retry saved action" });
+    const priority = await screen.findByLabelText("Priority") as HTMLSelectElement;
+    expect(priority.value).toBe("urgent");
+    expect((screen.getByLabelText("Category") as HTMLInputElement).value).toBe("billing");
+    expect((screen.getByLabelText("SLA due") as HTMLInputElement).value).toBe("2026-10-12T12:00");
+    fireEvent.click(screen.getByRole("button", { name: "Retry saved action" }));
+
+    await waitFor(() => expect(window.localStorage.getItem(storageKey)).toBeNull());
+    expect(calls.find((call) => call.payload?.capabilityId === "support.updateTicket")?.payload).toMatchObject({
+      capabilityId,
+      input,
+      intentId,
+    });
+    expect(fetchMock.mock.calls.map(([path]) => String(path))).not.toContain("/api/support");
+  }, SLOW);
+
   it("does not load customer care while the module is disabled", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("/api/modules");

@@ -2491,3 +2491,12 @@ new owners and the manifest shows zero legacy runtime paths.
      message attribution, with Go applying `support.write` permission checks
      and recording the signed-in human actor. Set
      `CHASTE_GO_SUPPORT_CONVERSATION_WRITES=0` for explicit rollback.
+250. (Vite implementation complete; browser proof pending) Route Vite Support
+     ticket metadata updates through the session-authenticated
+     `support.updateTicket` capability behind paired
+     `CHASTE_GO_SUPPORT_TICKET_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Persist exact
+     actor- and organization-scoped payloads and intent IDs for uncertain
+     results and reloads, restore the ticket fields for retry, and block legacy
+     fallback while unresolved. Set `CHASTE_GO_SUPPORT_TICKET_WRITES=0` for
+     explicit rollback.

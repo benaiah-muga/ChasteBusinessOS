@@ -243,6 +243,10 @@ export function goSupportConversationWritesFromEnv(env: Record<string, string | 
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_SUPPORT_CONVERSATION_WRITES !== "0";
 }
 
+export function goSupportTicketWritesFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_SUPPORT_TICKET_WRITES !== "0";
+}
+
 export function goMessagingAttachmentDeleteFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_ATTACHMENT_DELETE !== "0";
 }

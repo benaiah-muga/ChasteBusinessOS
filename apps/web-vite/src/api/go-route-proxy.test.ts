@@ -12,6 +12,7 @@ import {
   goSupportLibraryReadsFromEnv,
   goSupportCannedResponseWriteFromEnv,
   goSupportConversationWritesFromEnv,
+  goSupportTicketWritesFromEnv,
   goPosCloseSessionSliceFromEnv,
   goMarketingCampaignWritesFromEnv,
   goProjectsWritesFromEnv,
@@ -627,6 +628,14 @@ describe("Support conversation writes Go selector", () => {
     expect(goSupportConversationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportConversationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_CONVERSATION_WRITES: "0" })).toBe(false);
     expect(goSupportConversationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_CONVERSATION_WRITES: "1" })).toBe(false);
+  });
+});
+
+describe("Support ticket writes Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goSupportTicketWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goSupportTicketWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_TICKET_WRITES: "0" })).toBe(false);
+    expect(goSupportTicketWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_TICKET_WRITES: "1" })).toBe(false);
   });
 });
 

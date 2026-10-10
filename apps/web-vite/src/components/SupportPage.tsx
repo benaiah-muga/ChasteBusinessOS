@@ -21,10 +21,10 @@ import {
   fetchSupportTeamMembers,
   fetchSupportThread,
   goSupportCannedResponseWriteUseGo,
-  goSupportConversationWritesUseGo,
   readPendingSupportConversationWrite,
   readPendingSupportCannedResponse,
   supportWriteActionFromPending,
+  supportPendingWriteUsesGo,
   submitSupportCannedResponse,
   submitSupportAction,
   submitSupportConversationAction,
@@ -163,6 +163,16 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
         setComposer(String(pending.input.body));
         setFromCustomer(pending.input.from === "customer");
         break;
+      case "support.updateTicket":
+        setActiveId(String(pending.input.conversationId));
+        setShowTicket(true);
+        setTicket({
+          priority: String(pending.input.priority ?? "normal") as TicketDraft["priority"],
+          category: String(pending.input.category ?? ""),
+          assigneeUserId: String(pending.input.assigneeUserId ?? ""),
+          slaDueAt: typeof pending.input.slaDueAt === "string" ? pending.input.slaDueAt.slice(0, 16) : "",
+        });
+        break;
       case "support.escalateConversation":
         setActiveId(String(pending.input.conversationId));
         setEscalateOpen(true);
@@ -180,9 +190,9 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       const pending = readPendingSupportConversationWrite(retryScope);
       if (pending) {
         restoreConversationAction(pending);
-        setNotice({ tone: "pending", text: goSupportConversationWritesUseGo()
-          ? "An unresolved Go conversation action was restored. Retry the exact saved action to recover its result."
-          : "A Go conversation action is unresolved. Re-enable Go conversation writes to retry its exact saved details." });
+        setNotice({ tone: "pending", text: supportPendingWriteUsesGo(pending)
+          ? "An unresolved Go support action was restored. Retry the exact saved action to recover its result."
+          : `A Go support action is unresolved. Re-enable ${pending.capabilityId === "support.updateTicket" ? "Go ticket writes" : "Go conversation writes"} to retry its exact saved details.` });
       }
     } catch (error) {
       setNotice({ tone: "error", text: friendlyError(error) });
@@ -218,18 +228,31 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
         if (controller.signal.aborted) return;
         setConversation(thread.conversation);
         setMessages(thread.messages);
-        setTicket(ticketFrom(thread.conversation));
+        if (pendingGoAction?.capabilityId !== "support.updateTicket" || pendingGoAction.input.conversationId !== activeId) {
+          setTicket(ticketFrom(thread.conversation));
+        }
       })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setThreadError(friendlyError(reason));
       });
     return () => controller.abort();
-  }, [activeId]);
+  }, [activeId, pendingGoAction]);
 
   useEffect(() => {
-    if (pendingGoAction?.capabilityId !== "support.escalateConversation" || pendingGoAction.input.conversationId !== activeId) return;
-    setEscalateOpen(true);
-    setEscalateReason(String(pendingGoAction.input.reason));
+    if (pendingGoAction?.input.conversationId !== activeId) return;
+    if (pendingGoAction.capabilityId === "support.escalateConversation") {
+      setEscalateOpen(true);
+      setEscalateReason(String(pendingGoAction.input.reason));
+    }
+    if (pendingGoAction.capabilityId === "support.updateTicket") {
+      setShowTicket(true);
+      setTicket({
+        priority: String(pendingGoAction.input.priority ?? "normal") as TicketDraft["priority"],
+        category: String(pendingGoAction.input.category ?? ""),
+        assigneeUserId: String(pendingGoAction.input.assigneeUserId ?? ""),
+        slaDueAt: typeof pendingGoAction.input.slaDueAt === "string" ? pendingGoAction.input.slaDueAt.slice(0, 16) : "",
+      });
+    }
   }, [activeId, pendingGoAction]);
 
   useEffect(() => {
@@ -278,7 +301,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       setBusy(true);
       setNotice(null);
       try {
-        const capabilityId = ["create", "message", "send", "escalate", "resolve", "reopen"].includes(action.action);
+        const capabilityId = ["create", "message", "send", "updateTicket", "escalate", "resolve", "reopen"].includes(action.action);
         const outcome = capabilityId
           ? await submitSupportConversationAction(action, retryScope)
           : await submitSupportAction(action, intentId);
@@ -300,9 +323,9 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
           const pending = readPendingSupportConversationWrite(retryScope);
           if (pending) {
             restoreConversationAction(pending);
-            setNotice({ tone: "error", text: goSupportConversationWritesUseGo()
-              ? "A Go conversation action is unresolved. Its exact saved details were restored; retry them to recover the result."
-              : "A Go conversation action is unresolved. Re-enable Go conversation writes to retry its exact saved details." });
+            setNotice({ tone: "error", text: supportPendingWriteUsesGo(pending)
+              ? "A Go support action is unresolved. Its exact saved details were restored; retry them to recover the result."
+              : `A Go support action is unresolved. Re-enable ${pending.capabilityId === "support.updateTicket" ? "Go ticket writes" : "Go conversation writes"} to retry its exact saved details.` });
             return null;
           }
         } catch {
@@ -477,7 +500,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
           {pendingGoAction && (
             <div className="support-notice support-notice-pending" role="status">
               <span>The saved Go action is still unresolved. Retry the exact saved details to recover it.</span>
-              <button type="button" disabled={busy || !goSupportConversationWritesUseGo()} onClick={() => void run(supportWriteActionFromPending(pendingGoAction))}>Retry saved action</button>
+              <button type="button" disabled={busy || !supportPendingWriteUsesGo(pendingGoAction)} onClick={() => void run(supportWriteActionFromPending(pendingGoAction))}>Retry saved action</button>
             </div>
           )}
           <nav className="support-tabs" aria-label="Customer care sections">
