@@ -137,6 +137,7 @@ interface StubOptions {
   goBudgetScenarioResponse?: () => Response;
   goCashForecastResponse?: () => Response;
   goCashBasisResponse?: () => Response;
+  goOverviewResponse?: () => Response;
   goReportResponse?: (capabilityId: string) => Response;
 }
 
@@ -155,6 +156,9 @@ function stubAccounting(options: StubOptions = {}) {
     }
     if (url === "/api/capabilities/execute") {
       const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
+      if (capabilityId === "accounting.overview") {
+        return options.goOverviewResponse?.() ?? Response.json({ ok: true, data: overview });
+      }
       if (capabilityId === "accounting.cashBasisReport") {
         return options.goCashBasisResponse?.() ?? Response.json({ ok: true, data: {
           cashInMinor: cashBasis.cashInMinor,
@@ -443,6 +447,16 @@ describe("AccountingPage states", () => {
     expect(screen.getByText("Harbor Supplies")).toBeTruthy();
     expect(screen.getByText("Who I owe")).toBeTruthy();
     expect(screen.getByText("Invoice #1042")).toBeTruthy();
+  });
+
+  it("renders the books from the selected Go overview capability", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_OVERVIEW_READS__", true);
+    const { calls } = stubAccounting();
+
+    await renderReady();
+    expect(await screen.findByText("Net income · to date")).toBeTruthy();
+    expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.overview"'))).toBe(true);
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "GET")).toBe(false);
   });
 
   it("does not fetch the books when Accounting is disabled", async () => {

@@ -286,6 +286,54 @@ func TestGoApprovalDecisionVerifiesInventoryReadCapabilityInputs(t *testing.T) {
 	}
 }
 
+func TestGoApprovalDecisionVerifiesAccountingOverviewInput(t *testing.T) {
+	fx := newExecutorFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'accounting.read', $2::uuid) ON CONFLICT DO NOTHING`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	fx.addPolicy(accountingOverviewCapabilityID, "read", []string{"read"})
+	if permission, ok := permissionForCapability(accountingOverviewCapabilityID); !ok || permission != "accounting.read" {
+		t.Fatalf("permissionForCapability(%s) = %q, %t; want accounting.read", accountingOverviewCapabilityID, permission, ok)
+	}
+	decider := NewApprovalDecider(fx.runtime, fx.executor)
+
+	input := json.RawMessage(`{}`)
+	claims := fx.humanClaims(input, "accounting-overview-policy-gate-intent")
+	claims.CapabilityID = accountingOverviewCapabilityID
+	claims.Permissions = []string{"accounting.read"}
+	pending, err := fx.executor.Execute(fx.ctx, claims, accountingOverviewCapabilityID, input)
+	if err != nil || pending.OK || !pending.PendingApproval {
+		t.Fatalf("accounting overview policy result=%+v err=%v, want pending approval", pending, err)
+	}
+	var approvalID string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT id::text FROM approvals WHERE org_id=$1::uuid AND capability_id=$2 AND status='pending' ORDER BY created_at DESC LIMIT 1`, fx.orgID, accountingOverviewCapabilityID).Scan(&approvalID); err != nil {
+		t.Fatal(err)
+	}
+	approvedClaims := fx.humanClaims(input, "accounting-overview-policy-approval")
+	approvedClaims.CapabilityID = accountingOverviewCapabilityID
+	approvedClaims.Permissions = []string{"accounting.read"}
+	approved, err := decider.Decide(fx.ctx, approvedClaims, ApprovalDecisionInput{ApprovalID: approvalID, Decision: "approve"})
+	if err != nil || !approved.OK || approved.Status != "executed" || approved.Result == nil || !approved.Result.OK {
+		t.Fatalf("accounting overview approval result=%+v err=%v, want approved execution", approved, err)
+	}
+
+	t.Run("rejects org override", func(t *testing.T) {
+		seedInput := json.RawMessage(`{"name":"Approval payload seed for accounting overview","preferredContactMethod":"email","doNotContact":false}`)
+		malformedApprovalID := createPendingCustomerApproval(t, fx, seedInput)
+		malformedInput := json.RawMessage(`{"orgId":"00000000-0000-4000-8000-000000000001"}`)
+		if _, err := fx.owner.Exec(fx.ctx, `UPDATE approvals SET capability_id = $2, payload = $3::jsonb WHERE id = $1::uuid`, malformedApprovalID, accountingOverviewCapabilityID, malformedInput); err != nil {
+			t.Fatal(err)
+		}
+		malformedClaims := fx.humanClaims(malformedInput, "accounting-overview-invalid-payload-intent")
+		malformedClaims.CapabilityID = accountingOverviewCapabilityID
+		malformedClaims.Permissions = []string{"accounting.read"}
+		result, err := decider.Decide(fx.ctx, malformedClaims, ApprovalDecisionInput{ApprovalID: malformedApprovalID, Decision: "approve"})
+		if err != nil || result.OK || result.HTTPStatus != 422 || result.Error != approvalVerificationError {
+			t.Fatalf("accounting overview invalid approval result=%+v err=%v, want payload verification rejection", result, err)
+		}
+	})
+}
+
 func TestGoApprovalDecisionRechecksMembershipAndExpiry(t *testing.T) {
 	fx := newExecutorFixture(t)
 	input := json.RawMessage(`{"name":"Membership approval customer","preferredContactMethod":"email","doNotContact":false}`)

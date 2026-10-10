@@ -50,6 +50,11 @@ The full v1 changelog is preserved at the bottom of this file.
   `accounting.cashBasisReport` capability by default when session routing is
   enabled. Go's additional accrual expense total is validated and omitted from
   the current UI shape; unavailable or malformed Go results stay nullable.
+- Vite Accounting overview reads now use the session-authenticated Go
+  `accounting.overview` capability by default when session routing is enabled.
+  Go entry debit aggregates are validated as safe integer minor units, and
+  selected Go errors fail closed without retrying the legacy overview route.
+  Set `CHASTE_GO_ACCOUNTING_OVERVIEW_READS=0` for explicit rollback.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.

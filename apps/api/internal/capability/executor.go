@@ -263,6 +263,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	balanceSheetCapabilityID:                            {module: "accounting", permission: "accounting.read", risk: "read"},
 	listInvoicesCapabilityID:                            {module: "accounting", permission: "accounting.read", risk: "read"},
 	arAgingCapabilityID:                                 {module: "accounting", permission: "accounting.read", risk: "read"},
+	accountingOverviewCapabilityID:                      {module: "accounting", permission: "accounting.read", risk: "read"},
 	cashBasisReportCapabilityID:                         {module: "accounting", permission: "accounting.read", risk: "read"},
 	customerStatementCapabilityID:                       {module: "accounting", permission: "accounting.read", risk: "read"},
 	salesTaxReportCapabilityID:                          {module: "accounting", permission: "accounting.read", risk: "read"},
@@ -478,7 +479,7 @@ func supportedCapability(capabilityID string) bool {
 		inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID,
 		inventoryStockReportCapabilityID, inventoryItemHistoryCapabilityID, inventoryListLotsCapabilityID,
 		inventoryRebuildStockProjectionsCapabilityID,
-		reportCurrencyMetadataCapabilityID, incomeStatementCapabilityID, balanceSheetCapabilityID, listInvoicesCapabilityID, arAgingCapabilityID,
+		reportCurrencyMetadataCapabilityID, incomeStatementCapabilityID, balanceSheetCapabilityID, listInvoicesCapabilityID, arAgingCapabilityID, accountingOverviewCapabilityID,
 		cashBasisReportCapabilityID, customerStatementCapabilityID, salesTaxReportCapabilityID,
 		cashFlowCapabilityID, cashForecastCapabilityID,
 		unrealizedFxExposureCapabilityID, revalueForeignReceivablesCapabilityID, reversePeriodFxRevaluationCapabilityID,
@@ -1206,6 +1207,12 @@ func (e *Executor) executeWithFinalizer(
 			inventoryStockReportCapabilityID, inventoryItemHistoryCapabilityID, inventoryListLotsCapabilityID,
 			inventoryRebuildStockProjectionsCapabilityID:
 			parsed, err := parseInventoryValuationInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case accountingOverviewCapabilityID:
+			parsed, err := ParseAccountingOverviewInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -2937,6 +2944,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case AccountingOverviewInput:
+			output, err := accountingOverview(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case CashBasisReportInput:
 			output, err := cashBasisReport(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -3502,7 +3515,7 @@ func canonicalInputHash(input any) (string, error) {
 		BillCreditNoteInput, ClosePurchaseOrderInput, ListReceiptsInput,
 		InventoryPostValuationSummaryInput, InventoryReverseValuationSummaryInput, InventoryStockReportInput,
 		InventoryItemHistoryInput, InventoryListLotsInput, InventoryRebuildStockProjectionsInput,
-		ReportCurrencyMetadataInput, IncomeStatementInput, BalanceSheetInput, ListInvoicesInput, ArAgingInput, CashBasisReportInput,
+		ReportCurrencyMetadataInput, IncomeStatementInput, BalanceSheetInput, ListInvoicesInput, ArAgingInput, AccountingOverviewInput, CashBasisReportInput,
 		CustomerStatementInput, SalesTaxReportInput, CashFlowInput, CashForecastInput,
 		UnrealizedFxExposureInput, ReversePeriodFxRevaluationInput,
 		BuildRemindersInput,

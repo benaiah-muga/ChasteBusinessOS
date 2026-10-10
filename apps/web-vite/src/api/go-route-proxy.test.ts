@@ -7,6 +7,7 @@ import {
   goAccountingInvoiceReadsFromEnv,
   goAccountingPaymentRemindersFromEnv,
   goAccountingCashBasisFromEnv,
+  goAccountingOverviewReadsFromEnv,
   goPosCloseSessionSliceFromEnv,
   goMarketingCampaignWritesFromEnv,
   goProjectsWritesFromEnv,
@@ -582,6 +583,14 @@ describe("Accounting cash basis Go selector", () => {
     expect(goAccountingCashBasisFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goAccountingCashBasisFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_CASH_BASIS: "0" })).toBe(false);
     expect(goAccountingCashBasisFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_CASH_BASIS: "1" })).toBe(false);
+  });
+});
+
+describe("Accounting overview Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goAccountingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goAccountingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_OVERVIEW_READS: "0" })).toBe(false);
+    expect(goAccountingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_OVERVIEW_READS: "1" })).toBe(false);
   });
 });
 

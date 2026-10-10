@@ -327,6 +327,10 @@ export function goAccountingCashBasisFromEnv(env: Record<string, string | undefi
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_CASH_BASIS !== "0";
 }
 
+export function goAccountingOverviewReadsFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_OVERVIEW_READS !== "0";
+}
+
 export function goBankReconciliationWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_BANK_RECONCILIATION_WRITES === "1";
 }

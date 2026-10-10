@@ -33,6 +33,7 @@ declare const __GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__: boolean;
 declare const __GO_ACCOUNTING_INVOICE_READS__: boolean;
 declare const __GO_ACCOUNTING_PAYMENT_REMINDERS__: boolean;
 declare const __GO_ACCOUNTING_CASH_BASIS__: boolean;
+declare const __GO_ACCOUNTING_OVERVIEW_READS__: boolean;
 declare const __GO_BANK_RECONCILIATION_WRITES__: boolean;
 declare const __GO_PURCHASING_CREATE_ORDER__: boolean;
 declare const __GO_PURCHASING_RECEIVE_GOODS__: boolean;

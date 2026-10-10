@@ -33,6 +33,8 @@ const EntrySchema = z.object({
   debitMinor: minorAggregate,
 }).strict();
 
+const GoEntrySchema = EntrySchema.extend({ debitMinor: minor }).strict();
+
 const AgingSchema = z.object({
   current: minor,
   d30: minor,
@@ -116,6 +118,8 @@ const AccountingOverviewSchema = z.object({
   invoices: z.array(InvoiceSchema),
   payments: z.array(PaymentSchema),
 }).strict();
+
+const GoAccountingOverviewSchema = AccountingOverviewSchema.extend({ entries: z.array(GoEntrySchema) }).strict();
 
 const PnlSchema = z.object({
   revenueMinor: minor,
@@ -515,6 +519,10 @@ export function goAccountingCashBasisUseGo(): boolean {
   return typeof __GO_ACCOUNTING_CASH_BASIS__ !== "undefined" && __GO_ACCOUNTING_CASH_BASIS__;
 }
 
+export function goAccountingOverviewReadsUseGo(): boolean {
+  return typeof __GO_ACCOUNTING_OVERVIEW_READS__ !== "undefined" && __GO_ACCOUNTING_OVERVIEW_READS__;
+}
+
 export function goAccountingBankReconciliationWritesUseGo(): boolean {
   return typeof __GO_BANK_RECONCILIATION_WRITES__ !== "undefined" && __GO_BANK_RECONCILIATION_WRITES__;
 }
@@ -627,6 +635,15 @@ export async function fetchAccountingEnabled(signal?: AbortSignal): Promise<bool
 }
 
 export async function fetchAccountingOverview(signal?: AbortSignal): Promise<AccountingOverview> {
+  if (goAccountingOverviewReadsUseGo()) {
+    return readGoAccountingCapability(
+      "accounting.overview",
+      {},
+      GoAccountingOverviewSchema,
+      "load your books",
+      signal,
+    );
+  }
   return get("/api/accounting", AccountingOverviewSchema, "load your books", signal);
 }
 
@@ -746,7 +763,7 @@ export async function fetchAccountingBudgetScenarios(signal?: AbortSignal): Prom
 }
 
 async function readGoAccountingCapability<T>(
-  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.buildReminders" | "accounting.cashBasisReport",
+  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.buildReminders" | "accounting.cashBasisReport" | "accounting.overview",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   context: string,

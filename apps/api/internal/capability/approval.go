@@ -478,6 +478,13 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case accountingOverviewCapabilityID:
+			parsed, parseErr := ParseAccountingOverviewInput(transition.row.Payload)
+			verifiedPayload = false
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case unrealizedFxExposureCapabilityID, revalueForeignReceivablesCapabilityID, reversePeriodFxRevaluationCapabilityID:
 			parsed, parseErr := parseAccountingFxInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
@@ -915,7 +922,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "inventory.admin", true
 	case inventoryStockReportCapabilityID, inventoryItemHistoryCapabilityID, inventoryListLotsCapabilityID:
 		return "inventory.read", true
-	case incomeStatementCapabilityID, balanceSheetCapabilityID, listInvoicesCapabilityID, arAgingCapabilityID,
+	case incomeStatementCapabilityID, balanceSheetCapabilityID, listInvoicesCapabilityID, arAgingCapabilityID, accountingOverviewCapabilityID,
 		cashBasisReportCapabilityID, customerStatementCapabilityID, salesTaxReportCapabilityID,
 		cashFlowCapabilityID, cashForecastCapabilityID:
 		return "accounting.read", true

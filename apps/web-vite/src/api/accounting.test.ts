@@ -14,6 +14,7 @@ import {
   goAccountingCustomerStatementReadsUseGo,
   fetchPaymentReminders,
   goAccountingCashBasisUseGo,
+  goAccountingOverviewReadsUseGo,
   goAccountingPaymentRemindersUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
@@ -172,6 +173,46 @@ describe("accounting API: books and reports", () => {
     const mock = stubFetch(() => Response.json(overview));
     await expect(fetchAccountingOverview()).resolves.toEqual(overview);
     expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "GET" }));
+  });
+
+  it("loads the strict overview from Go with a session capability request", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_OVERVIEW_READS__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: overview }));
+
+    expect(goAccountingOverviewReadsUseGo()).toBe(true);
+    await expect(fetchAccountingOverview()).resolves.toEqual(overview);
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      body: expect.stringContaining('"capabilityId":"accounting.overview"'),
+    }));
+    const requestBody = JSON.parse(String(mock.mock.calls[0]?.[1]?.body ?? "{}")) as { input?: unknown; intentId?: string };
+    expect(requestBody.input).toEqual({});
+    expect(requestBody.intentId).toEqual(expect.any(String));
+  });
+
+  it("fails closed on a selected Go error without retrying the legacy overview", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_OVERVIEW_READS__", true);
+    const mock = stubFetch(() => Response.json({ message: "service unavailable" }, { status: 503 }));
+
+    await expect(fetchAccountingOverview()).rejects.toMatchObject({ status: 503 });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
+  });
+
+  it("rejects an unsafe Go debit aggregate", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_OVERVIEW_READS__", true);
+    stubFetch(() => Response.json({
+      ok: true,
+      data: { ...overview, entries: [{ ...entry, debitMinor: Number.MAX_SAFE_INTEGER + 1 }] },
+    }));
+
+    await expect(fetchAccountingOverview()).rejects.toMatchObject({
+      name: "AccountingApiError",
+      message: "The Go Accounting service returned an unexpected result.",
+    });
   });
 
   it("rejects a body that drifts from the ledger contract", async () => {
