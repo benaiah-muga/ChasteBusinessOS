@@ -2340,8 +2340,9 @@ new owners and the manifest shows zero legacy runtime paths.
      `messaging.readMessages` capability. Return the latest 60-message window
      in display order with the current full thread contract, reader and pin
      state, and older-page cursor. Search-jump and older-page requests stay on
-     their current routes; message attachment download remains a separate Go
-     route migration.
-228. (Open) Serve Vite Messaging attachment downloads directly from Go with the
-     current same-org, membership, ownership, and tombstone checks so the Vite
-     thread flow no longer depends on the Next attachment route.
+     their current routes; file downloads use the direct Go route in item 228.
+228. (Go/Vite implementation complete; browser proof pending) Serve Vite
+     Messaging attachment downloads directly from Go while preserving the
+     existing href. Go checks verified session, `messaging.read`, same-org
+     conversation, membership, visible-message state, and pending uploader
+     ownership before streaming the file with private, no-store headers.

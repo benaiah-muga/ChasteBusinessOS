@@ -178,6 +178,15 @@ func run(logger *slog.Logger) error {
 		salesOrdersRoute = httpapi.NewSalesOrdersSessionHandler(resolver, capabilityExecutor, logger)
 		logger.Info("Go sales order list route mounted", "path", "GET /api/sales")
 	}
+	var messageAttachmentDownloadRoute http.Handler
+	if os.Getenv("GO_MESSAGE_ATTACHMENT_DOWNLOAD_ROUTE") == "1" {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		messageAttachmentDownloadRoute = httpapi.NewMessageAttachmentDownloadHandler(pool, resolver, logger)
+		logger.Info("Go message attachment download route mounted", "path", "GET /api/message-attachments/{id}")
+	}
 	var supportChannelsRoute http.Handler
 	if os.Getenv("GO_SUPPORT_CHANNELS_ROUTE") == "1" {
 		resolver, resolverErr := getSessionResolver()
@@ -598,7 +607,7 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr: addr,
-		Handler: httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoCRMReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
+		Handler: httpapi.MountGoMessageAttachmentDownloadRoute(httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoCRMReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
 			pool,
 			logger,
 			os.Getenv("GO_INTERNAL_AUTH_SECRET"),
@@ -611,7 +620,7 @@ func run(logger *slog.Logger) error {
 			orgRoute,
 			authRoute,
 			approvalDecider,
-		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute),
+		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

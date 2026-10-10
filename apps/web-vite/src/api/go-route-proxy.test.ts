@@ -33,6 +33,7 @@ import {
   goMessagingPeopleReadsFromEnv,
   goMessagingConversationListFromEnv,
   goMessagingThreadReadsFromEnv,
+  goMessagingAttachmentDownloadsFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
   goPurchasingWorkflowReadsFromEnv,
   goPurchasingIntelReadsFromEnv,
@@ -452,6 +453,15 @@ describe("messaging thread-read Go selector", () => {
   });
 });
 
+describe("messaging attachment download Go selector", () => {
+  it("requires session capability routing and defaults on with an explicit legacy rollback", () => {
+    expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD: "0" })).toBe(false);
+    expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
+    expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD: "1" })).toBe(false);
+  });
+});
+
 describe("purchasing supplier statement read Go selector", () => {
   it("requires the supplier statement selector and session capability route", () => {
     expect(goPurchasingSupplierStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS: "1" })).toBe(true);
@@ -578,6 +588,8 @@ function requestRecorder(target: string, streamed = false): Server {
         authorization: request.headers.authorization,
         origin: request.headers.origin,
         host: request.headers.host,
+        range: request.headers.range,
+        ifRange: request.headers["if-range"],
         idempotencyKey: request.headers["idempotency-key"],
         body: Buffer.concat(chunks).toString("utf8"),
       }));
@@ -688,6 +700,83 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/analytics/extra")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/my-work?status=open")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
+  });
+
+  it("routes only exact message attachment GETs when the session selector is enabled", () => {
+    const defaults = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" });
+    const href = "/api/message-attachments/aaaaaaaa-0000-4000-8000-000000000001";
+    expect(defaults.messageAttachmentDownloads).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", href)).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", `${href}?download=1`)).toBe(true);
+    for (const [method, path] of [
+      ["HEAD", href],
+      ["POST", href],
+      ["GET", "/api/message-attachments/not-a-uuid"],
+      ["GET", `${href}/extra`],
+      ["GET", `${href}/`],
+    ]) {
+      expect(isGoRouteRequest(defaults, method, path)).toBe(false);
+    }
+    const rollback = goRouteProxyFlagsFromEnv({
+      CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1",
+      CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD: "0",
+    });
+    expect(rollback.messageAttachmentDownloads).toBe(false);
+    expect(isGoRouteRequest(rollback, "GET", href)).toBe(false);
+    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "GET", href)).toBe(false);
+  });
+
+  it("preserves the attachment href, session identity, and range headers when proxying to Go", async () => {
+    const go = requestRecorder("go");
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
+
+    const legacy = requestRecorder("legacy");
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
+
+    const vite = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" }), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+      },
+    });
+    await vite.listen();
+    runningServers.push({ close: () => vite.close() });
+    const address = vite.httpServer?.address() as AddressInfo;
+    const href = "/api/message-attachments/aaaaaaaa-0000-4000-8000-000000000001";
+
+    const response = await fetch(`http://127.0.0.1:${address.port}${href}`, {
+      headers: {
+        cookie: "session=authenticated-user",
+        authorization: "Bearer caller-token",
+        range: "bytes=0-31",
+        "if-range": '"attachment-etag"',
+      },
+    });
+    const payload = await response.json() as {
+      target: string;
+      method: string;
+      url: string;
+      cookie: string;
+      authorization: string;
+      range: string;
+      ifRange: string;
+    };
+    expect(payload).toMatchObject({
+      target: "go",
+      method: "GET",
+      url: href,
+      cookie: "session=authenticated-user",
+      authorization: "Bearer caller-token",
+      range: "bytes=0-31",
+      ifRange: '"attachment-etag"',
+    });
   });
 
   it("routes only POST onboarding when the explicit selector is enabled", () => {

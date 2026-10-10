@@ -42,6 +42,7 @@ export type GoRouteProxyFlags = {
   posShiftSummary: boolean;
   posCustomers: boolean;
   onboarding: boolean;
+  messageAttachmentDownloads: boolean;
 };
 
 export function goPosOpenSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
@@ -178,6 +179,10 @@ export function goMessagingThreadReadsFromEnv(env: Record<string, string | undef
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_THREAD_READ !== "0";
 }
 
+export function goMessagingAttachmentDownloadsFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD !== "0";
+}
+
 export function goPurchasingSourcingWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_SOURCING_WRITES === "1";
 }
@@ -311,6 +316,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
     posCustomers: goPosCustomersSliceFromEnv(env),
     onboarding: env.CHASTE_GO_ONBOARDING_ROUTE === "1",
+    messageAttachmentDownloads: goMessagingAttachmentDownloadsFromEnv(env),
   };
 }
 
@@ -320,6 +326,8 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsRead && method === "GET" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsWrite && method === "POST" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
+  const attachmentID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+  if (flags.messageAttachmentDownloads && method === "GET" && new RegExp(`^/api/message-attachments/${attachmentID}(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.auth && isGoAuthRequest(path)) return true;
   const scimUserPath = /^\/api\/scim\/v2\/Users(?:\?.*)?$/;
   const scimUserItemPath = /^\/api\/scim\/v2\/Users\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\?.*)?$/i;
