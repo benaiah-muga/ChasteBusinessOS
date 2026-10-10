@@ -217,6 +217,7 @@ describe("Vite manufacturing page", () => {
     vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
     const fetchMock = manufacturingFetch({
       onPost: (body) => {
+        if (body.action === "overviewReport") return Response.json({ ok: true, data: report });
         if (body.action === "costPreview") return Response.json({ ok: true, data: {
           producible: true,
           plannedThousandths: 1000,
@@ -258,6 +259,7 @@ describe("Vite manufacturing page", () => {
       .filter(([url]) => url === "/api/capabilities/execute")
       .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
     expect(capabilityRequests.map((body) => body.capabilityId)).toEqual([
+      "manufacturing.overviewReport",
       "manufacturing.checkProductionFeasibility",
       "manufacturing.bomReport",
       "manufacturing.costPreview",
