@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite dashboard reads now use the Go session handler by default, preserving
+  the existing tenant-scoped calculations and permission-based financial
+  fields. Setting both route selectors to `0` restores the compatibility
+  handler.
+
 - Vite now routes the dashboard's `GET /api/setup` checklist read to Go by
   default. The Go handler resolves the verified session and active organization
   itself and keeps the `iam.admin` gate; setting both paired route flags to `0`

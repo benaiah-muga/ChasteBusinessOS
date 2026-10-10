@@ -56,6 +56,10 @@ func goSetupRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goDashboardRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goTeamReadRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -364,7 +368,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go POS shift summary route mounted", "path", "POST /api/pos/shift-summary")
 	}
 	var dashboardRoute http.Handler
-	if os.Getenv("GO_DASHBOARD_ROUTE") == "1" {
+	if goDashboardRouteEnabledFromEnv(os.Getenv("GO_DASHBOARD_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

@@ -868,15 +868,16 @@ describe("Vite Go route proxy selection", () => {
     },
   );
 
-  it("routes implemented Go auth, work queue, and analytics requests by default", () => {
+  it("routes implemented Go auth, dashboard, work queue, and analytics requests by default", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.analyticsReport).toBe(true);
     expect(flags.myWork).toBe(true);
+    expect(flags.dashboard).toBe(true);
     expect(flags.setup).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "posCustomers", "setup"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "posCustomers", "setup"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -894,6 +895,8 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/setup?source=dashboard")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/setup")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/setup/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/dashboard")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/dashboard?range=year")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/routines")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/support/public")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/scim/v2/Users")).toBe(false);
@@ -922,6 +925,19 @@ describe("Vite Go route proxy selection", () => {
     const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_SETUP_ROUTE: "0" });
     expect(rolledBack.setup).toBe(false);
     expect(isGoRouteRequest(rolledBack, "GET", "/api/setup")).toBe(false);
+  });
+
+  it("routes only the dashboard GET to Go by default and supports rollback", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(defaults.dashboard).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/dashboard")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/dashboard?range=year")).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/dashboard")).toBe(false);
+    expect(isGoRouteRequest(defaults, "GET", "/api/dashboard/extra")).toBe(false);
+
+    const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_DASHBOARD_ROUTE: "0" });
+    expect(rolledBack.dashboard).toBe(false);
+    expect(isGoRouteRequest(rolledBack, "GET", "/api/dashboard")).toBe(false);
   });
 
   it("allows explicit legacy rollback for analytics discovery, preview, and report generation", () => {

@@ -110,6 +110,10 @@ API. Set both `CHASTE_GO_SETUP_ROUTE=0` and `GO_SETUP_ROUTE=0` to restore the
 compatibility handler. Go resolves the signed-in session and active organization
 and retains the `iam.admin` permission gate.
 
+The dashboard `GET /api/dashboard` also uses Go by default in Vite and the Go
+API. Set both `CHASTE_GO_DASHBOARD_ROUTE=0` and `GO_DASHBOARD_ROUTE=0` to
+restore the compatibility handler.
+
 ## Why React and Go: measured build benefits
 
 We chose React and TypeScript on Vite to shorten frontend compile feedback and
