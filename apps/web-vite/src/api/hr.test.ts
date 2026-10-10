@@ -285,6 +285,33 @@ describe("Vite People API", () => {
     expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
   });
 
+  it("keeps a Go leave retry when a successful response has unexpected fields", async () => {
+    const action = {
+      action: "requestLeave" as const,
+      employeeId: "11111111-1111-4111-8111-111111111111",
+      kind: "annual",
+      startDate: "2026-10-12",
+      endDate: "2026-10-14",
+    };
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const intents: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { intentId: string };
+      intents.push(body.intentId);
+      return intents.length === 1
+        ? Response.json({ ok: true, data: { requestId: "44444444-4444-4444-8444-444444444444", calendarDays: 3, extra: true } })
+        : Response.json({ ok: true, data: { requestId: "44444444-4444-4444-8444-444444444444", calendarDays: 3 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrLeaveAction(action, scope, undefined, true)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrLeaveAction(scope)).resolves.toEqual(action);
+    await expect(submitHrLeaveAction(action, scope, undefined, true)).resolves.toMatchObject({ kind: "success", data: { requestId: "44444444-4444-4444-8444-444444444444", calendarDays: 3 } });
+    expect(intents).toHaveLength(2);
+    expect(intents[1]).toBe(intents[0]);
+    await expect(readPendingHrLeaveAction(scope)).resolves.toBeNull();
+  });
+
   it("maps leave decisions and cancellation to their Go capability contracts", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
