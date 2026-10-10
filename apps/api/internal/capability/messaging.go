@@ -876,11 +876,8 @@ func parseMessagingArchiveConversationInput(raw json.RawMessage) (MessagingArchi
 	if input.ConversationID, err = messagingRequiredString(fields, "conversationId"); err != nil {
 		return MessagingArchiveConversationInput{}, err
 	}
-	input.Archived = true
-	if _, ok := fields["archived"]; ok {
-		if input.Archived, err = messagingRequiredBool(fields, "archived"); err != nil {
-			return MessagingArchiveConversationInput{}, err
-		}
+	if input.Archived, err = messagingRequiredBool(fields, "archived"); err != nil {
+		return MessagingArchiveConversationInput{}, err
 	}
 	return input, nil
 }

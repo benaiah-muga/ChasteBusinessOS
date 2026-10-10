@@ -1600,6 +1600,75 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     expect(window.sessionStorage.length).toBe(0);
   });
 
+  it("retries the exact Go archive action after selector rollback, blocks duplicates, then refreshes and clears", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", true);
+    const scope = { actorId: me, organizationId: "conversation-archive-org" };
+    const requests: Record<string, unknown>[] = [];
+    const legacyPatches: string[] = [];
+    let archived = false;
+    let releaseFirst: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation({ archivedAt: archived ? "2026-10-10T08:00:00.000Z" : null })], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (requests.length === 1) return new Promise<Response>((resolve) => { releaseFirst = resolve; });
+        if (requests.length === 2) return Response.json({ error: "Temporary archive failure." }, { status: 503 });
+        archived = true;
+        return Response.json({ ok: true, data: { conversationId: channelId, archived: true } });
+      }
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
+        legacyPatches.push(path);
+        return Response.json({ error: "unexpected legacy archive" }, { status: 500 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstMount = render(<MessagesPage {...scope} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    const archive = screen.getByRole("button", { name: "Archive" });
+    await act(async () => {
+      fireEvent.click(archive);
+      fireEvent.click(archive);
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      capabilityId: "messaging.archiveConversation",
+      input: { conversationId: channelId, archived: true },
+      intentId: expect.any(String),
+    });
+    const storageKey = `chaste:conversation-archive:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}:${encodeURIComponent(channelId)}`;
+    const pending = JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null") as { action?: unknown; intentId?: unknown };
+    expect(pending).toMatchObject({ action: { action: "archive", archived: true }, intentId: requests[0]?.intentId });
+    await act(async () => {
+      releaseFirst?.(Response.json({ pendingApproval: true, hint: "Archive is waiting for approval." }, { status: 202 }));
+    });
+    expect((await screen.findByRole("status")).textContent).toContain("Archive is waiting for approval.");
+    firstMount.unmount();
+
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", false);
+    render(<MessagesPage {...scope} />);
+    expect((await screen.findByRole("status")).textContent).toMatch(/earlier archive change is unresolved/i);
+    fireEvent.click(screen.getByRole("button", { name: "Retry archive" }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]?.intentId).toBe(requests[0]?.intentId);
+    expect(requests[1]?.input).toEqual({ conversationId: channelId, archived: true });
+    expect((await screen.findByRole("alert")).textContent).toContain("Temporary archive failure.");
+    expect(window.sessionStorage.getItem(storageKey)).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry archive" }));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2]?.intentId).toBe(requests[0]?.intentId);
+    expect(requests[2]?.input).toEqual({ conversationId: channelId, archived: true });
+    await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toBeNull());
+    expect(legacyPatches).toHaveLength(0);
+    expect(screen.queryByRole("dialog", { name: /#general/ })).toBeNull();
+  });
+
   it("deletes a message through the governed route after a confirmation", async () => {
     const deletes: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

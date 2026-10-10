@@ -183,6 +183,10 @@ export function goMessagingConversationUpdateFromEnv(env: Record<string, string 
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_CONVERSATION_UPDATE !== "0";
 }
 
+export function goMessagingConversationArchiveFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_CONVERSATION_ARCHIVE !== "0";
+}
+
 export function goMessagingThreadReadsFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_THREAD_READ !== "0";
 }

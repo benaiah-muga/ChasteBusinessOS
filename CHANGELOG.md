@@ -21,6 +21,13 @@ The full v1 changelog is preserved at the bottom of this file.
   Go `messaging.updateConversation` capability by default when session routing
   is enabled. Pending settings and their idempotency key survive reloads within
   the actor, organization, and conversation scope.
+- Vite conversation archive and restore actions now route through the
+  session-authenticated Go `messaging.archiveConversation` capability by
+  default when session routing is enabled. Unresolved requests stay pinned to
+  their Go intent across reloads and selector rollback.
+- Vite conversation archive changes now route through the session-authenticated
+  Go `messaging.archiveConversation` capability by default when session routing
+  is enabled, with an independent selector for rollback.
 
 ### Changed
 

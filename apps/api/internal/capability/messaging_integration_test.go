@@ -560,6 +560,75 @@ func TestMessagingUpdateConversationMatchesViteContractAndReplaysReceipt(t *test
 	}
 }
 
+func TestMessagingArchiveConversationMatchesViteContractAndReplaysReceipt(t *testing.T) {
+	fx := newMessagingFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'messaging.write', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	channel := fx.createChannel(t, fx.userID, "archive contract")
+	fx.addMember(t, fx.userID, channel, fx.colleagueID)
+
+	input := `{"conversationId":"` + channel + `","archived":true}`
+	result, err := executeMessagingCapability(fx, messagingArchiveConversationCapabilityID, input, "messaging-archive-vite-contract")
+	if err != nil || !result.OK {
+		t.Fatalf("archive conversation result=%+v err=%v", result, err)
+	}
+	if string(result.Data) != `{"conversationId":"`+channel+`","archived":true}` {
+		t.Fatalf("archive output=%s, want the Vite {conversationId, archived} contract", result.Data)
+	}
+	var archivedAt time.Time
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT archived_at FROM conversations WHERE id=$1::uuid AND org_id=$2::uuid`, channel, fx.orgID).Scan(&archivedAt); err != nil {
+		t.Fatalf("load archive timestamp: %v", err)
+	}
+
+	replayed, err := executeMessagingCapability(fx, messagingArchiveConversationCapabilityID, input, "messaging-archive-vite-contract")
+	var replayedOutput MessagingArchiveConversationOutput
+	if unmarshalErr := json.Unmarshal(replayed.Data, &replayedOutput); unmarshalErr != nil {
+		t.Fatalf("decode replayed archive output: %v", unmarshalErr)
+	}
+	if err != nil || !replayed.OK || !replayed.Replayed || replayedOutput.ConversationID != channel || !replayedOutput.Archived {
+		t.Fatalf("same-intent archive receipt replay=%+v err=%v, want the original Vite output", replayed, err)
+	}
+	var replayedArchivedAt time.Time
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT archived_at FROM conversations WHERE id=$1::uuid AND org_id=$2::uuid`, channel, fx.orgID).Scan(&replayedArchivedAt); err != nil {
+		t.Fatalf("load replayed archive timestamp: %v", err)
+	}
+	if !replayedArchivedAt.Equal(archivedAt) {
+		t.Fatalf("replayed archive changed archived_at from %s to %s", archivedAt, replayedArchivedAt)
+	}
+
+	_, err = dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingArchiveConversationOutput, error) {
+		return messagingArchiveConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.nonMemberID), MessagingArchiveConversationInput{
+			ConversationID: channel, Archived: false,
+		})
+	})
+	if err == nil || err.Error() != "you are not a member of this conversation" {
+		t.Fatalf("non-member archive err=%v, want a membership refusal", err)
+	}
+
+	_, err = dbx.WithOrgTx(fx.ctx, fx.runtime, fx.otherOrgID, func(tx pgx.Tx) (MessagingArchiveConversationOutput, error) {
+		return messagingArchiveConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingArchiveConversationInput{
+			ConversationID: channel, Archived: false,
+		})
+	})
+	if err == nil || err.Error() != "you are not a member of this conversation" {
+		t.Fatalf("cross-organization archive err=%v, want a membership refusal", err)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversations WHERE id=$1::uuid AND org_id=$2::uuid AND archived_at IS NOT NULL`, channel, fx.orgID); got != 1 {
+		t.Fatalf("denied archive changed channel archive state, rows=%d", got)
+	}
+
+	// Archiving and restoring are the same reversible capability with an explicit state value.
+	restoredInput := `{"conversationId":"` + channel + `","archived":false}`
+	restored, err := executeMessagingCapability(fx, messagingArchiveConversationCapabilityID, restoredInput, "messaging-archive-vite-restore")
+	if err != nil || !restored.OK || string(restored.Data) != `{"conversationId":"`+channel+`","archived":false}` {
+		t.Fatalf("restore conversation result=%+v err=%v", restored, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversations WHERE id=$1::uuid AND org_id=$2::uuid AND archived_at IS NULL`, channel, fx.orgID); got != 1 {
+		t.Fatalf("restore did not clear archived_at, rows=%d", got)
+	}
+}
+
 func TestMessagingDirectMessagesRefuseChannelOperations(t *testing.T) {
 	fx := newMessagingFixture(t)
 	direct, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingConversationIDOutput, error) {

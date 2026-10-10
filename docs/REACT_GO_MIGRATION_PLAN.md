@@ -2398,3 +2398,10 @@ new owners and the manifest shows zero legacy runtime paths.
      empty updates before dispatch, retain the exact pending settings and
      intent across reloads within the actor, organization, and conversation
      scope, and set `CHASTE_GO_MESSAGING_CONVERSATION_UPDATE=0` for rollback.
+238. (Vite implementation complete; browser proof pending) Route conversation
+     archive and restore actions through the session-authenticated
+     `messaging.archiveConversation` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Require and validate the archived
+     state, retain unresolved action and intent across reloads and selector
+     rollback, and set `CHASTE_GO_MESSAGING_CONVERSATION_ARCHIVE=0` for
+     rollback of new actions.

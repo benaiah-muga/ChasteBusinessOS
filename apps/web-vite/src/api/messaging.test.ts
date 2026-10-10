@@ -865,6 +865,83 @@ describe("messaging API client", () => {
     });
   });
 
+  it("archives conversations through Go and requires an exact state receipt", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { conversationId, archived: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "archive", archived: true }, undefined, { intentId }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({
+      capabilityId: "messaging.archiveConversation",
+      input: { conversationId, archived: true },
+      intentId,
+    });
+  });
+
+  it("forces a saved archive retry through Go after selector rollback with the same intent", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { conversationId, archived: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "archive", archived: true }, undefined, { forceGo: true, intentId }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({
+      capabilityId: "messaging.archiveConversation",
+      input: { conversationId, archived: true },
+      intentId,
+    });
+  });
+
+  it("requires the saved archive intent for forceGo and ignores it for other lifecycle actions", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(() => changeConversation(conversationId, { action: "archive", archived: true }, undefined, { forceGo: true }))
+      .toThrow("original intent id");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await changeConversation(conversationId, { action: "leave" }, undefined, { forceGo: true });
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
+  });
+
+  it("handles Go archive approval and fails closed on malformed or mismatched receipts", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, hint: "Waiting for approval." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { conversationId, archived: false } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { conversationId: "not-a-uuid", archived: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "archive", archived: true }))
+      .resolves.toEqual({ kind: "pending", reason: "Waiting for approval." });
+    await expect(changeConversation(conversationId, { action: "archive", archived: true }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    await expect(changeConversation(conversationId, { action: "archive", archived: true }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("validates Go archive inputs and keeps the legacy route when its selector is off", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(() => changeConversation("bad-id", { action: "archive", archived: true })).toThrow(MessagingApiError);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", false);
+    await changeConversation(conversationId, { action: "archive", archived: true });
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
+    expect(lastBody(fetchMock)).toMatchObject({ action: "archive", archived: true });
+  });
+
   it("handles Go update approval and rejects malformed receipts without legacy fallback", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_UPDATE__", true);
     const fetchMock = vi.fn()
