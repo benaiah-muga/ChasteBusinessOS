@@ -344,7 +344,8 @@ The full v1 changelog is preserved at the bottom of this file.
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Exact actor/org scoped attempts and
   pending or uncertain action recovery survive reload; Go 404 never falls back
   to the legacy writer. Applicant-to-employee conversion is not part of this
-  Vite slice.
+  Vite slice. Retry intents reserve atomically across tabs, stale responses
+  cannot clear a newer action, and browsers without Web Locks fail closed.
 - Vite Payroll now reads payroll runs through Go's `hr.report` capability and
   creates drafts through `hr.createPayrollRun` behind paired
   `CHASTE_GO_HR_PAYROLL=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors.

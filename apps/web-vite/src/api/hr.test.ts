@@ -293,6 +293,7 @@ describe("Vite People API", () => {
 
   it("keeps an exact Hiring action after pending approval and Go 404, with no selector-off fallback", async () => {
     vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
     const action = { action: "createOpening" as const, title: "Field Technician" };
     const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
     const intentIds: string[] = [];
@@ -322,6 +323,7 @@ describe("Vite People API", () => {
 
   it("maps Hiring applicant add and stage changes to their Go contracts", async () => {
     vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
     const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
     const seen: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -341,6 +343,73 @@ describe("Vite People API", () => {
       { capabilityId: "hr.addApplicant", input: { openingId, name: "Mira Patel", email: "mira@example.com" } },
       { capabilityId: "hr.moveApplicant", input: { applicantId, stage: "interview" } },
     ]);
+  });
+
+  it("serializes cross-tab Go Hiring reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "createOpening" as const, title: "Field Technician" };
+    const alternateAction = { action: "createOpening" as const, title: "Finance Analyst" };
+    const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcomes = await Promise.allSettled([
+      submitHrHiringAction(action, scope),
+      submitHrHiringAction(alternateAction, scope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect([action, alternateAction]).toContainEqual(await readPendingHrHiringAction(scope));
+  });
+
+  it("does not let a delayed Hiring success clear a newer Go action intent", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "createOpening" as const, title: "Field Technician" };
+    const nextAction = { action: "createOpening" as const, title: "Finance Analyst" };
+    const respond: Array<(response: Response) => void> = [];
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+      return new Promise<Response>((resolve) => { respond.push(resolve); });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitHrHiringAction(action, scope);
+    const duplicate = submitHrHiringAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(intentIds[1]).toBe(intentIds[0]);
+    respond[0]?.(Response.json({ ok: true, data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } }));
+    await expect(first).resolves.toMatchObject({ kind: "success" });
+
+    const next = submitHrHiringAction(nextAction, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(intentIds[2]).not.toBe(intentIds[0]);
+    respond[1]?.(Response.json({ ok: true, data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } }));
+    await expect(duplicate).resolves.toMatchObject({ kind: "success" });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(nextAction);
+
+    respond[2]?.(Response.json({ pendingApproval: true }, { status: 202 }));
+    await expect(next).resolves.toMatchObject({ kind: "pending" });
+  });
+
+  it("fails closed when browser-wide Go Hiring locks are unavailable", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrHiringAction({ action: "createOpening", title: "Field Technician" }, scope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a Hiring action"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
   });
 
   it("keeps actor and organization scoped exact leave attempts through approval and Go 404", async () => {

@@ -196,6 +196,7 @@ describe("Vite People page", () => {
   it("uses Go for the Hiring report and all exposed pipeline changes, with exact retry after reload", async () => {
     window.history.replaceState(null, "", "/hr?tab=hiring");
     vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
     const actorId = "22222222-2222-4222-8222-222222222222";
     const organizationId = "33333333-3333-4333-8333-333333333333";
     const openingId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

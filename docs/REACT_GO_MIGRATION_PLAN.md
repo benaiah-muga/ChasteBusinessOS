@@ -2103,8 +2103,9 @@ new owners and the manifest shows zero legacy runtime paths.
      a newer draft, and browsers without Web Locks fail closed. Vite API/page/
      proxy tests, typecheck, lint, and Go payroll contract tests pass.
      Authenticated browser proof remains open.
-200. Route only the Vite Hiring tab's report, opening creation, applicant
-     creation, and applicant stage changes through Go's `hr.report`,
+200. (Vite/Go implementation complete; browser proof pending) Route only the
+     Vite Hiring tab's report, opening creation, applicant creation, and
+     applicant stage changes through Go's `hr.report`,
      `hr.createOpening`, `hr.addApplicant`, and `hr.moveApplicant` capabilities
      behind paired `CHASTE_GO_HR_HIRING=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other HR tab
@@ -2112,7 +2113,11 @@ new owners and the manifest shows zero legacy runtime paths.
      durable exact write attempts by actor and organization, recover pending
      and uncertain actions after reload, block legacy fallback while
      unresolved, and fail closed on Go 404. Add focused Go contract and Vite
-     API, page, and proxy tests.
+     API, page, and proxy tests. Atomic browser-wide reservations prevent
+     cross-tab intent races, stale responses cannot clear a newer action, and
+     browsers without Web Locks fail closed. Vite API/page/proxy tests,
+     typecheck, lint, and Go Hiring contract tests pass. Authenticated browser
+     proof remains open.
 201. Route only Vite period-close readiness reads through Go's session-
      authenticated `accounting.periodCloseWorkbench` capability behind paired
      `CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS=1` and
