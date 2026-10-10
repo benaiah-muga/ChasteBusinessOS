@@ -119,8 +119,12 @@ export function goSupportInboxReadsUseGo(): boolean {
   return typeof __GO_SUPPORT_INBOX_READS__ !== "undefined" && __GO_SUPPORT_INBOX_READS__;
 }
 
+export function goSupportLibraryReadsUseGo(): boolean {
+  return typeof __GO_SUPPORT_LIBRARY_READS__ !== "undefined" && __GO_SUPPORT_LIBRARY_READS__;
+}
+
 async function readGoSupportCapability<T>(
-  capabilityId: "support.listConversations" | "support.readConversation",
+  capabilityId: "support.listConversations" | "support.readConversation" | "support.listLibrary",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   signal?: AbortSignal,
@@ -195,6 +199,9 @@ const SupportLibrarySchema = z.object({
 export type SupportLibrary = z.infer<typeof SupportLibrarySchema>;
 
 export async function fetchSupportLibrary(signal?: AbortSignal): Promise<SupportLibrary> {
+  if (goSupportLibraryReadsUseGo()) {
+    return readGoSupportCapability("support.listLibrary", {}, SupportLibrarySchema, signal);
+  }
   return get("/api/support?library=1", SupportLibrarySchema, signal);
 }
 

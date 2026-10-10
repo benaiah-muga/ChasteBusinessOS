@@ -143,6 +143,22 @@ describe("Vite support page", () => {
     });
   }, SLOW);
 
+  it("loads the library from Go when the dedicated selector is enabled", async () => {
+    vi.stubGlobal("__GO_SUPPORT_LIBRARY_READS__", true);
+    const { fetchMock, calls } = supportFetch({
+      execute: (payload) => Response.json({ ok: true, data: payload.capabilityId === "support.listLibrary"
+        ? { canned: [], articles: [] }
+        : {} }),
+    });
+    render(<SupportPage />);
+
+    await screen.findByText("Latest activity");
+    fireEvent.click(screen.getByRole("button", { name: "Library" }));
+    expect(await screen.findByText("Knowledge base")).not.toBeNull();
+    expect(calls.some((call) => call.path === "/api/capabilities/execute" && call.payload !== null && call.payload.capabilityId === "support.listLibrary" && JSON.stringify(call.payload.input) === "{}")).toBe(true);
+    expect(fetchMock.mock.calls.map(([path]) => String(path))).not.toContain("/api/support?library=1");
+  }, SLOW);
+
   it("does not load customer care while the module is disabled", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("/api/modules");

@@ -61,6 +61,11 @@ The full v1 changelog is preserved at the bottom of this file.
   preserves the customer-bound inbox behavior and Support page contract, and
   selected Go errors do not retry the legacy Support route. Set
   `CHASTE_GO_SUPPORT_INBOX_READS=0` for rollback.
+- Vite Support canned responses and knowledge articles now read through the
+  session-authenticated Go `support.listLibrary` capability by default when
+  session routing is enabled. Responses are strictly validated and selected Go
+  errors do not retry the legacy library route. Set
+  `CHASTE_GO_SUPPORT_LIBRARY_READS=0` for rollback.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.

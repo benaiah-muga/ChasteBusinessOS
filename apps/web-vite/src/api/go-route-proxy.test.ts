@@ -9,6 +9,7 @@ import {
   goAccountingCashBasisFromEnv,
   goAccountingOverviewReadsFromEnv,
   goSupportInboxReadsFromEnv,
+  goSupportLibraryReadsFromEnv,
   goPosCloseSessionSliceFromEnv,
   goMarketingCampaignWritesFromEnv,
   goProjectsWritesFromEnv,
@@ -600,6 +601,14 @@ describe("Support inbox Go selector", () => {
     expect(goSupportInboxReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportInboxReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_INBOX_READS: "0" })).toBe(false);
     expect(goSupportInboxReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_INBOX_READS: "1" })).toBe(false);
+  });
+});
+
+describe("Support library Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goSupportLibraryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goSupportLibraryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_LIBRARY_READS: "0" })).toBe(false);
+    expect(goSupportLibraryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_LIBRARY_READS: "1" })).toBe(false);
   });
 });
 

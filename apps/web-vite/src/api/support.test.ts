@@ -5,8 +5,10 @@ import {
   fetchSupportConversations,
   fetchSupportDraft,
   fetchSupportEnabled,
+  fetchSupportLibrary,
   fetchSupportThread,
   goSupportInboxReadsUseGo,
+  goSupportLibraryReadsUseGo,
   submitSupportAction,
   SupportApiError,
   SupportWriteActionSchema,
@@ -49,6 +51,11 @@ const threadResponse = {
     slaDueAt: null,
   },
   messages: [message],
+};
+
+const supportLibrary = {
+  canned: [{ id: "9a145d87-5642-4c92-9d87-67f93b63b327", shortcut: "/refund", title: "Refund status", body: "Your refund is being processed." }],
+  articles: [{ id: "cc4ec95d-9332-4c4e-8d63-7b065cc88442", title: "Returns", body: "Return policy details.", category: "orders", isPublic: false }],
 };
 
 function moduleSwitchboard(enabled = true) {
@@ -163,6 +170,40 @@ describe("support Go inbox reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchSupportConversations()).rejects.toMatchObject({
+      status: 200,
+      message: "The Go support service returned data in an unexpected format.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
+  });
+});
+
+describe("support Go library read", () => {
+  it("loads canned responses and knowledge articles through the Go capability", async () => {
+    vi.stubGlobal("__GO_SUPPORT_LIBRARY_READS__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: supportLibrary }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(goSupportLibraryReadsUseGo()).toBe(true);
+    await expect(fetchSupportLibrary()).resolves.toEqual(supportLibrary);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      body: expect.stringContaining('"capabilityId":"support.listLibrary"'),
+    }));
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { input?: unknown; intentId?: string };
+    expect(request.input).toEqual({});
+    expect(request.intentId).toEqual(expect.any(String));
+  });
+
+  it("rejects malformed Go library data without retrying the legacy read", async () => {
+    vi.stubGlobal("__GO_SUPPORT_LIBRARY_READS__", true);
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { ...supportLibrary, unexpected: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSupportLibrary()).rejects.toMatchObject({
       status: 200,
       message: "The Go support service returned data in an unexpected format.",
     });

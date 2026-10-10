@@ -2464,3 +2464,9 @@ new owners and the manifest shows zero legacy runtime paths.
      shapes, retain customer-bound inbox filtering, use full-detail thread
      reads, fail closed on selected Go errors, and set
      `CHASTE_GO_SUPPORT_INBOX_READS=0` for explicit legacy rollback.
+247. (Vite implementation complete; browser proof pending) Route Vite Support
+     canned-response and knowledge-article reads through the session-
+     authenticated `support.listLibrary` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the response,
+     fail closed on selected Go errors, and set
+     `CHASTE_GO_SUPPORT_LIBRARY_READS=0` for explicit legacy rollback.
