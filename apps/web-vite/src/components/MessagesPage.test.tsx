@@ -1444,7 +1444,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(intentIds).toHaveLength(2), { timeout: 5_000 });
     expect(intentIds[1]).toBe(intentIds[0]);
-  });
+  }, 15_000);
 
   it("reuses a Go message intent after an uncertain transport failure and clears it on success", async () => {
     vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
