@@ -176,6 +176,11 @@ The full v1 changelog is preserved at the bottom of this file.
   while an earlier result is unresolved, and Go treats foreign-org deal IDs as
   not found.
 
+- Vite Sales confirmation now preserves the exact approval intent and
+  backorder choice across reloads. A browser-wide lock serializes the request
+  and outcome update, and the action fails closed when durable retry state is
+  unavailable.
+
 - Vite Projects create, archive, and task writes now use direct Go capabilities
   by default. Set `CHASTE_GO_PROJECTS_WRITES=0` to send them through the
   existing `POST /api/projects` route, which remains Go-backed while

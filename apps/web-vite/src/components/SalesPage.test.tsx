@@ -39,6 +39,8 @@ const customers = {
     { id: "20000000-0000-4000-8000-000000000002", name: "Benaiah Market", purchaseCount: 0, lifetimeSpendMinor: 0 },
   ],
 };
+const confirmAttemptKey = (actorId: string, organizationId: string, orderId: string) =>
+  `chaste:sales-confirm-attempt:${encodeURIComponent(JSON.stringify([actorId, organizationId]))}:${orderId}`;
 
 function salesFetch() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -50,11 +52,24 @@ function salesFetch() {
 }
 
 function stubWebLocks() {
+  const tails = new Map<string, Promise<void>>();
   const testNavigator = Object.create(navigator) as Navigator;
   Object.defineProperty(testNavigator, "locks", {
     configurable: true,
     value: {
-      request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback(),
+      request: async (name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => {
+        const previous = tails.get(name) ?? Promise.resolve();
+        let release = () => {};
+        const hold = new Promise<void>((resolve) => { release = resolve; });
+        const next = previous.then(() => hold);
+        tails.set(name, next);
+        await previous;
+        try { return await callback(); }
+        finally {
+          release();
+          if (tails.get(name) === next) tails.delete(name);
+        }
+      },
     },
   });
   vi.stubGlobal("navigator", testNavigator);
@@ -734,8 +749,13 @@ describe("Vite sales page", () => {
     const backorderInputFrom = (call: ReturnType<typeof capabilityCalls>[number]) =>
       (JSON.parse(String(call[1]?.body)) as { input: { allowBackorder?: boolean } }).input.allowBackorder;
     const originalIntent = intentFrom(capabilityCalls()[0]!);
-    expect(sessionStorage.getItem(`chaste:sales-confirm-intent:${orders[2]!.id}`)).toBe(originalIntent);
-    expect(sessionStorage.getItem(`chaste:sales-confirm-backorder:${orders[2]!.id}`)).toBe("1");
+    const markerKey = confirmAttemptKey("actor-1", "org-1", orders[2]!.id);
+    expect(JSON.parse(localStorage.getItem(markerKey) ?? "null")).toMatchObject({
+      orderId: orders[2]!.id,
+      intentId: originalIntent,
+      allowBackorder: true,
+      pending: true,
+    });
 
     firstMount.unmount();
     render(<SalesPage {...scopeProps} />);
@@ -749,9 +769,7 @@ describe("Vite sales page", () => {
     expect(capabilityCalls()).toHaveLength(2);
     expect(intentFrom(capabilityCalls()[1]!)).toBe(originalIntent);
     expect(backorderInputFrom(capabilityCalls()[1]!)).toBe(true);
-    expect(sessionStorage.getItem(`chaste:sales-confirm-intent:${orders[2]!.id}`)).toBeNull();
-    expect(sessionStorage.getItem(`chaste:sales-confirm-pending:${orders[2]!.id}`)).toBeNull();
-    expect(sessionStorage.getItem(`chaste:sales-confirm-backorder:${orders[2]!.id}`)).toBeNull();
+    expect(localStorage.getItem(markerKey)).toBeNull();
 
     cleanup();
     render(<SalesPage {...scopeProps} />);
@@ -763,14 +781,45 @@ describe("Vite sales page", () => {
     expect(vi.mocked(window.confirm)).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps confirmation errors visible when the order is filtered out", async () => {
+  it("serializes confirmation retries across tabs and reuses the durable attempt", async () => {
+    let capabilityAttempt = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/pos/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      void init;
+      capabilityAttempt += 1;
+      if (capabilityAttempt === 1) throw new TypeError("connection reset after request");
+      return Response.json({ ok: true, data: { confirmed: true, backordered: true, reservedThousandths: 0 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const props = { actorId: "actor-1", organizationId: "org-1" };
+    render(<><SalesPage {...props} /><SalesPage {...props} /></>);
+
+    const confirmButtons = await screen.findAllByRole("button", { name: "Confirm #43" });
+    await waitFor(() => expect(confirmButtons.every((button) => !(button as HTMLButtonElement).disabled)).toBe(true));
+    fireEvent.click(confirmButtons[0]!);
+    fireEvent.click(confirmButtons[1]!);
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute")).toHaveLength(2));
+    const capabilityCalls = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const intentFrom = (call: typeof capabilityCalls[number]) =>
+      (JSON.parse(String(call[1]?.body)) as { intentId: string }).intentId;
+    expect(intentFrom(capabilityCalls[1]!)).toBe(intentFrom(capabilityCalls[0]!));
+    expect(await screen.findByText("Order #43 confirmed.")).not.toBeNull();
+    expect(localStorage.getItem(confirmAttemptKey("actor-1", "org-1", orders[2]!.id))).toBeNull();
+  });
+
+  it("fails closed when durable storage is unavailable", async () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage is blocked"); });
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
       return Response.json({ error: "The sales service is unavailable. Check the order status before trying again." }, { status: 503 });
-    }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
     render(<SalesPage actorId="actor-1" organizationId="org-1" />);
 
@@ -778,10 +827,30 @@ describe("Vite sales page", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
     expect(await screen.findByRole("alert")).not.toBeNull();
-    expect((screen.getByRole("checkbox", { name: "Allow backorder" }) as HTMLInputElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Delivered" }));
+    expect(screen.getByRole("alert").textContent).toContain("Enable browser storage");
+    expect(fetchMock.mock.calls.some(([input]) => input === "/api/capabilities/execute")).toBe(false);
+  });
 
-    expect(screen.getByRole("alert").textContent).toContain("Check the order status before trying again.");
+  it("fails closed when Web Locks are unavailable", async () => {
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, "locks", { configurable: true, value: undefined });
+    vi.stubGlobal("navigator", testNavigator);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/pos/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      return Response.json({ ok: true, data: { confirmed: true, backordered: false, reservedThousandths: 0 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm #43" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Web Locks support");
+    expect(fetchMock.mock.calls.some(([input]) => input === "/api/capabilities/execute")).toBe(false);
+    expect(localStorage.getItem(confirmAttemptKey("actor-1", "org-1", orders[2]!.id))).toBeNull();
   });
 
   it("shows route-level Go permission failures as access denied", async () => {

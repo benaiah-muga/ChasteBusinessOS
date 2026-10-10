@@ -81,45 +81,70 @@ function quantityFromInput(value: string): number | null {
   return Number.isSafeInteger(thousandths) && thousandths > 0 ? thousandths : null;
 }
 
-function savedConfirmIntent(orderId: string): string | null {
-  try {
-    const value = sessionStorage.getItem(`chaste:sales-confirm-intent:${orderId}`);
-    return value && /^[0-9a-f-]{36}$/i.test(value) ? value : null;
-  } catch {
-    return null;
+type ConfirmAttempt = { orderId: string; intentId: string; allowBackorder: boolean; pending: boolean };
+
+function confirmAttemptKey(scopeIdentity: string, orderId: string): string {
+  return `chaste:sales-confirm-attempt:${encodeURIComponent(scopeIdentity)}:${orderId}`;
+}
+
+function parseConfirmAttempt(value: string | null, orderId: string): ConfirmAttempt | null {
+  if (value === null) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch {
+    throw new SalesApiError(0, "A saved order confirmation retry marker is damaged. Verify order history before trying again.");
+  }
+  if (!parsed || typeof parsed !== "object") throw new SalesApiError(0, "A saved order confirmation retry marker is damaged. Verify order history before trying again.");
+  const marker = parsed as Partial<ConfirmAttempt>;
+  if (marker.orderId !== orderId || typeof marker.intentId !== "string" || !/^[0-9a-f-]{36}$/i.test(marker.intentId)
+    || typeof marker.allowBackorder !== "boolean" || typeof marker.pending !== "boolean") {
+    throw new SalesApiError(0, "A saved order confirmation retry marker is damaged. Verify order history before trying again.");
+  }
+  return marker as ConfirmAttempt;
+}
+
+function readConfirmAttempt(scopeIdentity: string, orderId: string): ConfirmAttempt | null {
+  try { return parseConfirmAttempt(localStorage.getItem(confirmAttemptKey(scopeIdentity, orderId)), orderId); }
+  catch (error) {
+    if (error instanceof SalesApiError) throw error;
+    throw new SalesApiError(0, "Enable browser storage before confirming an order so an uncertain action can be retried safely.");
   }
 }
 
-function savedAllowBackorder(orderId: string): boolean {
+function savedConfirmAttempt(scopeIdentity: string | null, orderId: string): ConfirmAttempt | null {
+  if (!scopeIdentity) return null;
+  try { return readConfirmAttempt(scopeIdentity, orderId); } catch { return null; }
+}
+
+function hasSavedPendingApproval(scopeIdentity: string | null, orderId: string): boolean {
+  return savedConfirmAttempt(scopeIdentity, orderId)?.pending ?? false;
+}
+
+async function withConfirmAttemptLock<T>(scopeIdentity: string, orderId: string, operation: (key: string) => Promise<T>): Promise<T> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!locks) throw new SalesApiError(0, "Safe order confirmation retries are unavailable in this browser. Use a browser with Web Locks support before confirming orders.");
+  const key = confirmAttemptKey(scopeIdentity, orderId);
   try {
-    return sessionStorage.getItem(`chaste:sales-confirm-backorder:${orderId}`) === "1";
-  } catch {
-    return false;
+    return await locks.request(`chaste:sales-confirm-lock:${key}`, { mode: "exclusive" }, () => operation(key));
+  } catch (error) {
+    if (error instanceof SalesApiError) throw error;
+    throw new SalesApiError(0, "Could not safely coordinate this order confirmation across browser tabs. Close other Sales tabs and try again.");
   }
 }
 
-function persistConfirmIntent(orderId: string, intentId: string, pending: boolean, allowBackorder: boolean) {
+function persistConfirmAttempt(key: string, attempt: ConfirmAttempt): void {
   try {
-    sessionStorage.setItem(`chaste:sales-confirm-intent:${orderId}`, intentId);
-    sessionStorage.setItem(`chaste:sales-confirm-pending:${orderId}`, pending ? "1" : "0");
-    sessionStorage.setItem(`chaste:sales-confirm-backorder:${orderId}`, allowBackorder ? "1" : "0");
-  } catch { /* In-memory intent reuse still protects retries for this page. */ }
-}
-
-function clearConfirmIntent(orderId: string) {
-  try {
-    sessionStorage.removeItem(`chaste:sales-confirm-intent:${orderId}`);
-    sessionStorage.removeItem(`chaste:sales-confirm-pending:${orderId}`);
-    sessionStorage.removeItem(`chaste:sales-confirm-backorder:${orderId}`);
-  } catch { /* The server remains the source of truth for the action result. */ }
-}
-
-function hasSavedPendingApproval(orderId: string): boolean {
-  try {
-    return sessionStorage.getItem(`chaste:sales-confirm-pending:${orderId}`) === "1";
-  } catch {
-    return false;
+    localStorage.setItem(key, JSON.stringify(attempt));
+    const persisted = parseConfirmAttempt(localStorage.getItem(key), attempt.orderId);
+    if (!persisted || persisted.intentId !== attempt.intentId || persisted.allowBackorder !== attempt.allowBackorder || persisted.pending !== attempt.pending) throw new Error("saved attempt did not persist");
+  } catch (error) {
+    if (error instanceof SalesApiError) throw error;
+    throw new SalesApiError(0, "Enable browser storage before confirming an order so an uncertain action can be retried safely.");
   }
+}
+
+function clearConfirmAttempt(key: string): void {
+  try { localStorage.removeItem(key); }
+  catch { throw new SalesApiError(0, "Browser storage could not resolve the saved order confirmation. Retry the same confirmation or verify order history."); }
 }
 
 export function SalesPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
@@ -141,7 +166,6 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const [routeLessReviewConfirmed, setRouteLessReviewConfirmed] = useState(false);
   const [routeLessRecoveryBusy, setRouteLessRecoveryBusy] = useState(false);
   const [orderActionTarget, setOrderActionTarget] = useState<OrderActionTarget | null>(null);
-  const confirmIntents = useRef(new Map<string, string>());
   const previousCreateScope = useRef<string | null>(null);
   const currentCreateScope = useRef<string | null>(null);
   const confirmationScope = useRef<string | null>(null);
@@ -205,7 +229,6 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       setConfirmingOrderId(null);
       setApprovalWaitingOrderIds(new Set());
       setAllowBackorder({});
-      confirmIntents.current.clear();
       setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
       setShowCreateForm(false);
       setCreateError(null);
@@ -307,29 +330,44 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
 
   async function handleConfirm(order: SalesOrder) {
     if (!createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked) return;
+    if (!createScopeIdentity) return;
     const submittedScope = createScopeIdentity;
     const submittedGeneration = confirmationGeneration.current;
     const isCurrentScope = () => currentCreateScope.current === submittedScope
       && confirmationGeneration.current === submittedGeneration;
-    const checkingApproval = approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id);
+    const savedAttempt = savedConfirmAttempt(submittedScope, order.id);
+    const checkingApproval = approvalWaitingOrderIds.has(order.id) || savedAttempt?.pending === true;
     if (!checkingApproval && !window.confirm(`Confirm order #${order.number}?`)) return;
-    const intentId = confirmIntents.current.get(order.id) ?? savedConfirmIntent(order.id) ?? crypto.randomUUID();
-    confirmIntents.current.set(order.id, intentId);
-    const backorderChoice = allowBackorder[order.id] ?? savedAllowBackorder(order.id);
-    persistConfirmIntent(order.id, intentId, checkingApproval, backorderChoice);
+    const backorderChoice = savedAttempt?.allowBackorder ?? allowBackorder[order.id] ?? false;
     setConfirmingOrderId(order.id);
     setActionNotice(null);
     try {
-      const result = await confirmSalesOrder(order.id, intentId, backorderChoice);
+      const { result, attempt } = await withConfirmAttemptLock(submittedScope, order.id, async (key) => {
+        const existing = readConfirmAttempt(submittedScope, order.id);
+        const activeAttempt = existing ?? {
+          orderId: order.id,
+          intentId: crypto.randomUUID(),
+          allowBackorder: backorderChoice,
+          pending: false,
+        };
+        if (!existing) persistConfirmAttempt(key, activeAttempt);
+        try {
+          const outcome = await confirmSalesOrder(order.id, activeAttempt.intentId, activeAttempt.allowBackorder);
+          if (outcome.kind === "pending") persistConfirmAttempt(key, { ...activeAttempt, pending: true });
+          else clearConfirmAttempt(key);
+          return { result: outcome, attempt: activeAttempt };
+        } catch (error) {
+          if (error instanceof SalesApiError && error.status === 422) clearConfirmAttempt(key);
+          throw error;
+        }
+      });
       if (!isCurrentScope()) return;
       if (result.kind === "pending") {
-        persistConfirmIntent(order.id, intentId, true, backorderChoice);
+        setAllowBackorder((current) => ({ ...current, [order.id]: attempt.allowBackorder }));
         setApprovalWaitingOrderIds((current) => new Set(current).add(order.id));
         setActionNotice({ tone: "pending", message: result.reason });
         return;
       }
-      confirmIntents.current.delete(order.id);
-      clearConfirmIntent(order.id);
       setApprovalWaitingOrderIds((current) => {
         const next = new Set(current);
         next.delete(order.id);
@@ -345,8 +383,6 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     } catch (error) {
       if (!isCurrentScope()) return;
       if (error instanceof SalesApiError && error.status === 422) {
-        confirmIntents.current.delete(order.id);
-        clearConfirmIntent(order.id);
         setApprovalWaitingOrderIds((current) => {
           const next = new Set(current);
           next.delete(order.id);
@@ -625,16 +661,16 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
                     <label>
                       <input
                         type="checkbox"
-                        checked={allowBackorder[order.id] ?? savedAllowBackorder(order.id)}
+                        checked={savedConfirmAttempt(createScopeIdentity, order.id)?.allowBackorder ?? allowBackorder[order.id] ?? false}
                         onChange={(event) => {
                           const checked = event.currentTarget.checked;
                           setAllowBackorder((current) => ({ ...current, [order.id]: checked }));
                         }}
-                        disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || confirmingOrderId === order.id || approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) || savedConfirmIntent(order.id) !== null || confirmIntents.current.has(order.id)}
+                        disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || confirmingOrderId === order.id || approvalWaitingOrderIds.has(order.id) || savedConfirmAttempt(createScopeIdentity, order.id) !== null}
                       />
                       Allow backorder
                     </label>
-                    <button type="button" disabled={!createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked || confirmingOrderId !== null} onClick={() => void handleConfirm(order)}>{confirmingOrderId === order.id ? "Checking…" : approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) ? `Check approval #${order.number}` : `Confirm #${order.number}`}</button>
+                    <button type="button" disabled={!createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked || confirmingOrderId !== null} onClick={() => void handleConfirm(order)}>{confirmingOrderId === order.id ? "Checking…" : approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(createScopeIdentity, order.id) ? `Check approval #${order.number}` : `Confirm #${order.number}`}</button>
                     <button type="button" className="sales-row-action" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady || confirmingOrderId !== null} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
                   </>}{order.status === "confirmed" && <>
                     <button type="button" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "deliver", order })}>Deliver #{order.number}</button>
