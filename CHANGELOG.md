@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite now routes the dashboard's `GET /api/setup` checklist read to Go by
+  default. The Go handler resolves the verified session and active organization
+  itself and keeps the `iam.admin` gate; setting both paired route flags to `0`
+  restores the compatibility handler.
+
 - Vite Analytics dataset discovery, previews, and report generation now route
   to Go by default through the existing authenticated Analytics session
   handler. Setting the paired report route selectors to `0` restores the

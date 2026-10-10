@@ -109,6 +109,10 @@ continues to validate membership and set the HttpOnly cookie. Vite listens on
 `localhost` so the browser can send the existing host-scoped session cookie
 across the port change. `CHASTE_LEGACY_WEB_ORIGIN` configures the development
 proxy when the legacy server is not on `http://localhost:3001`.
+The dashboard setup checklist `GET /api/setup` now routes through the Go
+session handler by default in both the Vite proxy and Go API. Go resolves the
+verified session and active organization and retains the `iam.admin` gate; set
+both `CHASTE_GO_SETUP_ROUTE=0` and `GO_SETUP_ROUTE=0` for explicit rollback.
 The current application
 continues to own production traffic, and no writes have changed owner.
 The Vite `/approvals` preview now reads the legacy pending queue and decision

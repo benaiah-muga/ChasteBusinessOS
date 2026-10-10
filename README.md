@@ -105,6 +105,11 @@ the forwarded scheme without accepting another origin.
 to a remote or private service you control; the Vite development proxy accepts
 cleartext HTTP only for loopback hosts.
 
+The setup checklist read `GET /api/setup` uses Go by default in Vite and the Go
+API. Set both `CHASTE_GO_SETUP_ROUTE=0` and `GO_SETUP_ROUTE=0` to restore the
+compatibility handler. Go resolves the signed-in session and active organization
+and retains the `iam.admin` permission gate.
+
 ## Why React and Go: measured build benefits
 
 We chose React and TypeScript on Vite to shorten frontend compile feedback and

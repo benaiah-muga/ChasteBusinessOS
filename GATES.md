@@ -440,3 +440,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests  162 passed|ok.*internal\/httpapi|tsc --noEmit|eslint/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Focused Vite Analytics API and route-proxy tests passed all 162 tests, including default Go selection for GET discovery, GET preview, and POST report, plus explicit selector rollback. Go API flag and Analytics handler tests passed. Vite typecheck and lint passed. `graft build` completed. Browser runtime proof remains open.
+
+- [x] G90: Vite dashboard setup checklist reads route through the Go session handler by default, with a paired `0` rollback to compatibility handling.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/go-route-proxy.test.ts src/api/dashboard.test.ts && PATH=/home/benaiah/.local/share/go/1.27.1/bin:$PATH go -C apps/api test ./cmd/api ./internal/httpapi -run 'TestGoSetupRouteEnabledFromEnv|TestSetupSessionHandler|TestMountSetupRoute' -count=1 && PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite typecheck && PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite lint
+  EXPECT: /Tests .* passed|ok.*cmd\/api|ok.*internal\/httpapi|tsc --noEmit|eslint/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: The focused Vite proxy and dashboard API tests passed all 163 tests. Go API selector, setup-session auth/permission/scope, and route mount tests passed. Vite typecheck and lint passed; `graft build` completed. Browser runtime proof remains open.

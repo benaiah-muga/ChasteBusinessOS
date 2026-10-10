@@ -52,6 +52,10 @@ func goMetricsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goSetupRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goTeamReadRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -369,7 +373,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go dashboard route mounted", "path", "/api/dashboard")
 	}
 	var setupRoute http.Handler
-	if os.Getenv("GO_SETUP_ROUTE") == "1" {
+	if goSetupRouteEnabledFromEnv(os.Getenv("GO_SETUP_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
