@@ -2457,3 +2457,10 @@ new owners and the manifest shows zero legacy runtime paths.
      response and safe-integer entry debit aggregates, fail closed on selected
      Go errors, and set `CHASTE_GO_ACCOUNTING_OVERVIEW_READS=0` for explicit
      legacy rollback.
+246. (Vite implementation complete; browser proof pending) Route Vite Support
+     inbox and selected-thread reads through the session-authenticated
+     `support.listConversations` and `support.readConversation` capabilities
+     when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the strict Go wire
+     shapes, retain customer-bound inbox filtering, use full-detail thread
+     reads, fail closed on selected Go errors, and set
+     `CHASTE_GO_SUPPORT_INBOX_READS=0` for explicit legacy rollback.

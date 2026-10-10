@@ -65,6 +65,7 @@ function moduleSwitchboard(enabled = true) {
 
 interface Handlers {
   post?: (payload: Record<string, unknown>) => Response;
+  execute?: (payload: Record<string, unknown>) => Response;
 }
 
 function supportFetch(handlers: Handlers = {}) {
@@ -74,6 +75,9 @@ function supportFetch(handlers: Handlers = {}) {
     if (init?.method === "POST") {
       const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
       calls.push({ path, payload });
+      if (path === "/api/capabilities/execute") {
+        return handlers.execute?.(payload) ?? Response.json({ ok: true, data: {} });
+      }
       return handlers.post?.(payload) ?? Response.json({ ok: true, data: { updated: true } });
     }
     if (path === "/api/modules") return moduleSwitchboard();
@@ -107,6 +111,36 @@ describe("Vite support page", () => {
     expect(await screen.findByRole("heading", { name: "Support" })).not.toBeNull();
     expect(await screen.findByText("Invoice question")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/support", expect.objectContaining({ credentials: "same-origin" }));
+  }, SLOW);
+
+  it("loads the inbox and selected thread from Go capabilities without legacy reads", async () => {
+    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
+    const { fetchMock, calls } = supportFetch({
+      execute: (payload) => payload.capabilityId === "support.listConversations"
+        ? Response.json({ ok: true, data: { conversations } })
+        : Response.json({ ok: true, data: {
+          ...thread,
+          conversation: { ...thread.conversation, customerEmail: null },
+        } }),
+    });
+    render(<SupportPage />);
+
+    expect(await screen.findByRole("heading", { name: "Support" })).not.toBeNull();
+    expect(await screen.findByText("Invoice question")).not.toBeNull();
+    await waitFor(() => {
+      const paths = fetchMock.mock.calls.map(([path]) => String(path));
+      expect(paths.filter((path) => path === "/api/capabilities/execute")).toHaveLength(2);
+      expect(paths).not.toContain("/api/support");
+      expect(paths).not.toContain(`/api/support?id=${conversationId}`);
+      expect(calls[0]?.payload).toMatchObject({
+        capabilityId: "support.listConversations",
+        input: { customerBoundOnly: true, limit: 100 },
+      });
+      expect(calls[1]?.payload).toMatchObject({
+        capabilityId: "support.readConversation",
+        input: { conversationId, limit: 200 },
+      });
+    });
   }, SLOW);
 
   it("does not load customer care while the module is disabled", async () => {

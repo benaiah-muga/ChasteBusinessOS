@@ -109,7 +109,40 @@ export type SupportConversation = z.infer<typeof SupportConversationSchema>;
 
 const ConversationListSchema = z.object({ conversations: z.array(SupportConversationSchema) }).strict();
 
+const GoSupportThreadConversationSchema = SupportConversationSchema.extend({
+  customerId: uuid.nullable(),
+  customerEmail: z.string().nullable(),
+}).strict();
+const GoCapabilityEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+
+export function goSupportInboxReadsUseGo(): boolean {
+  return typeof __GO_SUPPORT_INBOX_READS__ !== "undefined" && __GO_SUPPORT_INBOX_READS__;
+}
+
+async function readGoSupportCapability<T>(
+  capabilityId: "support.listConversations" | "support.readConversation",
+  input: Record<string, unknown>,
+  schema: z.ZodType<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
+  const envelope = GoCapabilityEnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new SupportApiError(response.status, "The Go support service returned an unexpected response.");
+  const parsed = schema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new SupportApiError(response.status, "The Go support service returned data in an unexpected format.");
+  return parsed.data;
+}
+
 export async function fetchSupportConversations(signal?: AbortSignal): Promise<SupportConversation[]> {
+  if (goSupportInboxReadsUseGo()) {
+    const parsed = await readGoSupportCapability("support.listConversations", { customerBoundOnly: true, limit: 100 }, ConversationListSchema, signal);
+    return parsed.conversations;
+  }
   const parsed = await get("/api/support", ConversationListSchema, signal);
   return parsed.conversations;
 }
@@ -125,6 +158,11 @@ export const SupportMessageSchema = z.object({
 }).strict();
 export type SupportMessage = z.infer<typeof SupportMessageSchema>;
 
+const GoSupportThreadSchema = z.object({
+  conversation: GoSupportThreadConversationSchema,
+  messages: z.array(SupportMessageSchema),
+}).strict();
+
 const SupportThreadSchema = z.object({
   conversation: SupportConversationSchema,
   messages: z.array(SupportMessageSchema),
@@ -133,6 +171,19 @@ export type SupportThread = z.infer<typeof SupportThreadSchema>;
 
 export async function fetchSupportThread(conversationId: string, signal?: AbortSignal): Promise<SupportThread> {
   if (!uuid.safeParse(conversationId).success) throw new SupportApiError(0, "Choose a conversation to read its thread.");
+  if (goSupportInboxReadsUseGo()) {
+    const parsed = await readGoSupportCapability(
+      "support.readConversation",
+      { conversationId, limit: 200 },
+      GoSupportThreadSchema,
+      signal,
+    );
+    const { customerEmail: _customerEmail, customerId, ...conversation } = parsed.conversation;
+    return {
+      conversation: SupportConversationSchema.parse({ ...conversation, customerId: customerId ?? "" }),
+      messages: parsed.messages,
+    };
+  }
   const query = new URLSearchParams({ id: conversationId });
   return get(`/api/support?${query.toString()}`, SupportThreadSchema, signal);
 }

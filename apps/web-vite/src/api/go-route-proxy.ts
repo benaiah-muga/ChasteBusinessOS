@@ -227,6 +227,10 @@ export function goMessagingAttachmentDownloadsFromEnv(env: Record<string, string
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD !== "0";
 }
 
+export function goSupportInboxReadsFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_SUPPORT_INBOX_READS !== "0";
+}
+
 export function goMessagingAttachmentDeleteFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_ATTACHMENT_DELETE !== "0";
 }

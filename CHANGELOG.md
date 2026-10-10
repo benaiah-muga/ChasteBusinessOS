@@ -55,6 +55,12 @@ The full v1 changelog is preserved at the bottom of this file.
   Go entry debit aggregates are validated as safe integer minor units, and
   selected Go errors fail closed without retrying the legacy overview route.
   Set `CHASTE_GO_ACCOUNTING_OVERVIEW_READS=0` for explicit rollback.
+- Vite Support inbox and selected-thread reads now use the session-authenticated
+  Go `support.listConversations` and `support.readConversation` capabilities by
+  default when session routing is enabled. Strict Go response validation
+  preserves the customer-bound inbox behavior and Support page contract, and
+  selected Go errors do not retry the legacy Support route. Set
+  `CHASTE_GO_SUPPORT_INBOX_READS=0` for rollback.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.

@@ -6,6 +6,7 @@ import {
   fetchSupportDraft,
   fetchSupportEnabled,
   fetchSupportThread,
+  goSupportInboxReadsUseGo,
   submitSupportAction,
   SupportApiError,
   SupportWriteActionSchema,
@@ -102,6 +103,71 @@ describe("support module switchboard", () => {
       status: 200,
       message: "The support service returned data in an unexpected format.",
     });
+  });
+});
+
+describe("support Go inbox reads", () => {
+  it("loads the inbox through the strict Go capability contract", async () => {
+    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { conversations: [conversationRow] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(goSupportInboxReadsUseGo()).toBe(true);
+    await expect(fetchSupportConversations()).resolves.toEqual([conversationRow]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      body: expect.stringContaining('"capabilityId":"support.listConversations"'),
+    }));
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { input?: unknown; intentId?: string };
+    expect(request.input).toEqual({ customerBoundOnly: true, limit: 100 });
+    expect(request.intentId).toEqual(expect.any(String));
+  });
+
+  it("uses Go full-detail mode and projects its strict guest-customer shape", async () => {
+    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
+    const goThread = {
+      conversation: { ...threadResponse.conversation, customerId: null, customerEmail: "guest@example.test" },
+      messages: [message],
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: goThread }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchSupportThread(conversationId);
+
+    expect(result.conversation.customerId).toBe("");
+    expect(result.conversation).not.toHaveProperty("customerEmail");
+    expect(result.messages).toEqual([message]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      body: expect.stringContaining('"capabilityId":"support.readConversation"'),
+    }));
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { input?: unknown };
+    expect(request.input).toEqual({ conversationId, limit: 200 });
+  });
+
+  it("fails closed on Go read errors without retrying the legacy Support route", async () => {
+    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
+    const fetchMock = vi.fn(async () => jsonResponse({ error: "support backend unavailable" }, 503));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSupportConversations()).rejects.toMatchObject({ status: 503 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
+  });
+
+  it("rejects malformed Go success data without retrying the legacy Support route", async () => {
+    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { conversations: [{ ...conversationRow, unexpected: true }] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSupportConversations()).rejects.toMatchObject({
+      status: 200,
+      message: "The Go support service returned data in an unexpected format.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
   });
 });
 
