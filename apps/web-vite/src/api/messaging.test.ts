@@ -849,6 +849,68 @@ describe("messaging API client", () => {
       .resolves.toEqual({ kind: "pending", reason: "This change waits for approval in the Approvals inbox." });
   });
 
+  it("leaves conversations through Go with the stable intent and exact capability contract", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { left: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "leave" }, undefined, { intentId }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({
+      capabilityId: "messaging.leaveConversation",
+      input: { conversationId },
+      intentId,
+    });
+  });
+
+  it("forces a saved leave retry through Go after selector rollback with the same intent", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { left: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "leave" }, undefined, { forceGo: true, intentId }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({ capabilityId: "messaging.leaveConversation", input: { conversationId }, intentId });
+  });
+
+  it("maps Go leave approvals and fails closed on errors, malformed receipts, and invalid ids", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, hint: "Waiting for approval." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { left: false } }))
+      .mockResolvedValueOnce(Response.json({ error: "forbidden" }, { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "leave" }))
+      .resolves.toEqual({ kind: "pending", reason: "Waiting for approval." });
+    await expect(changeConversation(conversationId, { action: "leave" }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    await expect(changeConversation(conversationId, { action: "leave" }))
+      .rejects.toMatchObject({ status: 403 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
+    expect(() => changeConversation("bad-id", { action: "leave" })).toThrow(MessagingApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("requires the saved leave intent for forceGo and keeps the legacy route when rolled back", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(() => changeConversation(conversationId, { action: "leave" }, undefined, { forceGo: true }))
+      .toThrow("original intent id");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await changeConversation(conversationId, { action: "leave" });
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
+    expect(lastBody(fetchMock)).toMatchObject({ action: "leave", intentId: expect.any(String) });
+  });
+
   it("updates conversations through Go with a stable intent and exact capability contract", async () => {
     const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_UPDATE__", true);
@@ -897,7 +959,7 @@ describe("messaging API client", () => {
     });
   });
 
-  it("requires the saved archive intent for forceGo and ignores it for other lifecycle actions", async () => {
+  it("requires the saved intent for forced archive and leave retries", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", false);
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
@@ -906,8 +968,9 @@ describe("messaging API client", () => {
       .toThrow("original intent id");
     expect(fetchMock).not.toHaveBeenCalled();
 
-    await changeConversation(conversationId, { action: "leave" }, undefined, { forceGo: true });
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
+    expect(() => changeConversation(conversationId, { action: "leave" }, undefined, { forceGo: true }))
+      .toThrow("original intent id");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("handles Go archive approval and fails closed on malformed or mismatched receipts", async () => {

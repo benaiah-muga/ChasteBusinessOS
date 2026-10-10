@@ -629,6 +629,90 @@ func TestMessagingArchiveConversationMatchesViteContractAndReplaysReceipt(t *tes
 	}
 }
 
+func TestMessagingLeaveConversationMatchesViteContractAndReplaysReceipt(t *testing.T) {
+	fx := newMessagingFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'messaging.write', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Leaving is allowed for the channel creator even when they are the only
+	// member, matching the existing Vite capability contract.
+	channel := fx.createChannel(t, fx.userID, "leave contract")
+	input := `{"conversationId":"` + channel + `"}`
+	result, err := executeMessagingCapability(fx, messagingLeaveConversationCapabilityID, input, "messaging-leave-vite-contract")
+	if err != nil || !result.OK || string(result.Data) != `{"left":true}` {
+		t.Fatalf("leave conversation result=%+v err=%v, want Vite {left:true} contract", result, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversation_members WHERE conversation_id=$1::uuid AND user_id=$2::uuid`, channel, fx.userID); got != 0 {
+		t.Fatalf("creator leave kept membership row, count=%d", got)
+	}
+
+	replayed, err := executeMessagingCapability(fx, messagingLeaveConversationCapabilityID, input, "messaging-leave-vite-contract")
+	var replayedOutput MessagingLeaveConversationOutput
+	if unmarshalErr := json.Unmarshal(replayed.Data, &replayedOutput); unmarshalErr != nil {
+		t.Fatal(unmarshalErr)
+	}
+	if err != nil || !replayed.OK || !replayed.Replayed || !replayedOutput.Left {
+		t.Fatalf("same-intent leave replay=%+v err=%v, want original Vite {left:true} output", replayed, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversation_members WHERE conversation_id=$1::uuid AND user_id=$2::uuid`, channel, fx.userID); got != 0 {
+		t.Fatalf("receipt replay restored membership, count=%d", got)
+	}
+
+	// The membership check and delete must be tenant scoped even if malformed
+	// data contains a membership row for this user in another organization's DM.
+	var foreignConversation string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO conversations (org_id, kind, title, created_by_user_id)
+		VALUES ($1::uuid, 'dm', 'foreign dm', $2::uuid) RETURNING id::text`, fx.otherOrgID, fx.otherOrgUser).Scan(&foreignConversation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1::uuid, $2::uuid)`, foreignConversation, fx.userID); err != nil {
+		t.Fatal(err)
+	}
+	foreignInput := `{"conversationId":"` + foreignConversation + `"}`
+	foreignResult, err := executeMessagingCapability(fx, messagingLeaveConversationCapabilityID, foreignInput, "messaging-leave-foreign-tenant")
+	if err == nil || err.Error() != "you are not a member of this conversation" || foreignResult.OK {
+		t.Fatalf("cross-tenant leave result=%+v err=%v, want a membership refusal", foreignResult, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversation_members WHERE conversation_id=$1::uuid AND user_id=$2::uuid`, foreignConversation, fx.userID); got != 1 {
+		t.Fatalf("cross-tenant leave changed foreign membership, count=%d", got)
+	}
+
+	// Direct-message members can leave too; there is no channel-only or
+	// creator-only restriction on this capability.
+	direct, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingConversationIDOutput, error) {
+		return messagingCreateConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingCreateConversationInput{
+			Title: "leaveable dm", Kind: messagingConversationKindDM,
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.seedMember(t, direct.ConversationID, fx.colleagueID)
+	left, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingLeaveConversationOutput, error) {
+		return messagingLeaveConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.colleagueID), MessagingConversationIDInput{
+			ConversationID: direct.ConversationID,
+		})
+	})
+	if err != nil || !left.Left {
+		t.Fatalf("DM member leave=%+v err=%v, want {left:true}", left, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversation_members WHERE conversation_id=$1::uuid AND user_id=$2::uuid`, direct.ConversationID, fx.colleagueID); got != 0 {
+		t.Fatalf("DM leave kept membership row, count=%d", got)
+	}
+
+	_, err = dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingLeaveConversationOutput, error) {
+		return messagingLeaveConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.nonMemberID), MessagingConversationIDInput{
+			ConversationID: direct.ConversationID,
+		})
+	})
+	if err == nil || err.Error() != "you are not a member of this conversation" {
+		t.Fatalf("non-member DM leave err=%v, want a membership refusal", err)
+	}
+}
+
 func TestMessagingDirectMessagesRefuseChannelOperations(t *testing.T) {
 	fx := newMessagingFixture(t)
 	direct, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingConversationIDOutput, error) {

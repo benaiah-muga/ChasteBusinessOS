@@ -180,6 +180,11 @@ const GoArchiveConversationEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ conversationId: z.string().uuid(), archived: z.boolean() }).strict(),
 }).strict();
+const LeaveConversationInputSchema = z.object({ conversationId: z.string().uuid() }).strict();
+const GoLeaveConversationEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ left: z.literal(true) }).strict(),
+}).strict();
 const SendMessageSchema = z.object({ ok: z.literal(true), agentReply: z.string().nullable() }).strict();
 export type SendMessageResult = z.infer<typeof SendMessageSchema>;
 const GoSendMessageEnvelopeSchema = z.object({
@@ -752,7 +757,17 @@ export function changeConversation(
   if (options.forceGo === true && action.action === "archive" && options.intentId === undefined) {
     throw new MessagingApiError(400, "Retrying a saved conversation archive requires its original intent id.");
   }
+  if (options.forceGo === true && action.action === "leave" && options.intentId === undefined) {
+    throw new MessagingApiError(400, "Retrying a saved conversation leave requires its original intent id.");
+  }
   const intentId = options.intentId === undefined ? newIntentId() : z.string().uuid().parse(options.intentId);
+  const goLeaveOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_LEAVE__?: boolean }).__GO_MESSAGING_CONVERSATION_LEAVE__;
+  const goLeaveSelected = options.forceGo === true || (goLeaveOverride ?? (typeof __GO_MESSAGING_CONVERSATION_LEAVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_LEAVE__));
+  if (action.action === "leave" && goLeaveSelected) {
+    const parsedInput = LeaveConversationInputSchema.safeParse({ conversationId });
+    if (!parsedInput.success) throw new MessagingApiError(400, "Enter a valid conversation id to leave.");
+    return leaveConversationThroughGo(parsedInput.data, intentId, signal);
+  }
   const goArchiveOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_ARCHIVE__?: boolean }).__GO_MESSAGING_CONVERSATION_ARCHIVE__;
   const goArchiveSelected = options.forceGo === true || (goArchiveOverride ?? (typeof __GO_MESSAGING_CONVERSATION_ARCHIVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_ARCHIVE__));
   if (action.action === "archive" && goArchiveSelected) {
@@ -801,6 +816,29 @@ async function archiveConversationThroughGo(
   if (!parsed.success || parsed.data.data.conversationId !== input.conversationId || parsed.data.data.archived !== input.archived) {
     throw new MessagingApiError(response.status, "The messaging service returned an unexpected response to archive this conversation.");
   }
+  return { kind: "completed", data: { ok: true } };
+}
+
+async function leaveConversationThroughGo(
+  input: z.infer<typeof LeaveConversationInputSchema>,
+  intentId: string,
+  signal?: AbortSignal,
+): Promise<MessagingOutcome<{ ok: true }>> {
+  const { response, body } = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "messaging.leaveConversation", input, intentId }),
+  }, "leave this conversation", signal);
+  if (response.status === 202) {
+    const parsed = PendingApprovalSchema.safeParse(body);
+    if (!parsed.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to leave this conversation.");
+    return {
+      kind: "pending",
+      reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? "Leaving this conversation is waiting for approval.",
+    };
+  }
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "leave this conversation"));
+  const parsed = GoLeaveConversationEnvelopeSchema.safeParse(body);
+  if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected response to leave this conversation.");
   return { kind: "completed", data: { ok: true } };
 }
 

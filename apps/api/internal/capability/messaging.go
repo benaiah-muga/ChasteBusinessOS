@@ -1908,14 +1908,17 @@ func messagingLeaveConversation(
 	if userID == nil {
 		return MessagingLeaveConversationOutput{}, errors.New("leaving needs a named member")
 	}
-	if err := messagingRequireMember(ctx, tx, orgID, input.ConversationID, userID); err != nil {
-		return MessagingLeaveConversationOutput{}, err
+	var removed string
+	err := tx.QueryRow(ctx, `
+		DELETE FROM conversation_members AS m
+		USING conversations AS c
+		WHERE m.conversation_id = $2::uuid AND m.user_id = $3::uuid
+		  AND c.id = m.conversation_id AND c.org_id = $1::uuid
+		RETURNING m.conversation_id::text`, orgID, input.ConversationID, *userID).Scan(&removed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MessagingLeaveConversationOutput{}, errors.New("you are not a member of this conversation")
 	}
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM conversation_members
-		WHERE conversation_id = $2::uuid AND user_id = $3::uuid
-		  AND EXISTS (SELECT 1 FROM conversations c WHERE c.id = conversation_members.conversation_id AND c.org_id = $1::uuid)`,
-		orgID, input.ConversationID, *userID); err != nil {
+	if err != nil {
 		return MessagingLeaveConversationOutput{}, err
 	}
 	return MessagingLeaveConversationOutput{Left: true}, nil

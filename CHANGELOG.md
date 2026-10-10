@@ -25,9 +25,16 @@ The full v1 changelog is preserved at the bottom of this file.
   session-authenticated Go `messaging.archiveConversation` capability by
   default when session routing is enabled. Unresolved requests stay pinned to
   their Go intent across reloads and selector rollback.
+- Vite leave-conversation actions now route through the session-authenticated
+  Go `messaging.leaveConversation` capability by default when session routing
+  is enabled. Exact pending requests survive reload and selector rollback;
+  successful leaves clear their retry record before list refresh.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.
+- Vite conversation leave actions now route through the session-authenticated
+  Go `messaging.leaveConversation` capability by default when session routing
+  is enabled, with an independent rollback selector and exact receipt checks.
 
 ### Changed
 

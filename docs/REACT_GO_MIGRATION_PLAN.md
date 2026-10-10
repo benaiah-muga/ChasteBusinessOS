@@ -2405,3 +2405,10 @@ new owners and the manifest shows zero legacy runtime paths.
      state, retain unresolved action and intent across reloads and selector
      rollback, and set `CHASTE_GO_MESSAGING_CONVERSATION_ARCHIVE=0` for
      rollback of new actions.
+239. (Vite implementation complete; browser proof pending) Route leave-
+     conversation actions through the session-authenticated
+     `messaging.leaveConversation` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Retain unresolved action and
+     intent across reloads and selector rollback, atomically remove membership
+     in Go, and set `CHASTE_GO_MESSAGING_CONVERSATION_LEAVE=0` for rollback of
+     new actions.

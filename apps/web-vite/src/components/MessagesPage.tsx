@@ -230,6 +230,12 @@ type PendingConversationArchive = {
   fingerprint: string;
   intentId: string;
 };
+type PendingConversationLeave = {
+  conversationId: string;
+  action: Extract<Parameters<typeof changeConversation>[1], { action: "leave" }>;
+  fingerprint: string;
+  intentId: string;
+};
 
 function conversationArchiveGoSelected(): boolean {
   return typeof __GO_MESSAGING_CONVERSATION_ARCHIVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_ARCHIVE__;
@@ -411,6 +417,65 @@ function clearPendingConversationArchive(actorId: string | null, organizationId:
   if (!actorId || !organizationId) return;
   try {
     window.sessionStorage.removeItem(conversationArchiveIntentStorageKey(actorId, organizationId, conversationId));
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
+}
+
+function conversationLeaveIntentStorageKey(actorId: string, organizationId: string, conversationId: string): string {
+  return `chaste:conversation-leave:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}:${encodeURIComponent(conversationId)}`;
+}
+
+function conversationLeaveFingerprint(conversationId: string, action: PendingConversationLeave["action"]): string {
+  return JSON.stringify([conversationId, action]);
+}
+
+function parsePendingConversationLeave(value: unknown): PendingConversationLeave | null {
+  if (typeof value !== "object" || value === null) return null;
+  const stored = value as Partial<PendingConversationLeave>;
+  if (
+    typeof stored.conversationId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.conversationId)
+    || typeof stored.intentId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.intentId)
+    || typeof stored.fingerprint !== "string"
+    || typeof stored.action !== "object"
+    || stored.action === null
+    || stored.action.action !== "leave"
+  ) return null;
+  const action = stored.action as PendingConversationLeave["action"];
+  if (stored.fingerprint !== conversationLeaveFingerprint(stored.conversationId, action)) return null;
+  return { conversationId: stored.conversationId, action, fingerprint: stored.fingerprint, intentId: stored.intentId };
+}
+
+function readPendingConversationLeaveForScope(actorId: string, organizationId: string): PendingConversationLeave | null {
+  const prefix = `chaste:conversation-leave:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}:`;
+  try {
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const pending = parsePendingConversationLeave(JSON.parse(window.sessionStorage.getItem(key) ?? "null"));
+      if (pending) return pending;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function persistPendingConversationLeave(actorId: string | null, organizationId: string | null, leave: PendingConversationLeave): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.setItem(conversationLeaveIntentStorageKey(actorId, organizationId, leave.conversationId), JSON.stringify(leave));
+  } catch {
+    // The in-memory intent still protects retries for this page session.
+  }
+}
+
+function clearPendingConversationLeave(actorId: string | null, organizationId: string | null, conversationId: string): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.removeItem(conversationLeaveIntentStorageKey(actorId, organizationId, conversationId));
   } catch {
     // Storage can be unavailable in restricted browser contexts.
   }
@@ -778,8 +843,10 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const [dialogNotice, setDialogNotice] = useState<Notice | null>(null);
   const [pendingConversationUpdate, setPendingConversationUpdate] = useState<PendingConversationUpdate | null>(null);
   const [pendingConversationArchive, setPendingConversationArchive] = useState<PendingConversationArchive | null>(null);
+  const [pendingConversationLeave, setPendingConversationLeave] = useState<PendingConversationLeave | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [confirmDeleteConversation, setConfirmDeleteConversation] = useState(false);
+  const [confirmLeaveConversation, setConfirmLeaveConversation] = useState(false);
   const [confirmDeleteMessageId, setConfirmDeleteMessageId] = useState<string | null>(null);
   const [confirmDeleteMessageScope, setConfirmDeleteMessageScope] = useState<string | null>(null);
   const [confirmDeleteLocked, setConfirmDeleteLocked] = useState(false);
@@ -794,6 +861,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const lifecycleBusyRef = useRef(false);
   const pendingConversationUpdateRef = useRef<PendingConversationUpdate | null>(null);
   const pendingConversationArchiveRef = useRef<PendingConversationArchive | null>(null);
+  const pendingConversationLeaveRef = useRef<PendingConversationLeave | null>(null);
   const goSendIntentRef = useRef<GoSendIntent | null>(null);
   const aroundTargetRef = useRef<string | null>(null);
   const wideRef = useRef(wide);
@@ -844,6 +912,19 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     setRenameValue(pending.action.title ?? "");
     setSettingsOpen(true);
     setDialogNotice({ tone: "pending", text: "An earlier conversation update is unresolved. Retry the saved change to check the same request." });
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    pendingConversationLeaveRef.current = null;
+    setPendingConversationLeave(null);
+    if (!actorId || !organizationId) return;
+    const pending = readPendingConversationLeaveForScope(actorId, organizationId);
+    if (!pending) return;
+    pendingConversationLeaveRef.current = pending;
+    setPendingConversationLeave(pending);
+    setActiveId(pending.conversationId);
+    setSettingsOpen(true);
+    setDialogNotice({ tone: "pending", text: "An earlier leave request is unresolved. Retry the saved action to check the same request." });
   }, [actorId, organizationId]);
 
   const activeConv = conversations?.find((conversation) => conversation.id === activeId) ?? null;
@@ -901,20 +982,22 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     }
   }, [actorId, confirmDeleteMessageId, confirmDeleteMessageScope, organizationId]);
 
-  const loadConversations = useCallback(async (signal?: AbortSignal) => {
+  const loadConversations = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     setLoadError(null);
     try {
       const result = await fetchConversations(signal);
-      if (signal?.aborted) return;
+      if (signal?.aborted) return false;
       setConversations(result.conversations);
       setMe(result.me);
       // The legacy page auto-opens the first channel on a wide screen only, so a
       // narrow reader always lands on the conversation list first.
       setActiveId((current) => current ?? (wideRef.current ? result.conversations.find((conversation) => !conversation.archivedAt)?.id ?? null : null));
+      return true;
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted) return false;
       setLoadError(errorText(error, "Could not connect to Messages."));
       setConversations(null);
+      return false;
     }
   }, []);
 
@@ -1313,8 +1396,11 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     setDialogNotice(null);
     const goUpdateEnabled = typeof __GO_MESSAGING_CONVERSATION_UPDATE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_UPDATE__;
     const goArchiveEnabled = conversationArchiveGoSelected();
+    const goLeaveEnabled = typeof __GO_MESSAGING_CONVERSATION_LEAVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_LEAVE__;
     let updateIntent: PendingConversationUpdate | null = null;
     let archiveIntent: PendingConversationArchive | null = null;
+    let leaveIntent: PendingConversationLeave | null = null;
+    let retryingLeaveIntent = false;
     try {
       if (goUpdateEnabled && action.action === "update") {
         if (!actorId?.trim() || !organizationId?.trim()) {
@@ -1374,9 +1460,43 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
           persistPendingConversationArchive(actorId, organizationId, archiveIntent);
         }
       }
-      const selectedIntent = updateIntent ?? archiveIntent;
+      if (action.action === "leave") {
+        const retained = actorId?.trim() && organizationId?.trim()
+          ? pendingConversationLeaveRef.current ?? readPendingConversationLeaveForScope(actorId, organizationId)
+          : null;
+        if (goLeaveEnabled || retained) {
+          if (!actorId?.trim() || !organizationId?.trim()) {
+            setDialogNotice({ tone: "error", text: "Conversation leave is paused until the actor and organization are resolved." });
+            return false;
+          }
+          if (retained && retained.conversationId !== activeId) {
+            pendingConversationLeaveRef.current = retained;
+            setPendingConversationLeave(retained);
+            setDialogNotice({ tone: "pending", text: "An earlier leave request is unresolved. Retry the saved action before leaving another conversation." });
+            return false;
+          }
+          const fingerprint = conversationLeaveFingerprint(activeId, action);
+          if (retained && retained.fingerprint !== fingerprint) {
+            pendingConversationLeaveRef.current = retained;
+            setPendingConversationLeave(retained);
+            setDialogNotice({ tone: "pending", text: "An earlier leave request is unresolved. Retry the saved action before starting another leave request." });
+            return false;
+          }
+          retryingLeaveIntent = retained !== null;
+          leaveIntent = retained ?? {
+            conversationId: activeId,
+            action,
+            fingerprint,
+            intentId: crypto.randomUUID(),
+          };
+          pendingConversationLeaveRef.current = leaveIntent;
+          setPendingConversationLeave(leaveIntent);
+          persistPendingConversationLeave(actorId, organizationId, leaveIntent);
+        }
+      }
+      const selectedIntent = updateIntent ?? archiveIntent ?? leaveIntent;
       const outcome = selectedIntent
-        ? await changeConversation(activeId, action, undefined, { intentId: selectedIntent.intentId, ...(archiveIntent ? { forceGo: true } : {}) })
+        ? await changeConversation(activeId, action, undefined, { intentId: selectedIntent.intentId, ...((archiveIntent || (leaveIntent && retryingLeaveIntent)) ? { forceGo: true } : {}) })
         : await changeConversation(activeId, action);
       if (outcome.kind === "pending") {
         setDialogNotice({ tone: "pending", text: outcome.reason });
@@ -1392,8 +1512,21 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         pendingConversationArchiveRef.current = null;
         setPendingConversationArchive(null);
       }
+      if (leaveIntent) {
+        clearPendingConversationLeave(actorId, organizationId, activeId);
+        pendingConversationLeaveRef.current = null;
+        setPendingConversationLeave(null);
+      }
+      const refreshed = await loadConversations();
+      if (!refreshed) {
+        if (leaveIntent) {
+          setLoadError("You left this conversation, but the conversation list could not refresh. Retry to reload the list.");
+          return true;
+        }
+        setDialogNotice({ tone: "error", text: "The change completed, but the conversation list could not refresh. Retry to confirm the saved request." });
+        return false;
+      }
       setDialogNotice(null);
-      await loadConversations();
       return true;
     } catch (error) {
       setDialogNotice({ tone: "error", text: errorText(error, "That change did not go through.") });
@@ -2218,7 +2351,17 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
                   : activeConv.archivedAt ? "Restore" : "Archive"}
               </button>
             )}
-            <button type="button" className="messages-button messages-button-quiet" disabled={lifecycleBusy} onClick={() => { void leaveConversation(); }}>Leave</button>
+            <button
+              type="button"
+              className="messages-button messages-button-quiet"
+              disabled={lifecycleBusy}
+              onClick={() => {
+                if (pendingConversationLeave?.conversationId === activeConv.id) void leaveConversation();
+                else setConfirmLeaveConversation(true);
+              }}
+            >
+              {pendingConversationLeave?.conversationId === activeConv.id ? "Retry leave" : "Leave"}
+            </button>
             {activeConv.kind === "channel" && activeConv.createdByMe && (
               <button type="button" className="messages-button messages-button-danger" onClick={() => setConfirmDeleteConversation(true)}>Delete channel</button>
             )}
@@ -2233,6 +2376,19 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         confirmLabel="Delete channel"
         onClose={() => setConfirmDeleteConversation(false)}
         onConfirm={() => { void destroyConversation(); }}
+      />
+
+      <ConfirmDialog
+        open={confirmLeaveConversation}
+        title={`Leave #${activeConv?.title ?? ""}?`}
+        body="You will no longer see this conversation in your list. You can be added again by a member."
+        confirmLabel="Leave conversation"
+        onClose={() => setConfirmLeaveConversation(false)}
+        onConfirm={() => {
+          setConfirmLeaveConversation(false);
+          void leaveConversation();
+        }}
+        actionsDisabled={lifecycleBusy}
       />
 
       <ConfirmDialog

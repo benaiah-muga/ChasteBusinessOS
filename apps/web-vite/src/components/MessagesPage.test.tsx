@@ -1669,6 +1669,175 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     expect(screen.queryByRole("dialog", { name: /#general/ })).toBeNull();
   });
 
+  it("keeps a Go leave request across reload and selector rollback, then clears only after receipt and refresh", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", true);
+    const scope = { actorId: me, organizationId: "conversation-leave-org" };
+    const requests: Record<string, unknown>[] = [];
+    const legacyPatches: string[] = [];
+    let left = false;
+    let releaseFirst: ((response: Response) => void) | null = null;
+    let releaseRetry: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: left ? [] : [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (requests.length === 1) return new Promise<Response>((resolve) => { releaseFirst = resolve; });
+        if (requests.length === 2) return new Promise<Response>((resolve) => { releaseRetry = resolve; });
+        left = true;
+        return Response.json({ ok: true, data: { left: true } });
+      }
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
+        legacyPatches.push(path);
+        return Response.json({ error: "unexpected legacy leave" }, { status: 500 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstMount = render(<MessagesPage {...scope} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Leave" }));
+    const confirm = await screen.findByRole("alertdialog", { name: "Leave #general?" });
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole("button", { name: "Leave conversation" }));
+      await Promise.resolve();
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      capabilityId: "messaging.leaveConversation",
+      input: { conversationId: channelId },
+      intentId: expect.any(String),
+    });
+    const storageKey = `chaste:conversation-leave:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}:${encodeURIComponent(channelId)}`;
+    const pending = JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null") as { action?: unknown; intentId?: unknown };
+    expect(pending).toMatchObject({ action: { action: "leave" }, intentId: requests[0]?.intentId });
+    await act(async () => {
+      releaseFirst?.(Response.json({ pendingApproval: true, hint: "Leave is waiting for approval." }, { status: 202 }));
+    });
+    expect((await screen.findByRole("status")).textContent).toContain("Leave is waiting for approval.");
+    expect(window.sessionStorage.getItem(storageKey)).not.toBeNull();
+    firstMount.unmount();
+
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", false);
+    render(<MessagesPage {...scope} />);
+    expect((await screen.findByRole("status")).textContent).toMatch(/earlier leave request is unresolved/i);
+    const retry = screen.getByRole("button", { name: "Retry leave" });
+    await act(async () => {
+      fireEvent.click(retry);
+      fireEvent.click(retry);
+      await Promise.resolve();
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.intentId).toBe(requests[0]?.intentId);
+    expect(requests[1]?.input).toEqual({ conversationId: channelId });
+    expect(window.sessionStorage.getItem(storageKey)).not.toBeNull();
+    await act(async () => {
+      releaseRetry?.(Response.json({ error: "Temporary leave failure." }, { status: 503 }));
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain("Temporary leave failure.");
+    expect(window.sessionStorage.getItem(storageKey)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry leave" }));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2]?.intentId).toBe(requests[0]?.intentId);
+    expect(requests[2]?.input).toEqual({ conversationId: channelId });
+    await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toBeNull());
+    expect(legacyPatches).toHaveLength(0);
+    expect(screen.queryByRole("dialog", { name: /#general/ })).toBeNull();
+  });
+
+  it("uses the legacy leave route when the Go leave selector is off and no request is pending", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", false);
+    const legacy: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
+        legacy.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return Response.json({ ok: true, data: { left: true } });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage actorId={me} organizationId="conversation-legacy-leave-org" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Leave" }));
+    const confirm = await screen.findByRole("alertdialog", { name: "Leave #general?" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Leave conversation" }));
+    await waitFor(() => expect(legacy).toHaveLength(1));
+    expect(legacy[0]).toMatchObject({ action: "leave" });
+  });
+
+  it("clears a completed Go leave before a failed list refresh and allows leaving another conversation", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", true);
+    const scope = { actorId: me, organizationId: "conversation-leave-refresh-org" };
+    const otherConversationId = "8b3c4d6e-5f8a-4c1b-9e2d-3f4a5b6c7d8e";
+    const requests: Record<string, unknown>[] = [];
+    let listAttempts = 0;
+    const storageKey = `chaste:conversation-leave:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}:${encodeURIComponent(channelId)}`;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") {
+        listAttempts += 1;
+        if (listAttempts === 1) return Response.json({ conversations: [conversation()], me });
+        if (listAttempts === 2) {
+          expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+          return Response.json({ error: "temporary list failure" }, { status: 503 });
+        }
+        return Response.json({ conversations: [conversation({ id: otherConversationId, title: "support" })], me });
+      }
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return requests.length === 1
+          ? Response.json({ ok: true, data: { left: true } })
+          : Response.json({ pendingApproval: true, hint: "Support leave is waiting for approval." }, { status: 202 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage {...scope} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Leave" }));
+    const confirmFirst = await screen.findByRole("alertdialog", { name: "Leave #general?" });
+    fireEvent.click(within(confirmFirst).getByRole("button", { name: "Leave conversation" }));
+
+    const refreshAlert = await screen.findByRole("alert");
+    expect(refreshAlert.textContent).toContain("You left this conversation");
+    expect(within(refreshAlert).getByRole("button", { name: "Retry" })).not.toBeNull();
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry leave" })).toBeNull();
+    expect(requests).toHaveLength(1);
+
+    fireEvent.click(within(refreshAlert).getByRole("button", { name: "Retry" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    expect(screen.getByRole("button", { name: "Leave" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry leave" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Leave" }));
+    const confirmSecond = await screen.findByRole("alertdialog", { name: "Leave #support?" });
+    fireEvent.click(within(confirmSecond).getByRole("button", { name: "Leave conversation" }));
+
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0]?.input).toEqual({ conversationId: channelId });
+    expect(requests[1]?.input).toEqual({ conversationId: otherConversationId });
+    expect(requests[1]?.intentId).not.toBe(requests[0]?.intentId);
+    expect((await screen.findByRole("status")).textContent).toContain("Support leave is waiting for approval.");
+  });
+
   it("deletes a message through the governed route after a confirmation", async () => {
     const deletes: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
