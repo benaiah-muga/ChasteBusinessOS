@@ -135,6 +135,23 @@ describe("messaging conversation lifecycle", () => {
       conversationId: channel, before: foreignCursor!.id, limit: 2,
     });
     expect(mismatchedCursor).toMatchObject({ ok: false, error: "message cursor not found" });
+
+    const around = (await run("messaging.readMessages", ctx(creatorId, ["messaging.read"]), {
+      conversationId: channel, around: ids[2], limit: 1,
+    })) as { ok: true; data: { messages: { id: string }[]; hasMore: boolean; nextCursor: string | null } };
+    expect(around.data.messages.map((message) => message.id)).toEqual(ids);
+    expect(around.data.hasMore).toBe(false);
+    expect(around.data.nextCursor).toBeNull();
+
+    const aroundForeign = await run("messaging.readMessages", ctx(creatorId, ["messaging.read"]), {
+      conversationId: channel, around: foreignCursor!.id,
+    });
+    expect(aroundForeign).toMatchObject({ ok: false, error: "message not found" });
+    const beforeAndAround = await run("messaging.readMessages", ctx(creatorId, ["messaging.read"]), {
+      conversationId: channel, before: ids[0], around: ids[2],
+    });
+    expect(beforeAndAround).toMatchObject({ ok: false });
+    expect((beforeAndAround as { error: string }).error).toContain("before and around cannot be combined");
   });
 
   it("lists latest message previews and unread counts only for joined members", async () => {

@@ -381,11 +381,10 @@ export function fetchConversationThread(
   signal?: AbortSignal,
 ): Promise<ConversationThread> {
   if (
-    !options.aroundId &&
     typeof __GO_MESSAGING_THREAD_READ__ !== "undefined" &&
     __GO_MESSAGING_THREAD_READ__
   ) {
-    return fetchGoConversationThread(conversationId, signal);
+    return fetchGoConversationThread(conversationId, signal, undefined, options.aroundId);
   }
   const query = options.aroundId ? `?around=${encodeURIComponent(options.aroundId)}` : "";
   return getJson(
@@ -396,12 +395,17 @@ export function fetchConversationThread(
   );
 }
 
-async function fetchGoConversationThread(conversationId: string, signal?: AbortSignal, before?: string): Promise<ConversationThread> {
+async function fetchGoConversationThread(
+  conversationId: string,
+  signal?: AbortSignal,
+  before?: string,
+  around?: string,
+): Promise<ConversationThread> {
   const { response, body } = await send("/api/capabilities/execute", {
     method: "POST",
     body: JSON.stringify({
       capabilityId: "messaging.readMessages",
-      input: { conversationId, limit: 60, ...(before ? { before } : {}) },
+      input: { conversationId, limit: 60, ...(before ? { before } : {}), ...(around ? { around } : {}) },
       intentId: newIntentId(),
     }),
   }, "this conversation", signal);

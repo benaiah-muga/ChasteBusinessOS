@@ -192,7 +192,7 @@ describe("messaging API client", () => {
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
   });
 
-  it("keeps around windows on the current transport and routes older pages through Go", async () => {
+  it("routes around windows and older pages through Go", async () => {
     vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
       String(input) === "/api/capabilities/execute"
@@ -201,7 +201,12 @@ describe("messaging API client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await fetchConversationThread(conversationId, { aroundId: messageId });
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/messages?around=${messageId}`);
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({
+      capabilityId: "messaging.readMessages",
+      input: { conversationId, limit: 60, around: messageId },
+      intentId: expect.any(String),
+    });
     await fetchOlderMessages(conversationId, messageId);
     expect(lastUrl(fetchMock, 1)).toBe("/api/capabilities/execute");
     expect(lastBody(fetchMock, 1)).toMatchObject({
@@ -209,6 +214,16 @@ describe("messaging API client", () => {
       input: { conversationId, limit: 60, before: messageId },
       intentId: expect.any(String),
     });
+  });
+
+  it("fails closed when a selected Go around read fails", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+    const fetchMock = vi.fn(async () => Response.json({ error: "capability unavailable" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchConversationThread(conversationId, { aroundId: messageId })).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
   });
 
   it("fails closed and validates the strict Go result for older pages", async () => {

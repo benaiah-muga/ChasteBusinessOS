@@ -1206,16 +1206,25 @@ it("reports typing presence after the debounce and clears it on the mount heartb
     expect(deletes[0]).toMatch(/^\/api\/messages\/m1\?intentId=/);
   });
 
-  it("runs a full message history search and jumps to the conversation that holds the hit", async () => {
-    const threadUrls: string[] = [];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  it("runs a full message history search and loads the hit through Go around the selected message", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+    const threadInputs: Array<Record<string, unknown>> = [];
+    const legacyThreadReads: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
       if (path.startsWith("/api/conversations/people")) return Response.json({ people });
       if (path.startsWith("/api/messages/search")) return Response.json({ results: [{ id: "hit-1", conversationId: channelId, conversationTitle: "general", body: "the needle", createdAt: "2026-10-01T09:00:00.000Z", senderType: "human", senderUserId: other }] });
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path.includes("/messages")) { threadUrls.push(path); return Response.json(threadBody({ messages: [message({ id: "hit-1", body: "the needle" })] })); }
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const request = JSON.parse(String(init.body)) as { capabilityId?: string; input?: Record<string, unknown> };
+        if (request.capabilityId === "messaging.readMessages" && request.input) {
+          threadInputs.push(request.input);
+          return Response.json({ ok: true, data: threadBody({ messages: [message({ id: "hit-1", body: "the needle" })] }) });
+        }
+      }
+      if (/^\/api\/conversations\/[^/]+\/messages(?:\?|$)/.test(path)) legacyThreadReads.push(path);
       return Response.json({ error: "not found" }, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1225,7 +1234,10 @@ it("reports typing presence after the debounce and clears it on the mount heartb
     fireEvent.change(screen.getByLabelText("Search all messages"), { target: { value: "needle" } });
     fireEvent.click(await screen.findByRole("button", { name: /the needle/ }));
 
-    await waitFor(() => expect(threadUrls.some((url) => url.includes("around=hit-1"))).toBe(true));
+    await waitFor(() => expect(threadInputs.some((input) => input.around === "hit-1")).toBe(true));
+    expect(threadInputs).toContainEqual({ conversationId: channelId, limit: 60 });
+    expect(threadInputs).toContainEqual({ conversationId: channelId, limit: 60, around: "hit-1" });
+    expect(legacyThreadReads).toEqual([]);
   });
 
   it("scrolls to the top of the thread to prepend an older page without duplicating rows", async () => {

@@ -1268,6 +1268,80 @@ func TestMessagingReadMessagesReturnsLatestWindowInDisplayOrder(t *testing.T) {
 	}
 }
 
+func TestMessagingReadMessagesAroundUsesStableBoundedWindow(t *testing.T) {
+	fx := newMessagingFixture(t)
+	channel := fx.createChannel(t, fx.userID, "around window")
+	for index := 0; index < 65; index++ {
+		fx.send(t, fx.userID, channel, "around message")
+	}
+	tiedTimestamp := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE messages SET created_at = $2 WHERE conversation_id = $1::uuid`, channel, tiedTimestamp); err != nil {
+		t.Fatal(err)
+	}
+	orderedRows, err := fx.owner.Query(fx.ctx, `SELECT id::text FROM messages WHERE conversation_id = $1::uuid AND deleted_at IS NULL ORDER BY created_at, id`, channel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var orderedIDs []string
+	for orderedRows.Next() {
+		var id string
+		if err := orderedRows.Scan(&id); err != nil {
+			orderedRows.Close()
+			t.Fatal(err)
+		}
+		orderedIDs = append(orderedIDs, id)
+	}
+	if err := orderedRows.Err(); err != nil {
+		orderedRows.Close()
+		t.Fatal(err)
+	}
+	orderedRows.Close()
+	if len(orderedIDs) != 65 {
+		t.Fatalf("fixture has %d messages, want 65", len(orderedIDs))
+	}
+	target := orderedIDs[35]
+	around, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
+		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingReadMessagesInput{
+			ConversationID: channel, Limit: 5, Around: &target,
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(around.Messages) != 60 || around.Messages[30].ID != target || around.Messages[0].ID != orderedIDs[5] || around.Messages[59].ID != orderedIDs[64] {
+		t.Fatalf("around window starts/target/ends unexpectedly: count=%d first=%v target=%v last=%v", len(around.Messages), around.Messages[0].ID, around.Messages[30].ID, around.Messages[len(around.Messages)-1].ID)
+	}
+	for index, message := range around.Messages {
+		if message.ID != orderedIDs[index+5] {
+			t.Fatalf("around message[%d]=%s, want tied-timestamp order %s", index, message.ID, orderedIDs[index+5])
+		}
+	}
+	if !around.HasMore || around.NextCursor == nil || *around.NextCursor != orderedIDs[5] {
+		t.Fatalf("around older pagination=%+v, want hasMore and oldest visible cursor %s", around, orderedIDs[5])
+	}
+
+	foreignChannel := fx.createChannel(t, fx.userID, "foreign around target")
+	foreignTarget := fx.send(t, fx.userID, foreignChannel, "belongs to another conversation")
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
+		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingReadMessagesInput{
+			ConversationID: channel, Limit: 60, Around: &foreignTarget,
+		})
+	}); err == nil || err.Error() != "message not found" {
+		t.Fatalf("readMessages around cross-conversation target err=%v, want target refusal", err)
+	}
+	deletedTarget := orderedIDs[1]
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE messages SET deleted_at = now() WHERE id = $1::uuid`, deletedTarget); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
+		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingReadMessagesInput{
+			ConversationID: channel, Limit: 60, Around: &deletedTarget,
+		})
+	}); err == nil || err.Error() != "message not found" {
+		t.Fatalf("readMessages around deleted target err=%v, want target refusal", err)
+	}
+}
+
 func mustMarshalJSON(t *testing.T, value any) string {
 	t.Helper()
 	encoded, err := json.Marshal(value)

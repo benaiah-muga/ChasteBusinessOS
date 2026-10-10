@@ -267,6 +267,9 @@ const readMessages = (deps: ModuleDeps) =>
       conversationId: z.string(),
       limit: z.number().int().min(1).max(100).default(60),
       before: z.string().uuid().optional(),
+      around: z.string().uuid().optional(),
+    }).refine((input) => !(input.before && input.around), {
+      message: "before and around cannot be combined",
     }),
     output: z.object({
       conversation: z.object({
@@ -323,6 +326,7 @@ const readMessages = (deps: ModuleDeps) =>
       if (!(await isMember(deps.db, conv.id, actorId))) {
         throw new Error("you are not a member of this conversation");
       }
+      if (input.before && input.around) throw new Error("before and around cannot be combined");
       let beforeMessage: { id: string; createdAt: Date } | undefined;
       if (input.before) {
         [beforeMessage] = await deps.db
@@ -337,7 +341,41 @@ const readMessages = (deps: ModuleDeps) =>
           .limit(1);
         if (!beforeMessage) throw new Error("message cursor not found");
       }
-      const newestFirst = await deps.db
+      let aroundMessages: typeof messages.$inferSelect[] | undefined;
+      let aroundHasMore = false;
+      if (input.around) {
+        const [target] = await deps.db.select().from(messages).where(and(
+          eq(messages.id, input.around),
+          eq(messages.conversationId, input.conversationId),
+          eq(messages.orgId, ctx.actor.orgId),
+          isNull(messages.deletedAt),
+        )).limit(1);
+        if (!target) throw new Error("message not found");
+        const [olderNewestFirst, newer] = await Promise.all([
+          deps.db.select().from(messages).where(and(
+            eq(messages.conversationId, input.conversationId),
+            eq(messages.orgId, ctx.actor.orgId),
+            isNull(messages.deletedAt),
+            or(
+              lt(messages.createdAt, target.createdAt),
+              and(eq(messages.createdAt, target.createdAt), lt(messages.id, target.id)),
+            ),
+          )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(31),
+          deps.db.select().from(messages).where(and(
+            eq(messages.conversationId, input.conversationId),
+            eq(messages.orgId, ctx.actor.orgId),
+            isNull(messages.deletedAt),
+            or(
+              gt(messages.createdAt, target.createdAt),
+              and(eq(messages.createdAt, target.createdAt), gt(messages.id, target.id)),
+            ),
+          )).orderBy(asc(messages.createdAt), asc(messages.id)).limit(30),
+        ]);
+        aroundHasMore = olderNewestFirst.length > 30;
+        const older = olderNewestFirst.slice(0, 30).reverse();
+        aroundMessages = [...older, target, ...newer];
+      }
+      const newestFirst = aroundMessages ? [] : await deps.db
         .select()
         .from(messages)
         .where(
@@ -353,9 +391,10 @@ const readMessages = (deps: ModuleDeps) =>
         )
         .orderBy(desc(messages.createdAt), desc(messages.id))
         .limit((input.limit ?? 60) + 1);
-      const hasMore = newestFirst.length > (input.limit ?? 60);
+      const hasMore = aroundMessages ? aroundHasMore : newestFirst.length > (input.limit ?? 60);
       const page = newestFirst.slice(0, input.limit ?? 60).reverse();
-      const messageIds = page.map((message) => message.id);
+      const visiblePage = aroundMessages ?? page;
+      const messageIds = visiblePage.map((message) => message.id);
       const [attachments, reactions, readerRows, pinnedMessages] = await Promise.all([
         messageIds.length
           ? deps.db.select({
@@ -411,7 +450,7 @@ const readMessages = (deps: ModuleDeps) =>
           archivedAt: conv.archivedAt?.toISOString() ?? null,
           deletedAt: conv.deletedAt?.toISOString() ?? null,
         },
-        messages: page.map((m) => ({
+        messages: visiblePage.map((m) => ({
           id: m.id,
           senderType: m.senderType,
           senderUserId: m.senderUserId,
@@ -435,7 +474,7 @@ const readMessages = (deps: ModuleDeps) =>
           id: message.id, body: message.body, pinnedAt: message.pinnedAt!.toISOString(),
         })),
         hasMore,
-        nextCursor: hasMore ? page[0]?.id ?? null : null,
+        nextCursor: hasMore ? (aroundMessages?.[0] ?? page[0])?.id ?? null : null,
       };
     },
   });

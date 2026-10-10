@@ -2350,3 +2350,8 @@ new owners and the manifest shows zero legacy runtime paths.
      thread pages through `messaging.readMessages` using a visible message ID
      scoped to the same organization and conversation. Use stable keyset
      pagination and preserve around-message search jumps as a separate read.
+230. (Go/Vite implementation complete; browser proof pending) Route Vite
+     around-message thread reads through `messaging.readMessages`. Return the
+     target with up to 30 older and 30 newer visible messages, use stable
+     `(created_at, id)` ordering, and report older-side pagination metadata.
+     Keep search result discovery separate from the thread read.

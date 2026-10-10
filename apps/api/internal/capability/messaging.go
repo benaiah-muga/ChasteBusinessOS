@@ -172,6 +172,7 @@ type MessagingReadMessagesInput struct {
 	ConversationID string  `json:"conversationId"`
 	Limit          int64   `json:"limit"`
 	Before         *string `json:"before,omitempty"`
+	Around         *string `json:"around,omitempty"`
 }
 
 type MessagingConversationSnapshot struct {
@@ -787,6 +788,12 @@ func parseMessagingReadMessagesInput(raw json.RawMessage) (MessagingReadMessages
 	}
 	if input.Before, err = projectOptionalUUID(fields, "before"); err != nil {
 		return MessagingReadMessagesInput{}, err
+	}
+	if input.Around, err = projectOptionalUUID(fields, "around"); err != nil {
+		return MessagingReadMessagesInput{}, err
+	}
+	if input.Before != nil && input.Around != nil {
+		return MessagingReadMessagesInput{}, errors.New("before and around cannot be combined")
 	}
 	return input, nil
 }
@@ -1472,7 +1479,42 @@ func messagingReadMessages(
 		beforeCreatedAt = &cursorCreatedAt
 	}
 
-	rows, err := tx.Query(ctx, `
+	var rows pgx.Rows
+	aroundRead := input.Around != nil
+	if aroundRead {
+		var targetCreatedAt time.Time
+		if err := tx.QueryRow(ctx, `
+			SELECT created_at FROM messages
+			WHERE id = $3::uuid AND conversation_id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL`,
+			orgID, input.ConversationID, *input.Around,
+		).Scan(&targetCreatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return MessagingReadMessagesOutput{}, errors.New("message not found")
+			}
+			return MessagingReadMessagesOutput{}, err
+		}
+		rows, err = tx.Query(ctx, `
+			WITH older_all AS MATERIALIZED (
+				SELECT id, created_at FROM messages
+				WHERE conversation_id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL
+				  AND (created_at, id) < ($3::timestamptz, $4::uuid)
+				ORDER BY created_at DESC, id DESC LIMIT 31
+			), selected AS (
+				(SELECT id, created_at FROM older_all ORDER BY created_at DESC, id DESC LIMIT 30)
+				UNION ALL (SELECT id, created_at FROM messages
+				 WHERE id = $4::uuid AND conversation_id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL)
+				UNION ALL (SELECT id, created_at FROM messages
+				 WHERE conversation_id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL
+				   AND (created_at, id) > ($3::timestamptz, $4::uuid)
+				 ORDER BY created_at ASC, id ASC LIMIT 30)
+			)
+			SELECT m.id::text, m.sender_type, m.sender_user_id::text, m.body, m.created_at, m.edited_at,
+			       m.parent_message_id::text, m.pinned_at, m.mentions,
+			       (SELECT count(*) > 30 FROM older_all) AS has_more
+			FROM selected s JOIN messages m ON m.id = s.id
+			ORDER BY s.created_at ASC, s.id ASC`, orgID, input.ConversationID, targetCreatedAt, *input.Around)
+	} else {
+		rows, err = tx.Query(ctx, `
 		SELECT id::text, sender_type, sender_user_id::text, body, created_at, edited_at,
 		       parent_message_id::text, pinned_at, mentions
 		FROM messages
@@ -1480,6 +1522,7 @@ func messagingReadMessages(
 		  AND ($4::timestamptz IS NULL OR (created_at, id) < ($4::timestamptz, $5::uuid))
 		ORDER BY created_at DESC, id DESC
 		LIMIT $3`, orgID, input.ConversationID, input.Limit+1, beforeCreatedAt, input.Before)
+	}
 	if err != nil {
 		return MessagingReadMessagesOutput{}, err
 	}
@@ -1495,11 +1538,23 @@ func messagingReadMessages(
 		var message MessagingMessageSnapshot
 		var createdAt time.Time
 		var editedAt, pinnedAt *time.Time
-		if err := rows.Scan(
-			&message.ID, &message.SenderType, &message.SenderUserID, &message.Body,
-			&createdAt, &editedAt, &message.ParentMessageID, &pinnedAt, &message.Mentions,
-		); err != nil {
+		var aroundHasMore bool
+		if aroundRead {
+			err = rows.Scan(
+				&message.ID, &message.SenderType, &message.SenderUserID, &message.Body,
+				&createdAt, &editedAt, &message.ParentMessageID, &pinnedAt, &message.Mentions, &aroundHasMore,
+			)
+		} else {
+			err = rows.Scan(
+				&message.ID, &message.SenderType, &message.SenderUserID, &message.Body,
+				&createdAt, &editedAt, &message.ParentMessageID, &pinnedAt, &message.Mentions,
+			)
+		}
+		if err != nil {
 			return MessagingReadMessagesOutput{}, err
+		}
+		if aroundRead {
+			output.HasMore = aroundHasMore
 		}
 		message.CreatedAt = messagingFormatTime(createdAt)
 		message.EditedAt = messagingFormatOptionalTime(editedAt)
@@ -1515,12 +1570,14 @@ func messagingReadMessages(
 	if err := rows.Err(); err != nil {
 		return MessagingReadMessagesOutput{}, err
 	}
-	if int64(len(output.Messages)) > input.Limit {
+	if !aroundRead && int64(len(output.Messages)) > input.Limit {
 		output.HasMore = true
 		output.Messages = output.Messages[:input.Limit]
 	}
-	for left, right := 0, len(output.Messages)-1; left < right; left, right = left+1, right-1 {
-		output.Messages[left], output.Messages[right] = output.Messages[right], output.Messages[left]
+	if !aroundRead {
+		for left, right := 0, len(output.Messages)-1; left < right; left, right = left+1, right-1 {
+			output.Messages[left], output.Messages[right] = output.Messages[right], output.Messages[left]
+		}
 	}
 	if output.HasMore && len(output.Messages) > 0 {
 		cursor := output.Messages[0].ID
