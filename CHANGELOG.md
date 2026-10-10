@@ -399,7 +399,9 @@ The full v1 changelog is preserved at the bottom of this file.
   attempts and approval recovery survive reload; Go 404 and uncertain outcomes
   never fall back to the legacy writer. Go checks reversal eligibility and
   directs invoice, payment, and year-end entries to their domain workflows.
-  Other Accounting actions retain their existing routes.
+  Browser-wide Web Locks serialize retry reservations across tabs; browsers
+  without Web Locks fail closed before reversing an entry. Other Accounting
+  actions retain their existing routes.
 - Vite bank reconciliation match and unmatch writes can use Go's
   session-authenticated `accounting.matchBankTransaction` and
   `accounting.unmatchBankTransaction` capabilities behind the paired

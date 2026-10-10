@@ -2012,7 +2012,7 @@ new owners and the manifest shows zero legacy runtime paths.
      without Web Locks fail closed. Vite API/page/proxy tests, typecheck, lint,
      and the Go credit-note contract test pass. Authenticated browser proof
      remains open.
-194. Route only Vite manual/general `reverse` writes through Go's
+194. (Vite/Go implementation complete; browser proof pending) Route only Vite manual/general `reverse` writes through Go's
      session-authenticated `accounting.reverseEntry` capability behind paired
      `CHASTE_GO_ACCOUNTING_REVERSE_ENTRY=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the reversal selector
@@ -2023,8 +2023,11 @@ new owners and the manifest shows zero legacy runtime paths.
      authoritative for reversal eligibility and routes invoice, payment, and
      year-end entries to their domain workflows. Add focused API, proxy, and
      AccountingPage tests; existing Go reverse-entry parser, domain, and
-     governed-executor tests remain the contract proof. Authenticated browser
-     proof remains open.
+     governed-executor tests remain the contract proof. Atomic browser-wide
+     reservations prevent cross-tab intent races, and browsers without Web
+     Locks fail closed. Vite API/page/proxy tests, typecheck, lint, and the Go
+     reverse-entry contract test pass. Authenticated browser proof remains
+     open.
 195. Route only Vite bank reconciliation match/unmatch writes through Go's
      session-authenticated `accounting.matchBankTransaction` and
      `accounting.unmatchBankTransaction` capabilities behind paired

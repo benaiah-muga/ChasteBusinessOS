@@ -1069,6 +1069,38 @@ describe("accounting API: Go journal reversals", () => {
   const action = { action: "reverse", entryId: "99999999-9999-4999-8999-999999999999" };
   const output = { reversalEntryId: "88888888-8888-4888-8888-888888888888" };
 
+  beforeEach(stubPaymentLocks);
+
+  it("serializes cross-tab reversal reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
+    const mock = stubFetch(() => Response.json({ pendingApproval: true }, { status: 202 }));
+    const alternateReversal = { ...action, entryId: "77777777-7777-4777-8777-777777777777" };
+
+    const outcomes = await Promise.allSettled([
+      submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope),
+      submitAccountingAction("/api/accounting", alternateReversal, undefined, paymentRetryScope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(mock).toHaveBeenCalledTimes(1);
+    const stored = await readPendingAccountingReverseEntry(paymentRetryScope);
+    expect([action, alternateReversal]).toContainEqual(stored);
+  });
+
+  it("fails closed when browser-wide reversal locks are unavailable", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const mock = stubFetch(() => Response.json({ ok: true, data: output }));
+
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a journal reversal"),
+    });
+    expect(mock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
   it("routes only the manual reverse action to Go and validates the output", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
     const mock = stubFetch(() => Response.json({ ok: true, data: output }));

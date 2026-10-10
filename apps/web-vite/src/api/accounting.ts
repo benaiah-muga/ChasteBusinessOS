@@ -1261,23 +1261,30 @@ async function accountingCreditNoteAttempt(action: AccountingCreditNoteAction, s
 async function accountingReverseEntryAttempt(action: AccountingReverseEntryAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
   const storageKey = `${REVERSE_ENTRY_ATTEMPT_PREFIX}${scopeHash}`;
   const fingerprint = await accountingPaymentFingerprint(action);
-  let raw: string | null;
-  try { raw = window.localStorage.getItem(storageKey); }
-  catch { throw new AccountingApiError(0, "Enable browser storage before reversing an entry so it can be retried safely."); }
-  if (raw !== null) {
-    const stored = parseStoredReverseEntry(raw);
-    if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous journal reversal is unresolved. Retry its exact entry before reversing another entry.", true);
-    return { storageKey, intentId: stored.intentId };
-  }
-  const stored = { action, intentId: crypto.randomUUID(), fingerprint };
-  const serialized = JSON.stringify(stored);
-  try {
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("journal reversal retry marker did not persist");
-  } catch {
-    throw new AccountingApiError(0, "Enable browser storage before reversing an entry so it can be retried safely.");
-  }
-  return { storageKey, intentId: stored.intentId };
+  return withAccountingReservationLock(
+    storageKey,
+    "This browser cannot safely reserve a journal reversal. Open Accounting in a browser with Web Locks enabled before reversing it.",
+    "The browser could not reserve this journal reversal safely. Retry after closing other Accounting tabs.",
+    async () => {
+      let raw: string | null;
+      try { raw = window.localStorage.getItem(storageKey); }
+      catch { throw new AccountingApiError(0, "Enable browser storage before reversing an entry so it can be retried safely."); }
+      if (raw !== null) {
+        const stored = parseStoredReverseEntry(raw);
+        if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous journal reversal is unresolved. Retry its exact entry before reversing another entry.", true);
+        return { storageKey, intentId: stored.intentId };
+      }
+      const stored = { action, intentId: crypto.randomUUID(), fingerprint };
+      const serialized = JSON.stringify(stored);
+      try {
+        window.localStorage.setItem(storageKey, serialized);
+        if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("journal reversal retry marker did not persist");
+      } catch {
+        throw new AccountingApiError(0, "Enable browser storage before reversing an entry so it can be retried safely.");
+      }
+      return { storageKey, intentId: stored.intentId };
+    },
+  );
 }
 
 async function accountingBankReconciliationWriteAttempt(action: AccountingBankReconciliationWriteAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
