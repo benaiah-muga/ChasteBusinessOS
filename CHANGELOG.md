@@ -369,9 +369,10 @@ The full v1 changelog is preserved at the bottom of this file.
   payment attempts and pending approval recovery survive reload; Go 404 and
   uncertain results never fall back to the legacy writer. An unresolved Go
   payment blocks legacy rollback and remains retryable from the global notice,
-  even if the invoice is absent from the refreshed list. Other Accounting
-  operations keep their existing routes. Set the selector to `0` for explicit
-  legacy rollback.
+  even if the invoice is absent from the refreshed list. Browser-wide Web Locks
+  serialize retry reservations across tabs; browsers without Web Locks fail
+  closed before submitting a payment. Other Accounting operations keep their
+  existing routes. Set the selector to `0` for explicit legacy rollback.
 - Vite invoice creation can use Go's session-authenticated
   `accounting.createInvoice` capability behind the paired
   `CHASTE_GO_ACCOUNTING_CREATE_INVOICE=1` and

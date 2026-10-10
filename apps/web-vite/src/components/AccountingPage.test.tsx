@@ -141,7 +141,14 @@ interface StubOptions {
   goReportResponse?: (capabilityId: string) => Response;
 }
 
+function runWithTestLock<T>(_name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> {
+  return callback();
+}
+
 function stubAccounting(options: StubOptions = {}) {
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, {
+    locks: { request: runWithTestLock },
+  }));
   const calls: { url: string; method: string; body: string | null }[] = [];
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);

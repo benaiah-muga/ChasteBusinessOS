@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AccountingApiError,
   emailInvoice,
@@ -104,6 +104,25 @@ const paymentRetryScope = {
   actorId: "11111111-1111-4111-8111-111111111111",
   organizationId: "22222222-2222-4222-8222-222222222222",
 };
+
+function stubPaymentLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  const locks = {
+    request: async <T>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+      const previous = tails.get(name) ?? Promise.resolve();
+      let release = (): void => {};
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      tails.set(name, current);
+      await previous;
+      try { return await callback(); }
+      finally {
+        release();
+        if (tails.get(name) === current) tails.delete(name);
+      }
+    },
+  };
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
+}
 
 function stubFetch(handler: (url: string, init?: RequestInit) => Response) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => handler(String(input), init));
@@ -742,6 +761,37 @@ describe("accounting API: Go invoice payments", () => {
     entryId: "44444444-4444-4444-8444-444444444444",
     fullyPaid: false,
   };
+
+  beforeEach(stubPaymentLocks);
+
+  it("serializes cross-tab payment reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", true);
+    const mock = stubFetch(() => Response.json({ pendingApproval: true }, { status: 202 }));
+    const alternatePayment = { ...action, method: "cash" };
+
+    const outcomes = await Promise.allSettled([
+      submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope),
+      submitAccountingAction("/api/accounting", alternatePayment, undefined, paymentRetryScope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(mock).toHaveBeenCalledTimes(1);
+    await expect(readPendingAccountingRecordPayment(paymentRetryScope)).resolves.toEqual(action);
+  });
+
+  it("fails closed when browser-wide payment locks are unavailable", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const mock = stubFetch(() => Response.json({ ok: true, data: paymentOutput }));
+
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve an invoice payment"),
+    });
+    expect(mock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
 
   it("leaves unrelated Accounting operations on their existing endpoint", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", true);

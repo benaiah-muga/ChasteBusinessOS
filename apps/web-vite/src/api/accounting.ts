@@ -1156,25 +1156,36 @@ async function accountingPaymentScope(scope: AccountingPaymentRetryScope): Promi
 }
 
 async function accountingRecordPaymentAttempt(action: AccountingRecordPaymentAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
-  const storageKey = `${RECORD_PAYMENT_ATTEMPT_PREFIX}${scopeHash}`;
-  const fingerprint = await accountingPaymentFingerprint(action);
-  let raw: string | null;
-  try { raw = window.localStorage.getItem(storageKey); }
-  catch { throw new AccountingApiError(0, "Enable browser storage before recording a payment so it can be retried safely."); }
-  if (raw !== null) {
-    const stored = parseStoredRecordPayment(raw);
-    if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous invoice payment is unresolved. Retry its exact details before recording another payment.", true);
-    return { storageKey, intentId: stored.intentId };
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new AccountingApiError(0, "This browser cannot safely reserve an invoice payment. Open Accounting in a browser with Web Locks enabled before recording it.");
   }
-  const stored = { action, intentId: crypto.randomUUID(), fingerprint };
-  const serialized = JSON.stringify(stored);
   try {
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("payment retry marker did not persist");
-  } catch {
-    throw new AccountingApiError(0, "Enable browser storage before recording a payment so it can be retried safely.");
+    return await lockManager.request(`${RECORD_PAYMENT_ATTEMPT_PREFIX}${scopeHash}`, { mode: "exclusive" }, async () => {
+      const storageKey = `${RECORD_PAYMENT_ATTEMPT_PREFIX}${scopeHash}`;
+      const fingerprint = await accountingPaymentFingerprint(action);
+      let raw: string | null;
+      try { raw = window.localStorage.getItem(storageKey); }
+      catch { throw new AccountingApiError(0, "Enable browser storage before recording a payment so it can be retried safely."); }
+      if (raw !== null) {
+        const stored = parseStoredRecordPayment(raw);
+        if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous invoice payment is unresolved. Retry its exact details before recording another payment.", true);
+        return { storageKey, intentId: stored.intentId };
+      }
+      const stored = { action, intentId: crypto.randomUUID(), fingerprint };
+      const serialized = JSON.stringify(stored);
+      try {
+        window.localStorage.setItem(storageKey, serialized);
+        if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("payment retry marker did not persist");
+      } catch {
+        throw new AccountingApiError(0, "Enable browser storage before recording a payment so it can be retried safely.");
+      }
+      return { storageKey, intentId: stored.intentId };
+    });
+  } catch (error) {
+    if (error instanceof AccountingApiError) throw error;
+    throw new AccountingApiError(0, "The browser could not reserve this invoice payment safely. Retry after closing other Accounting tabs.", true);
   }
-  return { storageKey, intentId: stored.intentId };
 }
 
 async function accountingCreateInvoiceAttempt(action: AccountingCreateInvoiceAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
