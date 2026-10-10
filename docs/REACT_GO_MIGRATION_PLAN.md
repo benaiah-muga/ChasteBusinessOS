@@ -2072,7 +2072,8 @@ new owners and the manifest shows zero legacy runtime paths.
      without Web Locks fail closed. Vite API/page/proxy tests, typecheck, lint,
      and Go HR time contract tests pass. Authenticated browser proof remains
      open.
-198. Route Vite supplier payment run reads and lifecycle actions through Go's
+198. (Vite/Go implementation complete; browser proof pending) Route Vite
+     supplier payment run reads and lifecycle actions through Go's
      `purchasing.listPaymentRuns`, `purchasing.listPaymentRunBills`,
      `purchasing.createPaymentRun`, `purchasing.cancelPaymentRunDraft`,
      `purchasing.restorePaymentRunDraft`, `purchasing.instructPaymentRun`, and
@@ -2084,7 +2085,10 @@ new owners and the manifest shows zero legacy runtime paths.
      outcomes after reload, and fail closed on Go 404. Preserve the existing
      payment run schedule, remittance, cancel, restore, approval, and reversal
      workflows in Vite. Add focused Go executor, Vite API, proxy, and page
-     coverage.
+     coverage. Atomic browser-wide reservations prevent cross-tab intent
+     races, stale responses cannot clear a newer action, and browsers without
+     Web Locks fail closed. Vite API/page/proxy tests, typecheck, lint, and Go
+     payment run contract tests pass. Authenticated browser proof remains open.
 199. Route only the Vite Payroll tab's run report and draft creation through
      Go's `hr.report` and `hr.createPayrollRun` capabilities behind paired
      `CHASTE_GO_HR_PAYROLL=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`

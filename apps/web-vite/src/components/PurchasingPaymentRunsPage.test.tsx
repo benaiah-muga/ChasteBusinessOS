@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { submitPurchasingPaymentRunAction } from "../api/purchasing-payment-runs";
 import { PurchasingPaymentRunsPage } from "./PurchasingPaymentRunsPage";
 
@@ -36,11 +36,32 @@ function reads(capabilityId: string) {
     : { ok: true, data: { bills: [bill] } };
 }
 
+function stubPaymentRunLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  const locks = {
+    request: async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+      const previous = tails.get(name) ?? Promise.resolve();
+      let release = (): void => {};
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      tails.set(name, current);
+      await previous;
+      try { return await callback(); }
+      finally {
+        release();
+        if (tails.get(name) === current) tails.delete(name);
+      }
+    },
+  };
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
+}
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
   vi.unstubAllGlobals();
 });
+
+beforeEach(stubPaymentRunLocks);
 
 describe("Purchasing payment runs page", () => {
   it("loads Go data and creates a draft without using compatibility routes", async () => {

@@ -211,16 +211,16 @@ export async function submitPurchasingPaymentRunAction(
     if (!response.ok) {
       const mayHaveReachedServer = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
       const failure = new PurchasingPaymentRunsApiError(response.status, await errorMessageFromBody(response.status, body), mayHaveReachedServer);
-      if (!mayHaveReachedServer) await clearPaymentRunAttempt(attempt.storageKey);
+      if (!mayHaveReachedServer) await clearPaymentRunAttempt(attempt.storageKey, attempt.intentId);
       throw failure;
     }
     const parsed = z.object({ ok: z.literal(true), data: PaymentRunActionOutputs[action.action] }).strict().safeParse(body);
     if (response.status !== 200 || !parsed.success) throw new PurchasingPaymentRunsApiError(response.status, "Go returned an unexpected payment run action response.", true);
-    await clearPaymentRunAttempt(attempt.storageKey);
+    await clearPaymentRunAttempt(attempt.storageKey, attempt.intentId);
     return { kind: "success", data: parsed.data.data };
   } catch (error) {
     if (error instanceof PurchasingPaymentRunsApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearPaymentRunAttempt(attempt.storageKey);
+      await clearPaymentRunAttempt(attempt.storageKey, attempt.intentId);
     }
     throw error;
   }
@@ -245,23 +245,38 @@ async function paymentRunAttempt(action: PurchasingPaymentRunAction, scopeHash: 
   const parsedAction = PaymentRunActionSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingPaymentRunsApiError(400, "The payment run action does not match the Go service contract.");
   const fingerprint = await paymentRunFingerprint(parsedAction.data);
-  let raw: string | null;
-  try { raw = window.localStorage.getItem(storageKey); }
-  catch { throw new PurchasingPaymentRunsApiError(0, "Enable browser storage before changing a payment run so uncertain actions can be retried safely."); }
-  if (raw !== null) {
-    const stored = parsePaymentRunAttempt(raw);
-    if (stored.fingerprint !== fingerprint) throw new PurchasingPaymentRunsApiError(0, "A previous payment run action is unresolved. Retry its exact details before starting another action.", true);
-    return { storageKey, intentId: stored.intentId };
+  return withPaymentRunReservationLock(storageKey, async () => {
+    let raw: string | null;
+    try { raw = window.localStorage.getItem(storageKey); }
+    catch { throw new PurchasingPaymentRunsApiError(0, "Enable browser storage before changing a payment run so uncertain actions can be retried safely."); }
+    if (raw !== null) {
+      const stored = parsePaymentRunAttempt(raw);
+      if (stored.fingerprint !== fingerprint) throw new PurchasingPaymentRunsApiError(0, "A previous payment run action is unresolved. Retry its exact details before starting another action.", true);
+      return { storageKey, intentId: stored.intentId };
+    }
+    const attempt = { fingerprint, intentId: crypto.randomUUID(), action: parsedAction.data };
+    const serialized = JSON.stringify(attempt);
+    try {
+      window.localStorage.setItem(storageKey, serialized);
+      if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("payment run retry did not persist");
+    } catch {
+      throw new PurchasingPaymentRunsApiError(0, "Enable browser storage before changing a payment run so uncertain actions can be retried safely.");
+    }
+    return { storageKey, intentId: attempt.intentId };
+  });
+}
+
+async function withPaymentRunReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new PurchasingPaymentRunsApiError(0, "This browser cannot safely reserve a supplier payment run action. Open it in a browser with Web Locks enabled before submitting the change.");
   }
-  const attempt = { fingerprint, intentId: crypto.randomUUID(), action: parsedAction.data };
-  const serialized = JSON.stringify(attempt);
   try {
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("payment run retry did not persist");
-  } catch {
-    throw new PurchasingPaymentRunsApiError(0, "Enable browser storage before changing a payment run so uncertain actions can be retried safely.");
+    return await lockManager.request(`chaste:purchasing-payment-run-write-marker-lock:${storageKey}`, { mode: "exclusive" }, reserve);
+  } catch (error) {
+    if (error instanceof PurchasingPaymentRunsApiError) throw error;
+    throw new PurchasingPaymentRunsApiError(0, "The browser could not safely coordinate this supplier payment run action across tabs. Close other Purchasing tabs and try again.", true);
   }
-  return { storageKey, intentId: attempt.intentId };
 }
 
 async function paymentRunFingerprint(action: PurchasingPaymentRunAction): Promise<string> {
@@ -288,9 +303,16 @@ function parsePaymentRunAttempt(raw: string): z.infer<typeof PaymentRunAttemptSc
   return parsed.data;
 }
 
-async function clearPaymentRunAttempt(storageKey: string): Promise<void> {
-  try { window.localStorage.removeItem(storageKey); }
-  catch { throw new PurchasingPaymentRunsApiError(0, "The payment run action completed, but its retry marker could not be cleared. Reload before another action.", true); }
+async function clearPaymentRunAttempt(storageKey: string, intentId: string): Promise<void> {
+  await withPaymentRunReservationLock(storageKey, async () => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw === null) return;
+      if (parsePaymentRunAttempt(raw).intentId === intentId) window.localStorage.removeItem(storageKey);
+    } catch {
+      throw new PurchasingPaymentRunsApiError(0, "The payment run action completed, but its retry marker could not be cleared. Reload before another action.", true);
+    }
+  });
 }
 
 function paymentRunCapability(action: PurchasingPaymentRunAction): string {

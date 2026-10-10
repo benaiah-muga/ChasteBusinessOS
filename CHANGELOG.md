@@ -358,7 +358,9 @@ The full v1 changelog is preserved at the bottom of this file.
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
   attempts and approval recovery survive reload; Go 404 and uncertain outcomes
   never fall back to legacy routes. Go checks current bill balances and
-  currencies before creating and instructing a run.
+  currencies before creating and instructing a run. Retry intents reserve
+  atomically across tabs, stale responses cannot clear a newer action, and
+  browsers without Web Locks fail closed.
 - Vite HR Time reports, submitted-entry approvals, time logging, and decisions can
   use the Go `hr.*` capabilities behind the paired `CHASTE_GO_HR_TIME=1` and
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. A new org-scoped

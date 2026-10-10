@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchPurchasingPaymentRunBills,
   fetchPurchasingPaymentRuns,
@@ -39,10 +39,31 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+function stubPaymentRunLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  const locks = {
+    request: async <T>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+      const previous = tails.get(name) ?? Promise.resolve();
+      let release = (): void => {};
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      tails.set(name, current);
+      await previous;
+      try { return await callback(); }
+      finally {
+        release();
+        if (tails.get(name) === current) tails.delete(name);
+      }
+    },
+  };
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
+}
+
 afterEach(() => {
   window.localStorage.clear();
   vi.unstubAllGlobals();
 });
+
+beforeEach(stubPaymentRunLocks);
 
 describe("Purchasing payment run Go API", () => {
   it("lists runs and eligible bills through their Go read capabilities", async () => {
@@ -126,5 +147,67 @@ describe("Purchasing payment run Go API", () => {
       { capabilityId: "purchasing.instructPaymentRun", input: { paymentRunId: run.id }, intentId: expect.any(String) },
       { capabilityId: "purchasing.reversePaymentRun", input: { paymentRunId: run.id, reason: "Bank rejected the instruction" }, intentId: expect.any(String) },
     ]);
+  });
+
+  it("serializes cross-tab payment run reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_PURCHASING_PAYMENT_RUNS__", true);
+    const action = { action: "create" as const, memo: "September payables", lines: [{ billId: bill.id, amountMinor: 900 }] };
+    const alternateAction = { ...action, lines: [{ billId: bill.id, amountMinor: 800 }] };
+    const fetchMock = vi.fn(async () => jsonResponse({ pendingApproval: true }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcomes = await Promise.allSettled([
+      submitPurchasingPaymentRunAction(action, scope),
+      submitPurchasingPaymentRunAction(alternateAction, scope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect([action, alternateAction]).toContainEqual(await readPendingPaymentRunAction(scope));
+  });
+
+  it("does not let a delayed success clear a newer payment run intent", async () => {
+    vi.stubGlobal("__GO_PURCHASING_PAYMENT_RUNS__", true);
+    const action = { action: "create" as const, memo: "September payables", lines: [{ billId: bill.id, amountMinor: 900 }] };
+    const nextAction = { ...action, lines: [{ billId: bill.id, amountMinor: 800 }] };
+    const respond: Array<(response: Response) => void> = [];
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+      return new Promise<Response>((resolve) => { respond.push(resolve); });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitPurchasingPaymentRunAction(action, scope);
+    const duplicate = submitPurchasingPaymentRunAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(intentIds[1]).toBe(intentIds[0]);
+    respond[0]?.(jsonResponse({ ok: true, data: { paymentRunId: run.id, reference: run.reference, currency: "BHD", totalMinor: 900, billCount: 1 } }));
+    await expect(first).resolves.toMatchObject({ kind: "success" });
+
+    const next = submitPurchasingPaymentRunAction(nextAction, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(intentIds[2]).not.toBe(intentIds[0]);
+    respond[1]?.(jsonResponse({ ok: true, data: { paymentRunId: run.id, reference: run.reference, currency: "BHD", totalMinor: 900, billCount: 1 } }));
+    await expect(duplicate).resolves.toMatchObject({ kind: "success" });
+    await expect(readPendingPaymentRunAction(scope)).resolves.toEqual(nextAction);
+
+    respond[2]?.(jsonResponse({ pendingApproval: true }, 202));
+    await expect(next).resolves.toMatchObject({ kind: "pending" });
+  });
+
+  it("fails closed when browser-wide payment run locks are unavailable", async () => {
+    vi.stubGlobal("__GO_PURCHASING_PAYMENT_RUNS__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { paymentRunId: run.id } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitPurchasingPaymentRunAction({ action: "cancel", paymentRunId: run.id }, scope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a supplier payment run action"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
   });
 });
