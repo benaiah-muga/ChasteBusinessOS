@@ -5,7 +5,7 @@ const SwitchboardSchema = z.object({
   enabledModules: z.array(z.string().min(1)),
 });
 
-const InvoiceSchema = z.object({
+const invoiceFields = {
   id: z.string().min(1),
   number: z.number().int().positive().safe(),
   customerId: z.string().min(1),
@@ -16,10 +16,18 @@ const InvoiceSchema = z.object({
   paidMinor: z.number().int().safe(),
   outstandingMinor: z.number().int().safe(),
   issuedAt: z.string().datetime({ offset: true }).nullable(),
-});
+};
 
+const InvoiceSchema = z.object(invoiceFields);
+const GoInvoiceSchema = z.object({
+  ...invoiceFields,
+  creditedMinor: z.number().int().safe(),
+}).strict();
 const AccountingInvoicesSchema = z.object({ invoices: z.array(InvoiceSchema) });
+const GoAccountingInvoicesSchema = z.object({ invoices: z.array(GoInvoiceSchema) }).strict();
 const ErrorSchema = z.object({ error: z.string().max(500) });
+const CapabilityEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const CapabilityErrorSchema = z.object({ ok: z.literal(false), error: z.string().max(500) }).strict();
 
 export type AccountingInvoice = z.infer<typeof InvoiceSchema>;
 
@@ -48,9 +56,16 @@ export async function fetchAccountingEnabled(signal?: AbortSignal): Promise<bool
 }
 
 export async function fetchAccountingInvoices(signal?: AbortSignal): Promise<AccountingInvoice[]> {
-  const { response, body } = await getJson("/api/accounting", signal);
+  const useGo = goAccountingInvoiceReadsUseGo();
+  const { response, body } = useGo
+    ? await getJson("/api/capabilities/execute", signal, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ capabilityId: "accounting.listInvoices", input: {} }),
+    })
+    : await getJson("/api/accounting", signal);
   if (!response.ok) {
-    const parsedError = ErrorSchema.safeParse(body);
+    const parsedError = useGo ? CapabilityErrorSchema.safeParse(body) : ErrorSchema.safeParse(body);
     if (response.status === 401) {
       throw new AccountingInvoicesApiError(401, "Your session has ended. Sign in again to continue.");
     }
@@ -62,19 +77,33 @@ export async function fetchAccountingInvoices(signal?: AbortSignal): Promise<Acc
       : parsedError.success ? parsedError.data.error : "The Accounting request could not be completed. Try again.");
   }
 
-  const parsed = AccountingInvoicesSchema.safeParse(body);
+  const envelope = useGo ? CapabilityEnvelopeSchema.safeParse(body) : null;
+  if (useGo && (!envelope?.success || response.status !== 200)) {
+    throw new AccountingInvoicesApiError(response.status, "The Accounting service returned an unexpected capability response.");
+  }
+  const invoiceBody = useGo && envelope?.success ? envelope.data.data : body;
+  const parsed = useGo
+    ? GoAccountingInvoicesSchema.safeParse(invoiceBody)
+    : AccountingInvoicesSchema.safeParse(invoiceBody);
   if (!parsed.success) {
     throw new AccountingInvoicesApiError(response.status, "The Accounting service returned invoices in an unexpected format.");
   }
   return parsed.data.invoices;
 }
 
-async function getJson(path: string, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
+export function goAccountingInvoiceReadsUseGo(): boolean {
+  return typeof __GO_ACCOUNTING_INVOICE_READS__ !== "undefined" && __GO_ACCOUNTING_INVOICE_READS__;
+}
+
+async function getJson(path: string, signal?: AbortSignal, init?: RequestInit): Promise<{ response: Response; body: unknown }> {
   let response: Response;
   try {
+    const headers = new Headers(init?.headers);
+    headers.set("accept", "application/json");
     response = await fetch(path, {
+      ...init,
       credentials: "same-origin",
-      headers: { accept: "application/json" },
+      headers,
       cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 import {
   createGoRouteProxyPlugin,
+  goAccountingInvoiceReadsFromEnv,
   goPosCloseSessionSliceFromEnv,
   goMarketingCampaignWritesFromEnv,
   goProjectsWritesFromEnv,
@@ -555,6 +556,14 @@ describe("messaging attachment upload Go selector", () => {
     expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD: "0" })).toBe(false);
     expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD: "1" })).toBe(false);
+  });
+});
+
+describe("Accounting invoice reads Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goAccountingInvoiceReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goAccountingInvoiceReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_INVOICE_READS: "0" })).toBe(false);
+    expect(goAccountingInvoiceReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_INVOICE_READS: "1" })).toBe(false);
   });
 });
 

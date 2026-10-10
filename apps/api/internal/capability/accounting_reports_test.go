@@ -763,6 +763,23 @@ func TestAccountingReportsInvoicesAgingAndScoping(t *testing.T) {
 	if len(sentOnly.Invoices) != 5 {
 		t.Fatalf("sent rows = %d, want five", len(sentOnly.Invoices))
 	}
+	empty, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (ListInvoicesOutput, error) {
+		status := "void"
+		return listInvoices(fx.ctx, tx, fx.orgID, ListInvoicesInput{Status: &status, Limit: 50})
+	})
+	if err != nil {
+		t.Fatalf("listInvoices(empty): %v", err)
+	}
+	if empty.Invoices == nil || len(empty.Invoices) != 0 {
+		t.Fatalf("empty invoice rows = %#v, want a non-nil empty slice", empty.Invoices)
+	}
+	encodedEmpty, err := marshalJS(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encodedEmpty) != `{"invoices":[]}` {
+		t.Fatalf("empty invoice output = %s, want an empty invoices array", encodedEmpty)
+	}
 	limited, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (ListInvoicesOutput, error) {
 		return listInvoices(fx.ctx, tx, fx.orgID, ListInvoicesInput{Limit: 2})
 	})

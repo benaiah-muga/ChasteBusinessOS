@@ -2427,3 +2427,10 @@ new owners and the manifest shows zero legacy runtime paths.
      before list refresh, and serialize deletion with sends and other
      lifecycle writes. Set `CHASTE_GO_MESSAGING_CONVERSATION_DELETE=0` for
      rollback of new actions.
+242. (Go/Vite implementation complete; browser proof pending) Route Vite
+     Accounting invoice list reads through the session-authenticated
+     `accounting.listInvoices` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the Go envelope
+     and invoice rows, including safe integer `creditedMinor`, preserve the
+     legacy route shape for explicit rollback, and fail closed on selected Go
+     errors.

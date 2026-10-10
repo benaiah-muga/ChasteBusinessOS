@@ -37,6 +37,11 @@ The full v1 changelog is preserved at the bottom of this file.
   `messaging.deleteConversation` capability by default when session routing is
   enabled. Confirmed deletions serialize with sends and other lifecycle writes;
   unresolved requests retain their exact intent across reloads and rollback.
+- Vite Accounting invoice lists now read through the session-authenticated Go
+  `accounting.listInvoices` capability by default when session routing is
+  enabled. Go invoice rows require the exact response fields, including a safe
+  integer `creditedMinor`; selected Go failures do not retry through the old
+  invoice route.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.
