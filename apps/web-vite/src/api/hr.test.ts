@@ -12,6 +12,25 @@ const report = {
   attendance: [],
 };
 
+function stubHrTimeLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  const locks = {
+    request: async <T>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+      const previous = tails.get(name) ?? Promise.resolve();
+      let release = (): void => {};
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      tails.set(name, current);
+      await previous;
+      try { return await callback(); }
+      finally {
+        release();
+        if (tails.get(name) === current) tails.delete(name);
+      }
+    },
+  };
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
+}
+
 afterEach(() => {
   window.localStorage.clear();
   vi.unstubAllGlobals();
@@ -360,6 +379,7 @@ describe("Vite People API", () => {
 
   it("persists exact Go time actions through approval, 404, and reload recovery", async () => {
     vi.stubGlobal("__GO_HR_TIME__", true);
+    stubHrTimeLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
     const intents: string[] = [];
@@ -384,6 +404,7 @@ describe("Vite People API", () => {
 
   it("maps Go time decisions and keeps malformed successful responses retryable", async () => {
     vi.stubGlobal("__GO_HR_TIME__", true);
+    stubHrTimeLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const intents: string[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -401,5 +422,68 @@ describe("Vite People API", () => {
     await expect(readPendingHrTimeAction(scope)).resolves.toEqual(action);
     await expect(submitHrTimeAction(action, scope)).resolves.toMatchObject({ kind: "success" });
     expect(intents[1]).toBe(intents[0]);
+  });
+
+  it("serializes cross-tab Go time reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_HR_TIME__", true);
+    stubHrTimeLocks();
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
+    const alternateAction = { ...action, minutes: 60 };
+    const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcomes = await Promise.allSettled([
+      submitHrTimeAction(action, scope),
+      submitHrTimeAction(alternateAction, scope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const pending = await readPendingHrTimeAction(scope);
+    expect([action, alternateAction]).toContainEqual(pending);
+  });
+
+  it("does not let a delayed success clear a newer Go time intent", async () => {
+    vi.stubGlobal("__GO_HR_TIME__", true);
+    stubHrTimeLocks();
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
+    const nextAction = { ...action, minutes: 60, note: "Follow-up visit" };
+    const respond: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { respond.push(resolve); }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitHrTimeAction(action, scope);
+    const duplicate = submitHrTimeAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    respond[0]?.(Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", status: "submitted" } }));
+    await expect(first).resolves.toMatchObject({ kind: "success" });
+
+    const next = submitHrTimeAction(nextAction, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    respond[1]?.(Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", status: "submitted" } }));
+    await expect(duplicate).resolves.toMatchObject({ kind: "success" });
+    await expect(readPendingHrTimeAction(scope)).resolves.toEqual(nextAction);
+
+    respond[2]?.(Response.json({ pendingApproval: true }, { status: 202 }));
+    await expect(next).resolves.toMatchObject({ kind: "pending" });
+  });
+
+  it("fails closed when browser-wide Go time locks are unavailable", async () => {
+    vi.stubGlobal("__GO_HR_TIME__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75 };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrTimeAction(action, scope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a People time action"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
   });
 });

@@ -40,6 +40,25 @@ const expenseClaim = {
   memo: "Taxi to the client kickoff",
 };
 
+function stubHrTimeLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  const locks = {
+    request: async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+      const previous = tails.get(name) ?? Promise.resolve();
+      let release = (): void => {};
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      tails.set(name, current);
+      await previous;
+      try { return await callback(); }
+      finally {
+        release();
+        if (tails.get(name) === current) tails.delete(name);
+      }
+    },
+  };
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
+}
+
 function hrFetch(enabled = true) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -340,6 +359,7 @@ describe("Vite People page", () => {
   it("routes time queue and decisions through Go and retries the exact action after reload", async () => {
     window.history.replaceState(null, "", "/hr?tab=time");
     vi.stubGlobal("__GO_HR_TIME__", true);
+    stubHrTimeLocks();
     const actorId = "33333333-3333-4333-8333-333333333333";
     const organizationId = "44444444-4444-4444-8444-444444444444";
     const entry = {

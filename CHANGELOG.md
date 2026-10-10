@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite HR Time Go writes now reserve their actor and organization retry marker
+  atomically across tabs. Browsers without Web Locks fail closed before a time
+  action is sent.
+
 - Vite CRM customer CSV import and Undo now use Go's session-authenticated
   capabilities by default when session routing is enabled. Exact scoped intents
   and import receipts survive uncertain results and reloads; selector rollback

@@ -2055,8 +2055,9 @@ new owners and the manifest shows zero legacy runtime paths.
      closed. Purchasing API tests, AccountingPage recovery, Vite typecheck/lint,
      and the Go payBill contract test pass. Keep other Accounting actions
      unchanged. Authenticated browser proof remains open.
-197. Route Vite HR Time report and pending-entry reads, time logging, and
-     submitted-entry decisions through Go's session-authenticated
+197. (Vite/Go implementation complete; browser proof pending) Route Vite HR
+     Time report and pending-entry reads, time logging, and submitted-entry
+     decisions through Go's session-authenticated
      `hr.timeReport`, `hr.pendingTimeEntries`, `hr.logTime`, and
      `hr.decideTimeEntry` capabilities behind paired `CHASTE_GO_HR_TIME=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other HR tabs on
@@ -2066,7 +2067,11 @@ new owners and the manifest shows zero legacy runtime paths.
      behavior. Scope durable exact write attempts by actor and organization,
      recover approvals and uncertain results after reload, block legacy rollback
      while unresolved, and fail closed on Go 404. Add focused Go parser,
-     executor, org-scope, Vite API, proxy selector, and HR page tests.
+     executor, org-scope, Vite API, proxy selector, and HR page tests. Atomic
+     browser-wide reservations prevent cross-tab intent races, and browsers
+     without Web Locks fail closed. Vite API/page/proxy tests, typecheck, lint,
+     and Go HR time contract tests pass. Authenticated browser proof remains
+     open.
 198. Route Vite supplier payment run reads and lifecycle actions through Go's
      `purchasing.listPaymentRuns`, `purchasing.listPaymentRunBills`,
      `purchasing.createPaymentRun`, `purchasing.cancelPaymentRunDraft`,
