@@ -488,7 +488,7 @@ function readError(status: number, body: unknown, context: string): string {
   return `Could not ${context}. Check the service and try again.`;
 }
 
-async function request(path: string, init: RequestInit, activity: string, signal?: AbortSignal, allowNotFound = false): Promise<{ response: Response; body: unknown }> {
+async function request(path: string, init: RequestInit, activity: string, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -505,7 +505,7 @@ async function request(path: string, init: RequestInit, activity: string, signal
       : "Could not reach the Purchasing service. Check your connection and try again.", true);
   }
   const body: unknown = await response.json().catch(() => null);
-  if (!response.ok && !(allowNotFound && response.status === 404)) {
+  if (!response.ok) {
     throw new PurchasingApiError(response.status, readError(response.status, body, activity), true);
   }
   return { response, body };
@@ -634,7 +634,7 @@ export async function createPurchasingOrder(
   const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
   const attempt = await createPurchaseOrderAttempt(parsedAction.data, scope);
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({
@@ -646,21 +646,13 @@ export async function createPurchasingOrder(
         },
         intentId: attempt.intentId,
       }),
-    }, "raising the purchase order", signal, true);
-
-    if (response.status === 404) {
-      ({ response, body } = await request("/api/purchasing", {
-        method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ ...parsedAction.data, intentId: attempt.intentId }),
-      }, "raising the purchase order", signal));
-    }
+    }, "raising the purchase order", signal);
 
     const outcome = parsePurchasingActionOutcome(response, body, OpaqueOutputSchema, "raising the purchase order");
     if (outcome.kind === "completed") clearPurchaseOrderAttempt(attempt);
     return outcome;
   } catch (error) {
-    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
       clearPurchaseOrderAttempt(attempt);
     }
     throw error;
@@ -755,25 +747,27 @@ async function createPurchaseLifecycleAttempt(action: PurchaseLifecycleAction, s
     throw new PurchasingApiError(0, "Purchase order retry protection is unavailable. Check browser security settings and try again.");
   }
   const storageKey = `${purchaseLifecycleAttemptPrefix}${scopeDigest}`;
-  let stored: { fingerprint: string; intentId: string } | null;
-  try {
-    stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
-  } catch {
-    throw new PurchasingApiError(0, "Enable browser storage before changing a purchase order so an uncertain action can be retried safely.");
-  }
-  if (stored && stored.fingerprint !== fingerprint) {
-    throw new PurchasingApiError(0, "A previous purchase order result is unresolved. Retry that exact action or check purchase order history before making another change.");
-  }
-  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
-  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
-    const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
-    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
-    return { ...attempt, intentId: persisted.intentId };
-  } catch {
-    throw new PurchasingApiError(0, "Enable browser storage before changing a purchase order so an uncertain action can be retried safely.");
-  }
+  return withPurchasingReservationLock(storageKey, async () => {
+    let stored: { fingerprint: string; intentId: string } | null;
+    try {
+      stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+    } catch {
+      throw new PurchasingApiError(0, "Enable browser storage before changing a purchase order so an uncertain action can be retried safely.");
+    }
+    if (stored && stored.fingerprint !== fingerprint) {
+      throw new PurchasingApiError(0, "A previous purchase order result is unresolved. Retry that exact action or check purchase order history before making another change.");
+    }
+    if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+    const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+      const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+      if (!persisted || persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId) throw new Error("saved attempt did not persist");
+      return attempt;
+    } catch {
+      throw new PurchasingApiError(0, "Enable browser storage before changing a purchase order so an uncertain action can be retried safely.");
+    }
+  });
 }
 
 function clearPurchaseLifecycleAttempt(attempt: PurchaseLifecycleAttempt): void {
@@ -801,7 +795,7 @@ async function submitPurchaseLifecycle<T>(
   const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
   const attempt = await createPurchaseLifecycleAttempt(action, scope);
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({
@@ -809,19 +803,12 @@ async function submitPurchaseLifecycle<T>(
         input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")),
         intentId: attempt.intentId,
       }),
-    }, activity, signal, true);
-    if (response.status === 404) {
-      ({ response, body } = await request("/api/purchasing", {
-        method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ ...action, intentId: attempt.intentId }),
-      }, activity, signal));
-    }
+    }, activity, signal);
     const outcome = parsePurchasingActionOutcome(response, body, output, activity);
     if (outcome.kind === "completed") clearPurchaseLifecycleAttempt(attempt);
     return outcome;
   } catch (error) {
-    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
       clearPurchaseLifecycleAttempt(attempt);
     }
     throw error;
@@ -909,7 +896,7 @@ async function submitPurchaseFinanceCapability(
   const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
   const attempt = await createPurchaseFinanceAttempt(action, scope);
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({
@@ -917,24 +904,7 @@ async function submitPurchaseFinanceCapability(
         input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")),
         intentId: attempt.intentId,
       }),
-    }, activity, signal, true);
-    if (response.status === 404 && action.action === "payBill") {
-      throw new PurchasingApiError(
-        404,
-        "Go could not confirm this bill payment capability. Retry the exact payment through Go to recover its result.",
-        true,
-      );
-    }
-    if (response.status === 404) {
-      ({ response, body } = await request("/api/purchasing", {
-        method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ ...action, intentId: attempt.intentId }),
-      }, activity, signal));
-      const outcome = parsePurchasingActionOutcome(response, body, OpaqueOutputSchema, activity);
-      if (outcome.kind === "completed") clearPurchaseFinanceAttempt(attempt);
-      return outcome;
-    }
+    }, activity, signal);
     const outcome = parsePurchasingActionOutcome(response, body, output, activity);
     if (outcome.kind === "completed") clearPurchaseFinanceAttempt(attempt);
     return outcome;
@@ -942,7 +912,7 @@ async function submitPurchaseFinanceCapability(
     if (!(error instanceof PurchasingApiError)) {
       throw new PurchasingApiError(0, "The request was interrupted. Check the record before trying again.", true);
     }
-    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !(action.action === "payBill" && error.status === 404)) {
+    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
       clearPurchaseFinanceAttempt(attempt);
     }
     throw error;
@@ -963,7 +933,7 @@ async function submitPurchaseSourcingCapability<T>(
   const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
   const attempt = await createPurchaseSourcingAttempt(action, scope);
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({
@@ -971,17 +941,7 @@ async function submitPurchaseSourcingCapability<T>(
         input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")),
         intentId: attempt.intentId,
       }),
-    }, activity, signal, true);
-    if (response.status === 404) {
-      ({ response, body } = await request("/api/purchasing", {
-        method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ ...action, intentId: attempt.intentId }),
-      }, activity, signal));
-      const outcome = parsePurchasingActionOutcome(response, body, OpaqueOutputSchema, activity);
-      if (outcome.kind === "completed") clearPurchaseSourcingAttempt(attempt);
-      return outcome as PurchasingActionOutcome<T>;
-    }
+    }, activity, signal);
     const outcome = parsePurchasingActionOutcome(response, body, output, activity);
     if (outcome.kind === "completed") clearPurchaseSourcingAttempt(attempt);
     return outcome;
@@ -989,7 +949,7 @@ async function submitPurchaseSourcingCapability<T>(
     if (!(error instanceof PurchasingApiError)) {
       throw new PurchasingApiError(0, "The request was interrupted. Check the purchase request before trying again.", true);
     }
-    if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) clearPurchaseSourcingAttempt(attempt);
+    if (error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) clearPurchaseSourcingAttempt(attempt);
     throw error;
   }
 }
@@ -1010,25 +970,27 @@ async function createPurchaseSourcingAttempt(action: PurchaseSourcingAction, sco
     : action.action === "decidePurchaseRequest" || action.action === "createRfq" ? action.requestId
       : action.rfqId;
   const storageKey = `${purchaseSourcingAttemptPrefix}${action.action}:${encodeURIComponent(actionTarget)}:${scopeDigest}`;
-  let stored: { fingerprint: string; intentId: string } | null;
-  try {
-    stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
-  } catch {
-    throw new PurchasingApiError(0, "Enable browser storage before changing a purchase request so an uncertain result can be retried safely.");
-  }
-  if (stored && stored.fingerprint !== fingerprint) {
-    throw new PurchasingApiError(0, "A previous result for this sourcing action is unresolved. Retry the exact action or check the request before changing it.");
-  }
-  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
-  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
-    const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
-    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
-    return { ...attempt, intentId: persisted.intentId };
-  } catch {
-    throw new PurchasingApiError(0, "Enable browser storage before changing a purchase request so an uncertain result can be retried safely.");
-  }
+  return withPurchasingReservationLock(storageKey, async () => {
+    let stored: { fingerprint: string; intentId: string } | null;
+    try {
+      stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+    } catch {
+      throw new PurchasingApiError(0, "Enable browser storage before changing a purchase request so an uncertain result can be retried safely.");
+    }
+    if (stored && stored.fingerprint !== fingerprint) {
+      throw new PurchasingApiError(0, "A previous result for this sourcing action is unresolved. Retry the exact action or check the request before changing it.");
+    }
+    if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+    const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+      const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+      if (!persisted || persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId) throw new Error("saved attempt did not persist");
+      return attempt;
+    } catch {
+      throw new PurchasingApiError(0, "Enable browser storage before changing a purchase request so an uncertain result can be retried safely.");
+    }
+  });
 }
 
 function clearPurchaseSourcingAttempt(attempt: PurchaseSourcingAttempt): void {

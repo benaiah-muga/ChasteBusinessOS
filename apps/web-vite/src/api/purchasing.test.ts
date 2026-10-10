@@ -72,10 +72,10 @@ function postedBody(call: unknown[]): Record<string, unknown> {
   return JSON.parse(String((call[1] as RequestInit).body));
 }
 
-function stubPurchasingLocks(): void {
+function stubPurchasingLocks() {
   const tails = new Map<string, Promise<void>>();
   const locks = {
-    request: async <T>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+    request: vi.fn(async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
       const previous = tails.get(name) ?? Promise.resolve();
       let release = (): void => {};
       const current = new Promise<void>((resolve) => { release = resolve; });
@@ -86,9 +86,10 @@ function stubPurchasingLocks(): void {
         release();
         if (tails.get(name) === current) tails.delete(name);
       }
-    },
+    }),
   };
   vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
+  return locks.request;
 }
 
 describe("purchasing API module gate", () => {
@@ -253,7 +254,7 @@ describe("governed purchasing writes", () => {
     organizationId: "org-1",
   };
 
-  beforeEach(stubPurchasingLocks);
+  beforeEach(() => { stubPurchasingLocks(); });
 
   it("routes all sourcing actions through scoped Go capabilities with strict output shapes", async () => {
     vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
@@ -283,7 +284,7 @@ describe("governed purchasing writes", () => {
     expect(fetchMock.mock.calls.map((call) => postedBody(call).intentId)).toEqual(expect.arrayContaining([expect.any(String)]));
   });
 
-  it("requires scope, preserves a sourcing intent across uncertainty and pending, and reuses it on 404 fallback", async () => {
+  it("requires scope, preserves a sourcing intent across uncertainty, pending, and Go 404", async () => {
     vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
     const action = { action: "createPurchaseRequest" as const, title: "Need packaging", justification: "Stock is too low for confirmed orders." };
     const scoped = { actorId: "actor-sourcing-retry", organizationId: "org-sourcing-retry" };
@@ -302,10 +303,32 @@ describe("governed purchasing writes", () => {
     const firstIntent = postedBody(fetchMock.mock.calls[0]!).intentId;
     await expect(createPurchasingRequest(action, undefined, scoped)).resolves.toMatchObject({ kind: "pending" });
     expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(firstIntent);
-    await expect(createPurchasingRequest(action, undefined, scoped)).resolves.toMatchObject({ kind: "completed" });
+    await expect(createPurchasingRequest(action, undefined, scoped)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(firstIntent);
+    await expect(createPurchasingRequest(action, undefined, scoped)).resolves.toMatchObject({ kind: "completed" });
     expect(postedBody(fetchMock.mock.calls[3]!).intentId).toBe(firstIntent);
-    expect(postedBody(fetchMock.mock.calls[3]!).action).toBe("createPurchaseRequest");
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("reserves one sourcing intent across concurrent tabs", async () => {
+    const lockRequest = stubPurchasingLocks();
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => responses.push(resolve)));
+    const responses: Array<(response: Response) => void> = [];
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "createPurchaseRequest" as const, title: "Need packaging", justification: "Stock is too low for confirmed orders." };
+    const scope = { actorId: "actor-sourcing-tabs", organizationId: "org-sourcing-tabs" };
+
+    const first = createPurchasingRequest(action, undefined, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const second = createPurchasingRequest(action, undefined, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(lockRequest).toHaveBeenCalledWith(expect.stringContaining("chaste.purchasing.sourcing.active.v1:"), { mode: "exclusive" }, expect.any(Function));
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(postedBody(fetchMock.mock.calls[0]!).intentId);
+
+    responses.forEach((resolve) => resolve(Response.json({ ok: true, data: { requestId: "0569aacb-58c3-4a30-8afe-3554e38eb2ce" } })));
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
   });
 
   it("requires actor and organization scope before a Go purchase order request", async () => {
@@ -344,7 +367,7 @@ describe("governed purchasing writes", () => {
     expect(postedBody(fetchMock.mock.calls[3]!).intentId).not.toBe(first.intentId);
   });
 
-  it("falls back to the legacy route with the same purchase order intent", async () => {
+  it("keeps a purchase order intent on Go 404 and retries only through Go", async () => {
     vi.stubGlobal("__GO_PURCHASING_CREATE_ORDER__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
@@ -352,11 +375,13 @@ describe("governed purchasing writes", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(createPurchasingOrder(poAction, undefined, retryScope))
-      .resolves.toEqual({ kind: "completed", data: { poNumber: 43 } });
+      .rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     const goIntent = postedBody(fetchMock.mock.calls[0]!).intentId;
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/purchasing");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(createPurchasingOrder(poAction, undefined, retryScope))
+      .resolves.toEqual({ kind: "completed", data: { poNumber: 43 } });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/capabilities/execute");
     expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(goIntent);
-    expect(postedBody(fetchMock.mock.calls[1]!).action).toBe("createPurchaseOrder");
   });
 
   it("clears a terminal purchase order rejection so a corrected draft gets a new intent", async () => {
@@ -419,19 +444,22 @@ describe("governed purchasing writes", () => {
       .resolves.toEqual({ kind: "pending", reason: "Purchasing writes require approval." });
   });
 
-  it("uses the established Purchasing write only when the Go capability route is absent", async () => {
+  it("keeps vendor creation on Go after a missing capability response", async () => {
     vi.stubGlobal("__GO_PURCHASING_VENDOR_SLICE__", true);
+    const vendorId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { vendorId: "vendor-1" } }));
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { vendorId } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }, undefined, retryScope))
-      .resolves.toEqual({ kind: "completed", data: { vendorId: "vendor-1" } });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/purchasing");
-    expect(postedBody(fetchMock.mock.calls[1]!)).toMatchObject({ action: "createVendor", name: "Kampala Supplies" });
-    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(postedBody(fetchMock.mock.calls[0]!).intentId);
+      .rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const intentId = postedBody(fetchMock.mock.calls[0]!).intentId;
+    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }, undefined, retryScope))
+      .resolves.toEqual({ kind: "completed", data: { vendorId } });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/capabilities/execute");
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(intentId);
   });
 
   it("does not retry Go vendor creation on authentication or server errors", async () => {
@@ -585,7 +613,7 @@ describe("governed purchasing writes", () => {
     expect(await readPendingPurchasingBillPayment(retryScope)).toBeNull();
   });
 
-  it("routes bill credits through Go, reuses the intent after pending, and validates the result", async () => {
+  it("routes bill credits through Go, reuses the intent after pending or 404, and validates the result", async () => {
     vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
     const entryId = "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f";
     const fetchMock = vi.fn()
@@ -616,14 +644,16 @@ describe("governed purchasing writes", () => {
     expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(pendingAttempt.intentId);
     await expect(creditPurchasingBill(action, undefined, retryScope)).rejects.toMatchObject({ status: 200 });
 
-    const fallbackFetch = vi.fn()
+    const retryFetch = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "Go route missing" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { entryId, creditedMinor: 5000, billBalanceMinor: 7500 } }));
-    vi.stubGlobal("fetch", fallbackFetch);
+    vi.stubGlobal("fetch", retryFetch);
+    await expect(creditPurchasingBill(action, undefined, retryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    const retryIntent = postedBody(retryFetch.mock.calls[0]!).intentId;
     await expect(creditPurchasingBill(action, undefined, retryScope)).resolves.toMatchObject({ kind: "completed" });
-    expect(fallbackFetch).toHaveBeenCalledTimes(2);
-    expect(postedBody(fallbackFetch.mock.calls[0]!).intentId).toBe(postedBody(fallbackFetch.mock.calls[1]!).intentId);
-    expect(postedBody(fallbackFetch.mock.calls[1]!)).toMatchObject({ action: "billCreditNote", billId: action.billId, reason: action.reason });
+    expect(retryFetch).toHaveBeenCalledTimes(2);
+    expect(retryFetch.mock.calls.map((call) => call[0])).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(postedBody(retryFetch.mock.calls[1]!).intentId).toBe(retryIntent);
   });
 
   it("fails closed for Go bill credits without scope or with malformed input", async () => {
@@ -735,7 +765,27 @@ describe("governed purchasing writes", () => {
     });
   });
 
-  it("uses the same scoped intent for Go 404 fallback and rejects malformed Go output", async () => {
+  it("reserves one lifecycle intent across concurrent tabs", async () => {
+    const lockRequest = stubPurchasingLocks();
+    vi.stubGlobal("__GO_PURCHASING_RETURN_CLOSE__", true);
+    const responses: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => responses.push(resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "closePurchaseOrder" as const, poNumber: 42 };
+    const scope = { actorId: "actor-lifecycle-tabs", organizationId: "org-lifecycle-tabs" };
+
+    const first = closePurchasingOrder(action, undefined, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const second = closePurchasingOrder(action, undefined, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(lockRequest).toHaveBeenCalledWith(expect.stringContaining("chaste.purchasing.lifecycle.active.v1:"), { mode: "exclusive" }, expect.any(Function));
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(postedBody(fetchMock.mock.calls[0]!).intentId);
+
+    responses.forEach((resolve) => resolve(Response.json({ ok: true, data: { closed: true, backordered: false, shortThousandths: 0 } })));
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+  });
+
+  it("keeps returns and close on Go after 404 and rejects malformed Go output", async () => {
     vi.stubGlobal("__GO_PURCHASING_RETURN_CLOSE__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "route absent" }, { status: 404 }))
@@ -744,9 +794,13 @@ describe("governed purchasing writes", () => {
     vi.stubGlobal("fetch", fetchMock);
     const scope = { actorId: "actor-return", organizationId: "org-return" };
 
-    await expect(returnPurchasingGoods({ action: "returnGoods", poNumber: 42, lines: [{ lineNumber: 1, quantity: 5, reason: "damaged" }] }, undefined, scope))
-      .resolves.toMatchObject({ kind: "completed" });
-    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(postedBody(fetchMock.mock.calls[0]!).intentId);
+    const returnAction = { action: "returnGoods" as const, poNumber: 42, lines: [{ lineNumber: 1, quantity: 5, reason: "damaged" }] };
+    await expect(returnPurchasingGoods(returnAction, undefined, scope))
+      .rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    const intentId = postedBody(fetchMock.mock.calls[0]!).intentId;
+    await expect(returnPurchasingGoods(returnAction, undefined, scope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/capabilities/execute");
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(intentId);
     await expect(closePurchasingOrder({ action: "closePurchaseOrder", poNumber: 42 }, undefined, scope)).rejects.toMatchObject({ status: 200 });
   });
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchReceivingDetail,
   fetchReceivingEnabled,
@@ -65,6 +65,24 @@ const detail = {
 
 function postedBody(call: unknown[]): Record<string, unknown> {
   return JSON.parse(String((call[1] as RequestInit).body));
+}
+
+function stubReceivingLocks() {
+  const tails = new Map<string, Promise<void>>();
+  const request = vi.fn(async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+    const previous = tails.get(name) ?? Promise.resolve();
+    let release = (): void => {};
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    tails.set(name, current);
+    await previous;
+    try { return await callback(); }
+    finally {
+      release();
+      if (tails.get(name) === current) tails.delete(name);
+    }
+  });
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks: { request } }));
+  return request;
 }
 
 describe("receiving module gate and order lookup", () => {
@@ -189,6 +207,8 @@ describe("recording a receipt", () => {
   };
   const retryScope = { actorId: "actor-1", organizationId: "org-1" };
 
+  beforeEach(() => { stubReceivingLocks(); });
+
   it("requires actor and organization scope before a Go receipt request", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -227,17 +247,50 @@ describe("recording a receipt", () => {
     expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(first.intentId);
   });
 
-  it("falls back to the legacy receipt route with the same intent when Go is unavailable", async () => {
+  it("reserves one receipt intent across concurrent tabs", async () => {
+    const lockRequest = stubReceivingLocks();
+    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
+    const responses: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => responses.push(resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitReceiveGoods(action, undefined, retryScope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const second = submitReceiveGoods(action, undefined, retryScope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(lockRequest).toHaveBeenCalledWith(expect.stringContaining("chaste.purchasing.receive-goods.active.v1:"), { mode: "exclusive" }, expect.any(Function));
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(postedBody(fetchMock.mock.calls[0]!).intentId);
+
+    responses.forEach((resolve) => resolve(Response.json({ ok: true, data: { received: true, fullyReceived: true, receiptNumber: 2 } })));
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+  });
+
+  it("keeps a receipt on Go after a missing capability response and retries the same intent", async () => {
     vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { received: true, fullyReceived: false, receiptNumber: 3 } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitReceiveGoods(action, undefined, retryScope)).resolves.toMatchObject({ kind: "completed", data: { receiptNumber: 3 } });
+    await expect(submitReceiveGoods(action, undefined, retryScope)).rejects.toMatchObject({ status: 404 });
     const intentId = postedBody(fetchMock.mock.calls[0]!).intentId;
-    expect(postedBody(fetchMock.mock.calls[1]!)).toMatchObject({ action: "receiveGoods", poNumber: 42, intentId });
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/purchasing");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(submitReceiveGoods(action, undefined, retryScope)).resolves.toMatchObject({ kind: "completed", data: { receiptNumber: 3 } });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/capabilities/execute");
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(intentId);
+  });
+
+  it("requires the Go success envelope and keeps a malformed result retryable", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ received: true, fullyReceived: false, receiptNumber: 3 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { received: true, fullyReceived: false, receiptNumber: 3 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitReceiveGoods(action, undefined, retryScope)).rejects.toMatchObject({ status: 200 });
+    const intentId = postedBody(fetchMock.mock.calls[0]!).intentId;
+    await expect(submitReceiveGoods(action, undefined, retryScope)).resolves.toMatchObject({ kind: "completed", data: { receiptNumber: 3 } });
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(intentId);
   });
 
   it("rejects Go-incompatible quantities, totals, reasons, and authority values before requests", async () => {

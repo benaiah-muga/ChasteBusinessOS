@@ -22,7 +22,6 @@ import {
   goPurchasingWorkflowReadsUseGo,
   payPurchasingBill,
   PurchasingApiError,
-  receivePurchasingGoods,
   recordPurchasingQuote,
   returnPurchasingGoods,
   selectPurchasingWinningQuote,
@@ -39,6 +38,7 @@ import {
   type PurchasingVendor,
   type PurchasingWorkspace,
 } from "../api/purchasing";
+import { submitReceiveGoods } from "../api/purchasing-receiving";
 import { legacyUrl } from "../legacy";
 import "./PurchasingPage.css";
 
@@ -244,7 +244,7 @@ async function submitAction(action: PurchasingWrite, retryScope?: { actorId: str
   switch (action.action) {
     case "createVendor": return createPurchasingVendor(action, undefined, retryScope);
     case "createPurchaseOrder": return createPurchasingOrder(action, undefined, retryScope);
-    case "receiveGoods": return receivePurchasingGoods(action);
+    case "receiveGoods": return submitReceiveGoods(action, undefined, retryScope);
     case "returnGoods": return returnPurchasingGoods(action, undefined, retryScope);
     case "closePurchaseOrder": return closePurchasingOrder(action, undefined, retryScope);
     case "createBill": return createPurchasingBill(action, undefined, retryScope);
@@ -485,7 +485,7 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
       lifecycle?.onError?.(error);
       setNotice({
         tone: "error",
-        text: error instanceof PurchasingApiError ? error.message : `${label} failed. Try again.`,
+        text: error instanceof Error ? error.message : `${label} failed. Try again.`,
       });
       return false;
     } finally {

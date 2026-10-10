@@ -95,12 +95,13 @@ function purchasingFetch(overrides: Overrides = {}) {
       if (body.capabilityId === "purchasing.listPurchaseWorkflow") {
         return resolve(overrides.workflow ?? { ok: true, data: { requests: [] } });
       }
-      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote" && body.capabilityId !== "purchasing.supplierStatement" && body.capabilityId !== "purchasing.priceHistory" && body.capabilityId !== "purchasing.supplierPerformance") || !body.input) {
+      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.receiveGoods" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote" && body.capabilityId !== "purchasing.supplierStatement" && body.capabilityId !== "purchasing.priceHistory" && body.capabilityId !== "purchasing.supplierPerformance") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
       const action = body.capabilityId === "purchasing.createVendor" ? "createVendor"
         : body.capabilityId === "purchasing.createPurchaseOrder" ? "createPurchaseOrder"
-          : body.capabilityId === "purchasing.returnGoods" ? "returnGoods"
+          : body.capabilityId === "purchasing.receiveGoods" ? "receiveGoods"
+            : body.capabilityId === "purchasing.returnGoods" ? "returnGoods"
             : body.capabilityId === "purchasing.closePurchaseOrder" ? "closePurchaseOrder"
               : body.capabilityId === "purchasing.createBill" ? "createBill"
                 : body.capabilityId === "purchasing.billCreditNote" ? "billCreditNote"
@@ -112,6 +113,9 @@ function purchasingFetch(overrides: Overrides = {}) {
                           : body.capabilityId === "purchasing.supplierStatement" ? "supplierStatement"
                             : body.capabilityId === "purchasing.priceHistory" ? "priceHistory"
                               : body.capabilityId === "purchasing.supplierPerformance" ? "supplierPerformance" : "payBill";
+      if (body.capabilityId === "purchasing.receiveGoods") {
+        return resolve(await (overrides.post ? overrides.post({ ...body.input, action, intentId: body.intentId }) : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 5 } }));
+      }
       return post({ ...body.input, action, intentId: body.intentId });
     }
     throw new TypeError(`unrouted ${method} ${url}`);
@@ -1126,6 +1130,26 @@ describe("PurchasingPage", () => {
         { lineNumber: 2, quantity: 4500 },
       ],
     });
+  });
+
+  it("routes aggregate-page receipts through the scoped Go capability client", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
+    const fetchMock = purchasingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-1" organizationId="org-1" />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
+    fireEvent.change(screen.getByLabelText("Receive quantity for line 1 of purchase order 42"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+
+    await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(1));
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.receiveGoods",
+      input: { poNumber: 42, lines: [{ lineNumber: 1, quantity: 6000 }] },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.filter(([input, init]) => String(input) === "/api/purchasing" && (init as RequestInit | undefined)?.method === "POST")).toHaveLength(0);
   });
 
   it("refuses to pay more than a bill owes and sends integer minor units", async () => {

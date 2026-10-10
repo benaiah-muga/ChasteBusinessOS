@@ -166,6 +166,11 @@ The full v1 changelog is preserved at the bottom of this file.
   Go errors cannot fall through to legacy writes, and unresolved attempts block
   selector rollback until the same action is retried or resolved.
 
+- Vite Purchasing lifecycle, receipt, and sourcing writes now reserve their
+  exact actor- and organization-scoped intent across tabs. Selected Go errors
+  stay on Go, malformed success envelopes are rejected, and the aggregate
+  Purchasing page uses the scoped Go receipt client.
+
 - Vite Projects create, archive, and task writes now use direct Go capabilities
   by default. Set `CHASTE_GO_PROJECTS_WRITES=0` to send them through the
   existing `POST /api/projects` route, which remains Go-backed while

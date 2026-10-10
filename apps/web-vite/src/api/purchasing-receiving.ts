@@ -156,7 +156,7 @@ function readError(status: number, body: unknown, activity: string): string {
   return `Could not ${activity}. Check the service and try again.`;
 }
 
-async function request(path: string, init: RequestInit, activity: string, signal?: AbortSignal, allowNotFound = false): Promise<{ response: Response; body: unknown }> {
+async function request(path: string, init: RequestInit, activity: string, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -173,7 +173,7 @@ async function request(path: string, init: RequestInit, activity: string, signal
       : "Could not reach the Purchasing service. Check your connection and try again.");
   }
   const body: unknown = await response.json().catch(() => null);
-  if (!response.ok && !(allowNotFound && response.status === 404)) throw new ReceivingApiError(response.status, readError(response.status, body, activity));
+  if (!response.ok) throw new ReceivingApiError(response.status, readError(response.status, body, activity));
   return { response, body };
 }
 
@@ -233,7 +233,7 @@ export async function submitReceiveGoods(
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({ ...parsedAction.data, intentId: crypto.randomUUID() }),
     }, "record the receipt", signal);
-    return parseReceiveGoodsOutcome(response, body);
+    return parseLegacyReceiveGoodsOutcome(response, body);
   }
   if (!retryScope?.actorId?.trim() || !retryScope.organizationId?.trim()) {
     throw new ReceivingApiError(0, "Wait for your account and organization to finish loading before recording a delivery.");
@@ -242,7 +242,7 @@ export async function submitReceiveGoods(
   const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
   const attempt = await createReceiveGoodsAttempt(parsedAction.data, scope);
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({
@@ -256,21 +256,13 @@ export async function submitReceiveGoods(
         },
         intentId: attempt.intentId,
       }),
-    }, "record the receipt", signal, true);
+    }, "record the receipt", signal);
 
-    if (response.status === 404) {
-      ({ response, body } = await request("/api/purchasing", {
-        method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ ...parsedAction.data, intentId: attempt.intentId }),
-      }, "record the receipt", signal));
-    }
-
-    const outcome = parseReceiveGoodsOutcome(response, body);
+    const outcome = parseGoReceiveGoodsOutcome(response, body);
     if (outcome.kind === "completed") clearReceiveGoodsAttempt(attempt);
     return outcome;
   } catch (error) {
-    if (error instanceof ReceivingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    if (error instanceof ReceivingApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
       clearReceiveGoodsAttempt(attempt);
     }
     throw error;
@@ -292,25 +284,40 @@ async function createReceiveGoodsAttempt(action: ReceiveGoodsAction, scope: Rece
   }
 
   const storageKey = `${receiveGoodsActiveAttemptPrefix}${scopeDigest}`;
-  let stored: { fingerprint: string; intentId: string } | null;
-  try {
-    stored = parseReceiveGoodsAttempt(window.localStorage.getItem(storageKey));
-  } catch {
-    throw new ReceivingApiError(0, "Enable browser storage before recording a delivery so an uncertain receipt can be retried safely.");
-  }
-  if (stored && stored.fingerprint !== fingerprint) {
-    throw new ReceivingApiError(0, "A previous receipt result is unresolved. Retry the exact receipt or check receipt history before changing it.");
-  }
-  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+  return withReceiveGoodsReservationLock(storageKey, async () => {
+    let stored: { fingerprint: string; intentId: string } | null;
+    try {
+      stored = parseReceiveGoodsAttempt(window.localStorage.getItem(storageKey));
+    } catch {
+      throw new ReceivingApiError(0, "Enable browser storage before recording a delivery so an uncertain receipt can be retried safely.");
+    }
+    if (stored && stored.fingerprint !== fingerprint) {
+      throw new ReceivingApiError(0, "A previous receipt result is unresolved. Retry the exact receipt or check receipt history before changing it.");
+    }
+    if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
 
-  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+    const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+      const persisted = parseReceiveGoodsAttempt(window.localStorage.getItem(storageKey));
+      if (!persisted || persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId) throw new Error("saved attempt did not persist");
+      return attempt;
+    } catch {
+      throw new ReceivingApiError(0, "Enable browser storage before recording a delivery so an uncertain receipt can be retried safely.");
+    }
+  });
+}
+
+async function withReceiveGoodsReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new ReceivingApiError(0, "This browser cannot safely reserve a receipt action. Open it in a browser with Web Locks enabled before submitting the delivery.");
+  }
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
-    const persisted = parseReceiveGoodsAttempt(window.localStorage.getItem(storageKey));
-    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
-    return { ...attempt, intentId: persisted.intentId };
-  } catch {
-    throw new ReceivingApiError(0, "Enable browser storage before recording a delivery so an uncertain receipt can be retried safely.");
+    return await lockManager.request(`chaste:purchasing-receive-goods-write-marker-lock:${storageKey}`, { mode: "exclusive" }, reserve);
+  } catch (error) {
+    if (error instanceof ReceivingApiError) throw error;
+    throw new ReceivingApiError(0, "The browser could not reserve this receipt action safely. Retry after closing other Purchasing tabs.");
   }
 }
 
@@ -339,15 +346,30 @@ async function receiveGoodsDigest(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function parseReceiveGoodsOutcome(response: Response, body: unknown): ReceivingActionOutcome {
+function parsePendingReceiveGoodsOutcome(response: Response, body: unknown): ReceivingActionOutcome | null {
   if (response.status === 202) {
     const pending = PendingEnvelopeSchema.safeParse(body);
     if (!pending.success) throw new ReceivingApiError(202, "The Purchasing service returned an unexpected approval response.");
     return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This receiving action is gated; it completes once someone approves it." };
   }
+  return null;
+}
 
+function parseGoReceiveGoodsOutcome(response: Response, body: unknown): ReceivingActionOutcome {
+  const pending = parsePendingReceiveGoodsOutcome(response, body);
+  if (pending) return pending;
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  if (!response.ok || !envelope.success) throw new ReceivingApiError(response.status, "The Purchasing service returned an unexpected receipt result.");
+  const output = ReceiveGoodsOutputSchema.safeParse(envelope.data.data);
+  if (!output.success) throw new ReceivingApiError(response.status, "The Purchasing service returned an unexpected receipt result.");
+  return { kind: "completed", data: output.data };
+}
+
+function parseLegacyReceiveGoodsOutcome(response: Response, body: unknown): ReceivingActionOutcome {
+  const pending = parsePendingReceiveGoodsOutcome(response, body);
+  if (pending) return pending;
   const envelope = SuccessEnvelopeSchema.safeParse(body);
   const output = ReceiveGoodsOutputSchema.safeParse(envelope.success ? envelope.data.data : body);
-  if (!output.success) throw new ReceivingApiError(response.status, "The Purchasing service returned an unexpected receipt result.");
+  if (!response.ok || !output.success) throw new ReceivingApiError(response.status, "The Purchasing service returned an unexpected receipt result.");
   return { kind: "completed", data: output.data };
 }
