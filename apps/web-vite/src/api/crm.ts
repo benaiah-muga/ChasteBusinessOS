@@ -2,6 +2,19 @@ import { z } from "zod";
 
 const uuid = z.string().uuid();
 const stage = z.enum(["lead", "qualified", "proposal", "negotiation", "won", "lost"]);
+const CrmDealStageMoveInputSchema = z.object({
+  dealId: uuid,
+  stage,
+  lostReason: z.string().trim().max(500).optional(),
+}).strict().superRefine((input, context) => {
+  if (input.stage === "lost" && input.lostReason === undefined) {
+    context.addIssue({ code: "custom", path: ["lostReason"], message: "Add a short reason before marking this deal lost." });
+  }
+  if (input.lostReason !== undefined && input.lostReason.length < 3) {
+    context.addIssue({ code: "custom", path: ["lostReason"], message: "The lost reason must contain at least 3 characters." });
+  }
+});
+const CrmDealStageMoveOutputSchema = z.object({ moved: z.literal(true), stage }).strict();
 const contactMethod = z.enum(["email", "phone", "whatsapp", "other"]);
 
 export const CrmDealSchema = z.object({
@@ -199,30 +212,52 @@ export async function submitCrmDealStageMove(
   retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<CrmActionOutcome<{ moved: boolean; stage: string }>> {
   const useGo = useGoOverride ?? (typeof __GO_CRM_DEAL_STAGE_MOVE__ !== "undefined" && __GO_CRM_DEAL_STAGE_MOVE__);
-  const action = { action: "move", ...input };
+  const parsedInput = CrmDealStageMoveInputSchema.safeParse(input);
+  if (!parsedInput.success) throw new CrmApiError(0, "Check the deal and stage details before submitting.");
+  const action = { action: "move", ...parsedInput.data };
   if (!useGo) return submitCrmAction("/api/deals", action, signal);
-  if (!retryScope?.actorId?.trim() || !retryScope.organizationId?.trim()) {
+  const actorIdInput = retryScope?.actorId?.trim();
+  const organizationIdInput = retryScope?.organizationId?.trim();
+  const parsedActorId = uuid.safeParse(actorIdInput);
+  const parsedOrganizationId = uuid.safeParse(organizationIdInput);
+  const actorId = parsedActorId.success ? parsedActorId.data.toLowerCase() : null;
+  const organizationId = parsedOrganizationId.success ? parsedOrganizationId.data.toLowerCase() : null;
+  if (!actorId || !organizationId) {
     throw new CrmApiError(0, "CRM is waiting for your account and organization details. Wait for your organization to finish loading, then try again.");
   }
 
-  const attempt = await crmDealStageAttempt(input, retryScope);
+  const attempt = await crmDealStageAttempt(parsedInput.data, { actorId, organizationId });
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
-      body: JSON.stringify({ capabilityId: "crm.moveDealStage", input, intentId: attempt.intentId }),
+      body: JSON.stringify({ capabilityId: "crm.moveDealStage", input: parsedInput.data, intentId: attempt.intentId }),
     }, signal);
-    if (response.status === 404) {
-      ({ response, body } = await request("/api/deals", { method: "POST", body: JSON.stringify({ ...action, intentId: attempt.intentId }) }, signal));
-    }
-    const outcome = parseCrmActionOutcome<{ moved: boolean; stage: string }>(response, body);
+    const outcome = parseCrmDealStageMoveOutcome(response, body, parsedInput.data.stage);
     if (outcome.kind === "completed") await clearCrmDealStageAttempt(attempt.storageKey);
     return outcome;
   } catch (error) {
-    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
       await clearCrmDealStageAttempt(attempt.storageKey);
     }
     throw error;
   }
+}
+
+function parseCrmDealStageMoveOutcome(
+  response: Response,
+  body: unknown,
+  requestedStage: z.infer<typeof stage>,
+): CrmActionOutcome<{ moved: boolean; stage: string }> {
+  if (response.status === 202) {
+    const parsed = PendingSchema.safeParse(body);
+    if (!parsed.success) throw new CrmApiError(202, "The CRM service returned an unexpected approval response.", true);
+    return { kind: "pending", reason: parsed.data.reason ?? parsed.data.error ?? "This action is waiting for approval." };
+  }
+  const envelope = z.object({ ok: z.literal(true), data: CrmDealStageMoveOutputSchema }).strict().safeParse(body);
+  if (response.status !== 200 || !response.ok || !envelope.success || envelope.data.data.stage !== requestedStage) {
+    throw new CrmApiError(response.status, response.ok ? "The CRM service returned an unexpected deal stage result." : messageFor(response.status, body), true);
+  }
+  return { kind: "completed", data: envelope.data.data };
 }
 
 const CRM_TASK_INTENT_PREFIX = "chaste.crm.task-intent.v1:";
@@ -1075,54 +1110,87 @@ async function clearCrmTaskAttempt(storageKey: string): Promise<void> {
   catch { throw new CrmApiError(0, "The task was saved, but its retry marker could not be cleared. Reload CRM before submitting another task.", true); }
 }
 
-const crmDealStageIntents = new Map<string, string>();
-
-async function crmDealStageAttempt(input: { dealId: string; stage: string; lostReason?: string }, scope?: { actorId: string | null; organizationId: string | null }): Promise<{ storageKey: string; intentId: string }> {
+async function crmDealStageAttempt(input: z.infer<typeof CrmDealStageMoveInputSchema>, scope: { actorId: string; organizationId: string }): Promise<{ storageKey: string; intentId: string }> {
+  const reservationScope = JSON.stringify({ actorId: scope.actorId, organizationId: scope.organizationId, dealId: input.dealId });
   const canonical = JSON.stringify({
-    actorId: scope?.actorId ?? null,
-    organizationId: scope?.organizationId ?? null,
+    actorId: scope.actorId,
+    organizationId: scope.organizationId,
     dealId: input.dealId,
     stage: input.stage,
-    lostReason: input.lostReason?.trim() || null,
+    lostReason: input.lostReason ?? null,
   });
-  const canPersist = Boolean(scope?.actorId && scope.organizationId);
-  let fingerprint: string | null = null;
-  if (canPersist) {
-    try {
-      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
-      fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-    } catch {
-      // Use an in-memory attempt if WebCrypto is unavailable.
-    }
+  let reservationDigest: string;
+  let fingerprint: string;
+  try {
+    const encoder = new TextEncoder();
+    const [reservationHash, actionHash] = await Promise.all([
+      crypto.subtle.digest("SHA-256", encoder.encode(reservationScope)),
+      crypto.subtle.digest("SHA-256", encoder.encode(canonical)),
+    ]);
+    reservationDigest = Array.from(new Uint8Array(reservationHash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    fingerprint = Array.from(new Uint8Array(actionHash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    throw new CrmApiError(0, "CRM retry protection is unavailable. Check browser security settings before changing the deal.", true);
   }
-  const storageKey = fingerprint ? `chaste.crm.deal-stage.intent.v1:${fingerprint}` : `memory:${canonical}`;
-  let intentId: string | null = null;
-  if (fingerprint) {
+  const storageKey = `chaste.crm.deal-stage.intent.v1:${reservationDigest}`;
+  return withCrmDealStageReservationLock(storageKey, async () => {
+    let raw: string | null;
     try {
-      intentId = sessionStorage.getItem(storageKey);
+      raw = window.localStorage.getItem(storageKey);
     } catch {
-      // The in-memory copy remains available for this page.
+      throw new CrmApiError(0, "Enable browser storage before changing a deal so an uncertain stage move can be retried safely.", true);
     }
-  }
-  intentId ??= crmDealStageIntents.get(storageKey) ?? crypto.randomUUID();
-  crmDealStageIntents.set(storageKey, intentId);
-  if (fingerprint) {
+    if (raw !== null) {
+      let stored: { fingerprint: string; intentId: string };
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        const marker = z.object({ fingerprint: z.string().regex(/^[0-9a-f]{64}$/), intentId: uuid }).strict().safeParse(parsed);
+        if (!marker.success) throw new Error("saved CRM stage retry marker is invalid");
+        stored = marker.data;
+      } catch {
+        throw new CrmApiError(0, "A saved CRM stage retry marker is invalid. Check the deal before trying again.", true);
+      }
+      if (stored.fingerprint !== fingerprint) {
+        throw new CrmApiError(0, "A previous stage move for this deal is unresolved. Retry that exact move or check the deal before changing it.", true);
+      }
+      return { storageKey, intentId: stored.intentId };
+    }
+
+    let marker: { fingerprint: string; intentId: string };
     try {
-      sessionStorage.setItem(storageKey, intentId);
+      marker = { fingerprint, intentId: crypto.randomUUID() };
     } catch {
-      // The in-memory copy still keeps retries on the same attempt.
+      throw new CrmApiError(0, "CRM retry protection is unavailable. Check browser security settings before changing the deal.", true);
     }
+    try {
+      const serialized = JSON.stringify(marker);
+      window.localStorage.setItem(storageKey, serialized);
+      if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("stage retry marker did not persist");
+    } catch {
+      throw new CrmApiError(0, "Enable browser storage before changing a deal so an uncertain stage move can be retried safely.", true);
+    }
+    return { storageKey, intentId: marker.intentId };
+  });
+}
+
+async function withCrmDealStageReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new CrmApiError(0, "This browser cannot safely reserve a CRM stage move. Open CRM in a browser with Web Locks enabled before submitting.", true);
   }
-  return { storageKey, intentId };
+  try {
+    return await lockManager.request(`chaste:crm-deal-stage-write-marker-lock:${storageKey}`, { mode: "exclusive" }, reserve);
+  } catch (error) {
+    if (error instanceof CrmApiError) throw error;
+    throw new CrmApiError(0, "The browser could not safely coordinate this CRM stage move across tabs. Close other CRM tabs and try again.", true);
+  }
 }
 
 async function clearCrmDealStageAttempt(storageKey: string): Promise<void> {
-  crmDealStageIntents.delete(storageKey);
-  if (!storageKey.startsWith("chaste.crm.deal-stage.intent.v1:")) return;
   try {
-    sessionStorage.removeItem(storageKey);
+    window.localStorage.removeItem(storageKey);
   } catch {
-    // The terminal result is still cleared in memory.
+    throw new CrmApiError(0, "The stage move result was received, but its retry marker could not be cleared. Reload CRM before submitting the same move again.", true);
   }
 }
 

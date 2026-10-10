@@ -171,6 +171,11 @@ The full v1 changelog is preserved at the bottom of this file.
   stay on Go, malformed success envelopes are rejected, and the aggregate
   Purchasing page uses the scoped Go receipt client.
 
+- Vite CRM deal-stage moves now reserve one durable intent per actor,
+  organization, and deal. Exact retries reuse it, changed moves stay blocked
+  while an earlier result is unresolved, and Go treats foreign-org deal IDs as
+  not found.
+
 - Vite Projects create, archive, and task writes now use direct Go capabilities
   by default. Set `CHASTE_GO_PROJECTS_WRITES=0` to send them through the
   existing `POST /api/projects` route, which remains Go-backed while

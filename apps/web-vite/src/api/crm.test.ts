@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
@@ -8,7 +8,29 @@ const savedViewFilters = { status: "active" as const, owner: "all", staleOnly: f
 
 afterEach(() => { vi.unstubAllGlobals(); window.localStorage.clear(); });
 
+function stubCrmDealStageLocks() {
+  const tails = new Map<string, Promise<void>>();
+  const request = vi.fn(async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+    const previous = tails.get(name) ?? Promise.resolve();
+    let release = (): void => {};
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    tails.set(name, current);
+    await previous;
+    try { return await callback(); }
+    finally {
+      release();
+      if (tails.get(name) === current) tails.delete(name);
+    }
+  });
+  const testNavigator = Object.create(navigator) as Navigator;
+  Object.defineProperty(testNavigator, "locks", { configurable: true, value: { request } });
+  vi.stubGlobal("navigator", testNavigator);
+  return request;
+}
+
 describe("CRM API client", () => {
+  beforeEach(() => { stubCrmDealStageLocks(); });
+
   it("reads and validates deals directly from the Go CRM endpoint with the same-origin session", async () => {
     const deal = { id: dealId, title: "Renewal", stage: "proposal", valueMinor: 250000, note: null, customerId, customerName: "Northwind", updatedAt: "2026-09-29T12:00:00.000Z" };
     const fetchMock = vi.fn(async () => Response.json({ deals: [deal] }));
@@ -151,19 +173,38 @@ describe("CRM API client", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId).not.toBe(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId);
   });
 
-  it("reuses an intent when a missing Go route falls back to legacy", async () => {
+  it("fails closed and retains the exact intent when the selected Go route returns 404", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { moved: true, stage: "lost" } }));
     vi.stubGlobal("fetch", fetchMock);
     const input = { dealId, stage: "lost" as const, lostReason: "Customer chose another vendor" };
 
-    await submitCrmDealStageMove(input, undefined, true, { actorId: customerId, organizationId: dealId });
+    const scope = { actorId: customerId, organizationId: dealId };
+    await expect(submitCrmDealStageMove(input, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await submitCrmDealStageMove(input, undefined, true, scope);
     const goBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-    const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/deals"]);
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
     expect(goBody).toMatchObject({ capabilityId: "crm.moveDealStage", input, intentId: expect.any(String) });
-    expect(legacyBody).toEqual({ action: "move", ...input, intentId: goBody.intentId });
+    expect(retryBody).toEqual(goBody);
+  });
+
+  it("normalizes the exact Go payload and rejects unexpected stage results", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { moved: true, stage: "proposal", extra: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { dealId, stage: "lost" as const, lostReason: "  Customer chose another vendor  " };
+
+    await expect(submitCrmDealStageMove(input, undefined, true, crmRetryScope)).rejects.toMatchObject({
+      name: "CrmApiError",
+      message: "The CRM service returned an unexpected deal stage result.",
+      requestMayHaveReachedServer: true,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "crm.moveDealStage",
+      input: { ...input, lostReason: "Customer chose another vendor" },
+    });
+    await expect(submitCrmDealStageMove({ ...input, lostReason: "ab" }, undefined, true, crmRetryScope)).rejects.toMatchObject({ status: 0 });
   });
 
   it("does not fall back to legacy for non-404 Go failures and retains the retry intent", async () => {
@@ -445,6 +486,72 @@ describe("CRM API client", () => {
       ...input,
       intentId: expect.any(String),
     });
+  });
+
+  it("reserves and reuses one durable intent across concurrent stage submissions", async () => {
+    const lockRequest = stubCrmDealStageLocks();
+    const responses: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => responses.push(resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { dealId, stage: "proposal" as const };
+
+    const first = submitCrmDealStageMove(input, undefined, true, crmRetryScope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const second = submitCrmDealStageMove(input, undefined, true, crmRetryScope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(lockRequest).toHaveBeenCalledWith(expect.stringContaining("chaste.crm.deal-stage.intent.v1:"), { mode: "exclusive" }, expect.any(Function));
+    const firstIntent = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
+    const secondIntent = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId;
+    expect(secondIntent).toBe(firstIntent);
+
+    responses.forEach((resolve) => resolve(Response.json({ ok: true, data: { moved: true, stage: "proposal" } })));
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+  });
+
+  it("blocks a changed stage while the prior stage result is unresolved", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("connection lost"));
+    vi.stubGlobal("fetch", fetchMock);
+    const scope = crmRetryScope;
+
+    await expect(submitCrmDealStageMove({ dealId, stage: "proposal" }, undefined, true, scope)).rejects.toMatchObject({
+      status: 0,
+      requestMayHaveReachedServer: true,
+    });
+    const firstIntent = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
+    await expect(submitCrmDealStageMove({ dealId, stage: "won" }, undefined, true, scope)).rejects.toMatchObject({
+      status: 0,
+      message: "A previous stage move for this deal is unresolved. Retry that exact move or check the deal before changing it.",
+      requestMayHaveReachedServer: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(submitCrmDealStageMove({ dealId, stage: "proposal" }, undefined, true, scope)).rejects.toMatchObject({ status: 0 });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId).toBe(firstIntent);
+  });
+
+  it("fails closed when Web Crypto, durable storage, or Web Locks are unavailable", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { dealId, stage: "proposal" as const };
+    const scope = crmRetryScope;
+    const webCrypto = globalThis.crypto;
+
+    const brokenCrypto = Object.create(webCrypto) as Crypto;
+    Object.defineProperty(brokenCrypto, "subtle", { configurable: true, value: { digest: vi.fn().mockRejectedValue(new Error("digest unavailable")) } });
+    vi.stubGlobal("crypto", brokenCrypto);
+    await expect(submitCrmDealStageMove(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.stubGlobal("crypto", webCrypto);
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("storage unavailable"); });
+    await expect(submitCrmDealStageMove(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, "locks", { configurable: true, value: undefined });
+    vi.stubGlobal("navigator", testNavigator);
+    await expect(submitCrmDealStageMove(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("retries Go customer deactivation with its exact scoped intent and never falls back after a 404", async () => {

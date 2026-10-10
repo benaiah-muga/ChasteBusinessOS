@@ -175,6 +175,9 @@ func ParseMoveDealStageInput(raw json.RawMessage) (MoveDealStageInput, error) {
 	if err != nil {
 		return MoveDealStageInput{}, err
 	}
+	if !projectUUIDPattern.MatchString(dealID) {
+		return MoveDealStageInput{}, errors.New("dealId must be a valid UUID")
+	}
 	stage, err := requiredCRMDealString(fields, "stage", 1, 0)
 	if err != nil {
 		return MoveDealStageInput{}, err
@@ -311,12 +314,15 @@ func moveDealStage(ctx context.Context, tx pgx.Tx, orgID string, input MoveDealS
 	if input.Stage == "lost" {
 		lostReason = input.LostReason
 	}
-	_, err := tx.Exec(ctx, `
+	result, err := tx.Exec(ctx, `
 		UPDATE deals
 		SET stage = $3, updated_at = $4, lost_reason = $5
 		WHERE id = $1::uuid AND org_id = $2::uuid`, input.DealID, orgID, input.Stage, now, lostReason)
 	if err != nil {
 		return MoveDealStageOutput{}, err
+	}
+	if result.RowsAffected() == 0 {
+		return MoveDealStageOutput{}, errors.New("deal not found")
 	}
 	return MoveDealStageOutput{Moved: true, Stage: input.Stage}, nil
 }

@@ -113,6 +113,7 @@ func TestGoCRMDealsParsersMatchCRMContracts(t *testing.T) {
 
 	for _, raw := range []string{
 		`{"dealId":null,"stage":"lead"}`,
+		`{"dealId":"not-a-uuid","stage":"lead"}`,
 		`{"dealId":"` + validID + `","stage":null}`,
 		`{"dealId":"` + validID + `","stage":"unknown"}`,
 		`{"dealId":"` + validID + `","stage":"lost"}`,
@@ -309,10 +310,12 @@ func TestGoCRMDealsEnforceTenancyConversionAuditsAndReceiptReplay(t *testing.T) 
 		t.Fatal(err)
 	}
 	movePayload := json.RawMessage(fmt.Sprintf(`{"dealId":%q,"stage":"won"}`, foreignDealID))
-	moved := executeCRMDeal(t, fx, moveDealStageCapabilityID, movePayload, "crm-deal-foreign-move")
-	var moveOutput MoveDealStageOutput
-	if err := json.Unmarshal(moved.Data, &moveOutput); err != nil || !moved.OK || !moveOutput.Moved || moveOutput.Stage != "won" {
-		t.Fatalf("foreign move result=%+v output=%+v err=%v", moved, moveOutput, err)
+	if _, err := executeCRMDealWithError(fx, moveDealStageCapabilityID, movePayload, "crm-deal-foreign-move"); err == nil || err.Error() != "deal not found" {
+		t.Fatalf("foreign move error=%v, want deal not found", err)
+	}
+	missingDealPayload := json.RawMessage(fmt.Sprintf(`{"dealId":%q,"stage":"won"}`, "99999999-9999-4999-8999-999999999999"))
+	if _, err := executeCRMDealWithError(fx, moveDealStageCapabilityID, missingDealPayload, "crm-deal-missing-move"); err == nil || err.Error() != "deal not found" {
+		t.Fatalf("missing deal move error=%v, want deal not found", err)
 	}
 	var foreignStage string
 	if err := fx.owner.QueryRow(fx.ctx, `SELECT stage FROM deals WHERE id=$1::uuid AND org_id=$2::uuid`, foreignDealID, fx.otherOrgID).Scan(&foreignStage); err != nil {
@@ -381,8 +384,16 @@ func TestGoCRMDealsLostReasonClearsWhenLeavingLostStage(t *testing.T) {
 	fx := newExecutorFixture(t)
 	dealID := seedCRMDeal(t, fx, fx.orgID, "At risk", "lead", nil)
 	lostPayload := json.RawMessage(fmt.Sprintf(`{"dealId":%q,"stage":"lost","lostReason":"  budget freeze  "}`, dealID))
-	if result := executeCRMDeal(t, fx, moveDealStageCapabilityID, lostPayload, "crm-deal-lost-reason"); !result.OK {
-		t.Fatalf("move to lost result=%+v", result)
+	first := executeCRMDeal(t, fx, moveDealStageCapabilityID, lostPayload, "crm-deal-lost-reason")
+	if !first.OK || first.Replayed {
+		t.Fatalf("first move result=%+v, want a newly completed move", first)
+	}
+	replay := executeCRMDeal(t, fx, moveDealStageCapabilityID, lostPayload, "crm-deal-lost-reason")
+	if !replay.OK || !replay.Replayed || string(replay.Data) != string(first.Data) {
+		t.Fatalf("exact stage retry result=%+v, want the original output as a replay", replay)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2`, fx.orgID, moveDealStageCapabilityID); got != 1 {
+		t.Fatalf("stage move audit events=%d, want one after exact retry", got)
 	}
 	var stage string
 	var lostReason *string
