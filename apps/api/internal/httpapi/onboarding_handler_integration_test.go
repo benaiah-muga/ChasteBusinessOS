@@ -143,6 +143,21 @@ func TestGoOnboardingHandlerDatabaseBoundary(t *testing.T) {
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated malformed request status=%d, want 401", unauthorized.Code)
 	}
+	noWorkspaceGET := httptest.NewRecorder()
+	handler.ServeHTTP(noWorkspaceGET, newOnboardingHTTPRequest(t, http.MethodGet, "/api/onboarding", "", signedSessionCookie(createToken, secret), ""))
+	if noWorkspaceGET.Code != http.StatusOK || strings.TrimSpace(noWorkspaceGET.Body.String()) != `{"state":null,"steps":[]}` {
+		t.Fatalf("authenticated GET without workspace status=%d body=%s, want null state and empty steps", noWorkspaceGET.Code, noWorkspaceGET.Body.String())
+	}
+	unauthorizedGET := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedGET, httptest.NewRequest(http.MethodGet, "/api/onboarding", nil))
+	if unauthorizedGET.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated GET status=%d, want 401", unauthorizedGET.Code)
+	}
+	noWorkspacePATCH := httptest.NewRecorder()
+	handler.ServeHTTP(noWorkspacePATCH, newOnboardingHTTPRequest(t, http.MethodPatch, "/api/onboarding", bearerToken, "", `{"complete":true}`))
+	if noWorkspacePATCH.Code != http.StatusConflict || !strings.Contains(noWorkspacePATCH.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("authenticated PATCH without workspace status=%d body=%s, want 409 not_found", noWorkspacePATCH.Code, noWorkspacePATCH.Body.String())
+	}
 	malformed := newOnboardingHTTPRequest(t, http.MethodPost, "/api/onboarding", createToken, "", `{"orgName":"x"}`)
 	malformedResponse := httptest.NewRecorder()
 	handler.ServeHTTP(malformedResponse, malformed)
@@ -251,6 +266,75 @@ func TestGoOnboardingHandlerDatabaseBoundary(t *testing.T) {
 	}
 	if embedder.calls.Load() != 1 {
 		t.Fatalf("embedding attempts after replay=%d, want no duplicate embedding upgrade", embedder.calls.Load())
+	}
+
+	stateGET := httptest.NewRecorder()
+	handler.ServeHTTP(stateGET, newOnboardingHTTPRequest(t, http.MethodGet, "/api/onboarding", "", signedSessionCookie(createToken, secret), ""))
+	if stateGET.Code != http.StatusOK {
+		t.Fatalf("onboarding state GET status=%d body=%s", stateGET.Code, stateGET.Body.String())
+	}
+	var statePayload struct {
+		State *onboardingState          `json:"state"`
+		Steps []onboardingChecklistStep `json:"steps"`
+	}
+	if err := json.Unmarshal(stateGET.Body.Bytes(), &statePayload); err != nil {
+		t.Fatal(err)
+	}
+	if statePayload.State == nil || statePayload.State.Path != "import" || statePayload.State.Steps["import_customers"] != "pending" || len(statePayload.Steps) != 1 || statePayload.Steps[0].Key != "import_customers" {
+		t.Fatalf("onboarding GET payload=%+v, want persisted import state and checklist step", statePayload)
+	}
+	deferPatchBody := `{"step":"import_customers","status":"skipped"}`
+	patchRequest := newOnboardingHTTPRequest(t, http.MethodPatch, "/api/onboarding", createToken, "", deferPatchBody)
+	patchResponse := httptest.NewRecorder()
+	handler.ServeHTTP(patchResponse, patchRequest)
+	if patchResponse.Code != http.StatusOK {
+		t.Fatalf("onboarding step PATCH status=%d body=%s", patchResponse.Code, patchResponse.Body.String())
+	}
+	var patchPayload struct {
+		State onboardingState `json:"state"`
+	}
+	if err := json.Unmarshal(patchResponse.Body.Bytes(), &patchPayload); err != nil {
+		t.Fatal(err)
+	}
+	if patchPayload.State.Steps["import_customers"] != "skipped" || patchPayload.State.Path != "import" {
+		t.Fatalf("onboarding PATCH state=%+v, want updated step and preserved path", patchPayload.State)
+	}
+	repeatedDefer := httptest.NewRecorder()
+	handler.ServeHTTP(repeatedDefer, newOnboardingHTTPRequest(t, http.MethodPatch, "/api/onboarding", createToken, "", deferPatchBody))
+	if repeatedDefer.Code != http.StatusOK {
+		t.Fatalf("repeated onboarding deferral status=%d body=%s", repeatedDefer.Code, repeatedDefer.Body.String())
+	}
+	var stepNotificationCount int
+	var stepNotificationBody, stepNotificationHref string
+	if err := owner.QueryRow(ctx, `
+		SELECT count(*), min(body), min(href) FROM public.notifications
+		WHERE org_id=$1::uuid AND user_id=$2::uuid AND title='Bring in your customers - skipped during setup'`,
+		first.OrgID, expectedActor,
+	).Scan(&stepNotificationCount, &stepNotificationBody, &stepNotificationHref); err != nil {
+		t.Fatal(err)
+	}
+	if stepNotificationCount != 1 || stepNotificationBody != "Invoices, credit limits and payment reminders all hang off a customer record." || stepNotificationHref != "/sales" {
+		t.Fatalf("step notification count=%d body=%q href=%q, want one legacy-equivalent notification", stepNotificationCount, stepNotificationBody, stepNotificationHref)
+	}
+	markDone := httptest.NewRecorder()
+	handler.ServeHTTP(markDone, newOnboardingHTTPRequest(t, http.MethodPatch, "/api/onboarding", createToken, "", `{"step":"import_customers","status":"done"}`))
+	if markDone.Code != http.StatusOK {
+		t.Fatalf("mark onboarding step done status=%d body=%s", markDone.Code, markDone.Body.String())
+	}
+	invalidPatch := httptest.NewRecorder()
+	handler.ServeHTTP(invalidPatch, newOnboardingHTTPRequest(t, http.MethodPatch, "/api/onboarding", createToken, "", `{"step":"unknown","status":"done"}`))
+	if invalidPatch.Code != http.StatusBadRequest {
+		t.Fatalf("invalid onboarding PATCH status=%d body=%s, want 400", invalidPatch.Code, invalidPatch.Body.String())
+	}
+	completePatch := httptest.NewRecorder()
+	handler.ServeHTTP(completePatch, newOnboardingHTTPRequest(t, http.MethodPatch, "/api/onboarding", createToken, "", `{"complete":true}`))
+	if completePatch.Code != http.StatusOK || !strings.Contains(completePatch.Body.String(), `"finishedAt":"`) {
+		t.Fatalf("complete onboarding PATCH status=%d body=%s, want finishedAt", completePatch.Code, completePatch.Body.String())
+	}
+	finishedGET := httptest.NewRecorder()
+	handler.ServeHTTP(finishedGET, newOnboardingHTTPRequest(t, http.MethodGet, "/api/onboarding", createToken, "", ""))
+	if finishedGET.Code != http.StatusOK || !strings.Contains(finishedGET.Body.String(), `"steps":[]`) {
+		t.Fatalf("finished onboarding GET status=%d body=%s, want empty checklist", finishedGET.Code, finishedGET.Body.String())
 	}
 	if err := owner.QueryRow(ctx, `SELECT count(*) FROM public.ledger_events WHERE org_id=$1::uuid AND kind='organization.created'`, first.OrgID).Scan(&eventCount); err != nil {
 		t.Fatal(err)

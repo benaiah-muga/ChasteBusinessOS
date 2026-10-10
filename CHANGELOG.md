@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Go now serves onboarding state reads and setup-step updates for the Vite
+  wizard. Session identity and organization scope are resolved by the Go API;
+  changed deferred steps record a notification in the same transaction.
+
 - Vite Projects direct Go writes now reserve and clear retry intents under a
   cross-tab Web Lock. Project actions fail closed before dispatch when Web
   Locks are unavailable, preventing concurrent tabs from creating competing

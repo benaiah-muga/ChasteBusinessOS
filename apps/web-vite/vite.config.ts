@@ -194,9 +194,8 @@ export default defineConfig(({ mode }) => {
       port: 3000,
       strictPort: true,
       proxy: {
-        // The catch-all keeps transitional routes on Next. Onboarding POST
-        // reaches Go through Next unless the explicit Vite selector is enabled;
-        // onboarding GET and PATCH remain on the legacy handlers for now.
+        // The catch-all keeps explicit rollback routes available while the
+        // onboarding selector sends its session-authenticated methods to Go.
         "/api/health": {
           target: goApiOrigin,
         },

@@ -64,6 +64,18 @@ type onboardingResponse struct {
 	Replayed bool   `json:"replayed"`
 }
 
+type onboardingState struct {
+	Path       string            `json:"path"`
+	Steps      map[string]string `json:"steps"`
+	StartedAt  string            `json:"startedAt"`
+	FinishedAt string            `json:"finishedAt,omitempty"`
+}
+
+type onboardingChecklistStep struct {
+	Key    string `json:"key"`
+	Status string `json:"status"`
+}
+
 // NewGoOnboardingHandler serves session-owned workspace creation. A nil
 // embedder keeps creation available when the optional embedding provider is
 // unavailable, matching the legacy best-effort upgrade behavior.
@@ -103,8 +115,8 @@ func NewGoOnboardingHandler(
 
 func (h *onboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
+	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodPatch {
+		w.Header().Set("Allow", "GET, POST, PATCH")
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
@@ -122,12 +134,42 @@ func (h *onboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, onboardingError("unauthorized", "Your session has expired. Sign in again to continue."))
 		return
 	}
-	if !bearer && !sameOriginCapabilityRequest(r, h.trustedProxyCIDRs) {
+	if r.Method != http.MethodGet && !bearer && !sameOriginCapabilityRequest(r, h.trustedProxyCIDRs) {
 		writeJSON(w, http.StatusForbidden, onboardingError("forbidden", "This request could not be verified. Refresh the page and try again."))
 		return
 	}
-	if !resolved.EmailVerified {
+	if r.Method == http.MethodPost && !resolved.EmailVerified {
 		writeJSON(w, http.StatusForbidden, onboardingError("email_not_verified", "Verify your email before creating a workspace."))
+		return
+	}
+	if r.Method != http.MethodPost {
+		if resolved.OrgID == nil {
+			if r.Method == http.MethodGet {
+				writeJSON(w, http.StatusOK, map[string]any{"state": nil, "steps": []onboardingChecklistStep{}})
+			} else {
+				writeJSON(w, http.StatusConflict, onboardingError("not_found", "Set up your workspace first."))
+			}
+			return
+		}
+		if r.Method == http.MethodGet {
+			state, err := h.readState(r.Context(), *resolved.OrgID)
+			if err != nil {
+				h.failState(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"state": state, "steps": onboardingChecklist(state)})
+			return
+		}
+		state, err := h.updateState(w, r, *resolved.OrgID, resolved.UserID)
+		if err != nil {
+			status, response := onboardingStateFailure(err)
+			if status >= http.StatusInternalServerError && h.logger != nil {
+				h.logger.Error("Go onboarding state update failed", "error", err)
+			}
+			writeJSON(w, status, response)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]onboardingState{"state": state})
 		return
 	}
 
@@ -172,6 +214,188 @@ func (h *onboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		orgID, description := result.OrgID, body.businessDescription
 		go h.upgradeEmbedding(orgID, description)
 	}
+}
+
+func (h *onboardingHandler) failState(w http.ResponseWriter, err error) {
+	status, response := onboardingStateFailure(err)
+	if status >= http.StatusInternalServerError && h.logger != nil {
+		h.logger.Error("Go onboarding state read failed", "error", err)
+	}
+	writeJSON(w, status, response)
+}
+
+func onboardingStateFailure(err error) (int, map[string]string) {
+	if errors.Is(err, errOnboardingOrgNotFound) {
+		return http.StatusConflict, onboardingError("not_found", "Set up your workspace first.")
+	}
+	if errors.Is(err, errInvalidOnboardingUpdate) {
+		return http.StatusBadRequest, onboardingError("invalid", "That doesn't look right.")
+	}
+	return http.StatusInternalServerError, onboardingError("server_error", "Workspace setup state could not be saved. Try again.")
+}
+
+var (
+	errOnboardingOrgNotFound   = errors.New("onboarding organization not found")
+	errInvalidOnboardingUpdate = errors.New("invalid onboarding update")
+)
+
+var onboardingStepKeys = map[string]bool{
+	"business_profile": true,
+	"import_customers": true,
+	"import_products":  true,
+	"connect_source":   true,
+	"invite_team":      true,
+}
+
+type onboardingStepMeta struct {
+	title string
+	why   string
+	href  string
+}
+
+var onboardingStepMetadata = map[string]onboardingStepMeta{
+	"business_profile": {title: "Describe your business", why: "Your AI workmate reads this once and never asks again. Without it, it guesses.", href: "/settings"},
+	"import_customers": {title: "Bring in your customers", why: "Invoices, credit limits and payment reminders all hang off a customer record.", href: "/sales"},
+	"import_products":  {title: "Bring in your products", why: "Quotes and invoices price from your catalog instead of retyping every line.", href: "/products"},
+	"connect_source":   {title: "Connect where your data lives", why: "Live connectors keep your books current without exporting files by hand.", href: "/settings"},
+	"invite_team":      {title: "Invite your team", why: "Everyone works under their own identity, so the audit trail names a person.", href: "/team"},
+}
+
+func (h *onboardingHandler) readState(ctx context.Context, orgID string) (*onboardingState, error) {
+	return dbx.WithOrgTx(ctx, h.pool, orgID, func(tx pgx.Tx) (*onboardingState, error) {
+		var raw []byte
+		if err := tx.QueryRow(ctx, `SELECT settings FROM organizations WHERE id=$1::uuid`, orgID).Scan(&raw); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		var settings map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &settings); err != nil || settings == nil || len(settings["onboarding"]) == 0 {
+			return nil, nil
+		}
+		state := parseOnboardingState(raw)
+		return &state, nil
+	})
+}
+
+func onboardingChecklist(state *onboardingState) []onboardingChecklistStep {
+	steps := []onboardingChecklistStep{}
+	if state == nil || state.FinishedAt != "" {
+		return steps
+	}
+	for _, key := range []string{"business_profile", "import_customers", "import_products", "connect_source", "invite_team"} {
+		status := state.Steps[key]
+		if status == "pending" || status == "skipped" {
+			steps = append(steps, onboardingChecklistStep{Key: key, Status: status})
+		}
+	}
+	return steps
+}
+
+func (h *onboardingHandler) updateState(w http.ResponseWriter, r *http.Request, orgID, userID string) (onboardingState, error) {
+	var body map[string]json.RawMessage
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxOnboardingBodyBytes))
+	if err := decoder.Decode(&body); err != nil || body == nil {
+		return onboardingState{}, errInvalidOnboardingUpdate
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return onboardingState{}, errInvalidOnboardingUpdate
+	}
+	var state onboardingState
+	_, err := dbx.WithOrgTx(r.Context(), h.pool, orgID, func(tx pgx.Tx) (struct{}, error) {
+		var raw []byte
+		if err := tx.QueryRow(r.Context(), `SELECT settings FROM organizations WHERE id=$1::uuid FOR UPDATE`, orgID).Scan(&raw); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return struct{}{}, errOnboardingOrgNotFound
+			}
+			return struct{}{}, err
+		}
+		state = parseOnboardingState(raw)
+		if complete, exists := body["complete"]; exists {
+			var value bool
+			if len(body) != 1 || json.Unmarshal(complete, &value) != nil || !value {
+				return struct{}{}, errInvalidOnboardingUpdate
+			}
+			now := time.Now().UTC().Format(time.RFC3339Nano)
+			state.FinishedAt = now
+		} else {
+			var step, status string
+			if len(body) != 2 || json.Unmarshal(body["step"], &step) != nil || json.Unmarshal(body["status"], &status) != nil || !onboardingStepKeys[step] || (status != "done" && status != "pending" && status != "skipped") {
+				return struct{}{}, errInvalidOnboardingUpdate
+			}
+			previous := state.Steps[step]
+			state.Steps[step] = status
+			if status != "done" && previous != status {
+				meta := onboardingStepMetadata[step]
+				note := "left for later"
+				if status == "skipped" {
+					note = "skipped during setup"
+				}
+				if _, err := tx.Exec(r.Context(), `
+					INSERT INTO public.notifications (org_id, user_id, kind, title, body, href)
+					VALUES ($1::uuid, $2::uuid, 'system', $3, $4, $5)`,
+					orgID, userID, meta.title+" - "+note, meta.why, meta.href); err != nil {
+					return struct{}{}, err
+				}
+			}
+		}
+		encoded, err := json.Marshal(state)
+		if err != nil {
+			return struct{}{}, err
+		}
+		var settings []byte
+		if len(raw) == 0 || string(raw) == "null" {
+			settings = []byte(`{}`)
+		} else {
+			settings = raw
+			var valid map[string]json.RawMessage
+			if err := json.Unmarshal(settings, &valid); err != nil || valid == nil {
+				return struct{}{}, errors.New("stored organization settings are malformed")
+			}
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE organizations SET settings = jsonb_set($2::jsonb, '{onboarding}', $3::jsonb, true) WHERE id=$1::uuid`, orgID, settings, encoded); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, nil
+	})
+	return state, err
+}
+
+func parseOnboardingState(raw []byte) onboardingState {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	state := onboardingState{Path: "fresh", Steps: map[string]string{}, StartedAt: now}
+	if len(raw) == 0 {
+		return state
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &settings); err != nil || settings == nil {
+		return state
+	}
+	var stored map[string]json.RawMessage
+	if err := json.Unmarshal(settings["onboarding"], &stored); err != nil || stored == nil {
+		return state
+	}
+	var path, startedAt, finishedAt string
+	if json.Unmarshal(stored["path"], &path) == nil && (path == "fresh" || path == "import" || path == "connect") {
+		state.Path = path
+	}
+	if json.Unmarshal(stored["startedAt"], &startedAt) == nil && startedAt != "" {
+		state.StartedAt = startedAt
+	}
+	if json.Unmarshal(stored["finishedAt"], &finishedAt) == nil && finishedAt != "" {
+		state.FinishedAt = finishedAt
+	}
+	var steps map[string]string
+	if json.Unmarshal(stored["steps"], &steps) == nil {
+		for step, status := range steps {
+			if onboardingStepKeys[step] && (status == "done" || status == "pending" || status == "skipped") {
+				state.Steps[step] = status
+			}
+		}
+	}
+	return state
 }
 
 func (h *onboardingHandler) resolveRequestSession(r *http.Request) (string, *session.ResolvedUser, bool, error) {
@@ -401,7 +625,9 @@ func MountGoOnboardingRoute(base, route http.Handler) http.Handler {
 		return base
 	}
 	mux := http.NewServeMux()
+	mux.Handle("GET /api/onboarding", route)
 	mux.Handle("POST /api/onboarding", route)
+	mux.Handle("PATCH /api/onboarding", route)
 	if base != nil {
 		mux.Handle("/", base)
 	}

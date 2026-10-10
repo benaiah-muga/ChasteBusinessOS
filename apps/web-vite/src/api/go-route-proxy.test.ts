@@ -973,19 +973,23 @@ describe("Vite Go route proxy selection", () => {
     });
   });
 
-  it("routes only POST onboarding when the explicit selector is enabled", () => {
+  it("routes onboarding reads and writes when the explicit selector is enabled", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(defaults.onboarding).toBe(false);
     expect(isGoRouteRequest(defaults, "POST", "/api/onboarding")).toBe(false);
 
     const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "1" });
+    expect(isGoRouteRequest(enabled, "GET", "/api/onboarding")).toBe(true);
     expect(isGoRouteRequest(enabled, "POST", "/api/onboarding?source=wizard")).toBe(true);
-    expect(isGoRouteRequest(enabled, "GET", "/api/onboarding")).toBe(false);
-    expect(isGoRouteRequest(enabled, "PATCH", "/api/onboarding")).toBe(false);
+    expect(isGoRouteRequest(enabled, "PATCH", "/api/onboarding")).toBe(true);
     expect(isGoRouteRequest(enabled, "PUT", "/api/onboarding")).toBe(false);
+    expect(isGoRouteRequest(enabled, "DELETE", "/api/onboarding")).toBe(false);
     expect(isGoRouteRequest(enabled, "POST", "/api/onboarding/extra")).toBe(false);
     expect(isGoRouteRequest(enabled, "POST", "/api/onboarding/")).toBe(false);
-    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "0" }), "POST", "/api/onboarding")).toBe(false);
+    const rollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "0" });
+    expect(isGoRouteRequest(rollback, "GET", "/api/onboarding")).toBe(false);
+    expect(isGoRouteRequest(rollback, "POST", "/api/onboarding")).toBe(false);
+    expect(isGoRouteRequest(rollback, "PATCH", "/api/onboarding")).toBe(false);
   });
 
   it("allows the analytics read proxy to be disabled for rollback", () => {
@@ -1501,9 +1505,20 @@ describe("Vite Go route proxy selection", () => {
     for (const method of ["GET", "PATCH"] as const) {
       const transitionRequest = await fetch(`${onboardingOrigin}/api/onboarding`, {
         method,
-        ...(method === "PATCH" ? { headers: { "content-type": "application/json" }, body: JSON.stringify({ complete: true }) } : {}),
+        headers: {
+          cookie: "better-auth.session_token=browser-session",
+          authorization: "Bearer browser-bearer-token",
+          ...(method === "PATCH" ? { "content-type": "application/json" } : {}),
+        },
+        ...(method === "PATCH" ? { body: JSON.stringify({ complete: true }) } : {}),
       });
-      expect(await transitionRequest.json()).toMatchObject({ target: "legacy", method, url: "/api/onboarding" });
+      expect(await transitionRequest.json()).toMatchObject({
+        target: "go",
+        method,
+        url: "/api/onboarding",
+        cookie: "better-auth.session_token=browser-session",
+        authorization: "Bearer browser-bearer-token",
+      });
     }
 
     const unsupportedAuth = await fetch(`${origin}/api/auth/sign-in/social`, {

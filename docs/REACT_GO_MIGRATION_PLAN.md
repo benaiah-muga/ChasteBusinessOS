@@ -2581,3 +2581,16 @@ new owners and the manifest shows zero legacy runtime paths.
      results and reloads, restore the ticket fields for retry, and block legacy
      fallback while unresolved. Set `CHASTE_GO_SUPPORT_TICKET_WRITES=0` for
      explicit rollback.
+251. Route the Vite onboarding state's GET and PATCH methods directly to Go
+     alongside workspace creation when `CHASTE_GO_ONBOARDING_ROUTE=1`. Go
+     resolves the signed-in session and active organization for the state read,
+     returns the existing `{state, steps}` response, and updates onboarding
+     status under `dbx.WithOrgTx`. Changed pending or skipped steps create the
+     same notification as before in the state transaction. Keep the existing
+     Go POST behavior and use the selector as an explicit rollback switch.
+     (Go/Vite implementation complete; browser proof pending) The Vite
+     onboarding API, wizard, page, and route-proxy suite passed all 190 tests;
+     Vite typecheck and lint passed. The full Go HTTP API package passed with
+     runtime integration required, including onboarding session, organization
+     scope, state, notification, origin, and error-mapping cases. Independent
+     review found no remaining issues. Browser runtime proof remains open.

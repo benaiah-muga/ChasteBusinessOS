@@ -406,7 +406,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
 
 export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?: string): boolean {
   const path = url ?? "";
-  if (flags.onboarding && method === "POST" && /^\/api\/onboarding(?:\?.*)?$/.test(path)) return true;
+  if (flags.onboarding && ["GET", "POST", "PATCH"].includes(method ?? "") && /^\/api\/onboarding(?:\?.*)?$/.test(path)) return true;
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsRead && method === "GET" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsWrite && method === "POST" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;

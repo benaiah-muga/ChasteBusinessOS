@@ -5,10 +5,9 @@ import { z } from "zod";
  * were finished or deferred, and import the two entities a migrating business
  * almost always has a spreadsheet of.
  *
- * The routes stay legacy-owned, so this module only adds three things the
- * wizard cannot do without: runtime validation of every payload, one typed
- * failure shape whose title and hint are safe to render, and the approval-aware
- * reading of a 202 (a governed write parks for a human instead of executing).
+ * Go owns onboarding state and workspace writes. This module validates every
+ * payload, turns errors into safe guidance, and treats a 202 as approval-pending
+ * rather than success.
  */
 
 /** Mirrors the legacy ONBOARDING_STEPS list; the two must stay identical. */
