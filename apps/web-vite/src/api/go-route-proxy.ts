@@ -385,7 +385,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     teamWrite: env.CHASTE_GO_TEAM_WRITE_ROUTE !== "0",
     branding: env.CHASTE_GO_BRANDING_ROUTE === "1",
     analytics: env.CHASTE_GO_ANALYTICS_ROUTE !== "0",
-    analyticsReport: env.CHASTE_GO_ANALYTICS_REPORT_ROUTE === "1",
+    analyticsReport: env.CHASTE_GO_ANALYTICS_REPORT_ROUTE !== "0",
     myWork: env.CHASTE_GO_MY_WORK_ROUTE !== "0",
     dashboard: env.CHASTE_GO_DASHBOARD_ROUTE === "1",
     setup: env.CHASTE_GO_SETUP_ROUTE === "1",

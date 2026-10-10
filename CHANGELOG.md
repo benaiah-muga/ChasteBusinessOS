@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Analytics dataset discovery, previews, and report generation now route
+  to Go by default through the existing authenticated Analytics session
+  handler. Setting the paired report route selectors to `0` restores the
+  legacy report path during migration rollback.
+
 - Vite Marketing overview reads can now use Go's `marketing.overviewSnapshot`
   capability. The response retains the strict segments, campaigns, provider
   send counts, and recent delivery log contract, with all reads scoped to the

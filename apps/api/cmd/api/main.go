@@ -45,7 +45,7 @@ func goAnalyticsRouteEnabledFromEnv(value string) bool {
 }
 
 func goAnalyticsReportRouteEnabledFromEnv(value string) bool {
-	return value == "1"
+	return value != "0"
 }
 
 func goMetricsRouteEnabledFromEnv(value string) bool {

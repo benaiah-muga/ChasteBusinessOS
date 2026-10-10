@@ -677,12 +677,12 @@ and evaluated against the request method and exact path before the legacy
 `/api` catch-all; unmatched requests continue to the legacy server. Request and
 response streams, headers, query strings, and bodies pass through unchanged.
 Pair `GO_MY_WORK_ROUTE=1` with `CHASTE_GO_MY_WORK_ROUTE=1` to send only
-`GET /api/my-work` to Go. The local `.env.example` enables the session-authenticated Go
-`GET /api/analytics` discovery and preview route; report `POST /api/analytics`
-remains on legacy by default. Route only report generation to Go by setting
-`GO_ANALYTICS_REPORT_ROUTE=1` and `CHASTE_GO_ANALYTICS_REPORT_ROUTE=1`;
-the API flag defaults to `0`. GET discovery and preview ownership remains
-controlled by the existing analytics GET selectors. Set both
+`GET /api/my-work` to Go. Vite routes analytics discovery, previews, and report
+generation to Go by default through the authenticated Analytics session
+handler. Set both `GO_ANALYTICS_REPORT_ROUTE=0` and
+`CHASTE_GO_ANALYTICS_REPORT_ROUTE=0` to restore legacy report generation. GET
+discovery and preview ownership remains controlled by the existing analytics
+GET selectors. Set both
 `GO_ANALYTICS_ROUTE=0` and `CHASTE_GO_ANALYTICS_ROUTE=0` to use the legacy
 handler during local rollback. Vite's selectors apply only to its development
 server; production reverse-proxy ownership is configured separately. Go also

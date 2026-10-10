@@ -868,14 +868,14 @@ describe("Vite Go route proxy selection", () => {
     },
   );
 
-  it("routes implemented Go auth, work queue, and analytics reads by default", () => {
+  it("routes implemented Go auth, work queue, and analytics requests by default", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
-    expect(flags.analyticsReport).toBe(false);
+    expect(flags.analyticsReport).toBe(true);
     expect(flags.myWork).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "posCustomers"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "posCustomers"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -899,11 +899,21 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/notifications")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics?dataset=analytics.invoiceAging")).toBe(true);
-    expect(isGoRouteRequest(flags, "POST", "/api/analytics")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/analytics")).toBe(true);
     expect(isGoRouteRequest(flags, "DELETE", "/api/analytics")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics/extra")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/my-work?status=open")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
+  });
+
+  it("allows explicit legacy rollback for analytics discovery, preview, and report generation", () => {
+    const flags = goRouteProxyFlagsFromEnv({
+      CHASTE_GO_ANALYTICS_ROUTE: "0",
+      CHASTE_GO_ANALYTICS_REPORT_ROUTE: "0",
+    });
+    expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/analytics?dataset=analytics.pipelineByStage")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/analytics")).toBe(false);
   });
 
   it("routes only exact message attachment GETs when the session selector is enabled", () => {
@@ -1008,9 +1018,9 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(false);
   });
 
-  it("routes only exact analytics report POSTs when separately enabled", () => {
+  it("routes exact analytics report POSTs by default and allows explicit rollback", () => {
     const disabled = goRouteProxyFlagsFromEnv({});
-    expect(isGoRouteRequest(disabled, "POST", "/api/analytics")).toBe(false);
+    expect(isGoRouteRequest(disabled, "POST", "/api/analytics")).toBe(true);
 
     const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_ANALYTICS_REPORT_ROUTE: "1" });
     expect(isGoRouteRequest(enabled, "POST", "/api/analytics")).toBe(true);
@@ -1461,7 +1471,7 @@ describe("Vite Go route proxy selection", () => {
     });
     expect(selected.headers.get("set-cookie")).toContain("proxy-result=preserved");
 
-    const onboardingFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "1" });
+    const onboardingFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "1", CHASTE_GO_ANALYTICS_REPORT_ROUTE: "0" });
     const onboardingVite: ViteDevServer = await createViteServer({
       configFile: false,
       appType: "custom",
