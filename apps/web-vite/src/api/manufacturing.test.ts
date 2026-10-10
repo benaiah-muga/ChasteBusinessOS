@@ -67,6 +67,34 @@ describe("manufacturing API", () => {
     expect(result.lots[0]?.balanceThousandths).toBe(8_000);
   });
 
+  it("reads the overview report through the selected Go capability with strict schema validation", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: report }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchManufacturingReport()).resolves.toEqual(report);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "manufacturing.overviewReport",
+      input: {},
+    });
+  });
+
+  it("fails closed when the selected Go manufacturing report is unavailable", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "Go unavailable" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchManufacturingReport()).rejects.toThrow("Go unavailable");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
+
+  it("rejects extra fields in the selected Go report payload", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { ...report, unexpected: true } })));
+    await expect(fetchManufacturingReport()).rejects.toThrow("unexpected format");
+  });
+
   it("defaults missing collections so a sparse payload still renders", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ boms: report.boms })));
     const result = await fetchManufacturingReport();

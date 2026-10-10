@@ -393,11 +393,27 @@ export async function fetchManufacturingEnabled(signal?: AbortSignal): Promise<b
 }
 
 export async function fetchManufacturingReport(signal?: AbortSignal): Promise<ManufacturingReport> {
-  const { response, body } = await request("/api/manufacturing", {}, signal);
+  const useGo = typeof __GO_MANUFACTURING_PLANNING_READS__ !== "undefined" && __GO_MANUFACTURING_PLANNING_READS__;
+  const { response, body } = await request(
+    useGo ? "/api/capabilities/execute" : "/api/manufacturing",
+    useGo
+      ? { method: "POST", body: JSON.stringify({ capabilityId: "manufacturing.overviewReport", input: {}, intentId: crypto.randomUUID() }) }
+      : {},
+    signal,
+  );
+  if (response.status === 202) {
+    throw new ManufacturingApiError(202, "The manufacturing report unexpectedly requires approval. No result was returned.");
+  }
   if (!response.ok) {
     throw new ManufacturingApiError(response.status, messageFor(response.status, body, "Could not load manufacturing records."));
   }
-  const parsed = ManufacturingReportSchema.safeParse(body);
+  let reportBody: unknown = body;
+  if (useGo) {
+    const envelope = EnvelopeSchema.safeParse(body);
+    if (!envelope.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected response.");
+    reportBody = envelope.data.data;
+  }
+  const parsed = ManufacturingReportSchema.safeParse(reportBody);
   if (!parsed.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned data in an unexpected format.");
   return parsed.data;
 }

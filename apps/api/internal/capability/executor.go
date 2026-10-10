@@ -288,6 +288,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	manufacturingCostPreviewCapabilityID:                {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
 	manufacturingLotTraceCapabilityID:                   {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
 	manufacturingProductionRunsCapabilityID:             {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
+	manufacturingOverviewReportCapabilityID:             {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
 	marketingCreateSegmentCapabilityID:                  {module: "marketing", permission: "marketing.write", risk: "write"},
 	marketingCreateCampaignCapabilityID:                 {module: "marketing", permission: "marketing.write", risk: "write"},
 	marketingSendCampaignCapabilityID:                   {module: "marketing", permission: "marketing.write", risk: "write"},
@@ -491,6 +492,7 @@ func supportedCapability(capabilityID string) bool {
 		manufacturingDefineBomCapabilityID, manufacturingDeleteBomCapabilityID, manufacturingBomTreeCapabilityID,
 		manufacturingBomReportCapabilityID, manufacturingCostPreviewCapabilityID, manufacturingLotTraceCapabilityID,
 		manufacturingProductionRunsCapabilityID,
+		manufacturingOverviewReportCapabilityID,
 		marketingCreateSegmentCapabilityID, marketingCreateCampaignCapabilityID, marketingSendCampaignCapabilityID,
 		marketingCampaignAnalyticsCapabilityID,
 		hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID,
@@ -1254,7 +1256,7 @@ func (e *Executor) executeWithFinalizer(
 			input = parsed
 		case manufacturingDefineBomCapabilityID, manufacturingDeleteBomCapabilityID, manufacturingBomTreeCapabilityID,
 			manufacturingBomReportCapabilityID, manufacturingCostPreviewCapabilityID, manufacturingLotTraceCapabilityID,
-			manufacturingProductionRunsCapabilityID:
+			manufacturingProductionRunsCapabilityID, manufacturingOverviewReportCapabilityID:
 			parsed, err := parseManufacturingBomInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -3099,6 +3101,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case ManufacturingOverviewReportInput:
+			output, err := manufacturingOverviewReport(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case MarketingCreateSegmentInput:
 			output, err := marketingCreateSegment(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -3534,7 +3542,7 @@ func canonicalInputHash(input any) (string, error) {
 		ManufacturingRunRefInput, ManufacturingCheckProductionFeasibilityInput, ManufacturingWorkOrdersListInput,
 		ManufacturingProduceFromBomInput,
 		ManufacturingDefineBomInput, ManufacturingDeleteBomInput, ManufacturingBomTreeInput, ManufacturingBomReportInput,
-		ManufacturingCostPreviewInput, ManufacturingLotTraceInput, ManufacturingProductionRunsInput,
+		ManufacturingCostPreviewInput, ManufacturingLotTraceInput, ManufacturingProductionRunsInput, ManufacturingOverviewReportInput,
 		MarketingCreateSegmentInput, MarketingCreateCampaignInput, MarketingSendCampaignInput, MarketingCampaignAnalyticsInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, RestoreProjectInput,
 		CreateProjectTaskInput, DeleteProjectTaskInput, RestoreProjectTaskInput,

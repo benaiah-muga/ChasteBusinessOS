@@ -311,6 +311,8 @@ func parseManufacturingBomInput(capabilityID string, raw json.RawMessage) (any, 
 		return ParseManufacturingLotTraceInput(raw)
 	case manufacturingProductionRunsCapabilityID:
 		return ParseManufacturingProductionRunsInput(raw)
+	case manufacturingOverviewReportCapabilityID:
+		return parseManufacturingOverviewReportInput(raw)
 	default:
 		return nil, errors.New("unsupported manufacturing BOM capability")
 	}

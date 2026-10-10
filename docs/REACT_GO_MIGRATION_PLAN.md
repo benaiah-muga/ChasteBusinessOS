@@ -2594,3 +2594,17 @@ new owners and the manifest shows zero legacy runtime paths.
      runtime integration required, including onboarding session, organization
      scope, state, notification, origin, and error-mapping cases. Independent
      review found no remaining issues. Browser runtime proof remains open.
+
+252. Route the Vite Manufacturing overview report through a new
+     `manufacturing.overviewReport` Go capability under the existing
+     `CHASTE_GO_MANUFACTURING_PLANNING_READS` selector. The Go read preserves
+     the legacy strict response shape and limits: all organization BOM edges
+     and items, the latest 100 work orders, up to 100 production runs grouped
+     from the latest 2,000 stock movements, and the latest 200 lot balances.
+     Production outputs retain output unit cost, rounded consumed cost,
+     reversal state, and consumed lot codes. The DB-backed Go capability test
+     passed with runtime integration required, covering authorization,
+     organization isolation, report fields, and limits. The focused Vite API
+     and route-selector suite passed all 205 tests; Vite typecheck and lint
+     passed. `graft build` completed. Independent review found no actionable
+     issues. (Go/Vite implementation complete; browser proof open)

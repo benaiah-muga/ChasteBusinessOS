@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Manufacturing overview reports can now read through Go's
+  `manufacturing.overviewReport` capability. Go returns the existing strict
+  report shape from organization-scoped reads, including BOMs, assemblies,
+  work orders, production runs, and lot balances.
+
 - Go now serves onboarding state reads and setup-step updates for the Vite
   wizard. Session identity and organization scope are resolved by the Go API;
   changed deferred steps record a notification in the same transaction.
