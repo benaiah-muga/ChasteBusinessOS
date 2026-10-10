@@ -44,6 +44,17 @@ describe("accounting close API", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/accounting/close"))).toBe(false);
   });
 
+  it("surfaces a Go 404 without falling back to legacy readiness", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_PERIOD_CLOSE_READS__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "capability not found" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchAccountingCloseReadiness(2026, 8)).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/accounting/close"))).toBe(false);
+  });
+
   it("validates the Accounting switchboard and complete close-readiness response", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["accounting"] }))

@@ -2118,14 +2118,18 @@ new owners and the manifest shows zero legacy runtime paths.
      browsers without Web Locks fail closed. Vite API/page/proxy tests,
      typecheck, lint, and Go Hiring contract tests pass. Authenticated browser
      proof remains open.
-201. Route only Vite period-close readiness reads through Go's session-
-     authenticated `accounting.periodCloseWorkbench` capability behind paired
+201. (Vite/Go implementation complete; browser proof pending) Route only Vite
+     period-close readiness reads through Go's session-authenticated
+     `accounting.periodCloseWorkbench` capability behind paired
      `CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep the current period
      picker, module switchboard behavior, and other Accounting routes unchanged.
      Go derives organization access from the session and enforces
      `accounting.read`; a Go error must not fall back to the legacy readiness
      route. Add focused Vite API, page, proxy selector, and Go contract checks.
+     API tests (5), page tests (7), proxy tests (152), typecheck, lint, and Go
+     period-close parser/workbench tests pass. Authenticated browser proof
+     remains open.
 202. Route the existing Vite supplier statement read through the
      session-authenticated `purchasing.supplierStatement` capability behind
      paired `CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS=1` and
