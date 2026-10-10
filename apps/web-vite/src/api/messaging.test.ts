@@ -850,6 +850,7 @@ describe("messaging API client", () => {
   });
 
   it("creates a conversation from the 201 body and reports a pending create", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", false);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ conversationId }, { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(createConversation({ title: "ops", agentEnabled: true }))
@@ -859,6 +860,50 @@ describe("messaging API client", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
     await expect(createConversation({ title: "ops", agentEnabled: true }))
       .resolves.toEqual({ kind: "pending", reason: "Creating this conversation is waiting for approval." });
+  });
+
+  it("creates conversations through the selected Go capability with a reusable intent", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", true);
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LIST__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { conversationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createConversation({ title: "ops", agentEnabled: true }, undefined, { intentId }))
+      .resolves.toEqual({ kind: "completed", data: { conversationId } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({
+      capabilityId: "messaging.createConversation",
+      input: { title: "ops", agentEnabled: true },
+      intentId,
+    });
+  });
+
+  it("uses the Go create pending response and fails closed on bad Go receipts", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, hint: "Waiting for review." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { conversationId: "not-a-uuid" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createConversation({ title: "ops", agentEnabled: false }))
+      .resolves.toEqual({ kind: "pending", reason: "Waiting for review." });
+    await expect(createConversation({ title: "ops", agentEnabled: false }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("rejects invalid Go create input before sending", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(() => createConversation({ title: "", agentEnabled: true }))
+      .toThrow("Enter a conversation title using 1 to 80 characters");
+    expect(() => createConversation({ title: "x".repeat(81), agentEnabled: true }))
+      .toThrow("Enter a conversation title using 1 to 80 characters");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uploads an attachment as multipart form data and validates the receipt", async () => {

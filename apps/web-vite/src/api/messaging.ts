@@ -155,6 +155,14 @@ const GoPeopleOutputSchema = z.object({
 const PresenceResponseSchema = z.object({ people: z.array(PresenceSchema) }).strict();
 const SearchResponseSchema = z.object({ results: z.array(SearchResultSchema) }).strict();
 const CreateConversationSchema = z.object({ conversationId: z.string().min(1) }).strict();
+const CreateConversationInputSchema = z.object({
+  title: z.string().min(1).max(80),
+  agentEnabled: z.boolean(),
+}).strict();
+const GoCreateConversationEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ conversationId: z.string().uuid() }).strict(),
+}).strict();
 const SendMessageSchema = z.object({ ok: z.literal(true), agentReply: z.string().nullable() }).strict();
 export type SendMessageResult = z.infer<typeof SendMessageSchema>;
 const GoSendMessageEnvelopeSchema = z.object({
@@ -363,11 +371,43 @@ async function fetchGoConversations(signal?: AbortSignal): Promise<{ conversatio
 export function createConversation(
   input: { title: string; agentEnabled: boolean },
   signal?: AbortSignal,
+  options: { intentId?: string } = {},
 ): Promise<MessagingOutcome<{ conversationId: string }>> {
+  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_CREATE__?: boolean }).__GO_MESSAGING_CONVERSATION_CREATE__;
+  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_CONVERSATION_CREATE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_CREATE__);
+  if (goSelected) {
+    const parsedInput = CreateConversationInputSchema.safeParse(input);
+    if (!parsedInput.success) throw new MessagingApiError(400, "Enter a conversation title using 1 to 80 characters and choose whether its agent is enabled.");
+    const intentId = options.intentId === undefined ? newIntentId() : z.string().uuid().parse(options.intentId);
+    return createConversationThroughGo(parsedInput.data, intentId, signal);
+  }
   return governed("/api/conversations", {
     method: "POST",
-    body: JSON.stringify({ title: input.title, agentEnabled: input.agentEnabled, intentId: newIntentId() }),
+    body: JSON.stringify({ title: input.title, agentEnabled: input.agentEnabled, intentId: options.intentId ?? newIntentId() }),
   }, "create this conversation", CreateConversationSchema, "Creating this conversation is waiting for approval.", signal);
+}
+
+async function createConversationThroughGo(
+  input: z.infer<typeof CreateConversationInputSchema>,
+  intentId: string,
+  signal?: AbortSignal,
+): Promise<MessagingOutcome<{ conversationId: string }>> {
+  const { response, body } = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "messaging.createConversation", input, intentId }),
+  }, "create this conversation", signal);
+  if (response.status === 202) {
+    const parsed = PendingApprovalSchema.safeParse(body);
+    if (!parsed.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to create this conversation.");
+    return {
+      kind: "pending",
+      reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? "Creating this conversation is waiting for approval.",
+    };
+  }
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "create this conversation"));
+  const parsed = GoCreateConversationEnvelopeSchema.safeParse(body);
+  if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected response to create this conversation.");
+  return { kind: "completed", data: parsed.data.data };
 }
 
 export async function fetchConversationPeople(query?: string, signal?: AbortSignal): Promise<Person[]> {

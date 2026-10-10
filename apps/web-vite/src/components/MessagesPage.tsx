@@ -217,6 +217,56 @@ export function goSendIntentStorageKey(me: string | null, conversationId: string
 
 type GoSendIntent = { storageKey: string; fingerprint: string; intentId: string };
 type GoSendIntentRef = { current: GoSendIntent | null };
+type PendingCreateIntent = { fingerprint: string; intentId: string; title: string; agentEnabled: boolean };
+
+function createIntentStorageKey(actorId: string, organizationId: string): string {
+  return `chaste:conversation-create:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}`;
+}
+
+function readPendingCreateIntent(actorId: string, organizationId: string): PendingCreateIntent | null {
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(createIntentStorageKey(actorId, organizationId)) ?? "null") as Partial<PendingCreateIntent> | null;
+    if (
+      stored == null
+      || typeof stored.title !== "string"
+      || stored.title.trim().length < 1
+      || stored.title.trim().length > 80
+      || typeof stored.agentEnabled !== "boolean"
+      || typeof stored.fingerprint !== "string"
+      || typeof stored.intentId !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.intentId)
+    ) return null;
+    const title = stored.title.trim();
+    const fingerprint = JSON.stringify([title, stored.agentEnabled]);
+    if (stored.fingerprint !== fingerprint) return null;
+    return {
+      title,
+      agentEnabled: stored.agentEnabled,
+      intentId: stored.intentId,
+      fingerprint: stored.fingerprint,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistPendingCreateIntent(actorId: string | null, organizationId: string | null, intent: PendingCreateIntent): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.setItem(createIntentStorageKey(actorId, organizationId), JSON.stringify(intent));
+  } catch {
+    // The in-memory intent still protects retries for this page session.
+  }
+}
+
+function clearPendingCreateIntent(actorId: string | null, organizationId: string | null): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.removeItem(createIntentStorageKey(actorId, organizationId));
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
+}
 
 async function messageActionFingerprint(action: {
   conversationId: string;
@@ -588,6 +638,8 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const autoScrollRef = useRef(false);
   const draftOwnerRef = useRef<string | null>(null);
+  const createIntentRef = useRef<PendingCreateIntent | null>(null);
+  const creatingRef = useRef(false);
   const goSendIntentRef = useRef<GoSendIntent | null>(null);
   const aroundTargetRef = useRef<string | null>(null);
   const wideRef = useRef(wide);
@@ -596,6 +648,22 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   wideRef.current = wide;
   messageEditScopeRef.current = messageEditScopeIdentity(actorId, organizationId, activeId);
   messageDeleteScopeRef.current = messageDeleteScopeIdentity(actorId, organizationId);
+
+  useEffect(() => {
+    createIntentRef.current = null;
+    setNewTitle("");
+    setNewAgent(true);
+    setComposerOpen(false);
+    setNotice(null);
+    if (!actorId || !organizationId) return;
+    const pending = readPendingCreateIntent(actorId, organizationId);
+    if (!pending) return;
+    createIntentRef.current = pending;
+    setNewTitle(pending.title);
+    setNewAgent(pending.agentEnabled);
+    setComposerOpen(true);
+    setNotice({ tone: "pending", text: "An earlier channel creation is unresolved. Submit the saved details to check the same request." });
+  }, [actorId, organizationId]);
 
   const activeConv = conversations?.find((conversation) => conversation.id === activeId) ?? null;
   const counts = conversationCounts(conversations ?? []);
@@ -1211,27 +1279,59 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
 
   const createConversationFromForm = useCallback(async (event: FormEvent) => {
     event.preventDefault();
-    if (!newTitle.trim() || creating) return;
+    if (!newTitle.trim() || creatingRef.current) return;
+    const title = newTitle.trim();
+    const fingerprint = JSON.stringify([title, newAgent]);
+    if (createIntentRef.current?.fingerprint !== fingerprint) {
+      createIntentRef.current = { fingerprint, intentId: crypto.randomUUID(), title, agentEnabled: newAgent };
+      persistPendingCreateIntent(actorId, organizationId, createIntentRef.current);
+    }
+    const intentId = createIntentRef.current.intentId;
+    creatingRef.current = true;
     setCreating(true);
     setCreateError(null);
     try {
-      const outcome = await createConversation({ title: newTitle.trim(), agentEnabled: newAgent });
+      const outcome = await createConversation({ title, agentEnabled: newAgent }, undefined, { intentId });
       if (outcome.kind === "pending") {
-        setCreateError(null);
-        setNotice({ tone: "pending", text: outcome.reason });
+        setNotice({
+          tone: "pending",
+          text: `${outcome.reason} Your channel details are saved. Submit again after approval to check the same request.`,
+        });
+        void loadConversations();
         return;
       }
+      createIntentRef.current = null;
+      clearPendingCreateIntent(actorId, organizationId);
+      setNotice(null);
       setNewTitle("");
       setComposerOpen(false);
       await loadConversations();
       setActiveId(outcome.data.conversationId);
       setMobileListVisible(false);
     } catch (error) {
+      setNotice(null);
       setCreateError(errorText(error, "Could not create the conversation."));
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
-  }, [creating, loadConversations, newAgent, newTitle]);
+  }, [actorId, loadConversations, newAgent, newTitle, organizationId]);
+
+  const updateNewTitle = useCallback((value: string) => {
+    if (value.trim() !== newTitle.trim()) {
+      createIntentRef.current = null;
+      clearPendingCreateIntent(actorId, organizationId);
+    }
+    setNewTitle(value);
+  }, [actorId, newTitle, organizationId]);
+
+  const updateNewAgent = useCallback((value: boolean) => {
+    if (value !== newAgent) {
+      createIntentRef.current = null;
+      clearPendingCreateIntent(actorId, organizationId);
+    }
+    setNewAgent(value);
+  }, [actorId, newAgent, organizationId]);
 
   const leaveConversation = useCallback(async () => {
     if (await runLifecycle({ action: "leave" })) {
@@ -1352,12 +1452,12 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
               <input
                 type="text"
                 value={newTitle}
-                onChange={(event) => setNewTitle(event.target.value)}
+                onChange={(event) => updateNewTitle(event.target.value)}
                 placeholder="Channel name"
                 aria-label="New channel name"
               />
               <label>
-                <input type="checkbox" checked={newAgent} onChange={(event) => setNewAgent(event.target.checked)} />
+                <input type="checkbox" checked={newAgent} onChange={(event) => updateNewAgent(event.target.checked)} />
                 Include Chaste (AI workmate)
               </label>
               {createError && <p className="messages-composer-error" role="alert">{createError}</p>}

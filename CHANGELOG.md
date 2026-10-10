@@ -11,6 +11,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+
+- Vite conversation creation now routes through the session-authenticated Go
+  `messaging.createConversation` capability by default when session routing is
+  enabled. The pending form and idempotency key survive reloads within the
+  actor and organization session scope.
+
 ### Changed
 
 - Go message attachment uploads keep the `messaging.write` permission and

@@ -481,6 +481,35 @@ func TestMessagingConversationLifecycleGovernsMembershipAndTenant(t *testing.T) 
 	}
 }
 
+func TestMessagingCreateConversationPersistsChannelStateAndCreatorMembership(t *testing.T) {
+	fx := newMessagingFixture(t)
+	created, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingConversationIDOutput, error) {
+		input, err := parseMessagingCreateConversationInput(json.RawMessage(`{"title":"Vite channel","agentEnabled":true}`))
+		if err != nil {
+			return MessagingConversationIDOutput{}, err
+		}
+		return messagingCreateConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), input)
+	})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	var orgID, title, createdBy string
+	var agentEnabled bool
+	if err := fx.owner.QueryRow(fx.ctx, `
+		SELECT org_id::text, title, created_by_user_id::text, agent_enabled
+		FROM conversations WHERE id = $1::uuid`, created.ConversationID,
+	).Scan(&orgID, &title, &createdBy, &agentEnabled); err != nil {
+		t.Fatalf("load created channel: %v", err)
+	}
+	if orgID != fx.orgID || title != "Vite channel" || createdBy != fx.userID || !agentEnabled {
+		t.Fatalf("created channel = org %q title %q creator %q agentEnabled %v", orgID, title, createdBy, agentEnabled)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversation_members WHERE conversation_id = $1::uuid AND user_id = $2::uuid`, created.ConversationID, fx.userID); got != 1 {
+		t.Fatalf("creator membership count = %d, want 1", got)
+	}
+}
+
 func TestMessagingDirectMessagesRefuseChannelOperations(t *testing.T) {
 	fx := newMessagingFixture(t)
 	direct, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingConversationIDOutput, error) {

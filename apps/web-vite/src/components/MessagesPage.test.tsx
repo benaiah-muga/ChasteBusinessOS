@@ -125,6 +125,7 @@ function stubWideViewport() {
 beforeEach(() => {
   stubWideViewport();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -346,7 +347,155 @@ describe("messages page states", () => {
     expect(created[0]).toMatchObject({ title: "operations", agentEnabled: true, intentId: expect.any(String) });
   });
 
+  it("locks duplicate Go creates, retries errors with the same intent, and never falls back", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", true);
+    const creates: Record<string, unknown>[] = [];
+    const legacyPosts: string[] = [];
+    let releaseFirst: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations" && init?.method === "POST") {
+        legacyPosts.push(path);
+        return Response.json({ error: "unexpected legacy create" }, { status: 500 });
+      }
+      if (path === "/api/conversations") return Response.json({ conversations: [], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        creates.push(body);
+        if (creates.length === 1) {
+          return new Promise<Response>((resolve) => { releaseFirst = resolve; });
+        }
+        if (creates.length === 2) return Response.json({ error: "Go service unavailable." }, { status: 503 });
+        return Response.json({ ok: true, data: { conversationId: dmId } });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create a conversation" }));
+    fireEvent.change(screen.getByLabelText("New channel name"), { target: { value: "ops" } });
+    const form = screen.getByLabelText("New channel name").closest("form");
+    expect(form).not.toBeNull();
+    await act(async () => {
+      fireEvent.submit(form!);
+      fireEvent.submit(form!);
+    });
+    expect(creates).toHaveLength(1);
+    expect(creates[0]).toMatchObject({
+      capabilityId: "messaging.createConversation",
+      input: { title: "ops", agentEnabled: true },
+      intentId: expect.any(String),
+    });
+
+    await act(async () => {
+      releaseFirst?.(Response.json({ error: "Go service unavailable." }, { status: 503 }));
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain("Go service unavailable.");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(creates).toHaveLength(2));
+    expect(creates[1]?.intentId).toBe(creates[0]?.intentId);
+    expect(legacyPosts).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("New channel name"), { target: { value: "operations" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(creates).toHaveLength(3));
+    expect(creates[2]?.input).toEqual({ title: "operations", agentEnabled: true });
+    expect(creates[2]?.intentId).not.toBe(creates[0]?.intentId);
+    expect(legacyPosts).toHaveLength(0);
+  });
+
+  it("restores an unresolved create only for the same actor and organization", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", true);
+    const creates: Record<string, unknown>[] = [];
+    let requestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        creates.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        requestCount += 1;
+        if (requestCount === 1) return Response.json({ error: "Connection lost after submission." }, { status: 503 });
+        return Response.json({ ok: true, data: { conversationId: dmId } });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const scope = { actorId: "actor-1", organizationId: "org-1" };
+    const firstMount = render(<MessagesPage {...scope} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create a conversation" }));
+    fireEvent.change(screen.getByLabelText("New channel name"), { target: { value: "private ops" } });
+    fireEvent.click(screen.getByLabelText("Include Chaste (AI workmate)"));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Connection lost after submission.");
+    expect(creates).toHaveLength(1);
+    expect(creates[0]).toMatchObject({ input: { title: "private ops", agentEnabled: false }, intentId: expect.any(String) });
+    firstMount.unmount();
+
+    const otherActor = render(<MessagesPage actorId="actor-2" organizationId="org-1" />);
+    await screen.findByRole("button", { name: "Create a conversation" });
+    expect(screen.queryByLabelText("New channel name")).toBeNull();
+    otherActor.unmount();
+    const otherOrganization = render(<MessagesPage actorId="actor-1" organizationId="org-2" />);
+    await screen.findByRole("button", { name: "Create a conversation" });
+    expect(screen.queryByLabelText("New channel name")).toBeNull();
+    otherOrganization.unmount();
+
+    const restoredMount = render(<MessagesPage {...scope} />);
+    const titleInput = await screen.findByLabelText("New channel name");
+    expect((titleInput as HTMLInputElement).value).toBe("private ops");
+    expect((screen.getByLabelText("Include Chaste (AI workmate)") as HTMLInputElement).checked).toBe(false);
+    expect((await screen.findByRole("status")).textContent).toMatch(/earlier channel creation is unresolved.*same request/i);
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(creates).toHaveLength(2));
+    expect(creates[1]?.intentId).toBe(creates[0]?.intentId);
+    expect(creates[1]?.input).toEqual({ title: "private ops", agentEnabled: false });
+    await screen.findByRole("button", { name: "Create a conversation" });
+    restoredMount.unmount();
+    render(<MessagesPage {...scope} />);
+    await screen.findByRole("button", { name: "Create a conversation" });
+    expect(screen.queryByLabelText("New channel name")).toBeNull();
+  });
+
+  it("continues a Go create when session storage is unavailable", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", true);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("storage disabled"); });
+    const creates: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        creates.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return Response.json({ pendingApproval: true, reason: "Manager approval is required." }, { status: 202 });
+      }
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage actorId="actor-1" organizationId="org-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create a conversation" }));
+    fireEvent.change(screen.getByLabelText("New channel name"), { target: { value: "ops" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect((await screen.findByRole("status")).textContent).toContain("Manager approval is required.");
+    expect(creates).toHaveLength(1);
+  });
+
   it("keeps a pending channel creation visible as pending, never as success or error", async () => {
+    const posts: Record<string, unknown>[] = [];
+    let listReads = 0;
     const fetchMock = router([
       moduleRoute,
       peopleRoute,
@@ -354,7 +503,11 @@ describe("messages page states", () => {
       {
         match: (path, init) => {
           if (path !== "/api/conversations") return null;
-          if (init?.method === "POST") return Response.json({ pendingApproval: true }, { status: 202 });
+          if (init?.method === "POST") {
+            posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+            return Response.json({ pendingApproval: true, reason: "Manager approval is required." }, { status: 202 });
+          }
+          listReads += 1;
           return Response.json({ conversations: [], me });
         },
       },
@@ -367,8 +520,14 @@ describe("messages page states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     const status = await screen.findByRole("status");
-    expect(status.textContent).toContain("waiting for approval");
+    expect(status.textContent).toMatch(/approval.*details are saved.*same request/i);
     expect(screen.queryByRole("alert")).toBeNull();
+    await waitFor(() => expect(listReads).toBeGreaterThan(1));
+    expect(screen.getByLabelText("New channel name")).toHaveProperty("value", "ops");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]?.intentId).toBe(posts[0]?.intentId);
   });
 
   it("advances the read cursor for the newest message and reconciles the list", async () => {

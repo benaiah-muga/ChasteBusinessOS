@@ -2385,3 +2385,9 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the upload receipt,
      enforce the existing 1-byte to 5-MiB limit before dispatch, and set
      `CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD=0` for legacy rollback.
+236. (Vite implementation complete; browser proof pending) Route conversation
+     creation through the session-authenticated `messaging.createConversation`
+     capability when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the Go
+     receipt, retain the exact request intent across reloads within the actor
+     and organization session scope, and set
+     `CHASTE_GO_MESSAGING_CONVERSATION_CREATE=0` for legacy rollback.
