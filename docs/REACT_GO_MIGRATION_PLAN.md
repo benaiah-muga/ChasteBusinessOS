@@ -2156,7 +2156,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Vite API/page/proxy suite passed (206 tests); Go parser, persistence, and
      governed executor tests passed; Vite typecheck and lint passed. Independent
      review found no actionable issues. Browser runtime proof remains open.
-204. Route only the existing Vite Purchasing Intel price-history and supplier-
+204. (Vite/Go implementation complete; browser proof pending) Route only the existing Vite Purchasing Intel price-history and supplier-
      performance reads through `purchasing.priceHistory` and
      `purchasing.supplierPerformance` behind paired
      `CHASTE_GO_PURCHASING_INTEL_READS=1` and
@@ -2165,6 +2165,9 @@ new owners and the manifest shows zero legacy runtime paths.
      output contracts and render pending, malformed, or unavailable results as
      errors rather than empty analytics. Keep other Purchasing flows unchanged;
      add focused Vite API, page, proxy selector, and Go executor contract tests.
+     Eleven focused Vite tests passed; Go parser, reader, and governed executor
+     tests passed; Vite typecheck and lint passed. Independent review found no
+     permission or tenant-scope gaps. Browser runtime proof remains open.
 205. Route only the Vite Accounting Reports aggregate read through Go's
      `accounting.incomeStatement`, `accounting.balanceSheet`,
      `accounting.cashFlow`, `accounting.unrealizedFxExposure`, and
