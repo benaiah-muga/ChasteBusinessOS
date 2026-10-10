@@ -29,6 +29,10 @@ The full v1 changelog is preserved at the bottom of this file.
   Go `messaging.leaveConversation` capability by default when session routing
   is enabled. Exact pending requests survive reload and selector rollback;
   successful leaves clear their retry record before list refresh.
+- Vite add-member actions now route through the session-authenticated Go
+  `messaging.addMember` capability by default when session routing is enabled.
+  Same-org targets are validated in Go, and pending requests retain their
+  exact target and intent across reloads and selector rollback.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.

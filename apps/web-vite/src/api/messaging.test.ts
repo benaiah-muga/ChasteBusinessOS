@@ -911,6 +911,72 @@ describe("messaging API client", () => {
     expect(lastBody(fetchMock)).toMatchObject({ action: "leave", intentId: expect.any(String) });
   });
 
+  it("adds conversation members through Go with a stable intent and exact capability contract", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    const userId = "f93bb823-a6a8-41f4-8969-97328629b4d4";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { added: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "addMember", userId }, undefined, { intentId }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({
+      capabilityId: "messaging.addMember",
+      input: { conversationId, userId },
+      intentId,
+    });
+  });
+
+  it("forces a saved member-addition retry through Go after selector rollback", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    const userId = "f93bb823-a6a8-41f4-8969-97328629b4d4";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { added: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "addMember", userId }, undefined, { forceGo: true, intentId }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({ capabilityId: "messaging.addMember", input: { conversationId, userId }, intentId });
+  });
+
+  it("handles Go member-addition approval, fails closed on malformed receipts, and validates UUIDs", async () => {
+    const userId = "f93bb823-a6a8-41f4-8969-97328629b4d4";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, hint: "Waiting for approval." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { added: false } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { added: true, extra: "unexpected" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "addMember", userId }))
+      .resolves.toEqual({ kind: "pending", reason: "Waiting for approval." });
+    await expect(changeConversation(conversationId, { action: "addMember", userId }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    await expect(changeConversation(conversationId, { action: "addMember", userId }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    expect(() => changeConversation("bad-id", { action: "addMember", userId })).toThrow(MessagingApiError);
+    expect(() => changeConversation(conversationId, { action: "addMember", userId: "bad-id" })).toThrow(MessagingApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("requires the saved member-addition intent for forceGo and keeps addMember legacy when rolled back", async () => {
+    const userId = "f93bb823-a6a8-41f4-8969-97328629b4d4";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(() => changeConversation(conversationId, { action: "addMember", userId }, undefined, { forceGo: true }))
+      .toThrow("original intent id");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await changeConversation(conversationId, { action: "addMember", userId });
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
+    expect(lastBody(fetchMock)).toMatchObject({ action: "addMember", userId, intentId: expect.any(String) });
+  });
+
   it("updates conversations through Go with a stable intent and exact capability contract", async () => {
     const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_UPDATE__", true);

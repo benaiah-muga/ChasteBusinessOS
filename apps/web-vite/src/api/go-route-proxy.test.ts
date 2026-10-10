@@ -36,6 +36,7 @@ import {
   goMessagingConversationUpdateFromEnv,
   goMessagingConversationArchiveFromEnv,
   goMessagingConversationLeaveFromEnv,
+  goMessagingConversationAddMemberFromEnv,
   goMessagingThreadReadsFromEnv,
   goMessagingReadCursorFromEnv,
   goMessagingReactionsFromEnv,
@@ -488,6 +489,15 @@ describe("messaging conversation-leave Go selector", () => {
     expect(goMessagingConversationLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_LEAVE: "0" })).toBe(false);
     expect(goMessagingConversationLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_LEAVE: "1" })).toBe(false);
     expect(goMessagingConversationLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_ARCHIVE: "0" })).toBe(true);
+  });
+});
+
+describe("messaging conversation-add-member Go selector", () => {
+  it("requires session capability routing, defaults on, and supports its own rollback", () => {
+    expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER: "0" })).toBe(false);
+    expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER: "1" })).toBe(false);
+    expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_LEAVE: "0" })).toBe(true);
   });
 });
 

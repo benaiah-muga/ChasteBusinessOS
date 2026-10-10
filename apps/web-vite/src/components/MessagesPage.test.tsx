@@ -1537,6 +1537,250 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     expect(screen.getByRole("dialog", { name: /general/ })).not.toBeNull();
   });
 
+  it("clears a completed Go member request before reporting a failed conversation refresh", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", true);
+    const scope = { actorId: me, organizationId: "conversation-member-refresh-org" };
+    const addedUserId = "4d814ec3-71a2-40e1-8c53-3e81068c1f0d";
+    const requests: Record<string, unknown>[] = [];
+    let conversationReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") {
+        conversationReads += 1;
+        if (conversationReads > 1) return Response.json({ error: "refresh failed" }, { status: 503 });
+        return Response.json({ conversations: [conversation()], me });
+      }
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people: people.map((person) => person.id === other ? { ...person, id: addedUserId } : person) });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return Response.json({ ok: true, data: { added: true } });
+      }
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") return Response.json({ error: "unexpected legacy fallback" }, { status: 500 });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage {...scope} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Find a colleague by name" }), { target: { value: "Grace" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Grace Hopper/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]).toMatchObject({
+      capabilityId: "messaging.addMember",
+      input: { conversationId: channelId, userId: addedUserId },
+      intentId: expect.any(String),
+    });
+    const storageKey = `chaste:conversation-member:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}:${encodeURIComponent(channelId)}`;
+    await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toBeNull());
+    expect((await screen.findByRole("alert")).textContent).toContain("refresh failed");
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === `/api/conversations/${channelId}`)).toBe(false);
+  });
+
+  it("uses the legacy member route when the Go selector is off and there is no saved request", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", false);
+    const legacy: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
+        legacy.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return Response.json({ ok: true, data: { ok: true } });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Find a colleague by name" }), { target: { value: "Grace" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Grace Hopper/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => expect(legacy).toHaveLength(1));
+    expect(legacy[0]).toMatchObject({ action: "addMember", userId: other, intentId: expect.any(String) });
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/capabilities/execute")).toBe(false);
+  });
+
+  it("clears a terminal Go member rejection so a different member can be added", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", true);
+    const scope = { actorId: me, organizationId: "conversation-member-terminal-org" };
+    const firstUserId = "4d814ec3-71a2-40e1-8c53-3e81068c1f0d";
+    const secondUserId = "985a615b-24b4-42db-a69e-0327ea303c09";
+    const requests: Record<string, unknown>[] = [];
+    const candidates: Person[] = [
+      { type: "user", id: firstUserId, name: "Grace Hopper" },
+      { type: "user", id: secondUserId, name: "Linus Torvalds" },
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people: candidates });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (requests.length === 1) return Response.json({ error: "You cannot add members to this channel." }, { status: 403 });
+        return Response.json({ ok: true, data: { added: true } });
+      }
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") return Response.json({ error: "unexpected legacy fallback" }, { status: 500 });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage {...scope} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    const memberSearch = screen.getByRole("textbox", { name: "Find a colleague by name" });
+    fireEvent.change(memberSearch, { target: { value: "Grace" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Grace Hopper/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("cannot add members");
+    const storageKey = `chaste:conversation-member:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}:${encodeURIComponent(channelId)}`;
+    await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toBeNull());
+    expect(screen.queryByRole("button", { name: "Retry member addition" })).toBeNull();
+
+    fireEvent.change(memberSearch, { target: { value: "Linus" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Linus Torvalds/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0]).toMatchObject({ capabilityId: "messaging.addMember", input: { userId: firstUserId }, intentId: expect.any(String) });
+    expect(requests[1]).toMatchObject({ capabilityId: "messaging.addMember", input: { userId: secondUserId }, intentId: expect.any(String) });
+    expect(requests[1]?.intentId).not.toBe(requests[0]?.intentId);
+  });
+
+  it("restores and retries a pending Go member addition with its original intent after selector rollback", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", true);
+    const scope = { actorId: me, organizationId: "conversation-member-retry-org" };
+    const addedUserId = "4d814ec3-71a2-40e1-8c53-3e81068c1f0d";
+    const requests: Record<string, unknown>[] = [];
+    const legacyPatches: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people: people.map((person) => person.id === other ? { ...person, id: addedUserId } : person) });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (requests.length === 1) return Response.json({ pendingApproval: true, hint: "Member addition is waiting for approval." }, { status: 202 });
+        if (requests.length === 2) return Response.json({ error: "Temporary member-add failure." }, { status: 503 });
+        return Response.json({ ok: true, data: { added: true } });
+      }
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
+        legacyPatches.push(path);
+        return Response.json({ error: "unexpected legacy fallback" }, { status: 500 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstMount = render(<MessagesPage {...scope} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Find a colleague by name" }), { target: { value: "Grace" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Grace Hopper/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect((await screen.findByRole("status")).textContent).toContain("waiting for approval");
+    expect(requests[0]).toMatchObject({
+      capabilityId: "messaging.addMember",
+      input: { conversationId: channelId, userId: addedUserId },
+      intentId: expect.any(String),
+    });
+    const storageKey = `chaste:conversation-member:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}:${encodeURIComponent(channelId)}`;
+    const pending = JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null") as { action?: unknown; intentId?: unknown };
+    expect(pending).toMatchObject({ action: { action: "addMember", userId: addedUserId }, intentId: requests[0]?.intentId });
+    firstMount.unmount();
+
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", false);
+    render(<MessagesPage {...scope} />);
+    expect((await screen.findByRole("status")).textContent).toMatch(/earlier member addition is unresolved/i);
+    const retry = screen.getByRole("button", { name: "Retry member addition" });
+    fireEvent.click(retry);
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]?.intentId).toBe(requests[0]?.intentId);
+    expect(requests[1]?.input).toEqual({ conversationId: channelId, userId: addedUserId });
+    expect((await screen.findByRole("alert")).textContent).toContain("Temporary member-add failure.");
+    const retained = JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null") as { intentId?: unknown };
+    expect(retained.intentId).toBe(requests[0]?.intentId);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry member addition" }));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2]?.intentId).toBe(requests[0]?.intentId);
+    expect(requests[2]?.input).toEqual({ conversationId: channelId, userId: addedUserId });
+    await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toBeNull());
+    expect(legacyPatches).toHaveLength(0);
+  });
+
+  it.each([
+    { failure: "408", status: 408 },
+    { failure: "409", status: 409 },
+    { failure: "425", status: 425 },
+    { failure: "429", status: 429 },
+    { failure: "network rejection", status: null },
+  ])("retains a Go add-member intent after $failure and retries without legacy fallback", async ({ status }) => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", true);
+    const scope = { actorId: me, organizationId: `conversation-member-retry-${status ?? "network"}-org` };
+    const addedUserId = "4d814ec3-71a2-40e1-8c53-3e81068c1f0d";
+    const requests: Record<string, unknown>[] = [];
+    const legacyPatches: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people: [{ type: "user", id: addedUserId, name: "Grace Hopper" }] });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (requests.length === 1) {
+          if (status === null) throw new TypeError("Network unavailable");
+          return Response.json({ error: `Temporary ${status} failure.` }, { status });
+        }
+        return Response.json({ ok: true, data: { added: true } });
+      }
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
+        legacyPatches.push(path);
+        return Response.json({ error: "unexpected legacy fallback" }, { status: 500 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage {...scope} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Find a colleague by name" }), { target: { value: "Grace" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Grace Hopper/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    const storageKey = `chaste:conversation-member:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}:${encodeURIComponent(channelId)}`;
+    const firstIntentId = requests[0]?.intentId;
+    expect(firstIntentId).toEqual(expect.any(String));
+    await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null")).toMatchObject({ intentId: firstIntentId }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry member addition" }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]).toMatchObject({
+      capabilityId: "messaging.addMember",
+      input: { conversationId: channelId, userId: addedUserId },
+      intentId: firstIntentId,
+    });
+    await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toBeNull());
+    expect(legacyPatches).toHaveLength(0);
+  });
+
   it("keeps a Go conversation update pending and retries the saved details with one stable intent", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_UPDATE__", true);
     const updates: Record<string, unknown>[] = [];

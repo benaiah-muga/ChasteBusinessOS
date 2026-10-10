@@ -1927,22 +1927,36 @@ func messagingLeaveConversation(
 func messagingAddMember(
 	ctx context.Context, tx pgx.Tx, orgID string, userID *string, input MessagingAddMemberInput,
 ) (MessagingAddMemberOutput, error) {
-	if err := messagingRequireMember(ctx, tx, orgID, input.ConversationID, userID); err != nil {
-		return MessagingAddMemberOutput{}, err
+	if userID == nil {
+		return MessagingAddMemberOutput{}, errors.New("you are not a member of this conversation")
 	}
-	conversation, err := messagingLoadConversation(ctx, tx, orgID, input.ConversationID)
+	var conversation messagingConversation
+	err := tx.QueryRow(ctx, `
+		SELECT c.id::text, c.kind, c.title, c.created_by_user_id::text
+		FROM conversations c
+		JOIN conversation_members actor_member
+		  ON actor_member.conversation_id = c.id AND actor_member.user_id = $3::uuid
+		WHERE c.id = $2::uuid AND c.org_id = $1::uuid AND c.deleted_at IS NULL
+		FOR SHARE OF c, actor_member`, orgID, input.ConversationID, *userID).Scan(
+		&conversation.ID, &conversation.Kind, &conversation.Title, &conversation.CreatedByUserID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Preserve the established error distinction while the locked lookup
+		// prevents a concurrent leave or conversation deletion from racing the add.
+		if memberErr := messagingRequireMember(ctx, tx, orgID, input.ConversationID, userID); memberErr != nil {
+			return MessagingAddMemberOutput{}, memberErr
+		}
+		return MessagingAddMemberOutput{}, errors.New("conversation not found")
+	}
 	if err != nil {
 		return MessagingAddMemberOutput{}, err
-	}
-	if conversation == nil {
-		return MessagingAddMemberOutput{}, errors.New("conversation not found")
 	}
 	if conversation.Kind == messagingConversationKindDM {
 		return MessagingAddMemberOutput{}, errors.New("direct messages cannot gain members")
 	}
 	var existing string
 	err = tx.QueryRow(ctx, `
-		SELECT user_id::text FROM memberships WHERE org_id = $1::uuid AND user_id = $2::uuid LIMIT 1`,
+		SELECT user_id::text FROM memberships WHERE org_id = $1::uuid AND user_id = $2::uuid LIMIT 1 FOR KEY SHARE`,
 		orgID, input.UserID).Scan(&existing)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return MessagingAddMemberOutput{}, errors.New("that person is not part of this organization")

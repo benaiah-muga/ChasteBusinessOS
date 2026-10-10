@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -507,6 +508,69 @@ func TestMessagingCreateConversationPersistsChannelStateAndCreatorMembership(t *
 	}
 	if got := fx.count(`SELECT count(*) FROM conversation_members WHERE conversation_id = $1::uuid AND user_id = $2::uuid`, created.ConversationID, fx.userID); got != 1 {
 		t.Fatalf("creator membership count = %d, want 1", got)
+	}
+}
+
+func TestMessagingAddMemberExecutorContractReplayAndConcurrentDuplicates(t *testing.T) {
+	fx := newMessagingFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'messaging.write', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	channel := fx.createChannel(t, fx.userID, "member invitations")
+	input := fmt.Sprintf(`{"conversationId":%q,"userId":%q}`, channel, fx.colleagueID)
+
+	added, err := executeMessagingCapability(fx, messagingAddMemberCapabilityID, input, "messaging-add-member-contract")
+	if err != nil || !added.OK || string(added.Data) != `{"added":true}` {
+		t.Fatalf("addMember result=%+v data=%s err=%v, want exact {added:true} contract", added, added.Data, err)
+	}
+	replay, err := executeMessagingCapability(fx, messagingAddMemberCapabilityID, input, "messaging-add-member-contract")
+	var replayOutput MessagingAddMemberOutput
+	if json.Unmarshal(replay.Data, &replayOutput) != nil || err != nil || !replay.OK || !replay.Replayed || replayOutput.Added != true {
+		t.Fatalf("addMember replay=%+v err=%v, want stable receipt replay", replay, err)
+	}
+	if count := fx.count(`SELECT count(*) FROM conversation_members WHERE conversation_id=$1::uuid AND user_id=$2::uuid`, channel, fx.colleagueID); count != 1 {
+		t.Fatalf("membership rows after replay=%d, want one", count)
+	}
+
+	// A regular member has the same invitation permission as the creator.
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO memberships (org_id, user_id) VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING`, fx.orgID, fx.otherOrgUser); err != nil {
+		t.Fatal(err)
+	}
+	memberInput := fmt.Sprintf(`{"conversationId":%q,"userId":%q}`, channel, fx.otherOrgUser)
+	memberAdded, err := executeMessagingCapability(fx, messagingAddMemberCapabilityID, memberInput, "messaging-add-member-by-member")
+	if err != nil || !memberAdded.OK || string(memberAdded.Data) != `{"added":true}` {
+		t.Fatalf("member add result=%+v err=%v, want regular member to invite", memberAdded, err)
+	}
+
+	// Different intents can race after a caller loses a response. Both should
+	// succeed and the unique membership row should still be singular.
+	raceInput := fmt.Sprintf(`{"conversationId":%q,"userId":%q}`, channel, fx.nonMemberID)
+	start := make(chan struct{})
+	type addResult struct {
+		result Result
+		err    error
+	}
+	results := make(chan addResult, 2)
+	var workers sync.WaitGroup
+	for index := 0; index < 2; index++ {
+		workers.Add(1)
+		go func(index int) {
+			defer workers.Done()
+			<-start
+			result, err := executeMessagingCapability(fx, messagingAddMemberCapabilityID, raceInput, fmt.Sprintf("messaging-add-member-race-%d", index))
+			results <- addResult{result: result, err: err}
+		}(index)
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	for result := range results {
+		if result.err != nil || !result.result.OK || string(result.result.Data) != `{"added":true}` {
+			t.Errorf("concurrent add result=%+v err=%v, want success with exact output", result.result, result.err)
+		}
+	}
+	if count := fx.count(`SELECT count(*) FROM conversation_members WHERE conversation_id=$1::uuid AND user_id=$2::uuid`, channel, fx.nonMemberID); count != 1 {
+		t.Fatalf("membership rows after concurrent adds=%d, want one", count)
 	}
 }
 

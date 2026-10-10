@@ -2412,3 +2412,10 @@ new owners and the manifest shows zero legacy runtime paths.
      intent across reloads and selector rollback, atomically remove membership
      in Go, and set `CHASTE_GO_MESSAGING_CONVERSATION_LEAVE=0` for rollback of
      new actions.
+240. (Vite implementation complete; browser proof pending) Route add-member
+     actions through the session-authenticated `messaging.addMember`
+     capability when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the
+     target user against the active organization in Go, retain exact pending
+     target and intent across reloads and selector rollback, and set
+     `CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER=0` for rollback of new
+     actions.

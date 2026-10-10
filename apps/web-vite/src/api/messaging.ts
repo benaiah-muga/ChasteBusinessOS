@@ -185,6 +185,14 @@ const GoLeaveConversationEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ left: z.literal(true) }).strict(),
 }).strict();
+const AddConversationMemberInputSchema = z.object({
+  conversationId: z.string().uuid(),
+  userId: z.string().uuid(),
+}).strict();
+const GoAddConversationMemberEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ added: z.literal(true) }).strict(),
+}).strict();
 const SendMessageSchema = z.object({ ok: z.literal(true), agentReply: z.string().nullable() }).strict();
 export type SendMessageResult = z.infer<typeof SendMessageSchema>;
 const GoSendMessageEnvelopeSchema = z.object({
@@ -760,6 +768,9 @@ export function changeConversation(
   if (options.forceGo === true && action.action === "leave" && options.intentId === undefined) {
     throw new MessagingApiError(400, "Retrying a saved conversation leave requires its original intent id.");
   }
+  if (options.forceGo === true && action.action === "addMember" && options.intentId === undefined) {
+    throw new MessagingApiError(400, "Retrying a saved member addition requires its original intent id.");
+  }
   const intentId = options.intentId === undefined ? newIntentId() : z.string().uuid().parse(options.intentId);
   const goLeaveOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_LEAVE__?: boolean }).__GO_MESSAGING_CONVERSATION_LEAVE__;
   const goLeaveSelected = options.forceGo === true || (goLeaveOverride ?? (typeof __GO_MESSAGING_CONVERSATION_LEAVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_LEAVE__));
@@ -788,10 +799,40 @@ export function changeConversation(
     }
     return updateConversationThroughGo(parsedInput.data, intentId, signal);
   }
+  const goAddMemberOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_ADD_MEMBER__?: boolean }).__GO_MESSAGING_CONVERSATION_ADD_MEMBER__;
+  const goAddMemberSelected = options.forceGo === true || (goAddMemberOverride ?? (typeof __GO_MESSAGING_CONVERSATION_ADD_MEMBER__ !== "undefined" && __GO_MESSAGING_CONVERSATION_ADD_MEMBER__));
+  if (action.action === "addMember" && goAddMemberSelected) {
+    const parsedInput = AddConversationMemberInputSchema.safeParse({ conversationId, userId: action.userId });
+    if (!parsedInput.success) throw new MessagingApiError(400, "Enter a valid conversation id and team member to add.");
+    return addConversationMemberThroughGo(parsedInput.data, intentId, signal);
+  }
   return governed(`/api/conversations/${encodeURIComponent(conversationId)}`, {
     method: "PATCH",
     body: JSON.stringify({ ...action, intentId }),
   }, `apply "${action.action}"`, OkEnvelopeSchema, "This change is waiting for approval.", signal);
+}
+
+async function addConversationMemberThroughGo(
+  input: z.infer<typeof AddConversationMemberInputSchema>,
+  intentId: string,
+  signal?: AbortSignal,
+): Promise<MessagingOutcome<{ ok: true }>> {
+  const { response, body } = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "messaging.addMember", input, intentId }),
+  }, "add this team member", signal);
+  if (response.status === 202) {
+    const parsed = PendingApprovalSchema.safeParse(body);
+    if (!parsed.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response while adding this team member.");
+    return {
+      kind: "pending",
+      reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? "Adding this team member is waiting for approval.",
+    };
+  }
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "add this team member"));
+  const parsed = GoAddConversationMemberEnvelopeSchema.safeParse(body);
+  if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected response while adding this team member.");
+  return { kind: "completed", data: { ok: true } };
 }
 
 async function archiveConversationThroughGo(

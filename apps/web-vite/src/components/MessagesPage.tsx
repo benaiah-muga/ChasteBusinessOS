@@ -236,6 +236,12 @@ type PendingConversationLeave = {
   fingerprint: string;
   intentId: string;
 };
+type PendingConversationMember = {
+  conversationId: string;
+  action: Extract<Parameters<typeof changeConversation>[1], { action: "addMember" }>;
+  fingerprint: string;
+  intentId: string;
+};
 
 function conversationArchiveGoSelected(): boolean {
   return typeof __GO_MESSAGING_CONVERSATION_ARCHIVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_ARCHIVE__;
@@ -426,6 +432,67 @@ function conversationLeaveIntentStorageKey(actorId: string, organizationId: stri
   return `chaste:conversation-leave:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}:${encodeURIComponent(conversationId)}`;
 }
 
+function conversationMemberIntentStorageKey(actorId: string, organizationId: string, conversationId: string): string {
+  return `chaste:conversation-member:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}:${encodeURIComponent(conversationId)}`;
+}
+
+function conversationMemberFingerprint(conversationId: string, action: PendingConversationMember["action"]): string {
+  return JSON.stringify([conversationId, action]);
+}
+
+function parsePendingConversationMember(value: unknown): PendingConversationMember | null {
+  if (typeof value !== "object" || value === null) return null;
+  const stored = value as Partial<PendingConversationMember>;
+  if (
+    typeof stored.conversationId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.conversationId)
+    || typeof stored.intentId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.intentId)
+    || typeof stored.fingerprint !== "string"
+    || typeof stored.action !== "object"
+    || stored.action === null
+    || stored.action.action !== "addMember"
+    || typeof stored.action.userId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.action.userId)
+  ) return null;
+  const action = stored.action as PendingConversationMember["action"];
+  if (stored.fingerprint !== conversationMemberFingerprint(stored.conversationId, action)) return null;
+  return { conversationId: stored.conversationId, action, fingerprint: stored.fingerprint, intentId: stored.intentId };
+}
+
+function readPendingConversationMemberForScope(actorId: string, organizationId: string): PendingConversationMember | null {
+  const prefix = `chaste:conversation-member:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}:`;
+  try {
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const pending = parsePendingConversationMember(JSON.parse(window.sessionStorage.getItem(key) ?? "null"));
+      if (pending) return pending;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function persistPendingConversationMember(actorId: string | null, organizationId: string | null, member: PendingConversationMember): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.setItem(conversationMemberIntentStorageKey(actorId, organizationId, member.conversationId), JSON.stringify(member));
+  } catch {
+    // The in-memory intent still protects retries for this page session.
+  }
+}
+
+function clearPendingConversationMember(actorId: string | null, organizationId: string | null, conversationId: string): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.removeItem(conversationMemberIntentStorageKey(actorId, organizationId, conversationId));
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
+}
+
 function conversationLeaveFingerprint(conversationId: string, action: PendingConversationLeave["action"]): string {
   return JSON.stringify([conversationId, action]);
 }
@@ -535,6 +602,11 @@ function clearGoSendIntent(intent: GoSendIntent, cached: GoSendIntentRef): void 
 
 function errorText(error: unknown, fallback: string): string {
   return error instanceof MessagingApiError ? error.message : fallback;
+}
+
+function isTerminalAddMemberRejection(error: unknown): boolean {
+  if (!(error instanceof MessagingApiError) || error.status < 400 || error.status >= 500) return false;
+  return ![408, 409, 425, 429].includes(error.status);
 }
 
 /** Pins the thread to the newest message. Direct assignment, not scrollTo, so it works without a layout engine. */
@@ -844,6 +916,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const [pendingConversationUpdate, setPendingConversationUpdate] = useState<PendingConversationUpdate | null>(null);
   const [pendingConversationArchive, setPendingConversationArchive] = useState<PendingConversationArchive | null>(null);
   const [pendingConversationLeave, setPendingConversationLeave] = useState<PendingConversationLeave | null>(null);
+  const [pendingConversationMember, setPendingConversationMember] = useState<PendingConversationMember | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [confirmDeleteConversation, setConfirmDeleteConversation] = useState(false);
   const [confirmLeaveConversation, setConfirmLeaveConversation] = useState(false);
@@ -862,6 +935,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const pendingConversationUpdateRef = useRef<PendingConversationUpdate | null>(null);
   const pendingConversationArchiveRef = useRef<PendingConversationArchive | null>(null);
   const pendingConversationLeaveRef = useRef<PendingConversationLeave | null>(null);
+  const pendingConversationMemberRef = useRef<PendingConversationMember | null>(null);
   const goSendIntentRef = useRef<GoSendIntent | null>(null);
   const aroundTargetRef = useRef<string | null>(null);
   const wideRef = useRef(wide);
@@ -885,6 +959,19 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     setNewAgent(pending.agentEnabled);
     setComposerOpen(true);
     setNotice({ tone: "pending", text: "An earlier channel creation is unresolved. Submit the saved details to check the same request." });
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    pendingConversationMemberRef.current = null;
+    setPendingConversationMember(null);
+    if (!actorId || !organizationId) return;
+    const pending = readPendingConversationMemberForScope(actorId, organizationId);
+    if (!pending) return;
+    pendingConversationMemberRef.current = pending;
+    setPendingConversationMember(pending);
+    setActiveId(pending.conversationId);
+    setSettingsOpen(true);
+    setDialogNotice({ tone: "pending", text: "An earlier member addition is unresolved. Retry the saved action to check the same request." });
   }, [actorId, organizationId]);
 
   useEffect(() => {
@@ -1397,9 +1484,11 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     const goUpdateEnabled = typeof __GO_MESSAGING_CONVERSATION_UPDATE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_UPDATE__;
     const goArchiveEnabled = conversationArchiveGoSelected();
     const goLeaveEnabled = typeof __GO_MESSAGING_CONVERSATION_LEAVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_LEAVE__;
+    const goAddMemberEnabled = typeof __GO_MESSAGING_CONVERSATION_ADD_MEMBER__ !== "undefined" && __GO_MESSAGING_CONVERSATION_ADD_MEMBER__;
     let updateIntent: PendingConversationUpdate | null = null;
     let archiveIntent: PendingConversationArchive | null = null;
     let leaveIntent: PendingConversationLeave | null = null;
+    let memberIntent: PendingConversationMember | null = null;
     let retryingLeaveIntent = false;
     try {
       if (goUpdateEnabled && action.action === "update") {
@@ -1494,9 +1583,42 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
           persistPendingConversationLeave(actorId, organizationId, leaveIntent);
         }
       }
-      const selectedIntent = updateIntent ?? archiveIntent ?? leaveIntent;
+      if (action.action === "addMember") {
+        const retained = actorId?.trim() && organizationId?.trim()
+          ? pendingConversationMemberRef.current ?? readPendingConversationMemberForScope(actorId, organizationId)
+          : null;
+        if (goAddMemberEnabled || retained) {
+          if (!actorId?.trim() || !organizationId?.trim()) {
+            setDialogNotice({ tone: "error", text: "Member additions are paused until the actor and organization are resolved." });
+            return false;
+          }
+          if (retained && retained.conversationId !== activeId) {
+            pendingConversationMemberRef.current = retained;
+            setPendingConversationMember(retained);
+            setDialogNotice({ tone: "pending", text: "An earlier member addition is unresolved. Retry the saved action before adding someone to another conversation." });
+            return false;
+          }
+          const fingerprint = conversationMemberFingerprint(activeId, action);
+          if (retained && retained.fingerprint !== fingerprint) {
+            pendingConversationMemberRef.current = retained;
+            setPendingConversationMember(retained);
+            setDialogNotice({ tone: "pending", text: "An earlier member addition is unresolved. Retry the saved action before starting another addition." });
+            return false;
+          }
+          memberIntent = retained ?? {
+            conversationId: activeId,
+            action,
+            fingerprint,
+            intentId: crypto.randomUUID(),
+          };
+          pendingConversationMemberRef.current = memberIntent;
+          setPendingConversationMember(memberIntent);
+          persistPendingConversationMember(actorId, organizationId, memberIntent);
+        }
+      }
+      const selectedIntent = updateIntent ?? archiveIntent ?? leaveIntent ?? memberIntent;
       const outcome = selectedIntent
-        ? await changeConversation(activeId, action, undefined, { intentId: selectedIntent.intentId, ...((archiveIntent || (leaveIntent && retryingLeaveIntent)) ? { forceGo: true } : {}) })
+        ? await changeConversation(activeId, action, undefined, { intentId: selectedIntent.intentId, ...((archiveIntent || (leaveIntent && retryingLeaveIntent) || memberIntent) ? { forceGo: true } : {}) })
         : await changeConversation(activeId, action);
       if (outcome.kind === "pending") {
         setDialogNotice({ tone: "pending", text: outcome.reason });
@@ -1517,10 +1639,19 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         pendingConversationLeaveRef.current = null;
         setPendingConversationLeave(null);
       }
+      if (memberIntent) {
+        clearPendingConversationMember(actorId, organizationId, activeId);
+        pendingConversationMemberRef.current = null;
+        setPendingConversationMember(null);
+      }
       const refreshed = await loadConversations();
       if (!refreshed) {
         if (leaveIntent) {
           setLoadError("You left this conversation, but the conversation list could not refresh. Retry to reload the list.");
+          return true;
+        }
+        if (memberIntent) {
+          setDialogNotice({ tone: "error", text: "The member was added, but the conversation list could not refresh." });
           return true;
         }
         setDialogNotice({ tone: "error", text: "The change completed, but the conversation list could not refresh. Retry to confirm the saved request." });
@@ -1529,6 +1660,11 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
       setDialogNotice(null);
       return true;
     } catch (error) {
+      if (memberIntent && isTerminalAddMemberRejection(error)) {
+        clearPendingConversationMember(actorId, organizationId, memberIntent.conversationId);
+        pendingConversationMemberRef.current = null;
+        setPendingConversationMember(null);
+      }
       setDialogNotice({ tone: "error", text: errorText(error, "That change did not go through.") });
       return false;
     } finally {
@@ -2286,6 +2422,16 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
 
           {activeConv.kind === "channel" && (
             <div className="messages-dialog-section messages-dialog-section-spaced">
+              {pendingConversationMember?.conversationId === activeConv.id && (
+                <button
+                  type="button"
+                  className="messages-button messages-button-primary"
+                  disabled={lifecycleBusy}
+                  onClick={() => { void runLifecycle(pendingConversationMember.action); }}
+                >
+                  {lifecycleBusy ? "Checking member addition…" : "Retry member addition"}
+                </button>
+              )}
               <span className="messages-dialog-field">
                 Find a colleague by name
                 <span className="messages-dialog-row">
