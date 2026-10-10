@@ -379,7 +379,9 @@ The full v1 changelog is preserved at the bottom of this file.
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Actor/org scoped exact
   attempts and pending approvals survive reload. Go 404 and uncertain results
   never fall back to the legacy writer, and an unresolved attempt blocks legacy
-  rollback. Other Accounting actions retain their existing routes.
+  rollback. Browser-wide Web Locks serialize retry reservations across tabs;
+  browsers without Web Locks fail closed before creating an invoice. Other
+  Accounting actions retain their existing routes.
 - Vite invoice credit notes can use Go's session-authenticated
   `accounting.creditNote` capability behind the paired
   `CHASTE_GO_ACCOUNTING_CREDIT_NOTE=1` and

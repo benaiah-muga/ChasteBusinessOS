@@ -872,6 +872,38 @@ describe("accounting API: Go invoice creation", () => {
     currency: "USD",
   };
 
+  beforeEach(stubPaymentLocks);
+
+  it("serializes cross-tab invoice reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
+    const mock = stubFetch(() => Response.json({ pendingApproval: true }, { status: 202 }));
+    const alternateInvoice = { ...action, memo: "Different invoice" };
+
+    const outcomes = await Promise.allSettled([
+      submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope),
+      submitAccountingAction("/api/accounting", alternateInvoice, undefined, paymentRetryScope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(mock).toHaveBeenCalledTimes(1);
+    const stored = await readPendingAccountingCreateInvoice(paymentRetryScope);
+    expect([action, alternateInvoice]).toContainEqual(stored);
+  });
+
+  it("fails closed when browser-wide invoice locks are unavailable", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const mock = stubFetch(() => Response.json({ ok: true, data: output }));
+
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve an invoice creation"),
+    });
+    expect(mock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
   it("keeps other Accounting actions on their existing endpoint", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
     const mock = stubFetch(() => Response.json({ ok: true, data: {} }));

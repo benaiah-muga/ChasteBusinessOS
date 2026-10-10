@@ -1983,7 +1983,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Locks fail closed. Vite API/page/proxy tests, typecheck, lint, and the Go
      payment executor integration test pass. Authenticated browser proof
      remains open.
-192. Route only Vite `createInvoice` writes through Go's session-authenticated
+192. (Vite/Go implementation complete; browser proof pending) Route only Vite `createInvoice` writes through Go's session-authenticated
      `accounting.createInvoice` capability behind paired
      `CHASTE_GO_ACCOUNTING_CREATE_INVOICE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the invoice selector
@@ -1992,8 +1992,11 @@ new owners and the manifest shows zero legacy runtime paths.
      reload, block legacy fallback while unresolved, and fail closed on Go 404.
      Keep other Accounting operations on their current route. Add focused API,
      proxy selector, and AccountingPage tests; the existing Go invoice creation
-     executor integration test remains the contract proof. Authenticated
-     browser proof remains open.
+     executor integration test remains the contract proof. Atomic browser-wide
+     reservations prevent cross-tab intent races, and browsers without Web
+     Locks fail closed. Vite API/page/proxy tests, typecheck, lint, and the Go
+     invoice creation integration test pass. Authenticated browser proof
+     remains open.
 193. Route only Vite `creditNote` writes through Go's session-authenticated
      `accounting.creditNote` capability behind paired
      `CHASTE_GO_ACCOUNTING_CREDIT_NOTE=1` and
