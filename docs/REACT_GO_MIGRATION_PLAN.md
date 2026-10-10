@@ -2207,6 +2207,14 @@ new owners and the manifest shows zero legacy runtime paths.
      surface pending, malformed, and unavailable responses without falling
      back to `/api/accounting`. Keep other Accounting routes unchanged; add
      focused Vite API, page, proxy selector, and Go contract checks.
+     (Vite/Go implementation complete; browser proof pending) The focused Vite
+     API/page/proxy suite passed all 312 tests; the Go statement executor test
+     passed with runtime integration required, covering permission denial,
+     customer/org isolation, and audit behavior. Vite typecheck and lint passed.
+     Statement dates now require offset-aware timestamps, and changing the
+     selected customer clears old data and ignores late responses. Independent
+     review found no remaining issues. The in-app browser was unavailable, so
+     browser runtime proof remains open.
 208. (Implemented; default-on for Vite direct capability actions) Route the
      existing Vite Projects create, archive, task create, move, and assignment
      actions through Go's session-authenticated capabilities when

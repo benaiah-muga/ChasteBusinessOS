@@ -3135,6 +3135,7 @@ function CashSection({
   const [statement, setStatement] = useState<AccountingStatement | null>(null);
   const [statementBusy, setStatementBusy] = useState(false);
   const [statementError, setStatementError] = useState<string | null>(null);
+  const statementRequestRef = useRef(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
 
@@ -3193,20 +3194,34 @@ function CashSection({
 
   async function loadStatement() {
     if (!customerId) return;
+    const requestId = ++statementRequestRef.current;
+    const requestedCustomerId = customerId;
+    setStatement(null);
     setStatementBusy(true);
     setStatementError(null);
     try {
-      setStatement(await fetchCustomerStatement(customerId));
+      const result = await fetchCustomerStatement(requestedCustomerId);
+      if (requestId === statementRequestRef.current) setStatement(result);
     } catch (error) {
-      setStatement(null);
-      setStatementError(
-        error instanceof AccountingApiError
-          ? error.message
-          : "Could not load this customer statement. Try again.",
-      );
+      if (requestId === statementRequestRef.current) {
+        setStatement(null);
+        setStatementError(
+          error instanceof AccountingApiError
+            ? error.message
+            : "Could not load this customer statement. Try again.",
+        );
+      }
     } finally {
-      setStatementBusy(false);
+      if (requestId === statementRequestRef.current) setStatementBusy(false);
     }
+  }
+
+  function changeStatementCustomer(nextCustomerId: string) {
+    statementRequestRef.current += 1;
+    setCustomerId(nextCustomerId);
+    setStatement(null);
+    setStatementBusy(false);
+    setStatementError(null);
   }
 
   function copyMessage(reminder: AccountingReminder) {
@@ -3432,7 +3447,7 @@ function CashSection({
             <div className="accounting-field-row">
               <label className="accounting-label">
                 Customer
-                <select value={customerId} onChange={(event) => setCustomerId(event.target.value)}>
+                <select value={customerId} onChange={(event) => changeStatementCustomer(event.target.value)}>
                   <option value="">Choose a customer</option>
                   {customers.map((customer) => (
                     <option key={customer.id} value={customer.id}>

@@ -132,7 +132,7 @@ interface StubOptions {
   goBankMatchResponse?: () => Response;
   goBankUnmatchResponse?: () => Response;
   goPurchasingPayBillResponse?: () => Response;
-  goCustomerStatementResponse?: () => Response;
+  goCustomerStatementResponse?: () => Response | Promise<Response>;
   goPaymentReminderResponse?: () => Response;
   goBudgetScenarioResponse?: () => Response;
   goCashForecastResponse?: () => Response;
@@ -1300,6 +1300,53 @@ describe("AccountingPage tabs", () => {
       input: { customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
     });
     expect(calls.some((entry) => entry.url === "/api/accounting" && entry.method === "POST" && entry.body?.includes("customerStatement"))).toBe(false);
+  });
+
+  it("clears a prior customer statement and ignores its late response after selection changes", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__", true);
+    let resolveFirstStatement!: (response: Response) => void;
+    const firstStatement = new Promise<Response>((resolve) => { resolveFirstStatement = resolve; });
+    let statementRequest = 0;
+    const secondCustomerId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    stubAccounting({
+      accounting: {
+        ...overview,
+        customers: [...overview.customers, { id: secondCustomerId, name: "Second customer", paymentTermDays: 14 }],
+      },
+      goCustomerStatementResponse: () => {
+        statementRequest += 1;
+        if (statementRequest === 1) return firstStatement;
+        return Response.json({ ok: true, data: { currencies: [{
+          currency: "USD",
+          openingBalanceMinor: 0,
+          closingBalanceMinor: 1_200,
+          rows: [{ date: "2026-09-21T10:30:00.000Z", kind: "invoice", ref: "Current customer row", amountMinor: 1_200, balanceMinor: 1_200 }],
+        }] } });
+      },
+    });
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: /Cash & collections/ }));
+    await screen.findByRole("table", { name: "Weekly cash forecast" });
+
+    const selector = screen.getByLabelText("Customer");
+    fireEvent.change(selector, { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    fireEvent.click(screen.getByRole("button", { name: "Load statement" }));
+    await waitFor(() => expect(statementRequest).toBe(1));
+
+    fireEvent.change(selector, { target: { value: secondCustomerId } });
+    expect(screen.queryByText("Current customer row")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Load statement" }));
+    expect(await screen.findByText("Current customer row")).toBeTruthy();
+
+    resolveFirstStatement(Response.json({ ok: true, data: { currencies: [{
+      currency: "USD",
+      openingBalanceMinor: 2_500,
+      closingBalanceMinor: 2_500,
+      rows: [{ date: "2026-09-20T10:30:00.000Z", kind: "invoice", ref: "Previous customer row", amountMinor: 2_500, balanceMinor: 2_500 }],
+    }] } }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Previous customer row")).toBeNull();
+    expect(screen.getByText("Current customer row")).toBeTruthy();
   });
 
   it("shows budget scenarios and their projected cash", async () => {

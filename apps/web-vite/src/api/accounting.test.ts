@@ -682,6 +682,7 @@ describe("accounting API: capability reads", () => {
     { label: "pending", response: () => Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 }), status: 202 },
     { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }), status: 404 },
     { label: "malformed", response: () => Response.json({ ok: true, data: { currencies: [{ currency: "USD", rows: [] }] } }), status: 200 },
+    { label: "invalid row timestamp", response: () => Response.json({ ok: true, data: { currencies: [{ currency: "USD", openingBalanceMinor: 0, closingBalanceMinor: 0, rows: [{ date: "not-a-date", kind: "invoice", ref: "1042", amountMinor: 0, balanceMinor: 0 }] }] } }), status: 200 },
     { label: "capability error", response: () => Response.json({ ok: false, error: "Customer statement failed" }, { status: 422 }), status: 500 },
   ])("fails closed on selected Go statement $label responses", async ({ response, status }) => {
     vi.stubGlobal("__GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__", true);

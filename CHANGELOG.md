@@ -104,6 +104,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Manufacturing now gives expired sessions and denied permissions clear
   guidance when Go planning reads fail. Active Manufacturing tabs also update
   their border without conflicting shorthand styles.
+- Vite Accounting clears a displayed customer statement when its customer
+  changes, ignores late results from the previous selection, and rejects rows
+  with malformed timestamps.
 
 ### Changed
 

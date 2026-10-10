@@ -322,7 +322,7 @@ const StatementSchema = z.object({
     openingBalanceMinor: minor,
     closingBalanceMinor: minor,
     rows: z.array(z.object({
-      date: z.string().min(1),
+      date: timestamp,
       kind: z.string().min(1),
       ref: z.string(),
       amountMinor: minor,
