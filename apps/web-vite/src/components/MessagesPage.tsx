@@ -242,9 +242,19 @@ type PendingConversationMember = {
   fingerprint: string;
   intentId: string;
 };
+type PendingConversationDelete = {
+  conversationId: string;
+  action: Extract<Parameters<typeof changeConversation>[1], { action: "delete" }>;
+  fingerprint: string;
+  intentId: string;
+};
 
 function conversationArchiveGoSelected(): boolean {
   return typeof __GO_MESSAGING_CONVERSATION_ARCHIVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_ARCHIVE__;
+}
+
+function conversationDeleteGoSelected(): boolean {
+  return typeof __GO_MESSAGING_CONVERSATION_DELETE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_DELETE__;
 }
 
 function createIntentStorageKey(actorId: string, organizationId: string): string {
@@ -423,6 +433,65 @@ function clearPendingConversationArchive(actorId: string | null, organizationId:
   if (!actorId || !organizationId) return;
   try {
     window.sessionStorage.removeItem(conversationArchiveIntentStorageKey(actorId, organizationId, conversationId));
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
+}
+
+function conversationDeleteIntentStorageKey(actorId: string, organizationId: string, conversationId: string): string {
+  return `chaste:conversation-delete:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}:${encodeURIComponent(conversationId)}`;
+}
+
+function conversationDeleteFingerprint(conversationId: string, action: PendingConversationDelete["action"]): string {
+  return JSON.stringify([conversationId, action]);
+}
+
+function parsePendingConversationDelete(value: unknown): PendingConversationDelete | null {
+  if (typeof value !== "object" || value === null) return null;
+  const stored = value as Partial<PendingConversationDelete>;
+  if (
+    typeof stored.conversationId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.conversationId)
+    || typeof stored.intentId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored.intentId)
+    || typeof stored.fingerprint !== "string"
+    || typeof stored.action !== "object"
+    || stored.action === null
+    || stored.action.action !== "delete"
+  ) return null;
+  const action = stored.action as PendingConversationDelete["action"];
+  if (stored.fingerprint !== conversationDeleteFingerprint(stored.conversationId, action)) return null;
+  return { conversationId: stored.conversationId, action, fingerprint: stored.fingerprint, intentId: stored.intentId };
+}
+
+function readPendingConversationDeleteForScope(actorId: string, organizationId: string): PendingConversationDelete | null {
+  const prefix = `chaste:conversation-delete:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}:`;
+  try {
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const pending = parsePendingConversationDelete(JSON.parse(window.sessionStorage.getItem(key) ?? "null"));
+      if (pending) return pending;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function persistPendingConversationDelete(actorId: string | null, organizationId: string | null, deletion: PendingConversationDelete): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.setItem(conversationDeleteIntentStorageKey(actorId, organizationId, deletion.conversationId), JSON.stringify(deletion));
+  } catch {
+    // The in-memory intent still protects retries for this page session.
+  }
+}
+
+function clearPendingConversationDelete(actorId: string | null, organizationId: string | null, conversationId: string): void {
+  if (!actorId || !organizationId) return;
+  try {
+    window.sessionStorage.removeItem(conversationDeleteIntentStorageKey(actorId, organizationId, conversationId));
   } catch {
     // Storage can be unavailable in restricted browser contexts.
   }
@@ -917,6 +986,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const [pendingConversationArchive, setPendingConversationArchive] = useState<PendingConversationArchive | null>(null);
   const [pendingConversationLeave, setPendingConversationLeave] = useState<PendingConversationLeave | null>(null);
   const [pendingConversationMember, setPendingConversationMember] = useState<PendingConversationMember | null>(null);
+  const [pendingConversationDelete, setPendingConversationDelete] = useState<PendingConversationDelete | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [confirmDeleteConversation, setConfirmDeleteConversation] = useState(false);
   const [confirmLeaveConversation, setConfirmLeaveConversation] = useState(false);
@@ -936,6 +1006,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const pendingConversationArchiveRef = useRef<PendingConversationArchive | null>(null);
   const pendingConversationLeaveRef = useRef<PendingConversationLeave | null>(null);
   const pendingConversationMemberRef = useRef<PendingConversationMember | null>(null);
+  const pendingConversationDeleteRef = useRef<PendingConversationDelete | null>(null);
   const goSendIntentRef = useRef<GoSendIntent | null>(null);
   const aroundTargetRef = useRef<string | null>(null);
   const wideRef = useRef(wide);
@@ -1012,6 +1083,19 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     setActiveId(pending.conversationId);
     setSettingsOpen(true);
     setDialogNotice({ tone: "pending", text: "An earlier leave request is unresolved. Retry the saved action to check the same request." });
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    pendingConversationDeleteRef.current = null;
+    setPendingConversationDelete(null);
+    if (!actorId || !organizationId) return;
+    const pending = readPendingConversationDeleteForScope(actorId, organizationId);
+    if (!pending) return;
+    pendingConversationDeleteRef.current = pending;
+    setPendingConversationDelete(pending);
+    setActiveId(pending.conversationId);
+    setSettingsOpen(true);
+    setDialogNotice({ tone: "pending", text: "An earlier channel deletion is unresolved. Retry the saved action to check the same request." });
   }, [actorId, organizationId]);
 
   const activeConv = conversations?.find((conversation) => conversation.id === activeId) ?? null;
@@ -1485,10 +1569,12 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     const goArchiveEnabled = conversationArchiveGoSelected();
     const goLeaveEnabled = typeof __GO_MESSAGING_CONVERSATION_LEAVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_LEAVE__;
     const goAddMemberEnabled = typeof __GO_MESSAGING_CONVERSATION_ADD_MEMBER__ !== "undefined" && __GO_MESSAGING_CONVERSATION_ADD_MEMBER__;
+    const goDeleteEnabled = conversationDeleteGoSelected();
     let updateIntent: PendingConversationUpdate | null = null;
     let archiveIntent: PendingConversationArchive | null = null;
     let leaveIntent: PendingConversationLeave | null = null;
     let memberIntent: PendingConversationMember | null = null;
+    let deleteIntent: PendingConversationDelete | null = null;
     let retryingLeaveIntent = false;
     try {
       if (goUpdateEnabled && action.action === "update") {
@@ -1616,9 +1702,42 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
           persistPendingConversationMember(actorId, organizationId, memberIntent);
         }
       }
-      const selectedIntent = updateIntent ?? archiveIntent ?? leaveIntent ?? memberIntent;
+      if (action.action === "delete") {
+        const retained = actorId?.trim() && organizationId?.trim()
+          ? pendingConversationDeleteRef.current ?? readPendingConversationDeleteForScope(actorId, organizationId)
+          : null;
+        if (goDeleteEnabled || retained) {
+          if (!actorId?.trim() || !organizationId?.trim()) {
+            setDialogNotice({ tone: "error", text: "Channel deletion is paused until the actor and organization are resolved." });
+            return false;
+          }
+          if (retained && retained.conversationId !== activeId) {
+            pendingConversationDeleteRef.current = retained;
+            setPendingConversationDelete(retained);
+            setDialogNotice({ tone: "pending", text: "An earlier channel deletion is unresolved. Retry the saved action before deleting another channel." });
+            return false;
+          }
+          const fingerprint = conversationDeleteFingerprint(activeId, action);
+          if (retained && retained.fingerprint !== fingerprint) {
+            pendingConversationDeleteRef.current = retained;
+            setPendingConversationDelete(retained);
+            setDialogNotice({ tone: "pending", text: "An earlier channel deletion is unresolved. Retry the saved action before starting another deletion." });
+            return false;
+          }
+          deleteIntent = retained ?? {
+            conversationId: activeId,
+            action,
+            fingerprint,
+            intentId: crypto.randomUUID(),
+          };
+          pendingConversationDeleteRef.current = deleteIntent;
+          setPendingConversationDelete(deleteIntent);
+          persistPendingConversationDelete(actorId, organizationId, deleteIntent);
+        }
+      }
+      const selectedIntent = updateIntent ?? archiveIntent ?? leaveIntent ?? memberIntent ?? deleteIntent;
       const outcome = selectedIntent
-        ? await changeConversation(activeId, action, undefined, { intentId: selectedIntent.intentId, ...((archiveIntent || (leaveIntent && retryingLeaveIntent) || memberIntent) ? { forceGo: true } : {}) })
+        ? await changeConversation(activeId, action, undefined, { intentId: selectedIntent.intentId, ...((archiveIntent || (leaveIntent && retryingLeaveIntent) || memberIntent || deleteIntent) ? { forceGo: true } : {}) })
         : await changeConversation(activeId, action);
       if (outcome.kind === "pending") {
         setDialogNotice({ tone: "pending", text: outcome.reason });
@@ -1644,6 +1763,11 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         pendingConversationMemberRef.current = null;
         setPendingConversationMember(null);
       }
+      if (deleteIntent) {
+        clearPendingConversationDelete(actorId, organizationId, activeId);
+        pendingConversationDeleteRef.current = null;
+        setPendingConversationDelete(null);
+      }
       const refreshed = await loadConversations();
       if (!refreshed) {
         if (leaveIntent) {
@@ -1652,6 +1776,10 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         }
         if (memberIntent) {
           setDialogNotice({ tone: "error", text: "The member was added, but the conversation list could not refresh." });
+          return true;
+        }
+        if (deleteIntent) {
+          setLoadError("The channel was deleted, but the conversation list could not refresh. Retry to reload the list.");
           return true;
         }
         setDialogNotice({ tone: "error", text: "The change completed, but the conversation list could not refresh. Retry to confirm the saved request." });
@@ -1922,6 +2050,22 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         <div className={`messages-notice messages-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
           <span>{notice.text}</span>
           <button type="button" className="messages-notice-close" aria-label="Dismiss notice" onClick={() => setNotice(null)}>Dismiss</button>
+        </div>
+      )}
+
+      {pendingConversationDelete && !activeConv && (
+        <div className="messages-notice messages-notice-pending" role="status">
+          <span>
+            {dialogNotice?.text ?? "A channel deletion is unresolved. Retry the saved action to check the same request."}
+            <button
+              type="button"
+              className="messages-button messages-button-primary"
+              disabled={lifecycleBusy}
+              onClick={() => { void runLifecycle(pendingConversationDelete.action); }}
+            >
+              {lifecycleBusy ? "Checking deletion…" : "Retry channel deletion"}
+            </button>
+          </span>
         </div>
       )}
 
@@ -2509,7 +2653,17 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
               {pendingConversationLeave?.conversationId === activeConv.id ? "Retry leave" : "Leave"}
             </button>
             {activeConv.kind === "channel" && activeConv.createdByMe && (
-              <button type="button" className="messages-button messages-button-danger" onClick={() => setConfirmDeleteConversation(true)}>Delete channel</button>
+              <button
+                type="button"
+                className="messages-button messages-button-danger"
+                disabled={lifecycleBusy}
+                onClick={() => {
+                  if (pendingConversationDelete?.conversationId === activeConv.id) void destroyConversation();
+                  else setConfirmDeleteConversation(true);
+                }}
+              >
+                {pendingConversationDelete?.conversationId === activeConv.id ? "Retry delete" : "Delete channel"}
+              </button>
             )}
           </div>
         </Dialog>
@@ -2522,6 +2676,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         confirmLabel="Delete channel"
         onClose={() => setConfirmDeleteConversation(false)}
         onConfirm={() => { void destroyConversation(); }}
+        actionsDisabled={lifecycleBusy}
       />
 
       <ConfirmDialog

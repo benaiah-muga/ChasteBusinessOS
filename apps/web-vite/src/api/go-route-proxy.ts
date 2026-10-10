@@ -195,6 +195,10 @@ export function goMessagingConversationAddMemberFromEnv(env: Record<string, stri
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER !== "0";
 }
 
+export function goMessagingConversationDeleteFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_CONVERSATION_DELETE !== "0";
+}
+
 export function goMessagingThreadReadsFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_THREAD_READ !== "0";
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -775,6 +776,332 @@ func TestMessagingLeaveConversationMatchesViteContractAndReplaysReceipt(t *testi
 	if err == nil || err.Error() != "you are not a member of this conversation" {
 		t.Fatalf("non-member DM leave err=%v, want a membership refusal", err)
 	}
+}
+
+func TestMessagingDeleteConversationMatchesViteContractAndReplaysReceipt(t *testing.T) {
+	fx := newMessagingFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'messaging.write', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	channel := fx.createChannel(t, fx.userID, "delete contract")
+	input := `{"conversationId":"` + channel + `"}`
+	intent := "messaging-delete-vite-contract"
+
+	result, err := executeMessagingCapability(fx, messagingDeleteConversationCapabilityID, input, intent)
+	if err != nil || !result.OK || string(result.Data) != `{"deleted":true}` {
+		t.Fatalf("delete conversation result=%+v err=%v, want exact Vite {deleted:true} output", result, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversations WHERE id=$1::uuid AND org_id=$2::uuid AND deleted_at IS NOT NULL`, channel, fx.orgID); got != 1 {
+		t.Fatalf("deleted tombstone rows=%d, want one", got)
+	}
+
+	replayed, err := executeMessagingCapability(fx, messagingDeleteConversationCapabilityID, input, intent)
+	var replayedOutput MessagingDeleteConversationOutput
+	if decodeErr := json.Unmarshal(replayed.Data, &replayedOutput); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if err != nil || !replayed.OK || !replayed.Replayed || !replayedOutput.Deleted {
+		t.Fatalf("same-intent delete receipt replay=%+v err=%v, want original Vite output", replayed, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversations WHERE id=$1::uuid AND org_id=$2::uuid AND deleted_at IS NOT NULL`, channel, fx.orgID); got != 1 {
+		t.Fatalf("receipt replay changed tombstone count=%d, want one", got)
+	}
+
+	leftChannel := fx.createChannel(t, fx.userID, "creator left before delete")
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingLeaveConversationOutput, error) {
+		return messagingLeaveConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingConversationIDInput{ConversationID: leftChannel})
+	}); err != nil {
+		t.Fatalf("creator leave before delete: %v", err)
+	}
+	leftResult, err := executeMessagingCapability(fx, messagingDeleteConversationCapabilityID,
+		`{"conversationId":"`+leftChannel+`"}`, "messaging-delete-after-creator-left")
+	if err != nil || !leftResult.OK || string(leftResult.Data) != `{"deleted":true}` {
+		t.Fatalf("creator delete after leaving result=%+v err=%v, want success", leftResult, err)
+	}
+}
+
+func TestMessagingDeleteConversationSerializesLifecycleWriters(t *testing.T) {
+	fx := newMessagingFixture(t)
+	channel := fx.createChannel(t, fx.userID, "delete lifecycle race")
+	fx.addMember(t, fx.userID, channel, fx.colleagueID)
+
+	deleteReady := make(chan struct{})
+	finishDelete := make(chan struct{})
+	var releaseDelete sync.Once
+	finish := func() { releaseDelete.Do(func() { close(finishDelete) }) }
+	defer finish()
+	deleteResult := make(chan error, 1)
+	go func() {
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingDeleteConversationOutput, error) {
+			deleted, err := messagingDeleteConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingConversationIDInput{ConversationID: channel})
+			if err == nil && !deleted.Deleted {
+				err = errors.New("delete returned false")
+			}
+			close(deleteReady)
+			<-finishDelete
+			return deleted, err
+		})
+		deleteResult <- err
+	}()
+	<-deleteReady
+
+	type lifecycleResult struct {
+		name string
+		err  error
+	}
+	lifecycleDone := make(chan lifecycleResult, 4)
+	go func() {
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingAddMemberOutput, error) {
+			return messagingAddMember(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingAddMemberInput{
+				ConversationID: channel, UserID: fx.nonMemberID,
+			})
+		})
+		lifecycleDone <- lifecycleResult{name: "addMember", err: err}
+	}()
+	go func() {
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingArchiveConversationOutput, error) {
+			return messagingArchiveConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingArchiveConversationInput{
+				ConversationID: channel, Archived: true,
+			})
+		})
+		lifecycleDone <- lifecycleResult{name: "archive", err: err}
+	}()
+	go func() {
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingConversationIDOutput, error) {
+			return messagingUpdateConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingUpdateConversationInput{
+				ConversationID: channel, Title: messagingUserPointer("renamed after delete"),
+			})
+		})
+		lifecycleDone <- lifecycleResult{name: "update", err: err}
+	}()
+	go func() {
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingLeaveConversationOutput, error) {
+			return messagingLeaveConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.colleagueID), MessagingConversationIDInput{
+				ConversationID: channel,
+			})
+		})
+		lifecycleDone <- lifecycleResult{name: "leave", err: err}
+	}()
+
+	// All lifecycle writers must wait for the delete transaction's conversation row lock.
+	for range 4 {
+		select {
+		case result := <-lifecycleDone:
+			t.Fatalf("%s escaped the delete row lock with err=%v", result.name, result.err)
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+	finish()
+	if err := <-deleteResult; err != nil {
+		t.Fatalf("delete transaction: %v", err)
+	}
+	seen := map[string]error{}
+	for range 4 {
+		select {
+		case result := <-lifecycleDone:
+			seen[result.name] = result.err
+		case <-time.After(5 * time.Second):
+			t.Fatal("lifecycle writer did not finish after delete committed")
+		}
+	}
+	if err := seen["addMember"]; err == nil || err.Error() != "conversation not found" {
+		t.Errorf("addMember after delete err=%v, want refusal", err)
+	}
+	if err := seen["archive"]; err == nil || err.Error() != "conversation not found" {
+		t.Errorf("archive after delete err=%v, want not found", err)
+	}
+	if err := seen["update"]; err == nil || err.Error() != "conversation not found" {
+		t.Errorf("update after delete err=%v, want not found", err)
+	}
+	if err := seen["leave"]; err != nil {
+		t.Errorf("leave after delete err=%v, want membership cleanup to remain allowed", err)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversation_members WHERE conversation_id=$1::uuid AND user_id=$2::uuid`, channel, fx.nonMemberID); got != 0 {
+		t.Errorf("addMember after delete inserted rows=%d, want zero", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM conversations WHERE id=$1::uuid AND deleted_at IS NOT NULL AND archived_at IS NULL`, channel); got != 1 {
+		t.Errorf("delete/archive race left unexpected tombstone state, rows=%d", got)
+	}
+}
+
+func TestMessagingSendSerializesWithConversationDelete(t *testing.T) {
+	fx := newMessagingFixture(t)
+	channel := fx.createChannel(t, fx.userID, "send-delete-race")
+	backendPID := func(tx pgx.Tx) (int32, error) {
+		var pid int32
+		err := tx.QueryRow(fx.ctx, `SELECT pg_backend_pid()`).Scan(&pid)
+		return pid, err
+	}
+	waitForLockHolder := func(pid int32) error {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			var waitType string
+			if err := fx.owner.QueryRow(fx.ctx, `
+				SELECT COALESCE(wait_event_type, '') FROM pg_stat_activity WHERE pid = $1`, pid).Scan(&waitType); err != nil {
+				return fmt.Errorf("inspect blocked PostgreSQL backend %d: %w", pid, err)
+			}
+			if waitType == "Lock" {
+				return nil
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return fmt.Errorf("PostgreSQL backend %d did not enter a lock wait", pid)
+	}
+
+	t.Run("send commits before delete", func(t *testing.T) {
+		type sendResult struct {
+			output MessagingSendMessageOutput
+			err    error
+		}
+		type startResult struct {
+			pid int32
+			err error
+		}
+		sendReady := make(chan error, 1)
+		releaseSend := make(chan struct{})
+		var releaseSendOnce sync.Once
+		release := func() { releaseSendOnce.Do(func() { close(releaseSend) }) }
+		defer release()
+		sendDone := make(chan sendResult, 1)
+		go func() {
+			output, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingSendMessageOutput, error) {
+				result, err := messagingSendMessage(fx.ctx, tx, fx.orgID, "human", messagingUserPointer(fx.userID), MessagingSendMessageInput{
+					ConversationID: channel, Body: "send committed before delete",
+				})
+				sendReady <- err
+				if err != nil {
+					return result, err
+				}
+				<-releaseSend
+				return result, nil
+			})
+			sendDone <- sendResult{output: output, err: err}
+		}()
+		select {
+		case err := <-sendReady:
+			if err != nil {
+				t.Fatalf("send before readiness: %v", err)
+			}
+		case result := <-sendDone:
+			if result.err != nil {
+				t.Fatalf("send before readiness: %v", result.err)
+			}
+			t.Fatal("send transaction finished before the lock-holding section")
+		}
+
+		deleteStart := make(chan startResult, 1)
+		deleteDone := make(chan error, 1)
+		go func() {
+			_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingDeleteConversationOutput, error) {
+				pid, err := backendPID(tx)
+				if err != nil {
+					deleteStart <- startResult{err: err}
+					return MessagingDeleteConversationOutput{}, err
+				}
+				deleteStart <- startResult{pid: pid}
+				return messagingDeleteConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingConversationIDInput{ConversationID: channel})
+			})
+			deleteDone <- err
+		}()
+		var deletePID int32
+		select {
+		case started := <-deleteStart:
+			if started.err != nil {
+				t.Fatalf("start delete transaction: %v", started.err)
+			}
+			deletePID = started.pid
+		case err := <-deleteDone:
+			t.Fatalf("delete finished before blocking on the send-held row: %v", err)
+		}
+		if err := waitForLockHolder(deletePID); err != nil {
+			t.Fatal(err)
+		}
+		release()
+		sent := <-sendDone
+		if sent.err != nil {
+			t.Fatalf("send transaction: %v", sent.err)
+		}
+		if err := <-deleteDone; err != nil {
+			t.Fatalf("delete after send commit: %v", err)
+		}
+		if got := fx.count(`SELECT count(*) FROM messages WHERE id=$1::uuid AND conversation_id=$2::uuid AND body='send committed before delete'`, sent.output.MessageID, channel); got != 1 {
+			t.Fatalf("message rows after send/delete race=%d, want one", got)
+		}
+	})
+
+	t.Run("delete commits before send", func(t *testing.T) {
+		channel := fx.createChannel(t, fx.userID, "delete-before-send")
+		type startResult struct {
+			pid int32
+			err error
+		}
+		deleteReady := make(chan error, 1)
+		finishDelete := make(chan struct{})
+		var releaseDeleteOnce sync.Once
+		release := func() { releaseDeleteOnce.Do(func() { close(finishDelete) }) }
+		defer release()
+		deleteDone := make(chan error, 1)
+		go func() {
+			_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingDeleteConversationOutput, error) {
+				result, err := messagingDeleteConversation(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingConversationIDInput{ConversationID: channel})
+				deleteReady <- err
+				if err != nil {
+					return result, err
+				}
+				<-finishDelete
+				return result, nil
+			})
+			deleteDone <- err
+		}()
+		select {
+		case err := <-deleteReady:
+			if err != nil {
+				t.Fatalf("delete before readiness: %v", err)
+			}
+		case err := <-deleteDone:
+			t.Fatalf("delete transaction finished before the lock-holding section: %v", err)
+		}
+
+		sendStart := make(chan startResult, 1)
+		sendDone := make(chan error, 1)
+		go func() {
+			_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingSendMessageOutput, error) {
+				pid, err := backendPID(tx)
+				if err != nil {
+					sendStart <- startResult{err: err}
+					return MessagingSendMessageOutput{}, err
+				}
+				sendStart <- startResult{pid: pid}
+				return messagingSendMessage(fx.ctx, tx, fx.orgID, "human", messagingUserPointer(fx.userID), MessagingSendMessageInput{
+					ConversationID: channel, Body: "send refused after delete",
+				})
+			})
+			sendDone <- err
+		}()
+		var sendPID int32
+		select {
+		case started := <-sendStart:
+			if started.err != nil {
+				t.Fatalf("start send transaction: %v", started.err)
+			}
+			sendPID = started.pid
+		case err := <-sendDone:
+			t.Fatalf("send finished before blocking on the delete-held row: %v", err)
+		}
+		if err := waitForLockHolder(sendPID); err != nil {
+			t.Fatal(err)
+		}
+		release()
+		if err := <-deleteDone; err != nil {
+			t.Fatalf("delete transaction: %v", err)
+		}
+		if err := <-sendDone; err == nil || err.Error() != "conversation not found" {
+			t.Fatalf("send after delete err=%v, want conversation not found", err)
+		}
+		if got := fx.count(`SELECT count(*) FROM messages WHERE org_id=$1::uuid AND conversation_id=$2::uuid AND body='send refused after delete'`, fx.orgID, channel); got != 0 {
+			t.Fatalf("send after delete inserted rows=%d, want zero", got)
+		}
+	})
 }
 
 func TestMessagingDirectMessagesRefuseChannelOperations(t *testing.T) {

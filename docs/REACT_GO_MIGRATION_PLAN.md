@@ -2419,3 +2419,11 @@ new owners and the manifest shows zero legacy runtime paths.
      target and intent across reloads and selector rollback, and set
      `CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER=0` for rollback of new
      actions.
+241. (Vite implementation complete; browser proof pending) Route confirmed
+     conversation deletion through the session-authenticated
+     `messaging.deleteConversation` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Retain the exact request across
+     reloads and selector rollback, clear it after the completed receipt
+     before list refresh, and serialize deletion with sends and other
+     lifecycle writes. Set `CHASTE_GO_MESSAGING_CONVERSATION_DELETE=0` for
+     rollback of new actions.

@@ -33,6 +33,10 @@ The full v1 changelog is preserved at the bottom of this file.
   `messaging.addMember` capability by default when session routing is enabled.
   Same-org targets are validated in Go, and pending requests retain their
   exact target and intent across reloads and selector rollback.
+- Vite conversation deletion now routes through the session-authenticated Go
+  `messaging.deleteConversation` capability by default when session routing is
+  enabled. Confirmed deletions serialize with sends and other lifecycle writes;
+  unresolved requests retain their exact intent across reloads and rollback.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.

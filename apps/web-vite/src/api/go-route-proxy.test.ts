@@ -37,6 +37,7 @@ import {
   goMessagingConversationArchiveFromEnv,
   goMessagingConversationLeaveFromEnv,
   goMessagingConversationAddMemberFromEnv,
+  goMessagingConversationDeleteFromEnv,
   goMessagingThreadReadsFromEnv,
   goMessagingReadCursorFromEnv,
   goMessagingReactionsFromEnv,
@@ -498,6 +499,14 @@ describe("messaging conversation-add-member Go selector", () => {
     expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER: "0" })).toBe(false);
     expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER: "1" })).toBe(false);
     expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_LEAVE: "0" })).toBe(true);
+  });
+});
+
+describe("messaging conversation-delete Go selector", () => {
+  it("requires session capability routing, defaults on, and supports its own rollback", () => {
+    expect(goMessagingConversationDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingConversationDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_DELETE: "0" })).toBe(false);
+    expect(goMessagingConversationDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_DELETE: "1" })).toBe(false);
   });
 });
 

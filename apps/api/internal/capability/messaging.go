@@ -1211,12 +1211,21 @@ func messagingSendMessage(
 	ctx context.Context, tx pgx.Tx, orgID, actorType string, userID *string,
 	input MessagingSendMessageInput,
 ) (MessagingSendMessageOutput, error) {
-	conversation, err := messagingLoadConversation(ctx, tx, orgID, input.ConversationID)
+	// Hold a shared conversation lock through commit so deletion cannot tombstone
+	// the row between validation and message insertion. Delete takes FOR UPDATE.
+	var conversation messagingConversation
+	err := tx.QueryRow(ctx, `
+		SELECT id::text, kind, title, created_by_user_id::text
+		FROM conversations
+		WHERE id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL
+		FOR SHARE`, orgID, input.ConversationID).Scan(
+		&conversation.ID, &conversation.Kind, &conversation.Title, &conversation.CreatedByUserID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MessagingSendMessageOutput{}, errors.New("conversation not found")
+	}
 	if err != nil {
 		return MessagingSendMessageOutput{}, err
-	}
-	if conversation == nil {
-		return MessagingSendMessageOutput{}, errors.New("conversation not found")
 	}
 	if err := messagingRequireMember(ctx, tx, orgID, conversation.ID, userID); err != nil {
 		return MessagingSendMessageOutput{}, err
@@ -1301,7 +1310,7 @@ func messagingSendMessage(
 		}
 	}
 	if len(input.Mentions) > 0 && actorType == "human" {
-		if err := messagingNotifyMentions(ctx, tx, orgID, conversation, userID, input.Mentions, input.Body); err != nil {
+		if err := messagingNotifyMentions(ctx, tx, orgID, &conversation, userID, input.Mentions, input.Body); err != nil {
 			return MessagingSendMessageOutput{}, err
 		}
 	}
@@ -1844,8 +1853,12 @@ func messagingUpdateConversation(
 		args = append(args, *input.AgentEnabled)
 		sets = append(sets, "agent_enabled = $"+fmt.Sprint(len(args)))
 	}
-	if _, err := tx.Exec(ctx, "UPDATE conversations SET "+strings.Join(sets, ", ")+" WHERE id = $2::uuid AND org_id = $1::uuid", args...); err != nil {
+	updated, err := tx.Exec(ctx, "UPDATE conversations SET "+strings.Join(sets, ", ")+" WHERE id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL", args...)
+	if err != nil {
 		return MessagingConversationIDOutput{}, err
+	}
+	if updated.RowsAffected() != 1 {
+		return MessagingConversationIDOutput{}, errors.New("conversation not found")
 	}
 	return MessagingConversationIDOutput{ConversationID: conversation.ID}, nil
 }
@@ -1870,10 +1883,14 @@ func messagingArchiveConversation(
 	if input.Archived {
 		archivedAt = messagingNow()
 	}
-	if _, err := tx.Exec(ctx, `
+	updated, err := tx.Exec(ctx, `
 		UPDATE conversations SET archived_at = $3::timestamptz
-		WHERE id = $2::uuid AND org_id = $1::uuid`, orgID, conversation.ID, archivedAt); err != nil {
+		WHERE id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL`, orgID, conversation.ID, archivedAt)
+	if err != nil {
 		return MessagingArchiveConversationOutput{}, err
+	}
+	if updated.RowsAffected() != 1 {
+		return MessagingArchiveConversationOutput{}, errors.New("conversation not found")
 	}
 	return MessagingArchiveConversationOutput{ConversationID: conversation.ID, Archived: input.Archived}, nil
 }
@@ -1881,12 +1898,21 @@ func messagingArchiveConversation(
 func messagingDeleteConversation(
 	ctx context.Context, tx pgx.Tx, orgID string, userID *string, input MessagingConversationIDInput,
 ) (MessagingDeleteConversationOutput, error) {
-	conversation, err := messagingLoadConversation(ctx, tx, orgID, input.ConversationID)
+	// Serialize deletion with lifecycle changes that lock or update this row.
+	// PostgreSQL rechecks the active-row predicate after a concurrent update commits.
+	var conversation messagingConversation
+	err := tx.QueryRow(ctx, `
+		SELECT id::text, kind, title, created_by_user_id::text
+		FROM conversations
+		WHERE id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL
+		FOR UPDATE`, orgID, input.ConversationID).Scan(
+		&conversation.ID, &conversation.Kind, &conversation.Title, &conversation.CreatedByUserID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MessagingDeleteConversationOutput{}, errors.New("conversation not found")
+	}
 	if err != nil {
 		return MessagingDeleteConversationOutput{}, err
-	}
-	if conversation == nil {
-		return MessagingDeleteConversationOutput{}, errors.New("conversation not found")
 	}
 	if conversation.Kind == messagingConversationKindDM {
 		return MessagingDeleteConversationOutput{}, errors.New("direct messages are left, not deleted")
@@ -1894,10 +1920,14 @@ func messagingDeleteConversation(
 	if userID == nil || conversation.CreatedByUserID == nil || *conversation.CreatedByUserID != *userID {
 		return MessagingDeleteConversationOutput{}, errors.New("only the channel creator can delete it")
 	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE conversations SET deleted_at = $3 WHERE id = $2::uuid AND org_id = $1::uuid`,
-		orgID, conversation.ID, messagingNow()); err != nil {
+	updated, err := tx.Exec(ctx, `
+		UPDATE conversations SET deleted_at = $3 WHERE id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL`,
+		orgID, conversation.ID, messagingNow())
+	if err != nil {
 		return MessagingDeleteConversationOutput{}, err
+	}
+	if updated.RowsAffected() != 1 {
+		return MessagingDeleteConversationOutput{}, errors.New("conversation not found")
 	}
 	return MessagingDeleteConversationOutput{Deleted: true}, nil
 }
@@ -1908,8 +1938,20 @@ func messagingLeaveConversation(
 	if userID == nil {
 		return MessagingLeaveConversationOutput{}, errors.New("leaving needs a named member")
 	}
-	var removed string
+	var locked string
 	err := tx.QueryRow(ctx, `
+		SELECT c.id::text
+		FROM conversations AS c
+		WHERE c.id = $2::uuid AND c.org_id = $1::uuid
+		FOR SHARE OF c`, orgID, input.ConversationID).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MessagingLeaveConversationOutput{}, errors.New("you are not a member of this conversation")
+	}
+	if err != nil {
+		return MessagingLeaveConversationOutput{}, err
+	}
+	var removed string
+	err = tx.QueryRow(ctx, `
 		DELETE FROM conversation_members AS m
 		USING conversations AS c
 		WHERE m.conversation_id = $2::uuid AND m.user_id = $3::uuid

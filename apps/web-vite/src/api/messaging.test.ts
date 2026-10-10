@@ -1101,6 +1101,69 @@ describe("messaging API client", () => {
     expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
   });
 
+  it("deletes conversations through Go with a stable intent and the exact capability contract", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_DELETE__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { deleted: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "delete" }, undefined, { intentId }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({
+      capabilityId: "messaging.deleteConversation",
+      input: { conversationId },
+      intentId,
+    });
+  });
+
+  it("forces only a saved conversation-delete retry through Go after selector rollback", async () => {
+    const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_DELETE__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { deleted: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(() => changeConversation(conversationId, { action: "delete" }, undefined, { forceGo: true }))
+      .toThrow("original intent id");
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(changeConversation(conversationId, { action: "delete" }, undefined, { forceGo: true, intentId }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toEqual({ capabilityId: "messaging.deleteConversation", input: { conversationId }, intentId });
+  });
+
+  it("maps Go delete approval and fails closed on errors, malformed receipts, and invalid ids", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_DELETE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, hint: "Waiting for approval." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { deleted: false } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { deleted: true, extra: "unexpected" } }))
+      .mockResolvedValueOnce(Response.json({ error: "forbidden" }, { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeConversation(conversationId, { action: "delete" }))
+      .resolves.toEqual({ kind: "pending", reason: "Waiting for approval." });
+    await expect(changeConversation(conversationId, { action: "delete" }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    await expect(changeConversation(conversationId, { action: "delete" }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+    await expect(changeConversation(conversationId, { action: "delete" }))
+      .rejects.toMatchObject({ status: 403 });
+    expect(() => changeConversation("bad-id", { action: "delete" })).toThrow(MessagingApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("keeps conversation delete on the legacy route when its selector is rolled back", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_DELETE__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await changeConversation(conversationId, { action: "delete" });
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
+    expect(lastBody(fetchMock)).toMatchObject({ action: "delete", intentId: expect.any(String) });
+  });
+
   it("creates a conversation from the 201 body and reports a pending create", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", false);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ conversationId }, { status: 201 }));

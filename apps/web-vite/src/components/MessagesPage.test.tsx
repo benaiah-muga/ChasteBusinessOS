@@ -1913,6 +1913,127 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     expect(screen.queryByRole("dialog", { name: /#general/ })).toBeNull();
   });
 
+  it("confirms Go channel deletion, retries the saved intent after rollback, and clears it before a failed list refresh", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_DELETE__", true);
+    const scope = { actorId: me, organizationId: "conversation-delete-org" };
+    const requests: Record<string, unknown>[] = [];
+    const legacyPatches: string[] = [];
+    let refreshAfterDelete = false;
+    let markerWasClearedBeforeRefresh = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") {
+        if (refreshAfterDelete) {
+          markerWasClearedBeforeRefresh = window.sessionStorage.getItem(storageKey) === null;
+          return Response.json({ error: "list unavailable" }, { status: 503 });
+        }
+        if (requests.length > 0) return Response.json({ conversations: [], me });
+        return Response.json({ conversations: [conversation()], me });
+      }
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (requests.length === 1) return Response.json({ pendingApproval: true, hint: "Deletion is waiting for approval." }, { status: 202 });
+        if (requests.length === 2) return Response.json({ error: "Temporary delete failure." }, { status: 503 });
+        refreshAfterDelete = true;
+        return Response.json({ ok: true, data: { deleted: true } });
+      }
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
+        legacyPatches.push(path);
+        return Response.json({ error: "unexpected legacy delete" }, { status: 500 });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    const storageKey = `chaste:conversation-delete:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}:${encodeURIComponent(channelId)}`;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstMount = render(<MessagesPage {...scope} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete channel" }));
+    const confirmation = await screen.findByRole("alertdialog", { name: /Delete #general\?/ });
+    const confirmButton = within(confirmation).getByRole("button", { name: "Delete channel" });
+    await act(async () => {
+      fireEvent.click(confirmButton);
+      fireEvent.click(confirmButton);
+    });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]).toMatchObject({
+      capabilityId: "messaging.deleteConversation",
+      input: { conversationId: channelId },
+      intentId: expect.any(String),
+    });
+    const firstIntentId = requests[0]?.intentId;
+    expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null")).toMatchObject({
+      conversationId: channelId,
+      action: { action: "delete" },
+      intentId: firstIntentId,
+    });
+    expect((await screen.findByRole("status")).textContent).toContain("Deletion is waiting for approval.");
+    firstMount.unmount();
+
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_DELETE__", false);
+    render(<MessagesPage {...scope} />);
+    expect((await screen.findByRole("status")).textContent).toMatch(/earlier channel deletion is unresolved/i);
+    const retryButton = await screen.findByRole("button", { name: "Retry channel deletion" });
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]).toMatchObject({
+      capabilityId: "messaging.deleteConversation",
+      input: { conversationId: channelId },
+      intentId: firstIntentId,
+    });
+    expect((await screen.findByRole("status")).textContent).toContain("Temporary delete failure.");
+    expect(window.sessionStorage.getItem(storageKey)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry channel deletion" }));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2]).toMatchObject({
+      capabilityId: "messaging.deleteConversation",
+      input: { conversationId: channelId },
+      intentId: firstIntentId,
+    });
+    await waitFor(() => expect(markerWasClearedBeforeRefresh).toBe(true));
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain("The channel was deleted");
+    expect(screen.getByRole("button", { name: "Retry" })).not.toBeNull();
+    expect(legacyPatches).toHaveLength(0);
+  });
+
+  it("keeps a new channel deletion on the legacy route when the Go selector is off", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_DELETE__", false);
+    const legacyPatches: Array<{ path: string; body: unknown }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
+        legacyPatches.push({ path, body: JSON.parse(String(init.body)) as unknown });
+        return Response.json({ ok: true, data: {} });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage actorId={me} organizationId="conversation-delete-legacy-org" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete channel" }));
+    const confirmation = await screen.findByRole("alertdialog", { name: /Delete #general\?/ });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete channel" }));
+
+    await waitFor(() => expect(legacyPatches).toHaveLength(1));
+    expect(legacyPatches[0]).toMatchObject({
+      path: `/api/conversations/${channelId}`,
+      body: { action: "delete", intentId: expect.any(String) },
+    });
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
   it("keeps a Go leave request across reload and selector rollback, then clears only after receipt and refresh", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", true);
     const scope = { actorId: me, organizationId: "conversation-leave-org" };

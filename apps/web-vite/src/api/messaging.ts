@@ -193,6 +193,11 @@ const GoAddConversationMemberEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ added: z.literal(true) }).strict(),
 }).strict();
+const DeleteConversationInputSchema = z.object({ conversationId: z.string().uuid() }).strict();
+const GoDeleteConversationEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ deleted: z.literal(true) }).strict(),
+}).strict();
 const SendMessageSchema = z.object({ ok: z.literal(true), agentReply: z.string().nullable() }).strict();
 export type SendMessageResult = z.infer<typeof SendMessageSchema>;
 const GoSendMessageEnvelopeSchema = z.object({
@@ -762,6 +767,9 @@ export function changeConversation(
   signal?: AbortSignal,
   options: { intentId?: string; forceGo?: boolean } = {},
 ): Promise<MessagingOutcome<{ ok: true }>> {
+  if (options.forceGo === true && action.action === "delete" && options.intentId === undefined) {
+    throw new MessagingApiError(400, "Retrying a saved conversation delete requires its original intent id.");
+  }
   if (options.forceGo === true && action.action === "archive" && options.intentId === undefined) {
     throw new MessagingApiError(400, "Retrying a saved conversation archive requires its original intent id.");
   }
@@ -772,6 +780,13 @@ export function changeConversation(
     throw new MessagingApiError(400, "Retrying a saved member addition requires its original intent id.");
   }
   const intentId = options.intentId === undefined ? newIntentId() : z.string().uuid().parse(options.intentId);
+  const goDeleteOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_DELETE__?: boolean }).__GO_MESSAGING_CONVERSATION_DELETE__;
+  const goDeleteSelected = options.forceGo === true || (goDeleteOverride ?? (typeof __GO_MESSAGING_CONVERSATION_DELETE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_DELETE__));
+  if (action.action === "delete" && goDeleteSelected) {
+    const parsedInput = DeleteConversationInputSchema.safeParse({ conversationId });
+    if (!parsedInput.success) throw new MessagingApiError(400, "Enter a valid conversation id to delete.");
+    return deleteConversationThroughGo(parsedInput.data, intentId, signal);
+  }
   const goLeaveOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_LEAVE__?: boolean }).__GO_MESSAGING_CONVERSATION_LEAVE__;
   const goLeaveSelected = options.forceGo === true || (goLeaveOverride ?? (typeof __GO_MESSAGING_CONVERSATION_LEAVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_LEAVE__));
   if (action.action === "leave" && goLeaveSelected) {
@@ -810,6 +825,29 @@ export function changeConversation(
     method: "PATCH",
     body: JSON.stringify({ ...action, intentId }),
   }, `apply "${action.action}"`, OkEnvelopeSchema, "This change is waiting for approval.", signal);
+}
+
+async function deleteConversationThroughGo(
+  input: z.infer<typeof DeleteConversationInputSchema>,
+  intentId: string,
+  signal?: AbortSignal,
+): Promise<MessagingOutcome<{ ok: true }>> {
+  const { response, body } = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "messaging.deleteConversation", input, intentId }),
+  }, "delete this conversation", signal);
+  if (response.status === 202) {
+    const parsed = PendingApprovalSchema.safeParse(body);
+    if (!parsed.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to delete this conversation.");
+    return {
+      kind: "pending",
+      reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? "Deleting this conversation is waiting for approval.",
+    };
+  }
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "delete this conversation"));
+  const parsed = GoDeleteConversationEnvelopeSchema.safeParse(body);
+  if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected response to delete this conversation.");
+  return { kind: "completed", data: { ok: true } };
 }
 
 async function addConversationMemberThroughGo(
