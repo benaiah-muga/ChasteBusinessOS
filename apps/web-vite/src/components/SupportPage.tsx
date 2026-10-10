@@ -8,6 +8,8 @@ import {
   type SupportMessage,
   type SupportTeamMember,
   type SupportCannedResponseRetryScope,
+  type PendingSupportConversationWrite,
+  type SupportConversationWriteRetryScope,
   type SupportWriteAction,
   createSupportCustomer,
   fetchSupportChannels,
@@ -19,9 +21,13 @@ import {
   fetchSupportTeamMembers,
   fetchSupportThread,
   goSupportCannedResponseWriteUseGo,
+  goSupportConversationWritesUseGo,
+  readPendingSupportConversationWrite,
   readPendingSupportCannedResponse,
+  supportWriteActionFromPending,
   submitSupportCannedResponse,
   submitSupportAction,
+  submitSupportConversationAction,
   updateSupportChannels,
 } from "../api/support";
 import "./SupportPage.css";
@@ -92,6 +98,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
   const [draft, setDraft] = useState<string | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [pendingGoAction, setPendingGoAction] = useState<PendingSupportConversationWrite | null>(null);
   const [escalateOpen, setEscalateOpen] = useState(false);
   const [escalateReason, setEscalateReason] = useState("");
   const [newOpen, setNewOpen] = useState(false);
@@ -140,6 +147,48 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
     return () => controller.abort();
   }, [load]);
 
+  const retryScope = useMemo<SupportConversationWriteRetryScope>(() => ({ actorId, organizationId }), [actorId, organizationId]);
+
+  const restoreConversationAction = useCallback((pending: PendingSupportConversationWrite) => {
+    setPendingGoAction(pending);
+    setTab("inbox");
+    switch (pending.capabilityId) {
+      case "support.startConversation":
+        setNewOpen(true);
+        setNewCustomerId(String(pending.input.customerId));
+        setNewSubject(String(pending.input.subject));
+        break;
+      case "support.postMessage":
+        setActiveId(String(pending.input.conversationId));
+        setComposer(String(pending.input.body));
+        setFromCustomer(pending.input.from === "customer");
+        break;
+      case "support.escalateConversation":
+        setActiveId(String(pending.input.conversationId));
+        setEscalateOpen(true);
+        setEscalateReason(String(pending.input.reason));
+        break;
+      case "support.resolveConversation":
+      case "support.reopenConversation":
+        setActiveId(String(pending.input.conversationId));
+        break;
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const pending = readPendingSupportConversationWrite(retryScope);
+      if (pending) {
+        restoreConversationAction(pending);
+        setNotice({ tone: "pending", text: goSupportConversationWritesUseGo()
+          ? "An unresolved Go conversation action was restored. Retry the exact saved action to recover its result."
+          : "A Go conversation action is unresolved. Re-enable Go conversation writes to retry its exact saved details." });
+      }
+    } catch (error) {
+      setNotice({ tone: "error", text: friendlyError(error) });
+    }
+  }, [retryScope, restoreConversationAction]);
+
   useEffect(() => {
     if (state.status !== "ready" || tab !== "inbox" || members.length > 0 || membersError) return;
     const controller = new AbortController();
@@ -176,6 +225,12 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       });
     return () => controller.abort();
   }, [activeId]);
+
+  useEffect(() => {
+    if (pendingGoAction?.capabilityId !== "support.escalateConversation" || pendingGoAction.input.conversationId !== activeId) return;
+    setEscalateOpen(true);
+    setEscalateReason(String(pendingGoAction.input.reason));
+  }, [activeId, pendingGoAction]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -223,23 +278,43 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       setBusy(true);
       setNotice(null);
       try {
-        const outcome = await submitSupportAction(action, intentId);
+        const capabilityId = ["create", "message", "send", "escalate", "resolve", "reopen"].includes(action.action);
+        const outcome = capabilityId
+          ? await submitSupportConversationAction(action, retryScope)
+          : await submitSupportAction(action, intentId);
         if (outcome.kind === "pending") {
+          if (capabilityId) {
+            const pending = readPendingSupportConversationWrite(retryScope);
+            if (pending) restoreConversationAction(pending);
+          }
           setNotice({ tone: "pending", text: outcome.reason });
           return null;
         }
+        if (capabilityId) setPendingGoAction(null);
         setNotice({ tone: "success", text: "Support changes saved." });
         if (activeId) await refreshThread(activeId);
         await refresh();
         return outcome.data as Record<string, unknown>;
       } catch (error) {
+        try {
+          const pending = readPendingSupportConversationWrite(retryScope);
+          if (pending) {
+            restoreConversationAction(pending);
+            setNotice({ tone: "error", text: goSupportConversationWritesUseGo()
+              ? "A Go conversation action is unresolved. Its exact saved details were restored; retry them to recover the result."
+              : "A Go conversation action is unresolved. Re-enable Go conversation writes to retry its exact saved details." });
+            return null;
+          }
+        } catch {
+          // Keep the original request error visible if retry-state inspection also fails.
+        }
         setNotice({ tone: "error", text: friendlyError(error) });
         return null;
       } finally {
         setBusy(false);
       }
     },
-    [activeId, refresh, refreshThread],
+    [activeId, refresh, refreshThread, restoreConversationAction, retryScope],
   );
 
   async function postMessage() {
@@ -397,6 +472,12 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
             <div className={`support-notice support-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
               <span>{notice.text}</span>
               <button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}>×</button>
+            </div>
+          )}
+          {pendingGoAction && (
+            <div className="support-notice support-notice-pending" role="status">
+              <span>The saved Go action is still unresolved. Retry the exact saved details to recover it.</span>
+              <button type="button" disabled={busy || !goSupportConversationWritesUseGo()} onClick={() => void run(supportWriteActionFromPending(pendingGoAction))}>Retry saved action</button>
             </div>
           )}
           <nav className="support-tabs" aria-label="Customer care sections">

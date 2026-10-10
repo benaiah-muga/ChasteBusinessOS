@@ -2480,3 +2480,14 @@ new owners and the manifest shows zero legacy runtime paths.
      and organization; block fallback to legacy while a Go attempt is
      unresolved. Set `CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE=0` for explicit
      rollback of new writes.
+249. (Vite implementation complete; browser proof pending) Route Vite Support
+     conversation creation, posting messages, escalation, resolve, and reopen
+     through the session-authenticated `support.startConversation`,
+     `support.postMessage`, `support.escalateConversation`,
+     `support.resolveConversation`, and `support.reopenConversation`
+     capabilities. Persist exact actor- and organization-scoped payloads and
+     intent IDs across uncertain results and reloads, restore them in the page,
+     and block legacy fallback while unresolved. Preserve customer-words
+     message attribution, with Go applying `support.write` permission checks
+     and recording the signed-in human actor. Set
+     `CHASTE_GO_SUPPORT_CONVERSATION_WRITES=0` for explicit rollback.

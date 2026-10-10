@@ -10,7 +10,11 @@ import {
   goSupportInboxReadsUseGo,
   goSupportLibraryReadsUseGo,
   goSupportCannedResponseWriteUseGo,
+  goSupportConversationWritesUseGo,
   readPendingSupportCannedResponse,
+  readPendingSupportConversationWrite,
+  supportWriteActionFromPending,
+  submitSupportConversationAction,
   submitSupportCannedResponse,
   submitSupportAction,
   SupportApiError,
@@ -393,6 +397,123 @@ describe("Go canned-response write", () => {
     await expect(submitSupportCannedResponse(action, scope)).resolves.toMatchObject({ kind: "completed" });
     const retryPayload = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
     expect(retryPayload.intentId).toBe(firstPayload.intentId);
+  });
+});
+
+describe("Go support conversation writes", () => {
+  const scope = {
+    actorId: "55555555-5555-4555-8555-555555555555",
+    organizationId: "66666666-6666-4666-8666-666666666666",
+  };
+  const storageKey = `chaste.support.conversation-write-intent.v1:pending:${scope.actorId}:${scope.organizationId}`;
+
+  it("submits conversation creation with a durable intent and validates the strict Go output", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { conversationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportConversationAction({ action: "create", customerId, subject: "Invoice question" }, scope))
+      .resolves.toEqual({ kind: "completed", data: { conversationId } });
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    expect(payload).toMatchObject({ capabilityId: "support.startConversation", input: { customerId, subject: "Invoice question" } });
+    expect(payload.intentId).toEqual(expect.any(String));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it("reuses exact message payload and intent after uncertain response or reload", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "unavailable" }, 503))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { messageId: customerId, senderType: "staff" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "message" as const, conversationId, body: "Please check the invoice.", from: "staff" as const };
+
+    await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({ status: 503 });
+    const pending = readPendingSupportConversationWrite(scope);
+    expect(pending).toEqual({ capabilityId: "support.postMessage", input: { conversationId, body: action.body, from: "staff" } });
+    expect(supportWriteActionFromPending(pending!)).toEqual(action);
+    const firstIntent = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}").intentId;
+
+    await expect(submitSupportConversationAction({ ...action, body: "Changed reply" }, scope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("exact saved details"),
+    });
+    await expect(submitSupportConversationAction(action, scope)).resolves.toEqual({
+      kind: "completed",
+      data: { messageId: customerId, senderType: "staff" },
+    });
+    const retries = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string; input: unknown });
+    expect(retries[0]?.intentId).toBe(firstIntent);
+    expect(retries[1]?.intentId).toBe(firstIntent);
+    expect(retries[1]?.input).toEqual({ conversationId, body: action.body, from: "staff" });
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it("preserves the supported customer-words attribution choice in the Go message input", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { messageId: customerId, senderType: "customer" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "message" as const, conversationId, body: "I called this morning.", from: "customer" as const };
+
+    await expect(submitSupportConversationAction(action, scope)).resolves.toEqual({
+      kind: "completed",
+      data: { messageId: customerId, senderType: "customer" },
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "support.postMessage",
+      input: { conversationId, body: "I called this morning.", from: "customer" },
+    });
+  });
+
+  it.each([
+    [{ action: "send", conversationId, body: "Draft reply." }, "support.postMessage", { conversationId, body: "Draft reply.", from: "staff" }, { messageId: customerId, senderType: "staff" }],
+    [{ action: "escalate", conversationId, reason: "Needs a policy decision" }, "support.escalateConversation", { conversationId, reason: "Needs a policy decision" }, { status: "escalated" }],
+    [{ action: "reopen", conversationId }, "support.reopenConversation", { conversationId }, { status: "open" }],
+  ] as const)("maps %s to the matching Go capability", async (action, expectedCapability, input, output) => {
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: output }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportConversationAction(action, scope)).resolves.toMatchObject({ kind: "completed", data: output });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: expectedCapability, input });
+  });
+
+  it("keeps 202, 404, and malformed success outcomes unresolved without legacy fallback", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Needs approval." }, 202))
+      .mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { unexpected: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "resolve" as const, conversationId };
+
+    await expect(submitSupportConversationAction(action, scope)).resolves.toEqual({ kind: "pending", reason: "Needs approval." });
+    await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({ status: 404 });
+    await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({ status: 200, message: expect.stringContaining("unexpected conversation result") });
+    expect(readPendingSupportConversationWrite(scope)).toEqual({ capabilityId: "support.resolveConversation", input: { conversationId } });
+    expect(fetchMock.mock.calls.map(([path]) => String(path))).toEqual([
+      "/api/capabilities/execute",
+      "/api/capabilities/execute",
+      "/api/capabilities/execute",
+    ]);
+  });
+
+  it("blocks legacy rollback while a Go action remains unresolved", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "unavailable" }, 503)));
+    const action = { action: "reopen" as const, conversationId };
+    await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({ status: 503 });
+
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("Restore Go conversation writes"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(goSupportConversationWritesUseGo()).toBe(false);
   });
 });
 

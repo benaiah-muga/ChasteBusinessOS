@@ -72,6 +72,12 @@ The full v1 changelog is preserved at the bottom of this file.
   session routing is enabled. Responses are strictly validated and selected Go
   errors do not retry the legacy library route. Set
   `CHASTE_GO_SUPPORT_LIBRARY_READS=0` for rollback.
+- Vite Support conversation creation, message posting, escalation, resolution,
+  and reopen now use session-authenticated Go capabilities by default when
+  session routing is enabled. Exact payloads and intent IDs survive uncertain
+  outcomes and reloads, and unresolved actions block legacy fallback. Staff
+  can still record customer words, attributed to the signed-in actor. Set
+  `CHASTE_GO_SUPPORT_CONVERSATION_WRITES=0` for explicit rollback.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.

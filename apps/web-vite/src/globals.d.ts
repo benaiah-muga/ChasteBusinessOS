@@ -37,6 +37,7 @@ declare const __GO_ACCOUNTING_OVERVIEW_READS__: boolean;
 declare const __GO_SUPPORT_INBOX_READS__: boolean;
 declare const __GO_SUPPORT_LIBRARY_READS__: boolean;
 declare const __GO_SUPPORT_CANNED_RESPONSE_WRITE__: boolean;
+declare const __GO_SUPPORT_CONVERSATION_WRITES__: boolean;
 declare const __GO_BANK_RECONCILIATION_WRITES__: boolean;
 declare const __GO_PURCHASING_CREATE_ORDER__: boolean;
 declare const __GO_PURCHASING_RECEIVE_GOODS__: boolean;

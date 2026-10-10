@@ -188,6 +188,19 @@ func TestGoWave9SupportGovernedExecutorPath(t *testing.T) {
 	if err != nil || !posted.OK {
 		t.Fatalf("postMessage result=%+v err=%v", posted, err)
 	}
+	var senderType string
+	var senderUserID *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT sender_type, sender_user_id::text FROM support_messages WHERE org_id=$1::uuid AND conversation_id=$2::uuid AND body='Where is my order?'`, fx.orgID, startedOut.ConversationID).Scan(&senderType, &senderUserID); err != nil {
+		t.Fatal(err)
+	}
+	if senderType != "customer" || senderUserID == nil || *senderUserID != fx.userID {
+		t.Fatalf("customer-words message provenance=(%q,%v), want sender type customer attributed to signed-in user %s", senderType, senderUserID, fx.userID)
+	}
+	deniedPostInput := json.RawMessage(`{"conversationId":"` + startedOut.ConversationID + `","body":"This attempt must be denied","from":"customer"}`)
+	deniedPost, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, supportPostMessageCapabilityID, "crm.write", deniedPostInput, "human", "", "wave9-support-post-denied"), supportPostMessageCapabilityID, deniedPostInput)
+	if err != nil || deniedPost.OK || !strings.Contains(deniedPost.Error, "forbidden: missing permission: support.write") {
+		t.Fatalf("customer-words post without support.write=%+v err=%v, want permission failure", deniedPost, err)
+	}
 	escalateInput := json.RawMessage(`{"conversationId":"` + startedOut.ConversationID + `","reason":"Needs a refund decision"}`)
 	escalated, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, supportEscalateConversationCapabilityID, "support.write", escalateInput, "human", "", "wave9-support-escalate"), supportEscalateConversationCapabilityID, escalateInput)
 	if err != nil || !escalated.OK {

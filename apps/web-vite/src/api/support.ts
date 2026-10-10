@@ -127,7 +127,12 @@ export function goSupportCannedResponseWriteUseGo(): boolean {
   return typeof __GO_SUPPORT_CANNED_RESPONSE_WRITE__ !== "undefined" && __GO_SUPPORT_CANNED_RESPONSE_WRITE__;
 }
 
+export function goSupportConversationWritesUseGo(): boolean {
+  return typeof __GO_SUPPORT_CONVERSATION_WRITES__ !== "undefined" && __GO_SUPPORT_CONVERSATION_WRITES__;
+}
+
 export type SupportCannedResponseRetryScope = { actorId: string | null; organizationId: string | null };
+export type SupportConversationWriteRetryScope = SupportCannedResponseRetryScope;
 
 const CannedResponseWriteInputSchema = z.object({
   shortcut: z.string().min(1).max(40),
@@ -476,6 +481,209 @@ export async function submitSupportAction<Action extends SupportWriteAction>(
   if (!envelope.success) throw new SupportApiError(response.status, "The support service returned an unexpected action response.");
   const output = SupportActionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
   if (!output.success) throw new SupportApiError(response.status, "The support service returned an unexpected action result.");
+  return { kind: "completed", data: output.data as SupportActionOutput<Action> };
+}
+
+const GoSupportConversationInputSchema = z.discriminatedUnion("capabilityId", [
+  z.object({ capabilityId: z.literal("support.startConversation"), input: z.object({ customerId: uuid, subject: z.string().min(1).max(200) }).strict() }).strict(),
+  z.object({ capabilityId: z.literal("support.postMessage"), input: z.object({ conversationId: uuid, body: z.string().min(1).max(4000), from: z.enum(["customer", "staff"]) }).strict() }).strict(),
+  z.object({ capabilityId: z.literal("support.escalateConversation"), input: z.object({ conversationId: uuid, reason: z.string().min(3).max(4000) }).strict() }).strict(),
+  z.object({ capabilityId: z.literal("support.resolveConversation"), input: z.object({ conversationId: uuid }).strict() }).strict(),
+  z.object({ capabilityId: z.literal("support.reopenConversation"), input: z.object({ conversationId: uuid }).strict() }).strict(),
+]);
+const GoSupportConversationRetryRecordSchema = z.object({
+  version: z.literal(1),
+  intentId: uuid,
+  capabilityId: z.enum(["support.startConversation", "support.postMessage", "support.escalateConversation", "support.resolveConversation", "support.reopenConversation"]),
+  input: z.record(z.string(), z.unknown()),
+  fingerprint: z.string().min(1),
+}).strict();
+const SUPPORT_CONVERSATION_RETRY_PREFIX = "chaste.support.conversation-write-intent.v1:";
+const SUPPORT_CONVERSATION_RETRY_KEY = `${SUPPORT_CONVERSATION_RETRY_PREFIX}pending`;
+
+const GoSupportConversationOutputSchemas = {
+  "support.startConversation": z.object({ conversationId: uuid }).strict(),
+  "support.postMessage": z.object({ messageId: uuid, senderType: z.enum(["customer", "staff", "agent"]) }).strict(),
+  "support.escalateConversation": z.object({ status: z.literal("escalated") }).strict(),
+  "support.resolveConversation": z.object({ status: z.literal("resolved") }).strict(),
+  "support.reopenConversation": z.object({ status: z.literal("open") }).strict(),
+} as const;
+
+export type PendingSupportConversationWrite = {
+  capabilityId: z.infer<typeof GoSupportConversationInputSchema>["capabilityId"];
+  input: Record<string, unknown>;
+};
+
+function supportConversationRetryStorageKey(scope: SupportConversationWriteRetryScope): string {
+  const actorId = scope.actorId?.trim() ?? "";
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
+    throw new SupportApiError(0, "Wait for your account and organization to finish loading before changing a conversation.");
+  }
+  return `${SUPPORT_CONVERSATION_RETRY_KEY}:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}`;
+}
+
+function supportConversationFingerprint(capabilityId: string, input: Record<string, unknown>): string {
+  return JSON.stringify({ capabilityId, input });
+}
+
+function readSupportConversationRetryRecord(storageKey: string): z.infer<typeof GoSupportConversationRetryRecordSchema> | null {
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "Conversation retry protection is unavailable. Enable browser storage before continuing.");
+  }
+  if (raw === null) return null;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw);
+  } catch {
+    throw new SupportApiError(0, "A saved conversation retry record is unreadable. Verify the thread before trying again.");
+  }
+  const parsed = GoSupportConversationRetryRecordSchema.safeParse(decoded);
+  const validInput = parsed.success ? GoSupportConversationInputSchema.safeParse({ capabilityId: parsed.data.capabilityId, input: parsed.data.input }) : null;
+  if (!parsed.success || !validInput?.success || parsed.data.fingerprint !== supportConversationFingerprint(parsed.data.capabilityId, parsed.data.input)) {
+    throw new SupportApiError(0, "A saved conversation retry record is invalid. Verify the thread before trying again.");
+  }
+  return parsed.data;
+}
+
+export function readPendingSupportConversationWrite(scope: SupportConversationWriteRetryScope): PendingSupportConversationWrite | null {
+  const record = readSupportConversationRetryRecord(supportConversationRetryStorageKey(scope));
+  return record ? { capabilityId: record.capabilityId, input: record.input } : null;
+}
+
+export function supportWriteActionFromPending(pending: PendingSupportConversationWrite): SupportWriteAction {
+  const parsed = GoSupportConversationInputSchema.safeParse(pending);
+  if (!parsed.success) throw new SupportApiError(0, "The saved conversation action is invalid. Verify the thread before trying again.");
+  switch (parsed.data.capabilityId) {
+    case "support.startConversation": return { action: "create", ...parsed.data.input };
+    case "support.postMessage": return { action: "message", ...parsed.data.input };
+    case "support.escalateConversation": return { action: "escalate", ...parsed.data.input };
+    case "support.resolveConversation": return { action: "resolve", ...parsed.data.input };
+    case "support.reopenConversation": return { action: "reopen", ...parsed.data.input };
+  }
+}
+
+async function createSupportConversationWriteAttempt(
+  capabilityId: PendingSupportConversationWrite["capabilityId"],
+  rawInput: Record<string, unknown>,
+  scope: SupportConversationWriteRetryScope,
+): Promise<{ storageKey: string; record: z.infer<typeof GoSupportConversationRetryRecordSchema> }> {
+  const parsedInput = GoSupportConversationInputSchema.safeParse({ capabilityId, input: rawInput });
+  if (!parsedInput.success) throw new SupportApiError(0, "The conversation action contains invalid details.");
+  const storageKey = supportConversationRetryStorageKey(scope);
+  const input = parsedInput.data.input;
+  const fingerprint = supportConversationFingerprint(capabilityId, input);
+  const existing = readSupportConversationRetryRecord(storageKey);
+  if (existing) {
+    if (existing.fingerprint !== fingerprint) {
+      throw new SupportApiError(0, "A previous conversation action is unresolved. Retry its exact saved details before changing anything else.");
+    }
+    return { storageKey, record: existing };
+  }
+  const record = { version: 1 as const, intentId: crypto.randomUUID(), capabilityId, input, fingerprint };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(record));
+  } catch {
+    throw new SupportApiError(0, "Conversation retry protection could not be saved. Enable browser storage before continuing.");
+  }
+  const saved = readSupportConversationRetryRecord(storageKey);
+  if (!saved || saved.intentId !== record.intentId || saved.fingerprint !== fingerprint) {
+    throw new SupportApiError(0, "Conversation retry protection could not be verified. Check browser storage and try again.");
+  }
+  return { storageKey, record: saved };
+}
+
+async function clearSupportConversationWriteAttempt(storageKey: string, intentId: string): Promise<void> {
+  const current = readSupportConversationRetryRecord(storageKey);
+  if (current?.intentId !== intentId) return;
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "The conversation action was saved, but its retry record could not be cleared. Retry the exact saved details to confirm the result.");
+  }
+}
+
+function capabilityForSupportAction(action: SupportWriteAction): PendingSupportConversationWrite["capabilityId"] | null {
+  switch (action.action) {
+    case "create": return "support.startConversation";
+    case "message":
+    case "send": return "support.postMessage";
+    case "escalate": return "support.escalateConversation";
+    case "resolve": return "support.resolveConversation";
+    case "reopen": return "support.reopenConversation";
+    default: return null;
+  }
+}
+
+function inputForSupportCapability(action: SupportWriteAction): Record<string, unknown> {
+  switch (action.action) {
+    case "create": return { customerId: action.customerId, subject: action.subject };
+    case "message": return { conversationId: action.conversationId, body: action.body, from: action.from };
+    case "send": return { conversationId: action.conversationId, body: action.body, from: "staff" };
+    case "escalate": return { conversationId: action.conversationId, reason: action.reason };
+    case "resolve":
+    case "reopen": return { conversationId: action.conversationId };
+    default: return {};
+  }
+}
+
+export async function submitSupportConversationAction<Action extends SupportWriteAction>(
+  action: Action,
+  scope: SupportConversationWriteRetryScope,
+  signal?: AbortSignal,
+): Promise<SupportActionOutcome<SupportActionOutput<Action>>> {
+  const parsedAction = SupportWriteActionSchema.safeParse(action);
+  if (!parsedAction.success) throw new SupportApiError(0, "The support action contains invalid details.");
+  const capabilityId = capabilityForSupportAction(parsedAction.data);
+  if (!capabilityId) return submitSupportAction(parsedAction.data, undefined, signal) as Promise<SupportActionOutcome<SupportActionOutput<Action>>>;
+  const input = inputForSupportCapability(parsedAction.data);
+  const useGo = goSupportConversationWritesUseGo();
+  if (!useGo) {
+    try {
+      const actorId = scope.actorId?.trim() ?? "";
+      const organizationId = scope.organizationId?.trim() ?? "";
+      if (uuid.safeParse(actorId).success && uuid.safeParse(organizationId).success) {
+        if (readSupportConversationRetryRecord(supportConversationRetryStorageKey(scope))) {
+          throw new SupportApiError(0, "A Go conversation action is unresolved. Restore Go conversation writes and retry those exact details before using the legacy route.");
+        }
+      } else {
+        for (let index = 0; index < window.localStorage.length; index += 1) {
+          if (window.localStorage.key(index)?.startsWith(SUPPORT_CONVERSATION_RETRY_PREFIX)) {
+            throw new SupportApiError(0, "A Go conversation action is unresolved. Restore Go conversation writes and retry those exact details before using the legacy route.");
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof SupportApiError) throw error;
+      throw new SupportApiError(0, "A saved conversation retry record could not be checked. Restore Go conversation writes before continuing.");
+    }
+    return submitSupportAction(parsedAction.data, undefined, signal) as Promise<SupportActionOutcome<SupportActionOutput<Action>>>;
+  }
+
+  const attempt = await createSupportConversationWriteAttempt(capabilityId, input, scope);
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({ capabilityId: attempt.record.capabilityId, input: attempt.record.input, intentId: attempt.record.intentId }),
+    }, signal));
+  } catch {
+    throw new SupportApiError(0, "The Go support service could not confirm this conversation action. Retry its exact saved details to recover the result.");
+  }
+  if (response.status === 202 || PendingEnvelopeSchema.safeParse(body).success) return pendingOutcome(body, DEFAULT_PENDING_REASON);
+  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
+  const envelope = GoCapabilityEnvelopeSchema.safeParse(body);
+  const outputSchema = GoSupportConversationOutputSchemas[capabilityId];
+  const output = envelope.success ? outputSchema.safeParse(envelope.data.data) : null;
+  if (response.status !== 200 || !output?.success) {
+    throw new SupportApiError(response.status, "The Go support service returned an unexpected conversation result.");
+  }
+  await clearSupportConversationWriteAttempt(attempt.storageKey, attempt.record.intentId);
   return { kind: "completed", data: output.data as SupportActionOutput<Action> };
 }
 

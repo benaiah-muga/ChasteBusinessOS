@@ -97,6 +97,7 @@ async function openTab(name: string | RegExp) {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 // The desk renders a full thread plus tab chrome, so each case needs more room
@@ -206,6 +207,117 @@ describe("Vite support page", () => {
     expect(first.calls.map((call) => call.path)).not.toContain("/api/support");
   }, SLOW);
 
+  it("restores an uncertain Go message and retries the same actor-scoped intent without legacy fallback", async () => {
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const organizationId = "66666666-6666-4666-8666-666666666666";
+    const storageKey = `chaste.support.conversation-write-intent.v1:pending:${actorId}:${organizationId}`;
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
+
+    const execute = (result: "uncertain" | "complete") => (payload: Record<string, unknown>) => {
+      if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
+      if (payload.capabilityId === "support.readConversation") return Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } });
+      if (payload.capabilityId === "support.postMessage") {
+        return result === "uncertain"
+          ? Response.json({ error: "temporarily unavailable" }, { status: 503 })
+          : Response.json({ ok: true, data: { messageId: customerId, senderType: "staff" } });
+      }
+      return Response.json({ error: "unexpected capability" }, { status: 400 });
+    };
+
+    const first = supportFetch({ execute: execute("uncertain") });
+    const firstView = render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+    await screen.findByText("Latest activity");
+    fireEvent.click(screen.getByRole("button", { name: /Inbox/ }));
+    const composer = await screen.findByPlaceholderText("Log what the customer wrote, or write the staff reply…");
+    fireEvent.change(composer, { target: { value: "Please check the invoice." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("button", { name: "Retry saved action" })).not.toBeNull();
+    const saved = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}") as { intentId?: string };
+    expect(saved.intentId).toEqual(expect.any(String));
+    expect((composer as HTMLTextAreaElement).value).toBe("Please check the invoice.");
+    firstView.unmount();
+
+    const second = supportFetch({ execute: execute("complete") });
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+    await screen.findByRole("button", { name: "Retry saved action" });
+    expect((screen.getByPlaceholderText("Log what the customer wrote, or write the staff reply…") as HTMLTextAreaElement).value)
+      .toBe("Please check the invoice.");
+    fireEvent.click(screen.getByRole("button", { name: "Retry saved action" }));
+
+    await waitFor(() => expect(window.localStorage.getItem(storageKey)).toBeNull());
+    const attempts = [...first.calls, ...second.calls].filter((call) => call.payload?.capabilityId === "support.postMessage");
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]?.payload).toMatchObject({
+      capabilityId: "support.postMessage",
+      input: { conversationId, body: "Please check the invoice.", from: "staff" },
+      intentId: saved.intentId,
+    });
+    expect(attempts[1]?.payload).toMatchObject({
+      capabilityId: "support.postMessage",
+      input: { conversationId, body: "Please check the invoice.", from: "staff" },
+      intentId: saved.intentId,
+    });
+    expect(first.fetchMock.mock.calls.map(([path]) => String(path))).not.toContain("/api/support");
+    expect(second.fetchMock.mock.calls.map(([path]) => String(path))).not.toContain("/api/support");
+  }, SLOW);
+
+  it("keeps a saved action visible but disables retry while the Go selector is rolled back", async () => {
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const organizationId = "66666666-6666-4666-8666-666666666666";
+    const storageKey = `chaste.support.conversation-write-intent.v1:pending:${actorId}:${organizationId}`;
+    const input = { conversationId, body: "Please check the invoice.", from: "staff" };
+    const capabilityId = "support.postMessage";
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 1,
+      intentId: "77777777-7777-4777-8777-777777777777",
+      capabilityId,
+      input,
+      fingerprint: JSON.stringify({ capabilityId, input }),
+    }));
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", false);
+    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
+    supportFetch({
+      execute: (payload) => payload.capabilityId === "support.listConversations"
+        ? Response.json({ ok: true, data: { conversations } })
+        : Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } }),
+    });
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+
+    const retry = await screen.findByRole("button", { name: "Retry saved action" });
+    expect((retry as HTMLButtonElement).disabled).toBe(true);
+    expect((await screen.findByPlaceholderText("Log what the customer wrote, or write the staff reply…") as HTMLTextAreaElement).value)
+      .toBe(input.body);
+    expect(await screen.findByText(/Re-enable Go conversation writes/)).not.toBeNull();
+  }, SLOW);
+
+  it("restores an unresolved escalation reason after the thread selection loads", async () => {
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const organizationId = "66666666-6666-4666-8666-666666666666";
+    const storageKey = `chaste.support.conversation-write-intent.v1:pending:${actorId}:${organizationId}`;
+    const input = { conversationId, reason: "Customer requested a manager callback" };
+    const capabilityId = "support.escalateConversation";
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 1,
+      intentId: "77777777-7777-4777-8777-777777777777",
+      capabilityId,
+      input,
+      fingerprint: JSON.stringify({ capabilityId, input }),
+    }));
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
+    supportFetch({
+      execute: (payload) => payload.capabilityId === "support.listConversations"
+        ? Response.json({ ok: true, data: { conversations } })
+        : Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } }),
+    });
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+
+    expect(await screen.findByLabelText("Why does this need a human owner?")).not.toBeNull();
+    expect((screen.getByLabelText("Why does this need a human owner?") as HTMLInputElement).value).toBe(input.reason);
+    expect(await screen.findByRole("button", { name: "Retry saved action" })).not.toBeNull();
+  }, SLOW);
+
   it("does not load customer care while the module is disabled", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("/api/modules");
@@ -248,19 +360,20 @@ describe("Vite support page", () => {
   }, SLOW);
 
   it("surfaces an approval-pending write as pending, not as a failure or a save", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
     const { calls } = supportFetch({
-      post: (payload) => {
-        if (payload.action === "resolve") return Response.json({ ok: false, pendingApproval: true, reason: "Resolving needs human approval." }, { status: 202 });
+      execute: (payload) => {
+        if (payload.capabilityId === "support.resolveConversation") return Response.json({ ok: false, pendingApproval: true, reason: "Resolving needs human approval." }, { status: 202 });
         return Response.json({ ok: true, data: { updated: true } });
       },
     });
-    render(<SupportPage />);
+    render(<SupportPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await openTab(/^Inbox/);
 
     fireEvent.click(await screen.findByRole("button", { name: "Resolve" }));
 
     expect(await screen.findByText("Resolving needs human approval.")).not.toBeNull();
-    expect(calls.filter((call) => call.payload!.action === "resolve")).toHaveLength(1);
+    expect(calls.filter((call) => call.payload!.capabilityId === "support.resolveConversation")).toHaveLength(1);
   }, SLOW);
 
   it("requires a reason before escalating a conversation", async () => {
