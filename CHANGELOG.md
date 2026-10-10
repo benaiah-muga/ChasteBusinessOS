@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite CRM customer CSV import and Undo now use Go's session-authenticated
+  capabilities by default when session routing is enabled. Exact scoped intents
+  and import receipts survive uncertain results and reloads; selector rollback
+  cannot send a Go import or Undo through the legacy route.
+
 - Vite Support canned-response saves now use the session-authenticated Go
   `support.createCannedResponse` capability by default when session routing is
   enabled. Exact action details and the idempotency intent survive uncertain

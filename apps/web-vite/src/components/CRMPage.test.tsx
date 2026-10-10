@@ -1638,7 +1638,7 @@ describe("Vite CRM page", () => {
         if (body.capabilityId === "crm.importCustomers" && capabilityPosts.filter((post) => post.capabilityId === "crm.importCustomers").length === 1) {
           return Response.json({ pendingApproval: true, error: "Import needs approval" }, { status: 202 });
         }
-        if (body.capabilityId === "crm.importCustomers") return Response.json({ ok: true, data: { createdIds: importedCustomerIds, imported: 1, skippedDuplicateRows: [] } });
+        if (body.capabilityId === "crm.importCustomers") return Response.json({ ok: true, data: { createdIds: importedCustomerIds, imported: 1, skippedDuplicateRows: [], importIntentId: body.intentId } });
         const undoInput = body.input as { importIntentId: string };
         return Response.json({ ok: true, data: { customerIds: importedCustomerIds, deactivated: 1, importIntentId: undoInput.importIntentId, undoIntentId: body.intentId } });
       }
@@ -1678,6 +1678,58 @@ describe("Vite CRM page", () => {
     const undoPost = capabilityPosts.find((post) => post.capabilityId === "crm.undoCustomerImport");
     const importIntentId = capabilityPosts.find((post) => post.capabilityId === "crm.importCustomers")?.intentId;
     expect(undoPost).toMatchObject({ capabilityId: "crm.undoCustomerImport", input: { customerIds: importedCustomerIds, importIntentId } });
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/import")).toBe(false);
+  });
+
+  it("restores an unresolved Go import undo after reload and retries the exact receipt action", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_IMPORT__", true);
+    const importedCustomerIds = [dealId];
+    const capabilityPosts: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        capabilityPosts.push(body);
+        if (body.capabilityId === "crm.importCustomers") {
+          return Response.json({ ok: true, data: { createdIds: importedCustomerIds, imported: 1, skippedDuplicateRows: [], importIntentId: body.intentId } });
+        }
+        const undoInput = body.input as { customerIds: string[]; importIntentId: string };
+        const undoCalls = capabilityPosts.filter((post) => post.capabilityId === "crm.undoCustomerImport").length;
+        if (undoCalls === 1) return Response.json({ pendingApproval: true, error: "Undo needs approval" }, { status: 202 });
+        return Response.json({ ok: true, data: { customerIds: undoInput.customerIds, deactivated: 1, importIntentId: undoInput.importIntentId, undoIntentId: body.intentId } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const firstView = render(<CRMPage actorId={dealId} organizationId={customerId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Import CSV" }));
+    const file = new File(["Name,Email\nNorthwind,contact@northwind.test"], "customers.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Choose CSV"), { target: { files: [file] } });
+    fireEvent.change(await screen.findByLabelText("Map name"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Map email"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import 1 customers" }));
+    expect(await screen.findByText("1 customers imported, 0 duplicates skipped.")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo this import" }));
+    expect(await screen.findByText("Undo needs approval")).not.toBeNull();
+    expect(await screen.findByText("This import undo is pending or uncertain. Retry the exact undo to resolve it.")).not.toBeNull();
+    const firstUndo = capabilityPosts.find((post) => post.capabilityId === "crm.undoCustomerImport");
+    expect(firstUndo).toMatchObject({ capabilityId: "crm.undoCustomerImport", input: { customerIds: importedCustomerIds } });
+
+    firstView.unmount();
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
+    expect(await screen.findByText("This import undo is pending or uncertain. Retry the exact undo to resolve it.")).not.toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry undo" }));
+    expect(await screen.findByText("Import undone.")).not.toBeNull();
+    const undoPosts = capabilityPosts.filter((post) => post.capabilityId === "crm.undoCustomerImport");
+    expect(undoPosts).toHaveLength(2);
+    expect(undoPosts[1]).toEqual(undoPosts[0]);
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/import")).toBe(false);
   });
 

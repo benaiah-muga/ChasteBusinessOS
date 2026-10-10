@@ -467,6 +467,39 @@ func TestGoCustomerImportsAndInversesMatchLegacy(t *testing.T) {
 	if err := json.Unmarshal(result.Data, &imported); err != nil {
 		t.Fatal(err)
 	}
+	if imported.ImportIntentID != importIntentID {
+		t.Fatalf("import receipt reference=%q, want intent %q", imported.ImportIntentID, importIntentID)
+	}
+	uncertainReplay := executeCRMWrite(t, fx, importCustomersCapabilityID, input, importIntentID)
+	if !uncertainReplay.OK || !uncertainReplay.Replayed {
+		t.Fatalf("same-intent import retry=%+v, want durable receipt replay", uncertainReplay)
+	}
+	var replayedImport CustomerImportOutput
+	if err := json.Unmarshal(uncertainReplay.Data, &replayedImport); err != nil || !sameStringSet(replayedImport.CreatedIDs, imported.CreatedIDs) {
+		t.Fatalf("same-intent import replay output=%+v err=%v, want original created IDs", replayedImport, err)
+	}
+	wrongImportActor := crmWriteClaims(fx, importCustomersCapabilityID, input, "human", "", importIntentID)
+	wrongImportActorID := executorUUID(t)
+	wrongImportActor.ActorID = &wrongImportActorID
+	importReceiptTx, err := fx.owner.Begin(fx.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	importReceipt, found, err := loadReceipt(fx.ctx, importReceiptTx, fx.orgID, fx.orgID+":"+importIntentID)
+	if err != nil || !found {
+		_ = importReceiptTx.Rollback(fx.ctx)
+		t.Fatalf("load import receipt found=%t err=%v", found, err)
+	}
+	wrongActorReplayErr := validateCustomerImportReceiptReplay(fx.ctx, importReceiptTx, wrongImportActor, importCustomersCapabilityID, CustomerImportInput{Rows: rows}, importReceipt)
+	_ = importReceiptTx.Rollback(fx.ctx)
+	if wrongActorReplayErr == nil || !strings.Contains(wrongActorReplayErr.Error(), "does not belong to this actor") {
+		t.Fatalf("different-actor import replay error=%v, want actor-bound rejection", wrongActorReplayErr)
+	}
+	changedImportInput := json.RawMessage(`{"rows":[{"rowNumber":1,"name":"different retry payload"}]}`)
+	changedReplay, err := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, importCustomersCapabilityID, changedImportInput, "human", "", importIntentID), importCustomersCapabilityID, changedImportInput)
+	if err != nil || changedReplay.OK || !strings.Contains(changedReplay.Error, "different payload") {
+		t.Fatalf("different-payload import retry=%+v err=%v, want exact-intent payload conflict", changedReplay, err)
+	}
 	if imported.Imported != 502 || len(imported.CreatedIDs) != 502 || !reflect.DeepEqual(imported.SkippedDuplicateRows, []int{2, 4, 6}) {
 		t.Fatalf("import output imported=%d ids=%d skipped=%v, want 502 imports and rows [2 4 6] skipped", imported.Imported, len(imported.CreatedIDs), imported.SkippedDuplicateRows)
 	}
@@ -533,6 +566,23 @@ func TestGoCustomerImportsAndInversesMatchLegacy(t *testing.T) {
 	if replayed := executeCRMWrite(t, fx, undoCustomerImportCapabilityID, undoInput, undoIntentID); !replayed.OK || !replayed.Replayed {
 		t.Fatalf("same-intent import undo retry=%+v, want cached receipt", replayed)
 	}
+	wrongUndoReplayClaims := crmWriteClaims(fx, undoCustomerImportCapabilityID, undoInput, "human", "", undoIntentID)
+	wrongUndoReplayActorID := executorUUID(t)
+	wrongUndoReplayClaims.ActorID = &wrongUndoReplayActorID
+	undoReceiptTx, err := fx.owner.Begin(fx.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	undoReceipt, found, err := loadReceipt(fx.ctx, undoReceiptTx, fx.orgID, fx.orgID+":"+undoIntentID)
+	if err != nil || !found {
+		_ = undoReceiptTx.Rollback(fx.ctx)
+		t.Fatalf("load undo receipt found=%t err=%v", found, err)
+	}
+	wrongUndoReplayErr := validateCustomerImportReceiptReplay(fx.ctx, undoReceiptTx, wrongUndoReplayClaims, undoCustomerImportCapabilityID, CustomerUndoImportInput{CustomerIDs: imported.CreatedIDs, ImportIntentID: importIntentID}, undoReceipt)
+	_ = undoReceiptTx.Rollback(fx.ctx)
+	if wrongUndoReplayErr == nil || !strings.Contains(wrongUndoReplayErr.Error(), "does not belong to this actor") {
+		t.Fatalf("different-actor import undo replay error=%v, want actor-bound rejection", wrongUndoReplayErr)
+	}
 	repeatedUndo, repeatedUndoErr := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, undoCustomerImportCapabilityID, undoInput, "human", "", executorUUID(t)), undoCustomerImportCapabilityID, undoInput)
 	if repeatedUndoErr == nil || !strings.Contains(repeatedUndoErr.Error(), "already undone") {
 		t.Fatalf("new-intent repeat undo=%+v err=%v, want consumed import receipt rejection", repeatedUndo, repeatedUndoErr)
@@ -582,6 +632,23 @@ func TestGoCustomerImportsAndInversesMatchLegacy(t *testing.T) {
 	}
 	if replayed := executeCRMWrite(t, fx, restoreImportedCustomersCapabilityID, restoreInput, restoreIntentID); !replayed.OK || !replayed.Replayed {
 		t.Fatalf("same-intent import restore retry=%+v, want cached receipt", replayed)
+	}
+	wrongRestoreReplayClaims := crmWriteClaims(fx, restoreImportedCustomersCapabilityID, restoreInput, "human", "", restoreIntentID)
+	wrongRestoreReplayActorID := executorUUID(t)
+	wrongRestoreReplayClaims.ActorID = &wrongRestoreReplayActorID
+	restoreReceiptTx, err := fx.owner.Begin(fx.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreReceipt, found, err := loadReceipt(fx.ctx, restoreReceiptTx, fx.orgID, fx.orgID+":"+restoreIntentID)
+	if err != nil || !found {
+		_ = restoreReceiptTx.Rollback(fx.ctx)
+		t.Fatalf("load restore receipt found=%t err=%v", found, err)
+	}
+	wrongRestoreReplayErr := validateCustomerImportReceiptReplay(fx.ctx, restoreReceiptTx, wrongRestoreReplayClaims, restoreImportedCustomersCapabilityID, CustomerRestoreImportInput{CustomerIDs: undone.CustomerIDs, UndoIntentID: undoIntentID}, restoreReceipt)
+	_ = restoreReceiptTx.Rollback(fx.ctx)
+	if wrongRestoreReplayErr == nil || !strings.Contains(wrongRestoreReplayErr.Error(), "does not belong to this actor") {
+		t.Fatalf("different-actor import restore replay error=%v, want actor-bound rejection", wrongRestoreReplayErr)
 	}
 	repeatedRestore, repeatedRestoreErr := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, restoreImportedCustomersCapabilityID, restoreInput, "human", "", executorUUID(t)), restoreImportedCustomersCapabilityID, restoreInput)
 	if repeatedRestoreErr == nil || !strings.Contains(repeatedRestoreErr.Error(), "already restored") {
@@ -671,6 +738,88 @@ func TestGoCustomerImportRestoreRejectsEditsAfterUndo(t *testing.T) {
 	}
 }
 
+func TestGoCustomerImportUndoRejectsEditsAfterImport(t *testing.T) {
+	fx := newExecutorFixture(t)
+	importIntentID := executorUUID(t)
+	importInput := json.RawMessage(`{"rows":[{"rowNumber":1,"name":"Changed import customer"}]}`)
+	importResult := executeCRMWrite(t, fx, importCustomersCapabilityID, importInput, importIntentID)
+	if !importResult.OK {
+		t.Fatalf("import result=%+v", importResult)
+	}
+	var imported CustomerImportOutput
+	if err := json.Unmarshal(importResult.Data, &imported); err != nil || len(imported.CreatedIDs) != 1 {
+		t.Fatalf("import output=%+v err=%v, want one created customer", imported, err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		UPDATE customers SET notes='edited after import', updated_at=clock_timestamp()
+		WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, imported.CreatedIDs[0]); err != nil {
+		t.Fatal(err)
+	}
+	undoInput, err := json.Marshal(CustomerUndoImportInput{CustomerIDs: imported.CreatedIDs, ImportIntentID: importIntentID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	undoResult, undoErr := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, undoCustomerImportCapabilityID, undoInput, "human", "", executorUUID(t)), undoCustomerImportCapabilityID, undoInput)
+	if undoErr == nil || !strings.Contains(undoErr.Error(), "changed after import") {
+		t.Fatalf("undo after intervening edit result=%+v err=%v, want conflict rejection", undoResult, undoErr)
+	}
+	var notes string
+	var active bool
+	if err := fx.owner.QueryRow(fx.ctx, `
+		SELECT notes, deactivated_at IS NULL FROM customers WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, imported.CreatedIDs[0]).Scan(&notes, &active); err != nil {
+		t.Fatal(err)
+	}
+	if notes != "edited after import" || !active {
+		t.Fatalf("customer after rejected undo notes=%q active=%t, want edit preserved and customer active", notes, active)
+	}
+}
+
+func TestGoCustomerImportUndoAndRestoreRequireUUIDIntents(t *testing.T) {
+	fx := newExecutorFixture(t)
+	importIntentID := executorUUID(t)
+	importInput := json.RawMessage(`{"rows":[{"rowNumber":1,"name":"UUID intent customer"}]}`)
+	importResult := executeCRMWrite(t, fx, importCustomersCapabilityID, importInput, importIntentID)
+	if !importResult.OK {
+		t.Fatalf("import result=%+v", importResult)
+	}
+	var imported CustomerImportOutput
+	if err := json.Unmarshal(importResult.Data, &imported); err != nil || len(imported.CreatedIDs) != 1 {
+		t.Fatalf("import output=%+v err=%v, want one created customer", imported, err)
+	}
+	undoInput, err := json.Marshal(CustomerUndoImportInput{CustomerIDs: imported.CreatedIDs, ImportIntentID: importIntentID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, intentID := range []string{"", "not-a-uuid"} {
+		result, err := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, undoCustomerImportCapabilityID, undoInput, "human", "", intentID), undoCustomerImportCapabilityID, undoInput)
+		if err != nil || result.OK || !strings.Contains(result.Error, "durable UUID intent") {
+			t.Fatalf("undo intent %q result=%+v err=%v, want UUID intent refusal", intentID, result, err)
+		}
+	}
+	undoIntentID := executorUUID(t)
+	undoResult := executeCRMWrite(t, fx, undoCustomerImportCapabilityID, undoInput, undoIntentID)
+	if !undoResult.OK {
+		t.Fatalf("valid undo result=%+v", undoResult)
+	}
+	restoreInput, err := json.Marshal(CustomerRestoreImportInput{CustomerIDs: imported.CreatedIDs, UndoIntentID: undoIntentID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, intentID := range []string{"", "not-a-uuid"} {
+		result, err := fx.executor.Execute(fx.ctx, crmWriteClaims(fx, restoreImportedCustomersCapabilityID, restoreInput, "human", "", intentID), restoreImportedCustomersCapabilityID, restoreInput)
+		if err != nil || result.OK || !strings.Contains(result.Error, "durable UUID intent") {
+			t.Fatalf("restore intent %q result=%+v err=%v, want UUID intent refusal", intentID, result, err)
+		}
+	}
+	validRestore := executeCRMWrite(t, fx, restoreImportedCustomersCapabilityID, restoreInput, executorUUID(t))
+	if !validRestore.OK {
+		t.Fatalf("valid restore result=%+v", validRestore)
+	}
+	if got := fx.count(`SELECT count(*) FROM customers WHERE org_id=$1::uuid AND id=ANY($2::uuid[]) AND deactivated_at IS NULL`, fx.orgID, imported.CreatedIDs); got != 1 {
+		t.Fatalf("restored rows=%d, want 1 after rejected intents and one valid restore", got)
+	}
+}
+
 func TestGoCustomerMergeAndImportEnforceScopeApprovalAndAudit(t *testing.T) {
 	fx := newExecutorFixture(t)
 	fx.addAgentSession()
@@ -700,6 +849,11 @@ func TestGoCustomerMergeAndImportEnforceScopeApprovalAndAudit(t *testing.T) {
 	deniedImport, err := fx.executor.Execute(fx.ctx, deniedImportClaims, importCustomersCapabilityID, importInput)
 	if err != nil || deniedImport.OK || deniedImport.Error != "forbidden: missing permission: crm.write" {
 		t.Fatalf("import permission result=%+v err=%v, want crm.write refusal", deniedImport, err)
+	}
+	invalidIntentClaims := crmWriteClaims(fx, importCustomersCapabilityID, importInput, "human", "", "not-a-uuid")
+	invalidIntent, err := fx.executor.Execute(fx.ctx, invalidIntentClaims, importCustomersCapabilityID, importInput)
+	if err != nil || invalidIntent.OK || !strings.Contains(invalidIntent.Error, "durable UUID intent") {
+		t.Fatalf("non-UUID import intent result=%+v err=%v, want durable UUID refusal", invalidIntent, err)
 	}
 	nonmemberImport := crmWriteClaims(fx, importCustomersCapabilityID, importInput, "human", "", executorUUID(t))
 	nonmemberImport.OrganizationID = fx.otherOrgID

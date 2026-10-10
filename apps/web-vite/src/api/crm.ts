@@ -1227,7 +1227,7 @@ export async function importCrmCustomers(
   if (!parsedRows.success) throw new CrmApiError(0, "Review the customer import rows and correct invalid values before submitting.");
   const scope = await crmTaskScope(retryScope);
   if (!useGo) {
-    if (await readPendingCrmCustomerImport(scope) || await readPendingCrmCustomerImportUndo(scope)) {
+    if (await readPendingCrmCustomerImport(scope) || await readPendingCrmCustomerImportUndo(scope) || await readCrmCustomerImportUndo(scope)) {
       throw new CrmApiError(0, "A Go customer import is unresolved. Restore the Go customer route and retry its exact action before using the legacy import route.", true);
     }
     const { response, body } = await request("/api/import", { method: "POST", body: JSON.stringify({ entity: "customers", rows: parsedRows.data }) }, signal);
@@ -1255,12 +1255,17 @@ export async function importCrmCustomers(
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
     const submittedRowNumbers = new Set(parsedRows.data.map((row) => row.rowNumber));
-    const parsed = z.object({ createdIds: z.array(uuid).max(5000), imported: z.number().int().nonnegative(), skippedDuplicateRows: z.array(z.number().int().positive()).max(5000) }).strict().safeParse(outcome.data);
+    const parsed = z.object({
+      createdIds: z.array(uuid).max(5000),
+      imported: z.number().int().nonnegative(),
+      skippedDuplicateRows: z.array(z.number().int().positive()).max(5000),
+      importIntentId: uuid,
+    }).strict().safeParse(outcome.data);
     const skippedRowNumbers = parsed.success ? parsed.data.skippedDuplicateRows : [];
     const skippedRowsAreValid = parsed.success
       && new Set(skippedRowNumbers).size === skippedRowNumbers.length
       && skippedRowNumbers.every((rowNumber) => submittedRowNumbers.has(rowNumber));
-    if (!parsed.success || !skippedRowsAreValid || parsed.data.imported !== parsed.data.createdIds.length || new Set(parsed.data.createdIds).size !== parsed.data.createdIds.length || parsed.data.imported + skippedRowNumbers.length !== parsedRows.data.length) {
+    if (!parsed.success || parsed.data.importIntentId !== attempt.intentId || !skippedRowsAreValid || parsed.data.imported !== parsed.data.createdIds.length || new Set(parsed.data.createdIds).size !== parsed.data.createdIds.length || parsed.data.imported + skippedRowNumbers.length !== parsedRows.data.length) {
       throw new CrmApiError(response.status, "The CRM service returned an unexpected import result.", true);
     }
     const result: CrmImportResult = {
@@ -1268,7 +1273,7 @@ export async function importCrmCustomers(
       skippedDuplicates: parsed.data.skippedDuplicateRows.length,
       createdIds: parsed.data.createdIds,
     };
-    await persistCrmCustomerImportUndo(scope, result, attempt.intentId);
+    await persistCrmCustomerImportUndo(scope, result, parsed.data.importIntentId);
     await clearCrmTaskAttempt(attempt.storageKey);
     return { kind: "completed", data: result };
   } catch (error) {
@@ -1287,11 +1292,11 @@ export async function undoCrmImport(
   importIntentId?: string,
 ): Promise<CrmActionOutcome<{ undone: number; remaining: number }>> {
   const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_IMPORT__ !== "undefined" && __GO_CRM_CUSTOMER_IMPORT__);
-  const parsedIds = z.array(uuid).min(1).max(5000).safeParse(importIds);
+  const parsedIds = z.array(uuid).min(1).max(5000).refine((ids) => new Set(ids).size === ids.length).safeParse(importIds);
   if (!parsedIds.success) throw new CrmApiError(0, "The customer import undo IDs are invalid.");
   const scope = await crmTaskScope(retryScope);
   if (!useGo) {
-    if (importIntentId) throw new CrmApiError(0, "This import was performed by Go. Restore the Go CRM import route to undo it safely.", true);
+    if (importIntentId || await readCrmCustomerImportUndo(scope)) throw new CrmApiError(0, "This import was performed by Go. Restore the Go CRM import route to undo it safely.", true);
     if (await readPendingCrmCustomerImport(scope) || await readPendingCrmCustomerImportUndo(scope)) {
       throw new CrmApiError(0, "A Go customer import is unresolved. Restore the Go customer route and retry its exact action before using the legacy import route.", true);
     }

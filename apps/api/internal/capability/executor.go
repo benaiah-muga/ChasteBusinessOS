@@ -933,12 +933,18 @@ func (e *Executor) executeWithFinalizer(
 			}
 			input = parsed
 		case undoCustomerImportCapabilityID:
+			if !isZodUUID(claims.IntentID) {
+				return Result{OK: false, Error: "invalid input: customer import undo requires a durable UUID intent"}, nil
+			}
 			parsed, err := ParseCustomerUndoImportInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
 		case restoreImportedCustomersCapabilityID:
+			if !isZodUUID(claims.IntentID) {
+				return Result{OK: false, Error: "invalid input: customer import restore requires a durable UUID intent"}, nil
+			}
 			parsed, err := ParseCustomerRestoreImportInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -1433,6 +1439,11 @@ func (e *Executor) executeWithFinalizer(
 				}
 				if prior.InputHash != inputHash {
 					return Result{OK: false, Error: "action intent conflict: same action key used with a different payload"}, nil
+				}
+				if capabilityID == importCustomersCapabilityID || capabilityID == undoCustomerImportCapabilityID || capabilityID == restoreImportedCustomersCapabilityID {
+					if err := validateCustomerImportReceiptReplay(ctx, tx, claims, capabilityID, input, prior); err != nil {
+						return Result{OK: false, Error: err.Error()}, nil
+					}
 				}
 				return Result{OK: prior.OK, Data: prior.Data, Error: prior.Error, Replayed: true}, nil
 			}

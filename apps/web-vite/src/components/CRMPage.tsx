@@ -222,7 +222,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [importMapping, setImportMapping] = useState({ name: -1, email: -1, phone: -1 });
   const [importPage, setImportPage] = useState(0);
   const [importRows, setImportRows] = useState<ImportPreviewRow[]>([]);
-  const [importSummary, setImportSummary] = useState<{ imported: number; skipped: number; ids: string[]; importIntentId: string | null; undone: boolean } | null>(null);
+  const [importSummary, setImportSummary] = useState<{ imported: number; skipped: number; ids: string[]; importIntentId: string | null; undone: boolean; undoPending?: boolean } | null>(null);
   const [importRetryLocked, setImportRetryLocked] = useState(false);
   const [importRecoveryResolvedScope, setImportRecoveryResolvedScope] = useState<string | null>(null);
   const [saveViewName, setSaveViewName] = useState("");
@@ -273,6 +273,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }
   const mergeRecoveryScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
   const importRecoveryScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
+  const importRecoveryReady = Boolean(importRecoveryScopeIdentity && importRecoveryResolvedScope === importRecoveryScopeIdentity);
   const busy = sharedBusy || savedViewBusyCount > 0 || customerCreateBusy || dealCreateBusy || profileUpdateBusyCount > 0;
   const customerCreateReady = Boolean(customerCreateScopeIdentity && customerCreateResolvedScope === customerCreateScopeIdentity);
   const dealCreateReady = Boolean(dealCreateScopeIdentity && dealCreateResolvedScope === dealCreateScopeIdentity);
@@ -394,8 +395,13 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
         setImportRetryLocked(true);
         setImportOpen(true);
       }
-      const undo = savedUndo ?? (pendingUndo ? { imported: pendingUndo.customerIds.length, skippedDuplicates: 0, createdIds: pendingUndo.customerIds, importIntentId: pendingUndo.importIntentId } : null);
-      if (undo) setImportSummary({ imported: undo.imported, skipped: undo.skippedDuplicates, ids: undo.createdIds, importIntentId: undo.importIntentId, undone: false });
+      const undo = pendingUndo
+        ? { imported: savedUndo?.imported ?? pendingUndo.customerIds.length, skippedDuplicates: savedUndo?.skippedDuplicates ?? 0, createdIds: pendingUndo.customerIds, importIntentId: pendingUndo.importIntentId }
+        : savedUndo;
+      if (undo) {
+        setImportSummary({ imported: undo.imported, skipped: undo.skippedDuplicates, ids: undo.createdIds, importIntentId: undo.importIntentId, undone: false, undoPending: Boolean(pendingUndo) });
+        if (pendingUndo) setImportOpen(true);
+      }
       setImportRecoveryResolvedScope(importRecoveryScopeIdentity);
     }).catch((reason: unknown) => {
       if (active) setNotice({ tone: "error", text: friendlyError(reason) });
@@ -1077,6 +1083,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }
 
   async function submitImport() {
+    if (goCrmCustomerImport && !importRecoveryReady) return;
     const rows = importRows.filter((row) => row.include && !row.error).map(({ rowNumber, name, email, phone, allowDuplicate }) => ({ rowNumber, name, ...(email ? { email } : {}), ...(phone ? { phone } : {}), allowDuplicate }));
     if (!rows.length) return;
     setSharedBusy(true);
@@ -1099,15 +1106,25 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }
 
   async function undoImport() {
-    if (!importSummary?.ids.length) return;
+    if (!importSummary?.ids.length || goCrmCustomerImport && !importRecoveryReady) return;
     setSharedBusy(true);
     try {
       const result = await undoCrmImport(importSummary.ids, undefined, goCrmCustomerImport, { actorId, organizationId }, importSummary.importIntentId ?? undefined);
-      if (result.kind === "pending") { setNotice({ tone: "pending", text: result.reason }); return; }
-      setImportSummary({ ...importSummary, ids: [], undone: true });
+      if (result.kind === "pending") {
+        setImportSummary({ ...importSummary, undoPending: true });
+        setNotice({ tone: "pending", text: result.reason });
+        return;
+      }
+      setImportSummary({ ...importSummary, ids: [], undone: true, undoPending: false });
       setNotice({ tone: "success", text: result.data.remaining ? `Deactivated ${result.data.undone} imported customers. ${result.data.remaining} had already changed.` : `Undid this import. ${result.data.undone} imported customers were deactivated.` });
       await load();
-    } catch (reason) { setNotice({ tone: "error", text: friendlyError(reason) }); }
+    } catch (reason) {
+      if (reason instanceof CrmApiError) {
+        const uncertain = reason.requestMayHaveReachedServer || reason.status === 408 || reason.status === 429 || reason.status >= 500;
+        setImportSummary({ ...importSummary, undoPending: uncertain });
+      }
+      setNotice({ tone: "error", text: friendlyError(reason) });
+    }
     finally { setSharedBusy(false); }
   }
 
@@ -1217,8 +1234,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
           </header>
           {importSummary ? (
             <div>
-              <p role="status">{importSummary.undone ? "Import undone." : `${importSummary.imported} customers imported, ${importSummary.skipped} duplicates skipped.`}</p>
-              {!importSummary.undone && importSummary.ids.length > 0 && <button type="button" disabled={busy} onClick={() => void undoImport()}>Undo this import</button>}
+              <p role="status">{importSummary.undone ? "Import undone." : importSummary.importIntentId && !goCrmCustomerImport ? "This import receipt belongs to Go CRM. Restore the Go customer import route to undo it safely." : importSummary.undoPending ? "This import undo is pending or uncertain. Retry the exact undo to resolve it." : `${importSummary.imported} customers imported, ${importSummary.skipped} duplicates skipped.`}</p>
+              {!importSummary.undone && importSummary.ids.length > 0 && <button type="button" disabled={busy || Boolean(importSummary.importIntentId && !goCrmCustomerImport) || goCrmCustomerImport && !importRecoveryReady} onClick={() => void undoImport()}>{importSummary.undoPending ? "Retry undo" : "Undo this import"}</button>}
               <button type="button" onClick={() => setImportOpen(false)}>Done</button>
             </div>
           ) : (
@@ -1226,22 +1243,24 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
               <div className="crm-import-start">
                 <p>Map your columns, review likely matches, then fix invalid rows before adding customers.</p>
                 <button type="button" onClick={downloadCustomerTemplate}>Download template</button>
-                <label className="crm-file">{importRows.length ? "Choose another CSV" : "Choose CSV"}<input type="file" accept=".csv,text/csv" disabled={importRetryLocked} onChange={(event) => void readImport(event.target.files?.[0])} /></label>
+                <label className="crm-file">{importRows.length ? "Choose another CSV" : "Choose CSV"}<input type="file" accept=".csv,text/csv" disabled={importRetryLocked || goCrmCustomerImport && !importRecoveryReady} onChange={(event) => void readImport(event.target.files?.[0])} /></label>
               </div>
+              {goCrmCustomerImport && !importRecoveryReady && <p role="status">CRM is restoring the import receipt for the active organization.</p>}
               {importHeaders.length > 0 && (
                 <>
                   <div className="crm-import-mapping" aria-label="Column mapping">
-                    {(["name", "email", "phone"] as const).map((field) => <label key={field}>Map {field}<select aria-label={`Map ${field}`} disabled={importRetryLocked} value={importMapping[field]} onChange={(event) => updateImportMapping(field, event.target.value)}><option value={-1}>Do not import</option>{importHeaders.map((header, index) => <option key={`${field}-${index}`} value={index}>{header || "Unnamed column"}</option>)}</select></label>)}
+                    {(["name", "email", "phone"] as const).map((field) => <label key={field}>Map {field}<select aria-label={`Map ${field}`} disabled={importRetryLocked || goCrmCustomerImport && !importRecoveryReady} value={importMapping[field]} onChange={(event) => updateImportMapping(field, event.target.value)}><option value={-1}>Do not import</option>{importHeaders.map((header, index) => <option key={`${field}-${index}`} value={index}>{header || "Unnamed column"}</option>)}</select></label>)}
                   </div>
                   <div className="crm-import-summary"><span>{importRows.length} rows, {importRows.filter((row) => !row.error).length} valid, {importRows.filter((row) => row.duplicate).length} possible duplicates.</span><span>{selectedImportCount} selected to import</span><span>Rows {importPage * importPageSize + 1}-{Math.min((importPage + 1) * importPageSize, importRows.length)} of {importRows.length}</span></div>
                   <div className="crm-import-pagination"><button type="button" disabled={importPage === 0} onClick={() => setImportPage((page) => Math.max(0, page - 1))}>Previous</button><button type="button" disabled={(importPage + 1) * importPageSize >= importRows.length} onClick={() => setImportPage((page) => page + 1)}>Next</button></div>
                   <div className="crm-import-rows">
                     {visibleImportRows.map((row, localIndex) => {
                       const index = importPage * importPageSize + localIndex;
-                      return <article key={row.rowNumber}><label><input type="checkbox" disabled={importRetryLocked || Boolean(row.error)} checked={row.include} onChange={(event) => setImportRows((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, include: event.target.checked, includeExplicit: true } : item))} /> Row {row.rowNumber}</label><input aria-label={`Row ${row.rowNumber} name`} disabled={importRetryLocked} value={row.name} onChange={(event) => editImportRow(index, "name", event.target.value)} /><input aria-label={`Row ${row.rowNumber} email`} disabled={importRetryLocked} value={row.email} onChange={(event) => editImportRow(index, "email", event.target.value)} /><input aria-label={`Row ${row.rowNumber} phone`} disabled={importRetryLocked} value={row.phone} onChange={(event) => editImportRow(index, "phone", event.target.value)} />{row.error && <span role="alert">{row.error}</span>}{row.duplicate && <label><input type="checkbox" disabled={importRetryLocked} checked={row.allowDuplicate} onChange={(event) => setImportRows((current) => validateImportRows(current.map((item, rowIndex) => rowIndex === index ? { ...item, allowDuplicate: event.target.checked, include: event.target.checked, includeExplicit: true } : item), customers))} />{row.duplicate}, import anyway</label>}</article>;
+                      const importFieldsDisabled = importRetryLocked || goCrmCustomerImport && !importRecoveryReady;
+                      return <article key={row.rowNumber}><label><input type="checkbox" disabled={importFieldsDisabled || Boolean(row.error)} checked={row.include} onChange={(event) => setImportRows((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, include: event.target.checked, includeExplicit: true } : item))} /> Row {row.rowNumber}</label><input aria-label={`Row ${row.rowNumber} name`} disabled={importFieldsDisabled} value={row.name} onChange={(event) => editImportRow(index, "name", event.target.value)} /><input aria-label={`Row ${row.rowNumber} email`} disabled={importFieldsDisabled} value={row.email} onChange={(event) => editImportRow(index, "email", event.target.value)} /><input aria-label={`Row ${row.rowNumber} phone`} disabled={importFieldsDisabled} value={row.phone} onChange={(event) => editImportRow(index, "phone", event.target.value)} />{row.error && <span role="alert">{row.error}</span>}{row.duplicate && <label><input type="checkbox" disabled={importFieldsDisabled} checked={row.allowDuplicate} onChange={(event) => setImportRows((current) => validateImportRows(current.map((item, rowIndex) => rowIndex === index ? { ...item, allowDuplicate: event.target.checked, include: event.target.checked, includeExplicit: true } : item), customers))} />{row.duplicate}, import anyway</label>}</article>;
                     })}
                   </div>
-                  <button type="button" disabled={busy || selectedImportCount === 0} onClick={() => void submitImport()}>{importRetryLocked ? "Retry import" : "Import"} {selectedImportCount} customers</button>
+                  <button type="button" disabled={busy || selectedImportCount === 0 || goCrmCustomerImport && !importRecoveryReady} onClick={() => void submitImport()}>{importRetryLocked ? "Retry import" : "Import"} {selectedImportCount} customers</button>
                 </>
               )}
             </>

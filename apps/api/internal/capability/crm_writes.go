@@ -99,6 +99,7 @@ type CustomerImportOutput struct {
 	CreatedIDs           []string `json:"createdIds"`
 	Imported             int      `json:"imported"`
 	SkippedDuplicateRows []int    `json:"skippedDuplicateRows"`
+	ImportIntentID       string   `json:"importIntentId"`
 }
 
 type CustomerUndoImportInput struct {
@@ -119,8 +120,10 @@ type CustomerUndoImportOutput struct {
 }
 
 type CustomerRestoreImportOutput struct {
-	CustomerIDs []string `json:"customerIds"`
-	Restored    int      `json:"restored"`
+	CustomerIDs     []string `json:"customerIds"`
+	Restored        int      `json:"restored"`
+	UndoIntentID    string   `json:"undoIntentId"`
+	RestoreIntentID string   `json:"restoreIntentId"`
 }
 
 func ParseCustomerMergeInput(raw json.RawMessage) (CustomerMergeInput, error) {
@@ -792,12 +795,14 @@ type customerImportInsert struct {
 	PaymentTermDays        *int64
 	PreferredContactMethod string
 	UpdatedByUserID        *string
+	UpdatedAt              time.Time
 }
 
-func importCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CustomerImportInput) (CustomerImportOutput, error) {
+func importCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CustomerImportInput, now time.Time) (CustomerImportOutput, error) {
 	if !isZodUUID(claims.IntentID) {
 		return CustomerImportOutput{}, errors.New("customer import requires a durable UUID intent")
 	}
+	changedAt := now.UTC().Truncate(time.Microsecond)
 	rows, err := tx.Query(ctx, `
 		SELECT name, email, phone FROM customers
 		WHERE org_id = $1::uuid AND deactivated_at IS NULL`, claims.OrganizationID)
@@ -839,7 +844,7 @@ func importCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.Capabilit
 		created = append(created, customerImportInsert{
 			ID: id, OrgID: claims.OrganizationID, Name: row.Name, Email: row.Email, Phone: row.Phone,
 			CreditLimitMinor: row.CreditLimitMinor, PaymentTermDays: row.PaymentTermDays,
-			PreferredContactMethod: method, UpdatedByUserID: updatedBy,
+			PreferredContactMethod: method, UpdatedByUserID: updatedBy, UpdatedAt: changedAt,
 		})
 	}
 	for offset := 0; offset < len(created); offset += 500 {
@@ -854,12 +859,12 @@ func importCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.Capabilit
 	}
 	marker := customerImportTransitionReceipt{
 		CustomerIDs: createdIDs, SourceIntentID: claims.IntentID, ActorType: claims.ActorType,
-		ActorID: claims.ActorID, AgentSessionID: claims.AgentSessionID,
+		ChangedAt: changedAt, ActorID: claims.ActorID, AgentSessionID: claims.AgentSessionID,
 	}
 	if err := insertCustomerImportTransitionMarker(ctx, tx, claims.OrganizationID, "import", importCustomersCapabilityID, claims.IntentID, marker); err != nil {
 		return CustomerImportOutput{}, err
 	}
-	return CustomerImportOutput{CreatedIDs: createdIDs, Imported: len(createdIDs), SkippedDuplicateRows: skipped}, nil
+	return CustomerImportOutput{CreatedIDs: createdIDs, Imported: len(createdIDs), SkippedDuplicateRows: skipped, ImportIntentID: claims.IntentID}, nil
 }
 
 func insertCustomerImportBatch(ctx context.Context, tx pgx.Tx, batch []customerImportInsert) error {
@@ -868,17 +873,17 @@ func insertCustomerImportBatch(ctx context.Context, tx pgx.Tx, batch []customerI
 	}
 	var query strings.Builder
 	query.WriteString(`INSERT INTO customers
-		(id, org_id, name, email, phone, credit_limit_minor, payment_term_days, preferred_contact_method, updated_by_user_id)
+		(id, org_id, name, email, phone, credit_limit_minor, payment_term_days, preferred_contact_method, updated_by_user_id, updated_at)
 		VALUES `)
-	args := make([]any, 0, len(batch)*9)
+	args := make([]any, 0, len(batch)*10)
 	for index, row := range batch {
 		if index > 0 {
 			query.WriteByte(',')
 		}
-		base := index*9 + 1
-		fmt.Fprintf(&query, "($%d::uuid,$%d::uuid,$%d,$%d,$%d,$%d::integer,$%d::integer,$%d,$%d::uuid)",
-			base, base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8)
-		args = append(args, row.ID, row.OrgID, row.Name, row.Email, row.Phone, row.CreditLimitMinor, row.PaymentTermDays, row.PreferredContactMethod, row.UpdatedByUserID)
+		base := index*10 + 1
+		fmt.Fprintf(&query, "($%d::uuid,$%d::uuid,$%d,$%d,$%d,$%d::integer,$%d::integer,$%d,$%d::uuid,$%d)",
+			base, base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9)
+		args = append(args, row.ID, row.OrgID, row.Name, row.Email, row.Phone, row.CreditLimitMinor, row.PaymentTermDays, row.PreferredContactMethod, row.UpdatedByUserID, row.UpdatedAt)
 	}
 	_, err := tx.Exec(ctx, query.String(), args...)
 	return err
@@ -947,6 +952,58 @@ func insertCustomerImportTransitionMarker(ctx context.Context, tx pgx.Tx, orgID,
 	return insertReceipt(ctx, tx, orgID, customerImportTransitionKey(orgID, transition, sourceIntentID), capabilityID, inputHash, Result{OK: true, Data: data})
 }
 
+func validateCustomerImportReceiptReplay(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, capabilityID string, input any, receipt actionReceipt) error {
+	if !receipt.OK {
+		return nil
+	}
+	transition, sourceIntentID := "", ""
+	switch capabilityID {
+	case importCustomersCapabilityID:
+		transition, sourceIntentID = "import", claims.IntentID
+	case undoCustomerImportCapabilityID:
+		parsed, ok := input.(CustomerUndoImportInput)
+		if !ok {
+			return errors.New("customer import undo receipt replay is invalid")
+		}
+		transition, sourceIntentID = "undo", parsed.ImportIntentID
+	case restoreImportedCustomersCapabilityID:
+		parsed, ok := input.(CustomerRestoreImportInput)
+		if !ok {
+			return errors.New("customer import restore receipt replay is invalid")
+		}
+		transition, sourceIntentID = "restore", parsed.UndoIntentID
+	default:
+		return nil
+	}
+	marker, found, err := customerImportTransitionMarker(ctx, tx, claims.OrganizationID, transition, sourceIntentID)
+	if err != nil {
+		return err
+	}
+	if !found || !sameCustomerImportActor(marker, claims) {
+		return errors.New("customer import receipt does not belong to this actor")
+	}
+	switch capabilityID {
+	case importCustomersCapabilityID:
+		var output CustomerImportOutput
+		if err := json.Unmarshal(receipt.Data, &output); err != nil || output.ImportIntentID != claims.IntentID || requireReceiptIDsMatch(marker.CustomerIDs, output.CreatedIDs) != nil {
+			return errors.New("customer import receipt replay is invalid")
+		}
+	case undoCustomerImportCapabilityID:
+		parsed := input.(CustomerUndoImportInput)
+		var output CustomerUndoImportOutput
+		if err := json.Unmarshal(receipt.Data, &output); err != nil || output.ImportIntentID != parsed.ImportIntentID || output.UndoIntentID != claims.IntentID || requireReceiptIDsMatch(marker.CustomerIDs, output.CustomerIDs) != nil {
+			return errors.New("customer import undo receipt replay is invalid")
+		}
+	case restoreImportedCustomersCapabilityID:
+		parsed := input.(CustomerRestoreImportInput)
+		var output CustomerRestoreImportOutput
+		if err := json.Unmarshal(receipt.Data, &output); err != nil || output.UndoIntentID != parsed.UndoIntentID || output.RestoreIntentID != claims.IntentID || requireReceiptIDsMatch(marker.CustomerIDs, output.CustomerIDs) != nil {
+			return errors.New("customer import restore receipt replay is invalid")
+		}
+	}
+	return nil
+}
+
 func requireReceiptIDsMatch(suppliedIDs, receiptIDs []string) error {
 	if len(suppliedIDs) != len(receiptIDs) {
 		return errors.New("customer IDs do not match the server receipt")
@@ -975,7 +1032,7 @@ func successfulCustomerImportReceipt(ctx context.Context, tx pgx.Tx, orgID, impo
 		return CustomerImportOutput{}, errors.New("a successful customer import receipt is required")
 	}
 	var output CustomerImportOutput
-	if err := json.Unmarshal(receipt.Data, &output); err != nil || output.Imported != len(output.CreatedIDs) || output.Imported < 1 || len(output.CreatedIDs) > 5000 {
+	if err := json.Unmarshal(receipt.Data, &output); err != nil || output.ImportIntentID != importIntentID || output.Imported != len(output.CreatedIDs) || output.Imported < 1 || len(output.CreatedIDs) > 5000 {
 		return CustomerImportOutput{}, errors.New("the customer import receipt is invalid")
 	}
 	if err := requireReceiptIDsMatch(output.CreatedIDs, output.CreatedIDs); err != nil {
@@ -1007,12 +1064,15 @@ func undoImportedCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.Cap
 	} else if found {
 		return CustomerUndoImportOutput{}, errors.New("this customer import was already undone")
 	}
+	if importMarker.ChangedAt.IsZero() {
+		return CustomerUndoImportOutput{}, errors.New("the customer import receipt is invalid")
+	}
 	changedAt := now.UTC().Truncate(time.Microsecond)
 	updatedBy := humanActorID(claims)
 	rows, err := tx.Query(ctx, `
 		UPDATE customers SET deactivated_at = $1, updated_by_user_id = $2::uuid, updated_at = $1
-		WHERE org_id = $3::uuid AND id = ANY($4::uuid[]) AND deactivated_at IS NULL
-		RETURNING id::text`, changedAt, updatedBy, claims.OrganizationID, imported.CreatedIDs)
+		WHERE org_id = $3::uuid AND id = ANY($4::uuid[]) AND deactivated_at IS NULL AND updated_at = $5
+		RETURNING id::text`, changedAt, updatedBy, claims.OrganizationID, imported.CreatedIDs, importMarker.ChangedAt)
 	if err != nil {
 		return CustomerUndoImportOutput{}, err
 	}
@@ -1031,7 +1091,7 @@ func undoImportedCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.Cap
 	}
 	rows.Close()
 	if err := requireReceiptIDsMatch(changedIDs, imported.CreatedIDs); err != nil {
-		return CustomerUndoImportOutput{}, errors.New("imported customers changed before undo could complete")
+		return CustomerUndoImportOutput{}, errors.New("imported customers changed after import and cannot be undone safely")
 	}
 	marker := customerImportTransitionReceipt{
 		CustomerIDs: imported.CreatedIDs, SourceIntentID: input.ImportIntentID, ChangedAt: changedAt,
@@ -1109,7 +1169,10 @@ func restoreImportedCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.
 	if err := insertCustomerImportTransitionMarker(ctx, tx, claims.OrganizationID, "restore", restoreImportedCustomersCapabilityID, input.UndoIntentID, marker); err != nil {
 		return CustomerRestoreImportOutput{}, err
 	}
-	return CustomerRestoreImportOutput{CustomerIDs: undoOutput.CustomerIDs, Restored: len(undoOutput.CustomerIDs)}, nil
+	return CustomerRestoreImportOutput{
+		CustomerIDs: undoOutput.CustomerIDs, Restored: len(undoOutput.CustomerIDs),
+		UndoIntentID: input.UndoIntentID, RestoreIntentID: claims.IntentID,
+	}, nil
 }
 
 func humanActorID(claims authbridge.CapabilityClaims) *string {
@@ -1158,7 +1221,7 @@ func executeCustomerMergeCapability(ctx context.Context, tx pgx.Tx, claims authb
 		if !ok {
 			return nil, errors.New("invalid import customer input")
 		}
-		return importCustomers(ctx, tx, claims, parsed)
+		return importCustomers(ctx, tx, claims, parsed, now)
 	case undoCustomerImportCapabilityID:
 		parsed, ok := input.(CustomerUndoImportInput)
 		if !ok {
