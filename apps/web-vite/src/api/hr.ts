@@ -80,18 +80,6 @@ const TimeReportSchema = z.object({
   })),
 });
 
-const PendingEntriesSchema = z.object({
-  entries: z.array(z.object({
-    id: z.string().min(1),
-    employeeId: z.string().min(1),
-    employeeName: z.string(),
-    workDate: z.string().datetime({ offset: true }),
-    minutes: z.number().int().safe(),
-    note: z.string().nullable(),
-    late: z.boolean(),
-  })),
-});
-
 export type HrEmployee = z.infer<typeof EmployeeSchema>;
 export type HrLeaveRequest = z.infer<typeof LeaveSchema>;
 export type HrPayrollRun = z.infer<typeof PayrollRunSchema>;
@@ -100,7 +88,7 @@ export type HrApplicant = z.infer<typeof ApplicantSchema>;
 export type HrAttendance = z.infer<typeof AttendanceSchema>;
 export type HrReport = z.infer<typeof HrReportSchema>;
 export type HrTimeReport = z.infer<typeof TimeReportSchema>;
-export type HrPendingEntry = z.infer<typeof PendingEntriesSchema>["entries"][number];
+export type HrPendingEntry = z.infer<typeof GoPendingEntriesSchema>["entries"][number];
 
 export type HrAction =
   | { action: "hireEmployee"; name: string; email?: string; title?: string; monthlySalaryMinor: number; taxRateBps?: number; annualLeaveDays?: number }
@@ -200,7 +188,7 @@ export function goHrLeaveUseGo(): boolean {
 }
 
 export function goHrTimeUseGo(): boolean {
-  return typeof __GO_HR_TIME__ !== "undefined" && __GO_HR_TIME__;
+  return true;
 }
 
 export function goHrPayrollUseGo(): boolean {
@@ -827,39 +815,24 @@ function goHrLeaveCapabilityInput(action: HrLeaveAction): { capabilityId: string
 }
 
 export async function fetchHrTime(from: string, to: string, signal?: AbortSignal): Promise<HrTimeReport> {
-  if (goHrTimeUseGo()) {
-    const response = await request("/api/capabilities/execute", {
-      method: "POST",
-      body: JSON.stringify({ capabilityId: "hr.timeReport", input: { from, to }, intentId: crypto.randomUUID() }),
-    }, signal);
-    if (!response.ok) throw await apiError(response, "time report");
-    const parsed = z.object({ ok: z.literal(true), data: TimeReportSchema }).strict().safeParse(await readJson(response));
-    if (!parsed.success) throw new HrApiError(response.status, "The Go time service returned data in an unexpected format.");
-    return parsed.data.data;
-  }
-  const query = new URLSearchParams({ from, to });
-  const response = await request(`/api/time?${query.toString()}`, { method: "GET" }, signal);
+  const response = await request("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "hr.timeReport", input: { from, to }, intentId: crypto.randomUUID() }),
+  }, signal);
   if (!response.ok) throw await apiError(response, "time report");
-  const parsed = TimeReportSchema.safeParse(await readJson(response));
-  if (!parsed.success) throw new HrApiError(response.status, "The time service returned data in an unexpected format.");
-  return parsed.data;
+  const parsed = z.object({ ok: z.literal(true), data: TimeReportSchema }).strict().safeParse(await readJson(response));
+  if (!parsed.success) throw new HrApiError(response.status, "The Go time service returned data in an unexpected format.");
+  return parsed.data.data;
 }
 
 export async function fetchHrPendingEntries(signal?: AbortSignal): Promise<HrPendingEntry[]> {
-  if (goHrTimeUseGo()) {
-    const response = await request("/api/capabilities/execute", {
-      method: "POST",
-      body: JSON.stringify({ capabilityId: "hr.pendingTimeEntries", input: {}, intentId: crypto.randomUUID() }),
-    }, signal);
-    if (!response.ok) throw await apiError(response, "pending time entries");
-    const parsed = GoPendingEntriesSchema.safeParse(await parseCapabilityData(response));
-    if (!parsed.success) throw new HrApiError(response.status, "The Go time service returned pending entries in an unexpected format.");
-    return parsed.data.entries;
-  }
-  const response = await request("/api/time?pending=1", { method: "GET" }, signal);
+  const response = await request("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "hr.pendingTimeEntries", input: {}, intentId: crypto.randomUUID() }),
+  }, signal);
   if (!response.ok) throw await apiError(response, "pending time entries");
-  const parsed = PendingEntriesSchema.safeParse(await readJson(response));
-  if (!parsed.success) throw new HrApiError(response.status, "The time service returned pending entries in an unexpected format.");
+  const parsed = GoPendingEntriesSchema.safeParse(await parseCapabilityData(response));
+  if (!parsed.success) throw new HrApiError(response.status, "The Go time service returned pending entries in an unexpected format.");
   return parsed.data.entries;
 }
 
@@ -892,33 +865,9 @@ export async function readPendingHrTimeAction(scope: HrRetryScope): Promise<HrTi
 
 export async function submitHrTimeAction(
   action: HrTimeAction,
-  scope?: HrRetryScope,
+  scope: HrRetryScope,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
 ): Promise<HrActionResult> {
-  const useGo = useGoOverride ?? goHrTimeUseGo();
-  if (!useGo) {
-    if (scope && await readPendingHrTimeAction(scope)) {
-      throw new HrApiError(0, "A Go time action is unresolved. Restore the Go time route and retry that exact action before using the legacy route.", true);
-    }
-    const result = await submit("/api/time", action);
-    const pending = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(result.body);
-    if (pending.success || result.response.status === 202) {
-      if (!pending.success) throw new HrApiError(result.response.status, "The time action needs approval, but the service returned an invalid approval response.");
-      retryIntentIds.delete(result.retryKey);
-      return { kind: "pending", data: { reason: pending.data.reason } };
-    }
-    if (!result.response.ok) {
-      if (result.response.status < 500) retryIntentIds.delete(result.retryKey);
-      throw parseError(result.response.status, result.body, "The time service could not complete this action.");
-    }
-    const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(result.body);
-    if (!parsed.success) throw new HrApiError(result.response.status, "The time service returned an unexpected action response.");
-    retryIntentIds.delete(result.retryKey);
-    return { kind: "success", data: parsed.data.data };
-  }
-
-  if (!scope) throw new HrApiError(0, "Time actions need your account and organization details before they can be submitted.");
   const scoped = await hrTimeScope(scope);
   const attempt = await goHrTimeAttempt(action, scoped.scopeHash);
   const { capabilityId, input } = goHrTimeCapabilityInput(action);

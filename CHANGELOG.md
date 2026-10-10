@@ -181,6 +181,10 @@ The full v1 changelog is preserved at the bottom of this file.
   and outcome update, and the action fails closed when durable retry state is
   unavailable.
 
+- Vite HR Time reports and approval writes now use Go session capabilities
+  unconditionally. Actor- and organization-scoped retries stay pinned to Go,
+  and no time action falls through to the legacy `/api/time` handler.
+
 - Vite Projects create, archive, and task writes now use direct Go capabilities
   by default. Set `CHASTE_GO_PROJECTS_WRITES=0` to send them through the
   existing `POST /api/projects` route, which remains Go-backed while

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrOverviewReportUseGo, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrOverviewReportUseGo, goHrTimeUseGo, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
 import type { HrApiError } from "./hr";
 
 const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
@@ -561,7 +561,8 @@ describe("Vite People API", () => {
   });
 
   it("loads the Go time report and approval queue through their read capabilities", async () => {
-    vi.stubGlobal("__GO_HR_TIME__", true);
+    vi.stubGlobal("__GO_HR_TIME__", false);
+    expect(goHrTimeUseGo()).toBe(true);
     const pendingEntry = {
       id: "11111111-1111-4111-8111-111111111111",
       employeeId: "22222222-2222-4222-8222-222222222222",
@@ -608,10 +609,13 @@ describe("Vite People API", () => {
     await expect(submitHrTimeAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
     await expect(submitHrTimeAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     await expect(readPendingHrTimeAction(scope)).resolves.toEqual(action);
-    await expect(submitHrTimeAction(action, scope, undefined, false)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(intents).toHaveLength(2);
+    await expect(submitHrTimeAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(intents).toHaveLength(3);
     expect(intents[1]).toBe(intents[0]);
-    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(intents[2]).toBe(intents[0]);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      "/api/capabilities/execute", "/api/capabilities/execute", "/api/capabilities/execute",
+    ]);
   });
 
   it("maps Go time decisions and keeps malformed successful responses retryable", async () => {
