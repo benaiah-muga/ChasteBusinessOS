@@ -419,6 +419,9 @@ The full v1 changelog is preserved at the bottom of this file.
   are preserved, including Go's `bank_transfer` default when method is
   omitted. Actor/org scoped retries and approval recovery survive reload, and
   the payBill retry intent is shared with the Purchasing workspace.
+  Browser-wide Web Locks serialize Purchasing finance intent reservations
+  across tabs; browsers without Web Locks fail closed before submitting these
+  actions.
 - Go leave requests now verify that the employee belongs to the caller's
   organization before inserting a request. Missing and cross-organization
   employee IDs are rejected without creating leave records.

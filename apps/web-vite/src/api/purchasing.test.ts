@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closePurchasingOrder,
   createPurchasingBill,
@@ -70,6 +70,25 @@ const switchboard = { catalog: [{ id: "purchasing" }], enabledModules: ["purchas
 
 function postedBody(call: unknown[]): Record<string, unknown> {
   return JSON.parse(String((call[1] as RequestInit).body));
+}
+
+function stubPurchasingLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  const locks = {
+    request: async <T>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+      const previous = tails.get(name) ?? Promise.resolve();
+      let release = (): void => {};
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      tails.set(name, current);
+      await previous;
+      try { return await callback(); }
+      finally {
+        release();
+        if (tails.get(name) === current) tails.delete(name);
+      }
+    },
+  };
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
 }
 
 describe("purchasing API module gate", () => {
@@ -233,6 +252,8 @@ describe("governed purchasing writes", () => {
     actorId: "actor-1",
     organizationId: "org-1",
   };
+
+  beforeEach(stubPurchasingLocks);
 
   it("routes all sourcing actions through scoped Go capabilities with strict output shapes", async () => {
     vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
@@ -483,6 +504,39 @@ describe("governed purchasing writes", () => {
     expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(uncertain.intentId);
     await expect(payPurchasingBill(paymentAction, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { paymentId, entryId, fullyPaid: true } });
     expect(postedBody(fetchMock.mock.calls[3]!).intentId).toBe(uncertain.intentId);
+  });
+
+  it("serializes cross-tab bill payment reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ pendingApproval: true, reason: "Approval required." }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const paymentAction = { action: "payBill" as const, billNumber: 91, amountMinor: 1200, method: "cash" as const };
+    const alternatePayment = { ...paymentAction, amountMinor: 1100 };
+
+    const outcomes = await Promise.allSettled([
+      payPurchasingBill(paymentAction, undefined, retryScope),
+      payPurchasingBill(alternatePayment, undefined, retryScope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const stored = await readPendingPurchasingBillPayment(retryScope);
+    expect([paymentAction, alternatePayment]).toContainEqual(stored);
+  });
+
+  it("fails closed when browser-wide Purchasing locks are unavailable", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { paymentId: "3c9e3c30-1e5c-4b3c-9d4b-5b3c4d5e6f70", entryId: "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f", fullyPaid: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(payPurchasingBill({ action: "payBill", billNumber: 91, amountMinor: 1200 }, undefined, retryScope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a Purchasing action"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
   });
 
   it("persists the exact omitted-method payment for reload recovery", async () => {

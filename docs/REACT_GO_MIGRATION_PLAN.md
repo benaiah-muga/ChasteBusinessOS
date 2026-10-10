@@ -2043,15 +2043,18 @@ new owners and the manifest shows zero legacy runtime paths.
      and browsers without Web Locks fail closed. Vite API/page/proxy tests,
      typecheck, lint, and Go banking reconciliation contract tests pass.
      Authenticated browser proof remains open.
-196. Route Accounting Payables `payBill` actions through the existing Vite Go
+196. (Vite/Go implementation complete; browser proof pending) Route Accounting Payables `payBill` actions through the existing Vite Go
      `payPurchasingBill` flow and `purchasing.payBill` capability under the
      existing `CHASTE_GO_PURCHASING_FINANCE_WRITES=1` selector. Preserve the
      exact amount and optional payment method, including the Go
      `bank_transfer` default when omitted. Reuse the Purchasing finance retry
      intent store, add persisted action details only for bill payment so the
      Accounting page can recover an exact 202 or uncertain action after
-     reload, and test the same stable intent through API and UI. Keep other
-     Accounting actions unchanged.
+     reload, and test the same stable intent through API and UI. Finance intent
+     reservations are atomic across tabs, and browsers without Web Locks fail
+     closed. Purchasing API tests, AccountingPage recovery, Vite typecheck/lint,
+     and the Go payBill contract test pass. Keep other Accounting actions
+     unchanged. Authenticated browser proof remains open.
 197. Route Vite HR Time report and pending-entry reads, time logging, and
      submitted-entry decisions through Go's session-authenticated
      `hr.timeReport`, `hr.pendingTimeEntries`, `hr.logTime`, and

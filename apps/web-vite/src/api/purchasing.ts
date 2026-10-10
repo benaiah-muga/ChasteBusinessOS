@@ -844,28 +844,43 @@ async function createPurchaseFinanceAttempt(action: PurchaseFinanceAction, scope
     throw new PurchasingApiError(0, "Purchasing retry protection is unavailable. Check browser security settings and try again.");
   }
   const storageKey = `${purchaseFinanceAttemptPrefix}${action.action}:${scopeDigest}`;
-  let stored: { fingerprint: string; intentId: string } | null;
-  try {
-    stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
-  } catch {
-    throw new PurchasingApiError(0, "Enable browser storage before making this purchasing change so an uncertain result can be retried safely.");
+  return withPurchasingReservationLock(storageKey, async () => {
+    let stored: { fingerprint: string; intentId: string } | null;
+    try {
+      stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+    } catch {
+      throw new PurchasingApiError(0, "Enable browser storage before making this purchasing change so an uncertain result can be retried safely.");
+    }
+    if (stored && stored.fingerprint !== fingerprint) {
+      throw new PurchasingApiError(0, "A previous result for this purchasing action is unresolved. Retry the exact action or check the related record before changing it.");
+    }
+    if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+    const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({
+        fingerprint,
+        intentId: attempt.intentId,
+        ...(action.action === "payBill" ? { action } : {}),
+      }));
+      const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+      if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
+      return { ...attempt, intentId: persisted.intentId };
+    } catch {
+      throw new PurchasingApiError(0, "Enable browser storage before making this purchasing change so an uncertain result can be retried safely.");
+    }
+  });
+}
+
+async function withPurchasingReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new PurchasingApiError(0, "This browser cannot safely reserve a Purchasing action. Open it in a browser with Web Locks enabled before submitting the change.");
   }
-  if (stored && stored.fingerprint !== fingerprint) {
-    throw new PurchasingApiError(0, "A previous result for this purchasing action is unresolved. Retry the exact action or check the related record before changing it.");
-  }
-  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
-  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify({
-      fingerprint,
-      intentId: attempt.intentId,
-      ...(action.action === "payBill" ? { action } : {}),
-    }));
-    const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
-    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
-    return { ...attempt, intentId: persisted.intentId };
-  } catch {
-    throw new PurchasingApiError(0, "Enable browser storage before making this purchasing change so an uncertain result can be retried safely.");
+    return await lockManager.request(storageKey, { mode: "exclusive" }, reserve);
+  } catch (error) {
+    if (error instanceof PurchasingApiError) throw error;
+    throw new PurchasingApiError(0, "The browser could not reserve this Purchasing action safely. Retry after closing other Purchasing tabs.", true);
   }
 }
 
