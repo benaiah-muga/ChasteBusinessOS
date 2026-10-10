@@ -1290,23 +1290,30 @@ async function accountingReverseEntryAttempt(action: AccountingReverseEntryActio
 async function accountingBankReconciliationWriteAttempt(action: AccountingBankReconciliationWriteAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
   const storageKey = `${BANK_RECONCILIATION_WRITE_ATTEMPT_PREFIX}${scopeHash}`;
   const fingerprint = await accountingPaymentFingerprint(action);
-  let raw: string | null;
-  try { raw = window.localStorage.getItem(storageKey); }
-  catch { throw new AccountingApiError(0, "Enable browser storage before changing a bank reconciliation so it can be retried safely."); }
-  if (raw !== null) {
-    const stored = parseStoredBankReconciliationWrite(raw);
-    if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous bank reconciliation action is unresolved. Retry its exact details before changing another match.", true);
-    return { storageKey, intentId: stored.intentId };
-  }
-  const stored = { action, intentId: crypto.randomUUID(), fingerprint };
-  const serialized = JSON.stringify(stored);
-  try {
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("bank reconciliation retry marker did not persist");
-  } catch {
-    throw new AccountingApiError(0, "Enable browser storage before changing a bank reconciliation so it can be retried safely.");
-  }
-  return { storageKey, intentId: stored.intentId };
+  return withAccountingReservationLock(
+    storageKey,
+    "This browser cannot safely reserve a bank reconciliation action. Open Accounting in a browser with Web Locks enabled before changing a match.",
+    "The browser could not reserve this bank reconciliation action safely. Retry after closing other Accounting tabs.",
+    async () => {
+      let raw: string | null;
+      try { raw = window.localStorage.getItem(storageKey); }
+      catch { throw new AccountingApiError(0, "Enable browser storage before changing a bank reconciliation so it can be retried safely."); }
+      if (raw !== null) {
+        const stored = parseStoredBankReconciliationWrite(raw);
+        if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous bank reconciliation action is unresolved. Retry its exact details before changing another match.", true);
+        return { storageKey, intentId: stored.intentId };
+      }
+      const stored = { action, intentId: crypto.randomUUID(), fingerprint };
+      const serialized = JSON.stringify(stored);
+      try {
+        window.localStorage.setItem(storageKey, serialized);
+        if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("bank reconciliation retry marker did not persist");
+      } catch {
+        throw new AccountingApiError(0, "Enable browser storage before changing a bank reconciliation so it can be retried safely.");
+      }
+      return { storageKey, intentId: stored.intentId };
+    },
+  );
 }
 
 async function accountingPaymentFingerprint(action: unknown): Promise<string> {

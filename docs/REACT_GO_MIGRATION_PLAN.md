@@ -2028,7 +2028,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Locks fail closed. Vite API/page/proxy tests, typecheck, lint, and the Go
      reverse-entry contract test pass. Authenticated browser proof remains
      open.
-195. Route only Vite bank reconciliation match/unmatch writes through Go's
+195. (Vite/Go implementation complete; browser proof pending) Route only Vite bank reconciliation match/unmatch writes through Go's
      session-authenticated `accounting.matchBankTransaction` and
      `accounting.unmatchBankTransaction` capabilities behind paired
      `CHASTE_GO_BANK_RECONCILIATION_WRITES=1` and
@@ -2039,7 +2039,10 @@ new owners and the manifest shows zero legacy runtime paths.
      Go 404. Keep other Banking operations and reads on their current routes.
      Go remains authoritative for allocation and matched-state rules. Add
      focused API, proxy, and AccountingPage tests plus governed Go executor
-     coverage. Authenticated browser proof remains open.
+     coverage. Atomic browser-wide reservations prevent cross-tab intent races,
+     and browsers without Web Locks fail closed. Vite API/page/proxy tests,
+     typecheck, lint, and Go banking reconciliation contract tests pass.
+     Authenticated browser proof remains open.
 196. Route Accounting Payables `payBill` actions through the existing Vite Go
      `payPurchasingBill` flow and `purchasing.payBill` capability under the
      existing `CHASTE_GO_PURCHASING_FINANCE_WRITES=1` selector. Preserve the

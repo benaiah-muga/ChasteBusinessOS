@@ -1156,6 +1156,37 @@ describe("accounting API: Go bank reconciliation writes", () => {
     transactionId: matchAction.transactionId,
   };
 
+  beforeEach(stubPaymentLocks);
+
+  it("serializes cross-tab match and unmatch reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    const mock = stubFetch(() => Response.json({ pendingApproval: true }, { status: 202 }));
+
+    const outcomes = await Promise.allSettled([
+      submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope),
+      submitAccountingAction("/api/banking", unmatchAction, undefined, paymentRetryScope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(mock).toHaveBeenCalledTimes(1);
+    const stored = await readPendingAccountingBankReconciliationWrite(paymentRetryScope);
+    expect([matchAction, unmatchAction]).toContainEqual(stored);
+  });
+
+  it("fails closed when browser-wide reconciliation locks are unavailable", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const mock = stubFetch(() => Response.json({ ok: true, data: { status: "matched", allocatedMinor: 5000, lineUnexplainedMinor: 0 } }));
+
+    await expect(submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a bank reconciliation action"),
+    });
+    expect(mock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
   it("routes match and unmatch through their Go capabilities and validates outputs", async () => {
     vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
     const mock = stubFetch((_url, init) => {

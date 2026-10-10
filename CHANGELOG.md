@@ -409,8 +409,10 @@ The full v1 changelog is preserved at the bottom of this file.
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
   attempts and approval recovery survive reload; Go 404 and uncertain outcomes
   never fall back to the legacy writer. Go remains authoritative for matching
-  eligibility and allocation rules. Other banking actions and reads retain
-  their existing routes.
+  eligibility and allocation rules. Browser-wide Web Locks serialize retry
+  reservations across tabs; browsers without Web Locks fail closed before
+  matching or unmatching. Other banking actions and reads retain their existing
+  routes.
 - Accounting Payables now routes bill payments through the existing Go
   `purchasing.payBill` client flow when
   `CHASTE_GO_PURCHASING_FINANCE_WRITES=1`. The exact amount and optional method
