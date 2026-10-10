@@ -1199,6 +1199,66 @@ func TestMessagingReadMessagesReturnsLatestWindowInDisplayOrder(t *testing.T) {
 	if full.HasMore || full.NextCursor != nil || len(full.Readers) != 1 || full.Readers[0].UserID != fx.userID || full.Conversation.ID != channel {
 		t.Fatalf("readMessages full contract=%+v, want conversation, member readers, and no older page", full)
 	}
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE messages SET created_at = $2::timestamptz WHERE conversation_id = $1::uuid`,
+		channel, time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	var orderedIDs []string
+	orderedRows, err := fx.owner.Query(fx.ctx, `SELECT id::text FROM messages WHERE conversation_id = $1::uuid AND deleted_at IS NULL ORDER BY created_at, id`, channel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for orderedRows.Next() {
+		var id string
+		if err := orderedRows.Scan(&id); err != nil {
+			orderedRows.Close()
+			t.Fatal(err)
+		}
+		orderedIDs = append(orderedIDs, id)
+	}
+	if err := orderedRows.Err(); err != nil {
+		orderedRows.Close()
+		t.Fatal(err)
+	}
+	orderedRows.Close()
+	before := orderedIDs[3]
+	older, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
+		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingReadMessagesInput{
+			ConversationID: channel, Limit: 2, Before: &before,
+		})
+	})
+	if err != nil || len(older.Messages) != 2 || older.Messages[0].ID != orderedIDs[1] || older.Messages[1].ID != orderedIDs[2] ||
+		!older.HasMore || older.NextCursor == nil || *older.NextCursor != orderedIDs[1] {
+		t.Fatalf("readMessages older page=%+v err=%v, want stable keyset page before %s", older, err, before)
+	}
+	oldestBefore := *older.NextCursor
+	oldestPage, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
+		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingReadMessagesInput{
+			ConversationID: channel, Limit: 2, Before: &oldestBefore,
+		})
+	})
+	if err != nil || len(oldestPage.Messages) != 1 || oldestPage.Messages[0].ID != orderedIDs[0] || oldestPage.HasMore || oldestPage.NextCursor != nil {
+		t.Fatalf("readMessages oldest page=%+v err=%v, want final older row and no cursor", oldestPage, err)
+	}
+	foreignChannel := fx.createChannel(t, fx.userID, "foreign cursor")
+	foreignCursor := fx.send(t, fx.userID, foreignChannel, "not a cursor for this conversation")
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
+		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingReadMessagesInput{
+			ConversationID: channel, Limit: 2, Before: &foreignCursor,
+		})
+	}); err == nil || err.Error() != "message cursor not found" {
+		t.Fatalf("readMessages cross-conversation cursor err=%v, want cursor refusal", err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE messages SET deleted_at = now() WHERE id = $1::uuid`, before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
+		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingReadMessagesInput{
+			ConversationID: channel, Limit: 2, Before: &before,
+		})
+	}); err == nil || err.Error() != "message cursor not found" {
+		t.Fatalf("readMessages deleted cursor err=%v, want cursor refusal", err)
+	}
 	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingReadMessagesOutput, error) {
 		return messagingReadMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.nonMemberID), MessagingReadMessagesInput{
 			ConversationID: channel, Limit: 30,

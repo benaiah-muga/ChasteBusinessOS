@@ -396,12 +396,12 @@ export function fetchConversationThread(
   );
 }
 
-async function fetchGoConversationThread(conversationId: string, signal?: AbortSignal): Promise<ConversationThread> {
+async function fetchGoConversationThread(conversationId: string, signal?: AbortSignal, before?: string): Promise<ConversationThread> {
   const { response, body } = await send("/api/capabilities/execute", {
     method: "POST",
     body: JSON.stringify({
       capabilityId: "messaging.readMessages",
-      input: { conversationId, limit: 60 },
+      input: { conversationId, limit: 60, ...(before ? { before } : {}) },
       intentId: newIntentId(),
     }),
   }, "this conversation", signal);
@@ -414,6 +414,12 @@ async function fetchGoConversationThread(conversationId: string, signal?: AbortS
 }
 
 export function fetchOlderMessages(conversationId: string, before: string, signal?: AbortSignal): Promise<ConversationThread> {
+  if (
+    typeof __GO_MESSAGING_THREAD_READ__ !== "undefined" &&
+    __GO_MESSAGING_THREAD_READ__
+  ) {
+    return fetchGoConversationThread(conversationId, signal, before);
+  }
   return getJson(
     `/api/conversations/${encodeURIComponent(conversationId)}/messages?before=${encodeURIComponent(before)}`,
     "earlier messages",

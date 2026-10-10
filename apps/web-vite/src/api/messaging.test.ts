@@ -192,15 +192,38 @@ describe("messaging API client", () => {
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
   });
 
-  it("keeps around and older-page windows on the existing transport when Go thread reads are selected", async () => {
+  it("keeps around windows on the current transport and routes older pages through Go", async () => {
     vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json(thread()));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      String(input) === "/api/capabilities/execute"
+        ? Response.json({ ok: true, data: thread() })
+        : Response.json(thread()));
     vi.stubGlobal("fetch", fetchMock);
 
     await fetchConversationThread(conversationId, { aroundId: messageId });
     expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/messages?around=${messageId}`);
     await fetchOlderMessages(conversationId, messageId);
-    expect(lastUrl(fetchMock, 1)).toBe(`/api/conversations/${conversationId}/messages?before=${messageId}`);
+    expect(lastUrl(fetchMock, 1)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock, 1)).toMatchObject({
+      capabilityId: "messaging.readMessages",
+      input: { conversationId, limit: 60, before: messageId },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("fails closed and validates the strict Go result for older pages", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: thread({ messages: [message({ extra: true })] }) }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchOlderMessages(conversationId, messageId)).rejects.toMatchObject({
+      status: 200,
+      message: "The messaging service returned this conversation in an unexpected format.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "capability unavailable" }, { status: 404 })));
+    await expect(fetchOlderMessages(conversationId, messageId)).rejects.toMatchObject({ status: 404 });
   });
 
   it("encodes thread cursors for the around and before windows", async () => {

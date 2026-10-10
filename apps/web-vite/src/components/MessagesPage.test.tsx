@@ -1250,4 +1250,35 @@ it("reports typing presence after the debounce and clears it on the mount heartb
     expect(document.querySelectorAll("#message-m1")).toHaveLength(1);
     expect(document.querySelectorAll("#message-old")).toHaveLength(1);
   });
+
+  it("loads older messages through the selected Go thread capability", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+    const capabilityInputs: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const request = JSON.parse(String(init.body)) as { capabilityId?: string; input?: Record<string, unknown> };
+        if (request.capabilityId !== "messaging.readMessages" || !request.input) return Response.json({ error: "unexpected capability" }, { status: 400 });
+        capabilityInputs.push(request.input);
+        return Response.json({ ok: true, data: request.input.before
+          ? threadBody({ messages: [message({ id: "old", body: "from last week" }), message({ id: "m1" })], hasMore: false, nextCursor: null })
+          : threadBody({ hasMore: true, nextCursor: "m1" }) });
+      }
+      return Response.json({ error: "unexpected legacy thread read" }, { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+    await waitFor(() => expect(document.querySelector("#message-m1")).not.toBeNull());
+
+    fireEvent.scroll(screen.getByLabelText("Messages in general"), { target: { scrollTop: 0 } });
+
+    expect(await screen.findByText("from last week")).not.toBeNull();
+    expect(capabilityInputs).toContainEqual({ conversationId: channelId, limit: 60 });
+    expect(capabilityInputs).toContainEqual({ conversationId: channelId, limit: 60, before: "m1" });
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("before="))).toBe(false);
+  });
 });

@@ -98,6 +98,45 @@ afterAll(async () => {
 });
 
 describe("messaging conversation lifecycle", () => {
+  it("pages visible messages before a conversation-scoped cursor in stable display order", async () => {
+    const channel = await makeChannel("older-page", creatorId);
+    const otherChannel = await makeChannel("other-cursor", creatorId);
+    const fixedTime = new Date("2026-09-20T00:00:00.000Z");
+    const ids = [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002",
+      "10000000-0000-4000-8000-000000000003",
+      "10000000-0000-4000-8000-000000000004",
+    ];
+    await db.db.insert(messages).values(ids.map((id, index) => ({
+      id, orgId, conversationId: channel, senderType: "human", senderUserId: creatorId,
+      body: `cursor page ${index + 1}`, createdAt: fixedTime,
+    })));
+    const [foreignCursor] = await db.db.insert(messages).values({
+      orgId, conversationId: otherChannel, senderType: "human", senderUserId: creatorId,
+      body: "belongs elsewhere", createdAt: fixedTime,
+    }).returning({ id: messages.id });
+
+    const latest = (await run("messaging.readMessages", ctx(creatorId, ["messaging.read"]), {
+      conversationId: channel, limit: 2,
+    })) as { ok: true; data: { messages: { id: string }[]; hasMore: boolean; nextCursor: string | null } };
+    expect(latest.data.messages.map((message) => message.id)).toEqual(ids.slice(2));
+    expect(latest.data.hasMore).toBe(true);
+    expect(latest.data.nextCursor).toBe(ids[2]);
+
+    const older = (await run("messaging.readMessages", ctx(creatorId, ["messaging.read"]), {
+      conversationId: channel, before: ids[2], limit: 2,
+    })) as { ok: true; data: { messages: { id: string }[]; hasMore: boolean; nextCursor: string | null } };
+    expect(older.data.messages.map((message) => message.id)).toEqual(ids.slice(0, 2));
+    expect(older.data.hasMore).toBe(false);
+    expect(older.data.nextCursor).toBeNull();
+
+    const mismatchedCursor = await run("messaging.readMessages", ctx(creatorId, ["messaging.read"]), {
+      conversationId: channel, before: foreignCursor!.id, limit: 2,
+    });
+    expect(mismatchedCursor).toMatchObject({ ok: false, error: "message cursor not found" });
+  });
+
   it("lists latest message previews and unread counts only for joined members", async () => {
     const channel = await makeChannel("list-preview", creatorId);
     await db.db.insert(conversationMembers).values({ conversationId: channel, userId: memberId });

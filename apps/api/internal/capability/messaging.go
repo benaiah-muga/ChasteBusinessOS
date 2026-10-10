@@ -169,8 +169,9 @@ type MessagingListConversationsOutput struct {
 }
 
 type MessagingReadMessagesInput struct {
-	ConversationID string `json:"conversationId"`
-	Limit          int64  `json:"limit"`
+	ConversationID string  `json:"conversationId"`
+	Limit          int64   `json:"limit"`
+	Before         *string `json:"before,omitempty"`
 }
 
 type MessagingConversationSnapshot struct {
@@ -782,6 +783,9 @@ func parseMessagingReadMessagesInput(raw json.RawMessage) (MessagingReadMessages
 		return MessagingReadMessagesInput{}, err
 	}
 	if input.Limit, err = messagingBoundedLimit(fields, "limit", messagingReadMessagesDefLimit); err != nil {
+		return MessagingReadMessagesInput{}, err
+	}
+	if input.Before, err = projectOptionalUUID(fields, "before"); err != nil {
 		return MessagingReadMessagesInput{}, err
 	}
 	return input, nil
@@ -1452,13 +1456,30 @@ func messagingReadMessages(
 	conversationSnapshot.ArchivedAt = messagingFormatOptionalTime(conversationArchivedAt)
 	conversationSnapshot.DeletedAt = messagingFormatOptionalTime(conversationDeletedAt)
 
+	var beforeCreatedAt *time.Time
+	if input.Before != nil {
+		var cursorCreatedAt time.Time
+		if err := tx.QueryRow(ctx, `
+			SELECT created_at FROM messages
+			WHERE id = $3::uuid AND conversation_id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL`,
+			orgID, input.ConversationID, *input.Before,
+		).Scan(&cursorCreatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return MessagingReadMessagesOutput{}, errors.New("message cursor not found")
+			}
+			return MessagingReadMessagesOutput{}, err
+		}
+		beforeCreatedAt = &cursorCreatedAt
+	}
+
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, sender_type, sender_user_id::text, body, created_at, edited_at,
 		       parent_message_id::text, pinned_at, mentions
 		FROM messages
 		WHERE conversation_id = $2::uuid AND org_id = $1::uuid AND deleted_at IS NULL
+		  AND ($4::timestamptz IS NULL OR (created_at, id) < ($4::timestamptz, $5::uuid))
 		ORDER BY created_at DESC, id DESC
-		LIMIT $3`, orgID, input.ConversationID, input.Limit+1)
+		LIMIT $3`, orgID, input.ConversationID, input.Limit+1, beforeCreatedAt, input.Before)
 	if err != nil {
 		return MessagingReadMessagesOutput{}, err
 	}

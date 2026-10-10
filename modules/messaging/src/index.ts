@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   actionReceipts,
@@ -263,7 +263,11 @@ const readMessages = (deps: ModuleDeps) =>
     module: "messaging",
     risk: "read",
     permission: "messaging.read",
-    input: z.object({ conversationId: z.string(), limit: z.number().int().min(1).max(100).default(60) }),
+    input: z.object({
+      conversationId: z.string(),
+      limit: z.number().int().min(1).max(100).default(60),
+      before: z.string().uuid().optional(),
+    }),
     output: z.object({
       conversation: z.object({
         id: z.string(),
@@ -319,6 +323,20 @@ const readMessages = (deps: ModuleDeps) =>
       if (!(await isMember(deps.db, conv.id, actorId))) {
         throw new Error("you are not a member of this conversation");
       }
+      let beforeMessage: { id: string; createdAt: Date } | undefined;
+      if (input.before) {
+        [beforeMessage] = await deps.db
+          .select({ id: messages.id, createdAt: messages.createdAt })
+          .from(messages)
+          .where(and(
+            eq(messages.id, input.before),
+            eq(messages.conversationId, input.conversationId),
+            eq(messages.orgId, ctx.actor.orgId),
+            isNull(messages.deletedAt),
+          ))
+          .limit(1);
+        if (!beforeMessage) throw new Error("message cursor not found");
+      }
       const newestFirst = await deps.db
         .select()
         .from(messages)
@@ -327,6 +345,10 @@ const readMessages = (deps: ModuleDeps) =>
             eq(messages.conversationId, input.conversationId),
             eq(messages.orgId, ctx.actor.orgId),
             isNull(messages.deletedAt),
+            beforeMessage && or(
+              lt(messages.createdAt, beforeMessage.createdAt),
+              and(eq(messages.createdAt, beforeMessage.createdAt), lt(messages.id, beforeMessage.id)),
+            ),
           ),
         )
         .orderBy(desc(messages.createdAt), desc(messages.id))

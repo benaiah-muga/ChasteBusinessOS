@@ -42,7 +42,7 @@ async function startViteProxy(): Promise<{ server: ViteDevServer; origin: string
 }
 
 describe("Messaging capability proxy", () => {
-  it("defaults messaging thread reads, edits, and deletions to Go with session routing and preserves independent selector rollbacks", async () => {
+  it("defaults messaging thread reads including older-page capability requests, edits, and deletions to Go with session routing and preserves independent selector rollbacks", async () => {
     const go = routeRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolveClose, reject) => go.close((error) => error ? reject(error) : resolveClose())) });
@@ -59,6 +59,12 @@ describe("Messaging capability proxy", () => {
     expect(goProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("true");
     const goResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await goResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
+    const olderPageResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ capabilityId: "messaging.readMessages", input: { conversationId: "conversation-1", before: "message-1" } }),
+    });
+    expect(await olderPageResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     await goProxy.server.close();
     runningServers.splice(runningServers.indexOf(goProxy.tracked), 1);
 

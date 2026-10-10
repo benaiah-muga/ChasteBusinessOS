@@ -2346,3 +2346,7 @@ new owners and the manifest shows zero legacy runtime paths.
      existing href. Go checks verified session, `messaging.read`, same-org
      conversation, membership, visible-message state, and pending uploader
      ownership before streaming the file with private, no-store headers.
+229. (Go/Vite implementation complete; browser proof pending) Route Vite older
+     thread pages through `messaging.readMessages` using a visible message ID
+     scoped to the same organization and conversation. Use stable keyset
+     pagination and preserve around-message search jumps as a separate read.
