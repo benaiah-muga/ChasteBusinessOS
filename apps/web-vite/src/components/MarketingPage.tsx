@@ -315,7 +315,11 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
     const operationScopeGeneration = campaignScopeGenerationRef.current;
     const isCurrentScope = () => campaignScopeIdentityRef.current === operationScopeIdentity
       && campaignScopeGenerationRef.current === operationScopeGeneration;
-    const done = await run("Create segment", () => submitMarketingAction({ action: "createSegment", name, minSpendMinor }), { isCurrent: isCurrentScope });
+    const done = await run("Create segment", () => submitMarketingAction(
+      { action: "createSegment", name, minSpendMinor },
+      crypto.randomUUID(),
+      { actorId, organizationId },
+    ), { isCurrent: isCurrentScope });
     if (done && isCurrentScope()) {
       setNotice({ tone: "success", message: "Segment saved. Campaigns against it target the same people every time." });
       setSegmentForm({ name: "", minSpend: "0.00" });

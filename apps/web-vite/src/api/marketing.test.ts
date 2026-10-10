@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchMarketingEnabled,
   fetchMarketingSnapshot,
@@ -43,6 +43,14 @@ function snapshot() {
     }],
   };
 }
+
+beforeEach(() => {
+  vi.stubGlobal("navigator", {
+    locks: {
+      request: async (_name: string, _options: LockOptions, callback: () => Promise<unknown>) => callback(),
+    },
+  });
+});
 
 afterEach(() => {
   window.localStorage.clear();
@@ -127,7 +135,7 @@ describe("marketing governed writes", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
 
-    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }))
+    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }, undefined, retryScope))
       .resolves.toEqual({ kind: "completed", data: { segmentId } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
@@ -149,21 +157,44 @@ describe("marketing governed writes", () => {
       { status: 202 },
     )));
 
-    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }))
+    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }, undefined, retryScope))
       .resolves.toEqual({ kind: "pending", reason: "Marketing writes need approval." });
   });
 
   it("fails closed instead of falling back when the Go segment route is absent", async () => {
-    const intentId = "marketing-segment-intent";
     vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "not found" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }, intentId))
+    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }, undefined, retryScope))
       .rejects.toMatchObject({ status: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ intentId });
+    const intentId = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
+    expect(intentId).toEqual(expect.any(String));
+
+    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", false);
+    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }, undefined, retryScope))
+      .rejects.toThrow(/Go segment action is still unresolved/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses the exact scoped segment intent after a response may have been lost", async () => {
+    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { segmentId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "createSegment" as const, name: "Big spenders", minSpendMinor: 250_000 };
+
+    await expect(submitMarketingAction(action, undefined, retryScope)).rejects.toBeInstanceOf(MarketingApiError);
+    await expect(submitMarketingAction(action, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { segmentId } });
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    const first = JSON.parse(String(calls[0]?.[1].body)) as Record<string, unknown>;
+    const second = JSON.parse(String(calls[1]?.[1].body)) as Record<string, unknown>;
+    expect(first.intentId).toEqual(expect.any(String));
+    expect(second.intentId).toBe(first.intentId);
+    expect(second.input).toEqual(first.input);
   });
 
   it("keeps legacy marketing actions as the default when the Go slice flag is off", async () => {
@@ -450,7 +481,7 @@ describe("marketing campaign Go routing", () => {
 
     await expect(submitMarketingAction(createCampaignAction, undefined, retryScope)).rejects.toBeInstanceOf(MarketingApiError);
     await submitMarketingAction(createCampaignAction, undefined, retryScope);
-    await submitMarketingAction({ action: "createSegment", name: "All", minSpendMinor: 0 });
+    await submitMarketingAction({ action: "createSegment", name: "All", minSpendMinor: 0 }, undefined, retryScope);
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
     expect(JSON.parse(String(calls[0]?.[1].body)).intentId).not.toBe(JSON.parse(String(calls[1]?.[1].body)).intentId);
     expect(JSON.parse(String(calls[2]?.[1].body))).toMatchObject({ capabilityId: "marketing.createSegment" });

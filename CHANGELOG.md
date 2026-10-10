@@ -33,6 +33,11 @@ The full v1 changelog is preserved at the bottom of this file.
   send counts, and recent delivery log contract, with all reads scoped to the
   active organization.
 
+- Vite Marketing segment creation now reserves its exact intent in durable,
+  actor- and organization-scoped storage. Browser-wide Web Locks prevent
+  concurrent tabs from generating competing IDs, and unresolved Go requests
+  cannot fall through to the legacy route.
+
 - Vite Manufacturing overview reports can now read through Go's
   `manufacturing.overviewReport` capability. Go returns the existing strict
   report shape from organization-scoped reads, including BOMs, assemblies,

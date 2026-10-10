@@ -251,8 +251,12 @@ export async function submitMarketingAction<Action extends MarketingAction>(
   let attempt: MarketingAttempt | null = null;
   if (useGoCampaign && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign")) {
     attempt = await getMarketingAttempt(parsedAction.data, retryScope);
+  } else if (useGoSegment && parsedAction.data.action === "createSegment") {
+    attempt = await getMarketingSegmentAttempt(parsedAction.data, retryScope);
   } else if (!useGoCampaign && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign")) {
     await assertNoUnresolvedGoMarketingAttempt(parsedAction.data, retryScope);
+  } else if (!useGoSegment && parsedAction.data.action === "createSegment") {
+    await assertNoUnresolvedGoMarketingSegmentAttempt(retryScope);
   }
   const activeIntentId = attempt?.intentId ?? intentId;
   const legacyBody = { ...parsedAction.data, intentId: activeIntentId };
@@ -335,29 +339,122 @@ async function marketingAttemptStorageKey(action: Extract<MarketingAction, { act
   return { storageKey, fingerprint };
 }
 
+async function marketingSegmentScopeStorageKey(scope?: MarketingRetryScope): Promise<string> {
+  const actorId = scope?.actorId?.trim();
+  const organizationId = scope?.organizationId?.trim();
+  if (!actorId || !organizationId || !uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
+    throw new MarketingApiError(0, "Wait for the active user and organization to load before creating a segment.");
+  }
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
+    const scopeHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `chaste.marketing.segment-intent.v1:${scopeHash}:create`;
+  } catch {
+    throw new MarketingApiError(0, "Could not prepare a durable segment retry. Check browser storage and try again.");
+  }
+}
+
+async function marketingSegmentAttemptStorageKey(action: Extract<MarketingAction, { action: "createSegment" }>, scope?: MarketingRetryScope): Promise<{ storageKey: string; fingerprint: string }> {
+  const storageKey = await marketingSegmentScopeStorageKey(scope);
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(action)));
+    const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return { storageKey, fingerprint };
+  } catch {
+    throw new MarketingApiError(0, "Could not prepare a durable segment retry. Check browser storage and try again.");
+  }
+}
+
+async function withMarketingReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new MarketingApiError(0, "This browser cannot safely reserve a Marketing action. Open it in a browser with Web Locks enabled before submitting the change.");
+  }
+  try {
+    return await lockManager.request(storageKey, { mode: "exclusive" }, reserve);
+  } catch (error) {
+    if (error instanceof MarketingApiError) throw error;
+    throw new MarketingApiError(0, "The browser could not reserve this Marketing action safely. Retry after closing other Marketing tabs.");
+  }
+}
+
+async function getMarketingSegmentAttempt(action: Extract<MarketingAction, { action: "createSegment" }>, scope?: MarketingRetryScope): Promise<MarketingAttempt> {
+  const { storageKey, fingerprint } = await marketingSegmentAttemptStorageKey(action, scope);
+  return withMarketingReservationLock(storageKey, async () => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw !== null) {
+        let decoded: unknown;
+        try {
+          decoded = JSON.parse(raw);
+        } catch {
+          throw new Error("segment retry marker is malformed");
+        }
+        const stored = MarketingAttemptSchema.safeParse(decoded);
+        if (!stored.success || stored.data.fingerprint !== fingerprint) throw new Error("another segment payload is unresolved");
+        return { storageKey, fingerprint, intentId: stored.data.intentId };
+      }
+      const intent = { fingerprint, intentId: crypto.randomUUID() };
+      const serialized = JSON.stringify(intent);
+      window.localStorage.setItem(storageKey, serialized);
+      if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("segment retry did not persist");
+      return { storageKey, fingerprint, intentId: intent.intentId };
+    } catch {
+      throw new MarketingApiError(0, "A previous segment attempt is unresolved or browser storage could not retain this retry. Restore the exact draft or resolve the earlier attempt before changing it.");
+    }
+  });
+}
+
+async function assertNoUnresolvedGoMarketingSegmentAttempt(scope?: MarketingRetryScope): Promise<void> {
+  const actorId = scope?.actorId?.trim();
+  const organizationId = scope?.organizationId?.trim();
+  try {
+    if (actorId && organizationId && uuid.safeParse(actorId).success && uuid.safeParse(organizationId).success) {
+      const storageKey = await marketingSegmentScopeStorageKey(scope);
+      if (window.localStorage.getItem(storageKey) !== null) {
+        throw new MarketingApiError(0, "A Go segment action is still unresolved. Restore Go segment writes and retry that exact action before using the legacy route.");
+      }
+      return;
+    }
+
+    const prefix = "chaste.marketing.segment-intent.v1:";
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith(prefix) && key.endsWith(":create")) {
+        throw new MarketingApiError(0, "A Go segment action is still unresolved. Restore Go segment writes and retry that exact action before using the legacy route.");
+      }
+    }
+  } catch (error) {
+    if (error instanceof MarketingApiError) throw error;
+    throw new MarketingApiError(0, "Segment retry state could not be checked. Enable browser storage or restore Go segment writes before continuing.");
+  }
+}
+
 async function getMarketingAttempt(action: Extract<MarketingAction, { action: "createCampaign" | "sendCampaign" }>, scope?: MarketingRetryScope): Promise<MarketingAttempt> {
   const { storageKey, fingerprint } = await marketingAttemptStorageKey(action, scope);
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (raw !== null) {
-      let decoded: unknown;
-      try {
-        decoded = JSON.parse(raw);
-      } catch {
-        throw new Error("campaign retry marker is malformed");
+  return withMarketingReservationLock(storageKey, async () => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw !== null) {
+        let decoded: unknown;
+        try {
+          decoded = JSON.parse(raw);
+        } catch {
+          throw new Error("campaign retry marker is malformed");
+        }
+        const stored = MarketingAttemptSchema.safeParse(decoded);
+        if (!stored.success || stored.data.fingerprint !== fingerprint) throw new Error("another campaign payload is unresolved");
+        return { storageKey, fingerprint, intentId: stored.data.intentId };
       }
-      const stored = MarketingAttemptSchema.safeParse(decoded);
-      if (!stored.success || stored.data.fingerprint !== fingerprint) throw new Error("another campaign payload is unresolved");
-      return { storageKey, fingerprint, intentId: stored.data.intentId };
+      const intent = { fingerprint, intentId: crypto.randomUUID() };
+      const serialized = JSON.stringify(intent);
+      window.localStorage.setItem(storageKey, serialized);
+      if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("campaign retry did not persist");
+      return { storageKey, fingerprint, intentId: intent.intentId };
+    } catch {
+      throw new MarketingApiError(0, "A previous campaign attempt is still unresolved or browser storage could not retain this retry. Restore the exact draft or resolve the earlier attempt before changing it.");
     }
-    const intent = { fingerprint, intentId: crypto.randomUUID() };
-    const serialized = JSON.stringify(intent);
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("campaign retry did not persist");
-    return { storageKey, fingerprint, intentId: intent.intentId };
-  } catch {
-    throw new MarketingApiError(0, "A previous campaign attempt is still unresolved or browser storage could not retain this retry. Restore the exact draft or resolve the earlier attempt before changing it.");
-  }
+  });
 }
 
 async function assertNoUnresolvedGoMarketingAttempt(

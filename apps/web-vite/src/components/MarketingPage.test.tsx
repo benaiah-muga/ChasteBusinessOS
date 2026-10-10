@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketingPage } from "./MarketingPage";
 
 const segmentId = "0f3d0f52-4a51-4c6a-9a52-6f7a2e5c9b11";
@@ -35,6 +35,14 @@ function snapshot(overrides: Record<string, unknown> = {}) {
     ...overrides,
   });
 }
+
+beforeEach(() => {
+  vi.stubGlobal("navigator", {
+    locks: {
+      request: async (_name: string, _options: LockOptions, callback: () => Promise<unknown>) => callback(),
+    },
+  });
+});
 
 afterEach(() => {
   cleanup();
@@ -117,6 +125,39 @@ describe("Vite marketing page", () => {
     expect(await screen.findByText(/Segment saved\./)).not.toBeNull();
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ minSpendMinor: 125_050 });
+  }, PAGE_TEST_TIMEOUT);
+
+  it("creates Go segments with the authenticated user and organization retry scope", async () => {
+    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return modules();
+      if (path === "/api/marketing") return snapshot();
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
+        expect(payload).toMatchObject({
+          capabilityId: "marketing.createSegment",
+          input: { name: "Wholesale", minSpendMinor: 125_050 },
+          intentId: expect.any(String),
+        });
+        return Response.json({ ok: true, data: { segmentId } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MarketingPage
+      baseCurrency="USD"
+      actorId="5c3f7c5c-9a2a-4d3e-8c0b-1f2a3b4c5d6e"
+      organizationId="6d4a8d6d-0b3b-4e4f-9d1c-2a3b4c5d6e7f"
+    />);
+    await screen.findByRole("heading", { name: "Marketing", level: 1 });
+    fireEvent.change(screen.getByLabelText("Segment name"), { target: { value: "Wholesale" } });
+    fireEvent.change(screen.getByLabelText("Min lifetime spend"), { target: { value: "1250.50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create segment" }));
+
+    expect(await screen.findByText(/Segment saved\./)).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute" && init?.method === "POST")).toBe(true);
   }, PAGE_TEST_TIMEOUT);
 
   it("refuses an amount it cannot read as minor units instead of rounding it away", async () => {
