@@ -40,7 +40,7 @@ const expenseClaim = {
   memo: "Taxi to the client kickoff",
 };
 
-function stubHrTimeLocks(): void {
+function stubHrWriteLocks(): void {
   const tails = new Map<string, Promise<void>>();
   const locks = {
     request: async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
@@ -285,6 +285,7 @@ describe("Vite People page", () => {
   it("loads Payroll from Go and retries a pending draft with the same intent after reload", async () => {
     window.history.replaceState(null, "", "/hr?tab=payroll");
     vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
     const actorId = "22222222-2222-4222-8222-222222222222";
     const organizationId = "33333333-3333-4333-8333-333333333333";
     const intentIds: string[] = [];
@@ -359,7 +360,7 @@ describe("Vite People page", () => {
   it("routes time queue and decisions through Go and retries the exact action after reload", async () => {
     window.history.replaceState(null, "", "/hr?tab=time");
     vi.stubGlobal("__GO_HR_TIME__", true);
-    stubHrTimeLocks();
+    stubHrWriteLocks();
     const actorId = "33333333-3333-4333-8333-333333333333";
     const organizationId = "44444444-4444-4444-8444-444444444444";
     const entry = {

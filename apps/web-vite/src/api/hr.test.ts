@@ -12,7 +12,7 @@ const report = {
   attendance: [],
 };
 
-function stubHrTimeLocks(): void {
+function stubHrWriteLocks(): void {
   const tails = new Map<string, Promise<void>>();
   const locks = {
     request: async <T>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
@@ -196,6 +196,7 @@ describe("Vite People API", () => {
 
   it("retries payroll draft creation with its exact actor/org intent after pending approval and Go 404", async () => {
     vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
     const action = { action: "createPayrollRun" as const, year: 2026, month: 9 };
     const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
     const intentIds: string[] = [];
@@ -221,6 +222,73 @@ describe("Vite People API", () => {
     expect(intentIds[1]).toBe(intentIds[0]);
     expect(intentIds[2]).toBe(intentIds[0]);
     expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("serializes cross-tab Go payroll draft reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "createPayrollRun" as const, year: 2026, month: 9 };
+    const alternateAction = { ...action, month: 10 };
+    const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcomes = await Promise.allSettled([
+      submitHrPayrollAction(action, scope),
+      submitHrPayrollAction(alternateAction, scope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect([action, alternateAction]).toContainEqual(await readPendingHrPayrollAction(scope));
+  });
+
+  it("does not let a delayed payroll success clear a newer Go draft intent", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "createPayrollRun" as const, year: 2026, month: 9 };
+    const nextAction = { ...action, month: 10 };
+    const respond: Array<(response: Response) => void> = [];
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+      return new Promise<Response>((resolve) => { respond.push(resolve); });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitHrPayrollAction(action, scope);
+    const duplicate = submitHrPayrollAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(intentIds[1]).toBe(intentIds[0]);
+    respond[0]?.(Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } }));
+    await expect(first).resolves.toMatchObject({ kind: "success" });
+
+    const next = submitHrPayrollAction(nextAction, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(intentIds[2]).not.toBe(intentIds[0]);
+    respond[1]?.(Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } }));
+    await expect(duplicate).resolves.toMatchObject({ kind: "success" });
+    await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(nextAction);
+
+    respond[2]?.(Response.json({ pendingApproval: true }, { status: 202 }));
+    await expect(next).resolves.toMatchObject({ kind: "pending" });
+  });
+
+  it("fails closed when browser-wide Go payroll locks are unavailable", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrPayrollAction({ action: "createPayrollRun", year: 2026, month: 9 }, scope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a payroll draft"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
   });
 
   it("keeps an exact Hiring action after pending approval and Go 404, with no selector-off fallback", async () => {
@@ -379,7 +447,7 @@ describe("Vite People API", () => {
 
   it("persists exact Go time actions through approval, 404, and reload recovery", async () => {
     vi.stubGlobal("__GO_HR_TIME__", true);
-    stubHrTimeLocks();
+    stubHrWriteLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
     const intents: string[] = [];
@@ -404,7 +472,7 @@ describe("Vite People API", () => {
 
   it("maps Go time decisions and keeps malformed successful responses retryable", async () => {
     vi.stubGlobal("__GO_HR_TIME__", true);
-    stubHrTimeLocks();
+    stubHrWriteLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const intents: string[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -426,7 +494,7 @@ describe("Vite People API", () => {
 
   it("serializes cross-tab Go time reservations for one actor and organization", async () => {
     vi.stubGlobal("__GO_HR_TIME__", true);
-    stubHrTimeLocks();
+    stubHrWriteLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
     const alternateAction = { ...action, minutes: 60 };
@@ -447,7 +515,7 @@ describe("Vite People API", () => {
 
   it("does not let a delayed success clear a newer Go time intent", async () => {
     vi.stubGlobal("__GO_HR_TIME__", true);
-    stubHrTimeLocks();
+    stubHrWriteLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
     const nextAction = { ...action, minutes: 60, note: "Follow-up visit" };

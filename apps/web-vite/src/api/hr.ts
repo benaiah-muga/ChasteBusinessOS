@@ -346,16 +346,16 @@ export async function submitHrPayrollAction(
       const mayHaveReachedServer = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
       const apiFailure = parseError(response.status, body, "The Go payroll service could not create this draft.");
       const failure = new HrApiError(response.status, apiFailure.message, mayHaveReachedServer);
-      if (!mayHaveReachedServer) await clearGoHrPayrollAttempt(attempt.storageKey);
+      if (!mayHaveReachedServer) await clearGoHrPayrollAttempt(attempt.storageKey, attempt.intentId);
       throw failure;
     }
     const parsed = z.object({ ok: z.literal(true), data: GoHrPayrollOutputSchema }).strict().safeParse(body);
     if (response.status !== 200 || !parsed.success) throw new HrApiError(response.status, "The Go payroll service returned an unexpected draft response.", true);
-    await clearGoHrPayrollAttempt(attempt.storageKey);
+    await clearGoHrPayrollAttempt(attempt.storageKey, attempt.intentId);
     return { kind: "success", data: parsed.data.data };
   } catch (error) {
     if (error instanceof HrApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearGoHrPayrollAttempt(attempt.storageKey);
+      await clearGoHrPayrollAttempt(attempt.storageKey, attempt.intentId);
     }
     throw error;
   }
@@ -635,23 +635,38 @@ async function goHrPayrollAttempt(action: HrPayrollAction, scopeHash: string): P
   const parsedAction = GoHrPayrollActionSchema.safeParse(action);
   if (!parsedAction.success) throw new HrApiError(400, "The payroll draft does not match the Go service contract.");
   const fingerprint = await goHrPayrollFingerprint(parsedAction.data);
-  let raw: string | null;
-  try { raw = window.localStorage.getItem(storageKey); }
-  catch { throw new HrApiError(0, "Enable browser storage before creating payroll so uncertain drafts can be retried safely."); }
-  if (raw !== null) {
-    const stored = parseGoHrPayrollAttempt(raw);
-    if (stored.fingerprint !== fingerprint) throw new HrApiError(0, "A previous payroll draft is unresolved. Retry its exact period before starting another draft.", true);
-    return { storageKey, intentId: stored.intentId };
+  return withHrPayrollReservationLock(storageKey, async () => {
+    let raw: string | null;
+    try { raw = window.localStorage.getItem(storageKey); }
+    catch { throw new HrApiError(0, "Enable browser storage before creating payroll so uncertain drafts can be retried safely."); }
+    if (raw !== null) {
+      const stored = parseGoHrPayrollAttempt(raw);
+      if (stored.fingerprint !== fingerprint) throw new HrApiError(0, "A previous payroll draft is unresolved. Retry its exact period before starting another draft.", true);
+      return { storageKey, intentId: stored.intentId };
+    }
+    const attempt = { fingerprint, intentId: crypto.randomUUID(), action: parsedAction.data };
+    const serialized = JSON.stringify(attempt);
+    try {
+      window.localStorage.setItem(storageKey, serialized);
+      if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("payroll retry did not persist");
+    } catch {
+      throw new HrApiError(0, "Enable browser storage before creating payroll so uncertain drafts can be retried safely.");
+    }
+    return { storageKey, intentId: attempt.intentId };
+  });
+}
+
+async function withHrPayrollReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new HrApiError(0, "This browser cannot safely reserve a payroll draft. Open it in a browser with Web Locks enabled before submitting the change.");
   }
-  const attempt = { fingerprint, intentId: crypto.randomUUID(), action: parsedAction.data };
-  const serialized = JSON.stringify(attempt);
   try {
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("payroll retry did not persist");
-  } catch {
-    throw new HrApiError(0, "Enable browser storage before creating payroll so uncertain drafts can be retried safely.");
+    return await lockManager.request(`chaste:hr-payroll-write-marker-lock:${storageKey}`, { mode: "exclusive" }, reserve);
+  } catch (error) {
+    if (error instanceof HrApiError) throw error;
+    throw new HrApiError(0, "The browser could not safely coordinate this payroll draft across tabs. Close other People tabs and try again.", true);
   }
-  return { storageKey, intentId: attempt.intentId };
 }
 
 async function goHrPayrollFingerprint(action: HrPayrollAction): Promise<string> {
@@ -672,9 +687,16 @@ function parseGoHrPayrollAttempt(raw: string): z.infer<typeof GoHrPayrollAttempt
   return parsed.data;
 }
 
-async function clearGoHrPayrollAttempt(storageKey: string): Promise<void> {
-  try { window.localStorage.removeItem(storageKey); }
-  catch { throw new HrApiError(0, "The payroll draft completed, but its retry marker could not be cleared. Reload before another draft.", true); }
+async function clearGoHrPayrollAttempt(storageKey: string, intentId: string): Promise<void> {
+  await withHrPayrollReservationLock(storageKey, async () => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw === null) return;
+      if (parseGoHrPayrollAttempt(raw).intentId === intentId) window.localStorage.removeItem(storageKey);
+    } catch {
+      throw new HrApiError(0, "The payroll draft completed, but its retry marker could not be cleared. Reload before another draft.", true);
+    }
+  });
 }
 
 async function hrLeaveScope(scope: HrRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
