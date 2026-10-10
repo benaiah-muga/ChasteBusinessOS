@@ -13,6 +13,7 @@ import {
   fetchCustomerStatement,
   goAccountingCustomerStatementReadsUseGo,
   fetchPaymentReminders,
+  goAccountingPaymentRemindersUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
@@ -487,6 +488,45 @@ describe("accounting API: capability reads", () => {
     const reminders = await fetchPaymentReminders();
     expect(reminders).toHaveLength(1);
     expect(reminders[0]?.oldestDaysOverdue).toBe(40);
+  });
+
+  it("uses the Go reminder capability when selected and validates the strict result", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_PAYMENT_REMINDERS__", true);
+    const reminder = { customerId: "customer-1", customerName: "Kampala Coffee", currency: "USD", overdueCount: 2, oldestDaysOverdue: 40, totalOverdueMinor: 9_000, message: "Hello" };
+    const mock = stubFetch(() => Response.json({ ok: true, data: { reminders: [reminder] } }));
+
+    expect(goAccountingPaymentRemindersUseGo()).toBe(true);
+    await expect(fetchPaymentReminders()).resolves.toEqual([reminder]);
+    expect(mock).toHaveBeenCalledTimes(1);
+    const [url, init] = mock.mock.calls[0]!;
+    expect(url).toBe("/api/capabilities/execute");
+    expect(init).toMatchObject({ method: "POST", cache: "no-store", credentials: "same-origin" });
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      capabilityId: "accounting.buildReminders",
+      input: {},
+      intentId: expect.any(String),
+    });
+  });
+
+  it.each([
+    { label: "pending", response: () => Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 }), status: 202 },
+    { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }), status: 404 },
+    { label: "malformed", response: () => Response.json({ ok: true, data: { reminders: [{ customerId: "customer-1", extra: true }] } }), status: 200 },
+    { label: "capability error", response: () => Response.json({ ok: false, error: "Reminder report failed" }, { status: 422 }), status: 500 },
+  ])("fails closed on selected Go reminder $label responses", async ({ response, status }) => {
+    vi.stubGlobal("__GO_ACCOUNTING_PAYMENT_REMINDERS__", true);
+    const mock = stubFetch(response);
+    await expect(fetchPaymentReminders()).rejects.toMatchObject({ name: "AccountingApiError", status });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("uses the legacy reminder route when the selector is explicitly off", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_PAYMENT_REMINDERS__", false);
+    const mock = stubFetch(() => Response.json({ ok: true, data: { reminders: [] } }));
+    expect(goAccountingPaymentRemindersUseGo()).toBe(false);
+    await expect(fetchPaymentReminders()).resolves.toEqual([]);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/accounting");
   });
 
   it("refuses to build a statement without a customer", async () => {

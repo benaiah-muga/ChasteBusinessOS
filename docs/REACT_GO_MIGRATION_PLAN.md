@@ -2434,3 +2434,12 @@ new owners and the manifest shows zero legacy runtime paths.
      and invoice rows, including safe integer `creditedMinor`, preserve the
      legacy route shape for explicit rollback, and fail closed on selected Go
      errors.
+243. (Vite implementation complete; browser proof pending) Route Vite
+     Accounting payment-reminder drafts through the session-
+     authenticated `accounting.buildReminders` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the Go envelope
+     and reminder rows, keep `CHASTE_GO_ACCOUNTING_PAYMENT_REMINDERS=0` as an
+     explicit legacy rollback, and fail closed on selected Go errors. Add
+     focused Vite API, selector, and Accounting page coverage. Go's binary
+     customer-name tie ordering can differ from browser locale ordering for
+     some names; reminder contents and grouping are unchanged.

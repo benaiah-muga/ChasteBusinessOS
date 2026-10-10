@@ -498,6 +498,10 @@ export function goAccountingCustomerStatementReadsUseGo(): boolean {
   return typeof __GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__ !== "undefined" && __GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__;
 }
 
+export function goAccountingPaymentRemindersUseGo(): boolean {
+  return typeof __GO_ACCOUNTING_PAYMENT_REMINDERS__ !== "undefined" && __GO_ACCOUNTING_PAYMENT_REMINDERS__;
+}
+
 export function goAccountingBankReconciliationWritesUseGo(): boolean {
   return typeof __GO_BANK_RECONCILIATION_WRITES__ !== "undefined" && __GO_BANK_RECONCILIATION_WRITES__;
 }
@@ -707,7 +711,7 @@ export async function fetchAccountingBudgetScenarios(signal?: AbortSignal): Prom
 }
 
 async function readGoAccountingCapability<T>(
-  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios",
+  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.buildReminders",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   context: string,
@@ -762,7 +766,9 @@ export async function fetchCashForecast(budgetScenarioId: string, signal?: Abort
 }
 
 export async function fetchPaymentReminders(signal?: AbortSignal): Promise<AccountingReminder[]> {
-  const result = await readCapability({ action: "buildReminders" }, RemindersSchema, "draft payment reminders", signal);
+  const result = goAccountingPaymentRemindersUseGo()
+    ? await readGoAccountingCapability("accounting.buildReminders", {}, RemindersSchema, "draft payment reminders", signal)
+    : await readCapability({ action: "buildReminders" }, RemindersSchema, "draft payment reminders", signal);
   return result.reminders;
 }
 

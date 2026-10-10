@@ -42,6 +42,10 @@ The full v1 changelog is preserved at the bottom of this file.
   enabled. Go invoice rows require the exact response fields, including a safe
   integer `creditedMinor`; selected Go failures do not retry through the old
   invoice route.
+- Vite payment-reminder drafts now read through the session-authenticated Go
+  `accounting.buildReminders` capability by default when session routing is
+  enabled. Strict response validation rejects malformed Go results, and
+  `CHASTE_GO_ACCOUNTING_PAYMENT_REMINDERS=0` restores the legacy read.
 - Vite conversation archive changes now route through the session-authenticated
   Go `messaging.archiveConversation` capability by default when session routing
   is enabled, with an independent selector for rollback.

@@ -5,6 +5,7 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import {
   createGoRouteProxyPlugin,
   goAccountingInvoiceReadsFromEnv,
+  goAccountingPaymentRemindersFromEnv,
   goPosCloseSessionSliceFromEnv,
   goMarketingCampaignWritesFromEnv,
   goProjectsWritesFromEnv,
@@ -564,6 +565,14 @@ describe("Accounting invoice reads Go selector", () => {
     expect(goAccountingInvoiceReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goAccountingInvoiceReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_INVOICE_READS: "0" })).toBe(false);
     expect(goAccountingInvoiceReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_INVOICE_READS: "1" })).toBe(false);
+  });
+});
+
+describe("Accounting payment reminders Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goAccountingPaymentRemindersFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goAccountingPaymentRemindersFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_PAYMENT_REMINDERS: "0" })).toBe(false);
+    expect(goAccountingPaymentRemindersFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_PAYMENT_REMINDERS: "1" })).toBe(false);
   });
 });
 

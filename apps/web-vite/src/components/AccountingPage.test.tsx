@@ -133,6 +133,7 @@ interface StubOptions {
   goBankUnmatchResponse?: () => Response;
   goPurchasingPayBillResponse?: () => Response;
   goCustomerStatementResponse?: () => Response;
+  goPaymentReminderResponse?: () => Response;
   goBudgetScenarioResponse?: () => Response;
   goCashForecastResponse?: () => Response;
   goReportResponse?: (capabilityId: string) => Response;
@@ -215,6 +216,9 @@ function stubAccounting(options: StubOptions = {}) {
       }
       if (capabilityId === "accounting.customerStatement") {
         return options.goCustomerStatementResponse?.() ?? Response.json({ ok: true, data: { currencies: [] } });
+      }
+      if (capabilityId === "accounting.buildReminders") {
+        return options.goPaymentReminderResponse?.() ?? Response.json({ ok: true, data: { reminders: [] } });
       }
       if (capabilityId === "accounting.createInvoice") {
         return options.goCreateInvoiceResponse?.() ?? Response.json({ ok: true, data: {
@@ -464,6 +468,32 @@ describe("AccountingPage states", () => {
     expect(await screen.findByText("Net income · to date")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
     expect(await screen.findByText("Bank feeds could not load")).toBeTruthy();
+  });
+});
+
+describe("AccountingPage payment reminders", () => {
+  it("drafts reminders through the selected Go capability", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_PAYMENT_REMINDERS__", true);
+    const { calls } = stubAccounting({
+      goPaymentReminderResponse: () => Response.json({ ok: true, data: { reminders: [{
+        customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        customerName: "Kampala Coffee",
+        currency: "USD",
+        overdueCount: 2,
+        oldestDaysOverdue: 40,
+        totalOverdueMinor: 9_000,
+        message: "Hello from the Go reminder report.",
+      }] } }),
+    });
+    await renderReady();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cash & collections" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Draft reminders" }));
+
+    expect(await screen.findByText("Hello from the Go reminder report.")).toBeTruthy();
+    await waitFor(() => expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.buildReminders"))).toBe(true));
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("buildReminders"))).toBe(false);
   });
 });
 
