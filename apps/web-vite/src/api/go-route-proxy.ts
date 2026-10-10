@@ -179,6 +179,10 @@ export function goMessagingThreadReadsFromEnv(env: Record<string, string | undef
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_THREAD_READ !== "0";
 }
 
+export function goMessagingReadCursorFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_READ_CURSOR !== "0";
+}
+
 export function goMessagingAttachmentDownloadsFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD !== "0";
 }

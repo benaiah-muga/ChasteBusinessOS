@@ -615,10 +615,27 @@ describe("messaging API client", () => {
   });
 
   it("carries an intent id on every governed write", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId?: string };
+        if (body.capabilityId === "messaging.advanceReadCursor") {
+          return Response.json({ ok: true, data: { conversationId, previousReadAt: null } });
+        }
+      }
+      return Response.json({ ok: true });
+    });
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MESSAGING_READ_CURSOR__", true);
 
     await advanceReadCursor(conversationId, "2026-10-01T09:00:00.000Z");
+    const readCall = fetchMock.mock.calls[0]!;
+    const readBody = JSON.parse(String((readCall[1] as RequestInit).body)) as Record<string, unknown>;
+    expect(String(readCall[0])).toBe("/api/capabilities/execute");
+    expect(readBody).toMatchObject({
+      capabilityId: "messaging.advanceReadCursor",
+      input: { conversationId, readAt: "2026-10-01T09:00:00.000Z" },
+      intentId: expect.any(String),
+    });
     await reportConversationPresence(conversationId, true);
     await setMessageReaction(messageId, "👍", true);
     await setMessagePin(messageId, true);
@@ -629,6 +646,25 @@ describe("messaging API client", () => {
       const body = JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>;
       expect(body.intentId).toEqual(expect.any(String));
     }
+  });
+
+  it("fails closed when the Go read-cursor capability returns an error or malformed output", async () => {
+    vi.stubGlobal("__GO_MESSAGING_READ_CURSOR__", true);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true }, { status: 200 })));
+    await expect(advanceReadCursor(conversationId, "2026-10-01T09:00:00.000Z")).rejects.toBeInstanceOf(MessagingApiError);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "cursor denied" }, { status: 403 })));
+    await expect(advanceReadCursor(conversationId, "2026-10-01T09:00:00.000Z")).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("preserves the legacy read route when the Go selector is off", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MESSAGING_READ_CURSOR__", false);
+
+    await advanceReadCursor(conversationId, "2026-10-01T09:00:00.000Z");
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/read`);
+    expect(lastBody(fetchMock)).toMatchObject({ readAt: "2026-10-01T09:00:00.000Z", intentId: expect.any(String) });
   });
 
   it("uses a fresh intent id per write so retries never collide", async () => {

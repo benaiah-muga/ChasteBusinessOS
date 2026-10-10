@@ -84,6 +84,24 @@ describe("Messaging capability proxy", () => {
     expect(await response.json()).toMatchObject({ target: "go", path: "/api/capabilities/execute", body: { input: { around } } });
     expect(goRequests).toHaveLength(1);
     expect(goRequests[0]?.body).toMatchObject({ capabilityId: "messaging.readMessages", input: { around } });
+
+    const readAt = "2026-10-01T09:00:00.000Z";
+    const cursorResponse = await fetch(`${proxy.origin}/api/capabilities/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        capabilityId: "messaging.advanceReadCursor",
+        input: { conversationId: "conversation-1", readAt },
+        intentId: "22222222-2222-4222-8222-222222222222",
+      }),
+    });
+    expect(await cursorResponse.json()).toMatchObject({ target: "go", path: "/api/capabilities/execute" });
+    expect(goRequests).toHaveLength(2);
+    expect(goRequests[1]?.body).toMatchObject({
+      capabilityId: "messaging.advanceReadCursor",
+      input: { conversationId: "conversation-1", readAt },
+      intentId: "22222222-2222-4222-8222-222222222222",
+    });
     expect(legacyRequests).toEqual([]);
   });
 
@@ -102,6 +120,7 @@ describe("Messaging capability proxy", () => {
     expect(goProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("true");
     expect(goProxy.server.config.define?.__GO_MESSAGING_DELETE_SLICE__).toBe("true");
     expect(goProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("true");
+    expect(goProxy.server.config.define?.__GO_MESSAGING_READ_CURSOR__).toBe("true");
     const goResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await goResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     const olderPageResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, {
@@ -116,10 +135,12 @@ describe("Messaging capability proxy", () => {
     vi.stubEnv("CHASTE_GO_MESSAGING_EDIT_SLICE", "0");
     vi.stubEnv("CHASTE_GO_MESSAGING_DELETE_SLICE", "0");
     vi.stubEnv("CHASTE_GO_MESSAGING_THREAD_READ", "0");
+    vi.stubEnv("CHASTE_GO_MESSAGING_READ_CURSOR", "0");
     const rollbackProxy = await startViteProxy();
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("false");
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_DELETE_SLICE__).toBe("false");
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("false");
+    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_READ_CURSOR__).toBe("false");
     const rollbackResponse = await fetch(`${rollbackProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await rollbackResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     const legacyEditResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1`, { method: "PATCH" });

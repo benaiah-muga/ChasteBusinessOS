@@ -2355,3 +2355,9 @@ new owners and the manifest shows zero legacy runtime paths.
      target with up to 30 older and 30 newer visible messages, use stable
      `(created_at, id)` ordering, and report older-side pagination metadata.
      Keep search result discovery separate from the thread read.
+231. (Vite implementation complete; browser proof pending) Route Vite read
+     receipt updates through the session-authenticated
+     `messaging.advanceReadCursor` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
+     `CHASTE_GO_MESSAGING_READ_CURSOR=0` for explicit legacy rollback. Validate
+     the strict capability result and fail closed on selected Go errors.

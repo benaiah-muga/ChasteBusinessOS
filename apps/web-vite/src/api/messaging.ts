@@ -99,6 +99,13 @@ const ConversationsResponseSchema = z.object({
   me: z.string().min(1),
 }).strict();
 const GoCapabilityEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const GoReadCursorEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({
+    conversationId: z.string().min(1),
+    previousReadAt: IsoTimestampSchema.nullable(),
+  }).strict(),
+}).strict();
 
 const ConversationThreadSchema = z.object({
   conversation: z.object({
@@ -433,6 +440,24 @@ export function fetchOlderMessages(conversationId: string, before: string, signa
 }
 
 export async function advanceReadCursor(conversationId: string, readAt: string, signal?: AbortSignal): Promise<void> {
+  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_READ_CURSOR__?: boolean }).__GO_MESSAGING_READ_CURSOR__;
+  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_READ_CURSOR__ !== "undefined" && __GO_MESSAGING_READ_CURSOR__);
+  if (goSelected) {
+    const { response, body } = await send("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({
+        capabilityId: "messaging.advanceReadCursor",
+        input: { conversationId, readAt },
+        intentId: newIntentId(),
+      }),
+    }, "your read position", signal);
+    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "your read position"));
+    const parsed = GoReadCursorEnvelopeSchema.safeParse(body);
+    if (!parsed.success || parsed.data.data.conversationId !== conversationId) {
+      throw new MessagingApiError(response.status, "The messaging service returned your read position in an unexpected format.");
+    }
+    return;
+  }
   await acknowledge(`/api/conversations/${encodeURIComponent(conversationId)}/read`, {
     method: "POST",
     body: JSON.stringify({ readAt, intentId: newIntentId() }),

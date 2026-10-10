@@ -378,6 +378,13 @@ describe("messages page states", () => {
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
       if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId?: string };
+        if (body.capabilityId === "messaging.advanceReadCursor") {
+          readCalls.push(String(init?.body));
+          return Response.json({ ok: true, data: { conversationId: conversation().id, previousReadAt: null } });
+        }
+      }
       if (path.endsWith("/read")) {
         readCalls.push(String(init?.body));
         return Response.json({ ok: true });
@@ -387,10 +394,15 @@ describe("messages page states", () => {
       return Response.json({ error: "not found" }, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MESSAGING_READ_CURSOR__", true);
     render(<MessagesPage />);
 
     await waitFor(() => expect(readCalls).toHaveLength(1));
-    expect(JSON.parse(readCalls[0]!)).toMatchObject({ readAt: "2026-10-01T09:00:00.000Z", intentId: expect.any(String) });
+    expect(JSON.parse(readCalls[0]!)).toMatchObject({
+      capabilityId: "messaging.advanceReadCursor",
+      input: { conversationId: conversation().id, readAt: "2026-10-01T09:00:00.000Z" },
+      intentId: expect.any(String),
+    });
   });
 
   it("marks a message pending rather than sent when the governed write returns 202", async () => {

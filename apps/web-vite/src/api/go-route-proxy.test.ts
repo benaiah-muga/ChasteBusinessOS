@@ -33,6 +33,7 @@ import {
   goMessagingPeopleReadsFromEnv,
   goMessagingConversationListFromEnv,
   goMessagingThreadReadsFromEnv,
+  goMessagingReadCursorFromEnv,
   goMessagingAttachmentDownloadsFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
   goPurchasingWorkflowReadsFromEnv,
@@ -450,6 +451,14 @@ describe("messaging thread-read Go selector", () => {
     expect(goMessagingThreadReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingThreadReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_THREAD_READ: "0" })).toBe(false);
     expect(goMessagingThreadReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
+  });
+});
+
+describe("messaging read-cursor Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goMessagingReadCursorFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingReadCursorFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_READ_CURSOR: "0" })).toBe(false);
+    expect(goMessagingReadCursorFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_READ_CURSOR: "1" })).toBe(false);
   });
 });
 
