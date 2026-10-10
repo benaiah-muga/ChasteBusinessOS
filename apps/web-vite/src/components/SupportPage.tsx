@@ -7,6 +7,7 @@ import {
   type SupportLibrary,
   type SupportMessage,
   type SupportTeamMember,
+  type SupportCannedResponseRetryScope,
   type SupportWriteAction,
   createSupportCustomer,
   fetchSupportChannels,
@@ -17,6 +18,9 @@ import {
   fetchSupportLibrary,
   fetchSupportTeamMembers,
   fetchSupportThread,
+  goSupportCannedResponseWriteUseGo,
+  readPendingSupportCannedResponse,
+  submitSupportCannedResponse,
   submitSupportAction,
   updateSupportChannels,
 } from "../api/support";
@@ -74,7 +78,7 @@ function ticketFrom(conversation: SupportConversation): TicketDraft {
   };
 }
 
-export function SupportPage() {
+export function SupportPage({ actorId = null, organizationId = null }: { actorId?: string | null; organizationId?: string | null } = {}) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [tab, setTab] = useState<Tab>("overview");
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("all");
@@ -459,7 +463,7 @@ export function SupportPage() {
 
           {tab === "widget" && <SupportWidgetPanel onNotice={setNotice} />}
 
-          {tab === "library" && <SupportLibraryPanel onNotice={setNotice} />}
+          {tab === "library" && <SupportLibraryPanel onNotice={setNotice} retryScope={{ actorId, organizationId }} />}
 
           {tab === "inbox" && (
             <section className="support-inbox" aria-label="Support inbox">
@@ -804,12 +808,31 @@ function SupportWidgetPanel({ onNotice }: { onNotice: (notice: Notice) => void }
   );
 }
 
-function SupportLibraryPanel({ onNotice }: { onNotice: (notice: Notice) => void }) {
+function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Notice) => void; retryScope: SupportCannedResponseRetryScope }) {
   const [library, setLibrary] = useState<SupportLibrary | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [cannedForm, setCannedForm] = useState({ shortcut: "", title: "", body: "" });
   const [articleForm, setArticleForm] = useState({ title: "", body: "", category: "", isPublic: false });
+  const { actorId, organizationId } = retryScope;
+
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    try {
+      const pending = readPendingSupportCannedResponse({ actorId, organizationId });
+      if (pending) {
+        setCannedForm(pending);
+        onNotice({
+          tone: "pending",
+          text: goSupportCannedResponseWriteUseGo()
+            ? "An unresolved Go canned-response save was restored. Save these exact details to retry it."
+            : "An unresolved Go canned-response save was restored. Re-enable Go canned-response writes and retry these exact details.",
+        });
+      }
+    } catch (error) {
+      onNotice({ tone: "error", text: friendlyError(error) });
+    }
+  }, [actorId, onNotice, organizationId]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -830,7 +853,9 @@ function SupportLibraryPanel({ onNotice }: { onNotice: (notice: Notice) => void 
   async function save(action: SupportWriteAction, reset: () => void) {
     setBusy(true);
     try {
-      const outcome = await submitSupportAction(action, crypto.randomUUID());
+      const outcome = action.action === "createCannedResponse"
+        ? await submitSupportCannedResponse(action, retryScope)
+        : await submitSupportAction(action, crypto.randomUUID());
       if (outcome.kind === "pending") {
         onNotice({ tone: "pending", text: outcome.reason });
         return;
@@ -838,6 +863,19 @@ function SupportLibraryPanel({ onNotice }: { onNotice: (notice: Notice) => void 
       reset();
       await load();
     } catch (error) {
+      if (action.action === "createCannedResponse") {
+        try {
+          const pending = readPendingSupportCannedResponse(retryScope);
+          const submitted = { shortcut: action.shortcut, title: action.title, body: action.body };
+          if (pending && JSON.stringify(pending) !== JSON.stringify(submitted)) {
+            setCannedForm(pending);
+            onNotice({ tone: "pending", text: "A previous Go canned-response save is unresolved. Its exact saved details were restored; retry them before making changes." });
+            return;
+          }
+        } catch {
+          // Keep the original action error visible when retry state cannot be read.
+        }
+      }
       onNotice({ tone: "error", text: friendlyError(error) });
     } finally {
       setBusy(false);

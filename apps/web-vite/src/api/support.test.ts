@@ -9,6 +9,9 @@ import {
   fetchSupportThread,
   goSupportInboxReadsUseGo,
   goSupportLibraryReadsUseGo,
+  goSupportCannedResponseWriteUseGo,
+  readPendingSupportCannedResponse,
+  submitSupportCannedResponse,
   submitSupportAction,
   SupportApiError,
   SupportWriteActionSchema,
@@ -76,6 +79,7 @@ function jsonResponse(body: unknown, status = 200) {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.localStorage.clear();
 });
 
 describe("support module switchboard", () => {
@@ -316,6 +320,79 @@ describe("governed support writes", () => {
       kind: "pending",
       reason: "Creating customers needs approval.",
     });
+  });
+});
+
+describe("Go canned-response write", () => {
+  const scope = {
+    actorId: "55555555-5555-4555-8555-555555555555",
+    organizationId: "66666666-6666-4666-8666-666666666666",
+  };
+  const action = { action: "createCannedResponse" as const, shortcut: "/refund", title: "Refund policy", body: "We can help with eligible returns." };
+
+  it("submits the existing Go capability contract with a persisted idempotency intent", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { cannedResponseId: conversationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(goSupportCannedResponseWriteUseGo()).toBe(true);
+    await expect(submitSupportCannedResponse(action, scope)).resolves.toEqual({ kind: "completed", data: { cannedResponseId: conversationId } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", cache: "no-store" }));
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    expect(payload.capabilityId).toBe("support.createCannedResponse");
+    expect(payload.input).toEqual({ shortcut: "/refund", title: "Refund policy", body: "We can help with eligible returns." });
+    expect(payload.intentId).toEqual(expect.any(String));
+    expect(readPendingSupportCannedResponse(scope)).toBeNull();
+  });
+
+  it("keeps exact retry details after an uncertain result and blocks changed or rolled-back writes", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
+    const fetchMock = vi.fn(async () => jsonResponse({ error: "temporarily unavailable" }, 503));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportCannedResponse(action, scope)).rejects.toMatchObject({ status: 503 });
+    const pending = readPendingSupportCannedResponse(scope);
+    expect(pending).toEqual({ shortcut: action.shortcut, title: action.title, body: action.body });
+    const retryRecord = JSON.parse(window.localStorage.getItem("chaste.support.canned-response-intent.v1:55555555-5555-4555-8555-555555555555:66666666-6666-4666-8666-666666666666") ?? "{}") as { intentId?: unknown };
+
+    await expect(submitSupportCannedResponse({ ...action, body: "Changed copy" }, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("exact saved details") });
+    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", false);
+    await expect(submitSupportCannedResponse(action, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("Restore Go canned-response writes") });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(retryRecord.intentId).toEqual(expect.any(String));
+  });
+
+  it("retains a pending or malformed success response without trying the legacy route", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Needs approval." }, 202))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { unexpected: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportCannedResponse(action, scope)).resolves.toEqual({ kind: "pending", reason: "Needs approval." });
+    expect(readPendingSupportCannedResponse(scope)).toEqual({ shortcut: action.shortcut, title: action.title, body: action.body });
+    await expect(submitSupportCannedResponse(action, scope)).rejects.toMatchObject({
+      status: 200,
+      message: "The Go support service returned an unexpected canned-response result.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([path]) => String(path))).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+  });
+
+  it("retains the same intent after a 422 executor conflict", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "intent conflict" }, 422))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { cannedResponseId: conversationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportCannedResponse(action, scope)).rejects.toMatchObject({ status: 422 });
+    const firstPayload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    expect(readPendingSupportCannedResponse(scope)).toEqual({ shortcut: action.shortcut, title: action.title, body: action.body });
+    await expect(submitSupportCannedResponse(action, scope)).resolves.toMatchObject({ kind: "completed" });
+    const retryPayload = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(retryPayload.intentId).toBe(firstPayload.intentId);
   });
 });
 

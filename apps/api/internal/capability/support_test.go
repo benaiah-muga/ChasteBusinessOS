@@ -78,6 +78,13 @@ func TestParseSupportCreateKbArticlePublicationDefaultsPrivate(t *testing.T) {
 	}
 }
 
+func TestParseSupportCreateCannedResponseRejectsUnknownFields(t *testing.T) {
+	input := json.RawMessage(`{"shortcut":"/refund","title":"Refund help","body":"Refund guidance","orgId":"11111111-1111-4111-8111-111111111111"}`)
+	if _, err := ParseSupportCreateCannedResponseInput(input); err == nil {
+		t.Fatal("ParseSupportCreateCannedResponseInput accepted orgId override")
+	}
+}
+
 func TestParseSupportConversationIDInputLimit(t *testing.T) {
 	tests := []struct {
 		name    string

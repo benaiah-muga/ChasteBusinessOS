@@ -2470,3 +2470,11 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the response,
      fail closed on selected Go errors, and set
      `CHASTE_GO_SUPPORT_LIBRARY_READS=0` for explicit legacy rollback.
+248. (Vite implementation complete; browser proof pending) Route Vite Support
+     canned-response saves through the session-authenticated
+     `support.createCannedResponse` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Persist the exact input and
+     idempotency intent across uncertain failures and reloads, scoped to actor
+     and organization; block fallback to legacy while a Go attempt is
+     unresolved. Set `CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE=0` for explicit
+     rollback of new writes.

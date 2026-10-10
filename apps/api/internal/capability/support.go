@@ -579,6 +579,11 @@ func ParseSupportCreateCannedResponseInput(raw json.RawMessage) (SupportCreateCa
 	if err != nil {
 		return SupportCreateCannedResponseInput{}, err
 	}
+	for key := range fields {
+		if key != "shortcut" && key != "title" && key != "body" {
+			return SupportCreateCannedResponseInput{}, fmt.Errorf("unknown field %q", key)
+		}
+	}
 	var input SupportCreateCannedResponseInput
 	if input.Shortcut, err = requiredCRMDealString(fields, "shortcut", 1, 40); err != nil {
 		return SupportCreateCannedResponseInput{}, err

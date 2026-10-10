@@ -10,6 +10,7 @@ import {
   goAccountingOverviewReadsFromEnv,
   goSupportInboxReadsFromEnv,
   goSupportLibraryReadsFromEnv,
+  goSupportCannedResponseWriteFromEnv,
   goPosCloseSessionSliceFromEnv,
   goMarketingCampaignWritesFromEnv,
   goProjectsWritesFromEnv,
@@ -609,6 +610,14 @@ describe("Support library Go selector", () => {
     expect(goSupportLibraryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportLibraryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_LIBRARY_READS: "0" })).toBe(false);
     expect(goSupportLibraryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_LIBRARY_READS: "1" })).toBe(false);
+  });
+});
+
+describe("Support canned-response write Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goSupportCannedResponseWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goSupportCannedResponseWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE: "0" })).toBe(false);
+    expect(goSupportCannedResponseWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE: "1" })).toBe(false);
   });
 });
 

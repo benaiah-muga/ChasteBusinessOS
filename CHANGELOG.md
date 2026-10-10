@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Support canned-response saves now use the session-authenticated Go
+  `support.createCannedResponse` capability by default when session routing is
+  enabled. Exact action details and the idempotency intent survive uncertain
+  failures and reloads within the actor and organization scope; unresolved Go
+  saves cannot fall through to the legacy route.
+
 - Vite conversation creation now routes through the session-authenticated Go
   `messaging.createConversation` capability by default when session routing is
   enabled. The pending form and idempotency key survive reloads within the

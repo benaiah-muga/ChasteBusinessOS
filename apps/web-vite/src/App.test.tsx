@@ -24,6 +24,18 @@ vi.mock("./legacy", () => legacyMocks);
 
 const firstOrgId = "62d994c0-a6d8-4ac2-9ec6-6689ba2bfc12";
 const secondOrgId = "21e89f2b-996f-4b18-9078-c0f2f743a5ab";
+const paymentRunFixture = {
+  id: "10000000-0000-4000-8000-000000000003",
+  reference: "PAY-204",
+  currency: "USD",
+  totalMinor: 45000,
+  status: "instructed",
+  createdAt: "2026-09-28T09:00:00.000Z",
+  instructedAt: "2026-09-28T10:00:00.000Z",
+  confirmedAt: null,
+  entryId: null,
+  lines: [{ billId: "10000000-0000-4000-8000-000000000004", billNumber: 88, vendorName: "Acme Supplies", vendorRef: null, amountMinor: 45000 }],
+};
 
 let activeOrgId = firstOrgId;
 
@@ -205,18 +217,13 @@ beforeEach(() => {
         currenciesWithExposure: ["EUR", "KES"],
       } });
     }
-    if (path === "/api/purchasing/payment-runs") return Response.json({ ok: true, data: { runs: [{
-      id: "10000000-0000-4000-8000-000000000003",
-      reference: "PAY-204",
-      currency: "USD",
-      totalMinor: 45000,
-      status: "instructed",
-      createdAt: "2026-09-28T09:00:00.000Z",
-      instructedAt: "2026-09-28T10:00:00.000Z",
-      confirmedAt: null,
-      entryId: null,
-      lines: [{ billId: "10000000-0000-4000-8000-000000000004", billNumber: 88, vendorName: "Acme Supplies", vendorRef: null, amountMinor: 45000 }],
-    }] } });
+    if (path === "/api/purchasing/payment-runs") return Response.json({ ok: true, data: { runs: [paymentRunFixture] } });
+    if (path === "/api/capabilities/execute") {
+      const { capabilityId } = JSON.parse(String(init?.body)) as { capabilityId: string };
+      if (capabilityId === "purchasing.listPaymentRuns") return Response.json({ ok: true, data: { runs: [paymentRunFixture] } });
+      if (capabilityId === "purchasing.listPaymentRunBills") return Response.json({ ok: true, data: { bills: [] } });
+      return new Response(null, { status: 404 });
+    }
     if (path === "/api/purchasing" && init?.method === "POST") return Response.json({ ok: true, data: {
       receipts: [{
         number: 2,
@@ -506,12 +513,16 @@ describe("Vite app frame", () => {
 
   it("opens the supplier payment-run preview within the authenticated shell", async () => {
     window.history.replaceState(null, "", "/purchasing/payment-runs");
+    vi.stubGlobal("__GO_PURCHASING_PAYMENT_RUNS__", true);
+    const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "Supplier payment runs" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Purchasing" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("link", { name: "Open full Purchasing workspace" })).not.toBeNull();
     expect(await screen.findByText("PAY-204")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute"
+      && JSON.parse(String(init?.body)).capabilityId === "purchasing.listPaymentRuns")).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/purchasing/payment-runs")).toBe(false);
   });
 
   it("opens the accounts payable aging preview within the authenticated shell", async () => {

@@ -159,6 +159,53 @@ describe("Vite support page", () => {
     expect(fetchMock.mock.calls.map(([path]) => String(path))).not.toContain("/api/support?library=1");
   }, SLOW);
 
+  it("restores and retries an unresolved Go canned-response save after reload", async () => {
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const organizationId = "66666666-6666-4666-8666-666666666666";
+    const storageKey = `chaste.support.canned-response-intent.v1:${actorId}:${organizationId}`;
+    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
+    vi.stubGlobal("__GO_SUPPORT_LIBRARY_READS__", true);
+    const first = supportFetch({
+      execute: (payload) => payload.capabilityId === "support.listLibrary"
+        ? Response.json({ ok: true, data: { canned: [], articles: [] } })
+        : Response.json({ error: "temporarily unavailable" }, { status: 503 }),
+    });
+    const firstView = render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+    await screen.findByText("Latest activity");
+    fireEvent.click(screen.getByRole("button", { name: "Library" }));
+    await screen.findByText("Knowledge base");
+    fireEvent.change(screen.getByLabelText("Canned shortcut"), { target: { value: "/refund" } });
+    fireEvent.change(screen.getByLabelText("Canned response title"), { target: { value: "Refund policy" } });
+    fireEvent.change(screen.getByLabelText("Reply body"), { target: { value: "Eligible refunds take five days." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save response" }));
+    await screen.findByText("The support service is unavailable. Try again.");
+    const firstIntent = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}").intentId;
+    expect(firstIntent).toEqual(expect.any(String));
+    firstView.unmount();
+
+    const second = supportFetch({
+      execute: (payload) => payload.capabilityId === "support.listLibrary"
+        ? Response.json({ ok: true, data: { canned: [], articles: [] } })
+        : Response.json({ ok: true, data: { cannedResponseId: "canned-1" } }),
+    });
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+    await screen.findByText("Latest activity");
+    fireEvent.click(screen.getByRole("button", { name: "Library" }));
+    expect(await screen.findByText("An unresolved Go canned-response save was restored. Save these exact details to retry it.")).not.toBeNull();
+    expect((screen.getByLabelText("Canned shortcut") as HTMLInputElement).value).toBe("/refund");
+    fireEvent.change(screen.getByLabelText("Reply body"), { target: { value: "Changed while the original result was unknown." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save response" }));
+    expect(await screen.findByText("A previous Go canned-response save is unresolved. Its exact saved details were restored; retry them before making changes.")).not.toBeNull();
+    expect((screen.getByLabelText("Reply body") as HTMLTextAreaElement).value).toBe("Eligible refunds take five days.");
+    fireEvent.click(screen.getByRole("button", { name: "Save response" }));
+    await waitFor(() => expect(second.calls.some((call) => call.payload?.capabilityId === "support.createCannedResponse")).toBe(true));
+    const retry = second.calls.find((call) => call.payload?.capabilityId === "support.createCannedResponse")?.payload;
+    expect(retry?.input).toEqual({ shortcut: "/refund", title: "Refund policy", body: "Eligible refunds take five days." });
+    expect(retry?.intentId).toBe(firstIntent);
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
+    expect(first.calls.map((call) => call.path)).not.toContain("/api/support");
+  }, SLOW);
+
   it("does not load customer care while the module is disabled", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("/api/modules");

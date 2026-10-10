@@ -298,7 +298,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                                     : settingsPage
                                                       ? <SettingsPage key={organizationRevision} />
                                                       : supportPage
-                                                        ? <SupportPage key={organizationRevision} />
+                                                        ? <SupportPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                                                         : manufacturingPage
                                                           ? <ManufacturingPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                                           : marketingPage

@@ -123,6 +123,100 @@ export function goSupportLibraryReadsUseGo(): boolean {
   return typeof __GO_SUPPORT_LIBRARY_READS__ !== "undefined" && __GO_SUPPORT_LIBRARY_READS__;
 }
 
+export function goSupportCannedResponseWriteUseGo(): boolean {
+  return typeof __GO_SUPPORT_CANNED_RESPONSE_WRITE__ !== "undefined" && __GO_SUPPORT_CANNED_RESPONSE_WRITE__;
+}
+
+export type SupportCannedResponseRetryScope = { actorId: string | null; organizationId: string | null };
+
+const CannedResponseWriteInputSchema = z.object({
+  shortcut: z.string().min(1).max(40),
+  title: z.string().min(1).max(120),
+  body: z.string().min(1).max(4000),
+}).strict();
+const CannedResponseRetryRecordSchema = z.object({
+  version: z.literal(1),
+  intentId: uuid,
+  input: CannedResponseWriteInputSchema,
+  fingerprint: z.string().min(1),
+}).strict();
+const CANNED_RESPONSE_RETRY_PREFIX = "chaste.support.canned-response-intent.v1:";
+
+function cannedResponseRetryStorageKey(scope: SupportCannedResponseRetryScope): string {
+  const actorId = scope.actorId?.trim() ?? "";
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
+    throw new SupportApiError(0, "Wait for your account and organization to finish loading before saving a canned response.");
+  }
+  return `${CANNED_RESPONSE_RETRY_PREFIX}${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}`;
+}
+
+function cannedResponseInputFingerprint(input: z.infer<typeof CannedResponseWriteInputSchema>): string {
+  return JSON.stringify(input);
+}
+
+function readCannedResponseRetryRecord(storageKey: string): z.infer<typeof CannedResponseRetryRecordSchema> | null {
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "Canned-response retry protection is unavailable. Enable browser storage before saving.");
+  }
+  if (raw === null) return null;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw);
+  } catch {
+    throw new SupportApiError(0, "A saved canned-response retry record is unreadable. Verify the library before trying again.");
+  }
+  const parsed = CannedResponseRetryRecordSchema.safeParse(decoded);
+  if (!parsed.success || parsed.data.fingerprint !== cannedResponseInputFingerprint(parsed.data.input)) {
+    throw new SupportApiError(0, "A saved canned-response retry record is invalid. Verify the library before trying again.");
+  }
+  return parsed.data;
+}
+
+export function readPendingSupportCannedResponse(scope: SupportCannedResponseRetryScope): z.infer<typeof CannedResponseWriteInputSchema> | null {
+  const record = readCannedResponseRetryRecord(cannedResponseRetryStorageKey(scope));
+  return record?.input ?? null;
+}
+
+async function createSupportCannedResponseAttempt(
+  input: z.infer<typeof CannedResponseWriteInputSchema>,
+  scope: SupportCannedResponseRetryScope,
+): Promise<{ storageKey: string; record: z.infer<typeof CannedResponseRetryRecordSchema> }> {
+  const storageKey = cannedResponseRetryStorageKey(scope);
+  const fingerprint = cannedResponseInputFingerprint(input);
+  const existing = readCannedResponseRetryRecord(storageKey);
+  if (existing) {
+    if (existing.fingerprint !== fingerprint) {
+      throw new SupportApiError(0, "A previous canned-response save is unresolved. Retry its exact saved details before changing them.");
+    }
+    return { storageKey, record: existing };
+  }
+  const record = { version: 1 as const, intentId: crypto.randomUUID(), input, fingerprint };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(record));
+  } catch {
+    throw new SupportApiError(0, "Canned-response retry protection could not be saved. Enable browser storage before continuing.");
+  }
+  const saved = readCannedResponseRetryRecord(storageKey);
+  if (!saved || saved.intentId !== record.intentId || saved.fingerprint !== fingerprint) {
+    throw new SupportApiError(0, "Canned-response retry protection could not be verified. Check browser storage and try again.");
+  }
+  return { storageKey, record: saved };
+}
+
+async function clearSupportCannedResponseAttempt(storageKey: string, intentId: string): Promise<void> {
+  const current = readCannedResponseRetryRecord(storageKey);
+  if (current?.intentId !== intentId) return;
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "The canned response was saved, but its retry record could not be cleared. Retry the same saved details to confirm the result.");
+  }
+}
+
 async function readGoSupportCapability<T>(
   capabilityId: "support.listConversations" | "support.readConversation" | "support.listLibrary",
   input: Record<string, unknown>,
@@ -383,6 +477,68 @@ export async function submitSupportAction<Action extends SupportWriteAction>(
   const output = SupportActionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
   if (!output.success) throw new SupportApiError(response.status, "The support service returned an unexpected action result.");
   return { kind: "completed", data: output.data as SupportActionOutput<Action> };
+}
+
+export async function submitSupportCannedResponse(
+  action: Extract<SupportWriteAction, { action: "createCannedResponse" }>,
+  scope: SupportCannedResponseRetryScope,
+  signal?: AbortSignal,
+): Promise<SupportActionOutcome<SupportActionOutput<Extract<SupportWriteAction, { action: "createCannedResponse" }>>>> {
+  const parsed = CreateCannedResponseInputSchema.safeParse(action);
+  if (!parsed.success) throw new SupportApiError(0, "The canned response contains invalid details.");
+  const { action: _action, ...rawInput } = parsed.data;
+  const input = CannedResponseWriteInputSchema.parse(rawInput);
+  const useGo = goSupportCannedResponseWriteUseGo();
+  if (!useGo) {
+    try {
+      const actorId = scope.actorId?.trim() ?? "";
+      const organizationId = scope.organizationId?.trim() ?? "";
+      if (uuid.safeParse(actorId).success && uuid.safeParse(organizationId).success) {
+        if (readCannedResponseRetryRecord(cannedResponseRetryStorageKey(scope))) {
+          throw new SupportApiError(0, "A Go canned-response save is unresolved. Restore Go canned-response writes and retry those exact details before using the legacy route.");
+        }
+      } else {
+        for (let index = 0; index < window.localStorage.length; index += 1) {
+          if (window.localStorage.key(index)?.startsWith(CANNED_RESPONSE_RETRY_PREFIX)) {
+            throw new SupportApiError(0, "A Go canned-response save is unresolved. Restore Go canned-response writes and retry those exact details before using the legacy route.");
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof SupportApiError) throw error;
+      throw new SupportApiError(0, "A saved canned-response retry record could not be checked. Restore Go canned-response writes before continuing.");
+    }
+    return submitSupportAction(parsed.data, crypto.randomUUID(), signal);
+  }
+
+  const attempt = await createSupportCannedResponseAttempt(input, scope);
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({ capabilityId: "support.createCannedResponse", input: attempt.record.input, intentId: attempt.record.intentId }),
+    }, signal));
+  } catch {
+    throw new SupportApiError(0, "The Go support service could not confirm this canned-response save. Retry the exact saved details to recover its result.");
+  }
+  if (response.status === 202 || PendingEnvelopeSchema.safeParse(body).success) {
+    return pendingOutcome(body, DEFAULT_PENDING_REASON);
+  }
+  if (!response.ok) {
+    if (response.status >= 400 && response.status < 500 && response.status !== 404 && response.status !== 408 && response.status !== 422 && response.status !== 429) {
+      await clearSupportCannedResponseAttempt(attempt.storageKey, attempt.record.intentId);
+    }
+    throw new SupportApiError(response.status, messageFor(response.status, body));
+  }
+  const envelope = GoCapabilityEnvelopeSchema.safeParse(body);
+  const output = envelope.success ? SupportActionOutputSchemas.createCannedResponse.safeParse(envelope.data.data) : null;
+  if (response.status !== 200 || !output?.success) {
+    throw new SupportApiError(response.status, "The Go support service returned an unexpected canned-response result.");
+  }
+  await clearSupportCannedResponseAttempt(attempt.storageKey, attempt.record.intentId);
+  return { kind: "completed", data: output.data };
 }
 
 const CustomerCreateSchema = z.object({
