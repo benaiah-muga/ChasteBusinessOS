@@ -320,7 +320,9 @@ The full v1 changelog is preserved at the bottom of this file.
   `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Salary remains integer
   minor units, and actor/org scoped exact attempts survive pending approvals,
   uncertain responses, and reloads. Go 404 does not fall back to the legacy
-  writer; successful recovery clears the matching form to prevent duplicates.
+  writer; cross-tab reservations reuse the same intent and stale responses
+  cannot erase a newer marker. Browsers without Web Locks fail closed.
+  Successful recovery clears the matching form to prevent duplicates.
   Other People actions retain their current routes.
 - Vite supplier statements can read through Go's session-authenticated
   `purchasing.supplierStatement` capability behind paired

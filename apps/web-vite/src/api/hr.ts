@@ -461,16 +461,16 @@ export async function submitHrEmployeeHireAction(
       const mayHaveReachedServer = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
       const apiFailure = parseError(response.status, body, "The Go People service could not hire this employee.");
       const failure = new HrApiError(response.status, apiFailure.message, mayHaveReachedServer);
-      if (!mayHaveReachedServer) await clearGoHrEmployeeHireAttempt(attempt.storageKey);
+      if (!mayHaveReachedServer) await clearGoHrEmployeeHireAttempt(attempt.storageKey, attempt.intentId);
       throw failure;
     }
     const parsed = z.object({ ok: z.literal(true), data: GoHrEmployeeHireOutputSchema }).strict().safeParse(body);
     if (response.status !== 200 || !parsed.success) throw new HrApiError(response.status, "The Go People service returned an unexpected employee hire response.", true);
-    await clearGoHrEmployeeHireAttempt(attempt.storageKey);
+    await clearGoHrEmployeeHireAttempt(attempt.storageKey, attempt.intentId);
     return { kind: "success", data: parsed.data.data };
   } catch (error) {
     if (error instanceof HrApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearGoHrEmployeeHireAttempt(attempt.storageKey);
+      await clearGoHrEmployeeHireAttempt(attempt.storageKey, attempt.intentId);
     }
     throw error;
   }
@@ -498,23 +498,25 @@ async function hrEmployeeScope(scope: HrRetryScope): Promise<{ actorId: string; 
 async function goHrEmployeeHireAttempt(action: HrEmployeeHireAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
   const storageKey = `${GO_HR_EMPLOYEE_ATTEMPT_PREFIX}${scopeHash}`;
   const fingerprint = await goHrEmployeeHireFingerprint(action);
-  let raw: string | null;
-  try { raw = window.localStorage.getItem(storageKey); }
-  catch { throw new HrApiError(0, "Enable browser storage before hiring so uncertain actions can be retried safely."); }
-  if (raw !== null) {
-    const stored = parseGoHrEmployeeHireAttempt(raw);
-    if (stored.fingerprint !== fingerprint) throw new HrApiError(0, "A previous employee hire is unresolved. Retry its exact details before starting another hire.", true);
-    return { storageKey, intentId: stored.intentId };
-  }
-  const attempt = { fingerprint, intentId: crypto.randomUUID(), action };
-  const serialized = JSON.stringify(attempt);
-  try {
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("employee hire retry did not persist");
-  } catch {
-    throw new HrApiError(0, "Enable browser storage before hiring so uncertain actions can be retried safely.");
-  }
-  return { storageKey, intentId: attempt.intentId };
+  return withHrEmployeeHireReservationLock(storageKey, async () => {
+    let raw: string | null;
+    try { raw = window.localStorage.getItem(storageKey); }
+    catch { throw new HrApiError(0, "Enable browser storage before hiring so uncertain actions can be retried safely."); }
+    if (raw !== null) {
+      const stored = parseGoHrEmployeeHireAttempt(raw);
+      if (stored.fingerprint !== fingerprint) throw new HrApiError(0, "A previous employee hire is unresolved. Retry its exact details before starting another hire.", true);
+      return { storageKey, intentId: stored.intentId };
+    }
+    const attempt = { fingerprint, intentId: crypto.randomUUID(), action };
+    const serialized = JSON.stringify(attempt);
+    try {
+      window.localStorage.setItem(storageKey, serialized);
+      if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("employee hire retry did not persist");
+    } catch {
+      throw new HrApiError(0, "Enable browser storage before hiring so uncertain actions can be retried safely.");
+    }
+    return { storageKey, intentId: attempt.intentId };
+  });
 }
 
 async function goHrEmployeeHireFingerprint(action: HrEmployeeHireAction): Promise<string> {
@@ -535,9 +537,29 @@ function parseGoHrEmployeeHireAttempt(raw: string): z.infer<typeof GoHrEmployeeH
   return parsed.data;
 }
 
-async function clearGoHrEmployeeHireAttempt(storageKey: string): Promise<void> {
-  try { window.localStorage.removeItem(storageKey); }
-  catch { throw new HrApiError(0, "The employee hire completed, but its retry marker could not be cleared. Reload before another hire.", true); }
+async function clearGoHrEmployeeHireAttempt(storageKey: string, intentId: string): Promise<void> {
+  await withHrEmployeeHireReservationLock(storageKey, async () => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw === null || parseGoHrEmployeeHireAttempt(raw).intentId !== intentId) return;
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      throw new HrApiError(0, "The employee hire completed, but its retry marker could not be cleared. Reload before another hire.", true);
+    }
+  });
+}
+
+async function withHrEmployeeHireReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new HrApiError(0, "This browser cannot safely reserve an employee hire. Open it in a browser with Web Locks enabled before submitting the change.");
+  }
+  try {
+    return await lockManager.request(`chaste:hr-employee-hire-write-marker-lock:${storageKey}`, { mode: "exclusive" }, reserve);
+  } catch (error) {
+    if (error instanceof HrApiError) throw error;
+    throw new HrApiError(0, "The browser could not safely coordinate this employee hire across tabs. Close other People tabs and try again.", true);
+  }
 }
 
 function goHrHiringCapabilityInput(action: HrHiringAction): { capabilityId: string; input: Record<string, unknown> } {

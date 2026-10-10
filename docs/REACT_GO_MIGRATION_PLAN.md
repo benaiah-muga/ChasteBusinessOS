@@ -2142,7 +2142,7 @@ new owners and the manifest shows zero legacy runtime paths.
      suite passes (267 tests), as do Go parser, supplier statement reader and
      executor tests, Vite typecheck, and Vite lint. Independent review found no
      authorization or tenant-scope issues. Browser runtime proof remains open.
-203. Route only existing Vite People employee creation through Go's
+203. (Vite/Go implementation complete; browser proof pending) Route only existing Vite People employee creation through Go's
      session-authenticated `hr.hireEmployee` capability behind paired
      `CHASTE_GO_HR_EMPLOYEE_WRITES=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Preserve salary in
@@ -2151,7 +2151,11 @@ new owners and the manifest shows zero legacy runtime paths.
      outcomes after reload, block legacy fallback while unresolved, and fail
      closed on Go 404. Reset the form after recovered success. Keep other HR
      actions unchanged; add focused Vite API, page, proxy selector, and Go
-     parser/executor contract tests.
+     parser/executor contract tests. Employee hire reservations now serialize
+     across tabs and stale responses cannot remove a newer marker. The focused
+     Vite API/page/proxy suite passed (206 tests); Go parser, persistence, and
+     governed executor tests passed; Vite typecheck and lint passed. Independent
+     review found no actionable issues. Browser runtime proof remains open.
 204. Route only the existing Vite Purchasing Intel price-history and supplier-
      performance reads through `purchasing.priceHistory` and
      `purchasing.supplierPerformance` behind paired

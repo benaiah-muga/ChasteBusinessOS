@@ -140,6 +140,7 @@ describe("Vite People page", () => {
   });
 
   it("retries an employee hire with the same intent after reload and clears the form", async () => {
+    stubHrWriteLocks();
     window.history.replaceState(null, "", "/hr?tab=people");
     vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
     const actorId = "22222222-2222-4222-8222-222222222222";
