@@ -106,6 +106,13 @@ const GoReadCursorEnvelopeSchema = z.object({
     previousReadAt: IsoTimestampSchema.nullable(),
   }).strict(),
 }).strict();
+const GoConversationPresenceEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({
+    previousLastSeenAt: IsoTimestampSchema.nullable(),
+    previousTypingUntil: IsoTimestampSchema.nullable(),
+  }).strict(),
+}).strict();
 const GoMessageReactionEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ previousActive: z.boolean(), active: z.boolean() }).strict(),
@@ -482,6 +489,25 @@ export async function fetchConversationPresence(conversationId: string, signal?:
 }
 
 export async function reportConversationPresence(conversationId: string, typing: boolean, signal?: AbortSignal): Promise<void> {
+  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_PRESENCE__?: boolean }).__GO_MESSAGING_PRESENCE__;
+  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_PRESENCE__ !== "undefined" && __GO_MESSAGING_PRESENCE__);
+  if (goSelected) {
+    const validatedConversationId = z.string().uuid().parse(conversationId);
+    const validatedTyping = z.boolean().parse(typing);
+    const { response, body } = await send("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({
+        capabilityId: "messaging.updateConversationPresence",
+        input: { conversationId: validatedConversationId, typing: validatedTyping },
+        intentId: newIntentId(),
+      }),
+    }, "your presence", signal);
+    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "your presence"));
+    if (!GoConversationPresenceEnvelopeSchema.safeParse(body).success) {
+      throw new MessagingApiError(response.status, "The messaging service returned your presence in an unexpected format.");
+    }
+    return;
+  }
   await acknowledge(`/api/conversations/${encodeURIComponent(conversationId)}/presence`, {
     method: "POST",
     body: JSON.stringify({ typing, intentId: newIntentId() }),

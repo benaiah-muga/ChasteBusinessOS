@@ -105,6 +105,7 @@ describe("Messaging capability proxy", () => {
     for (const [capabilityId, input] of [
       ["messaging.setMessageReaction", { messageId: around, emoji: "👍", active: true }],
       ["messaging.setMessagePin", { messageId: around, pinned: true }],
+      ["messaging.updateConversationPresence", { conversationId: "6f1c1f4a-2f6f-4a2a-9d0a-0b9a5f1c1f4a", typing: true }],
     ] as const) {
       const response = await fetch(`${proxy.origin}/api/capabilities/execute`, {
         method: "POST",
@@ -113,9 +114,10 @@ describe("Messaging capability proxy", () => {
       });
       expect(await response.json()).toMatchObject({ target: "go", path: "/api/capabilities/execute" });
     }
-    expect(goRequests).toHaveLength(4);
+    expect(goRequests).toHaveLength(5);
     expect(goRequests[2]?.body).toMatchObject({ capabilityId: "messaging.setMessageReaction", input: { messageId: around, emoji: "👍", active: true } });
     expect(goRequests[3]?.body).toMatchObject({ capabilityId: "messaging.setMessagePin", input: { messageId: around, pinned: true } });
+    expect(goRequests[4]?.body).toMatchObject({ capabilityId: "messaging.updateConversationPresence", input: { conversationId: "6f1c1f4a-2f6f-4a2a-9d0a-0b9a5f1c1f4a", typing: true } });
     expect(legacyRequests).toEqual([]);
   });
 
@@ -137,6 +139,7 @@ describe("Messaging capability proxy", () => {
     expect(goProxy.server.config.define?.__GO_MESSAGING_READ_CURSOR__).toBe("true");
     expect(goProxy.server.config.define?.__GO_MESSAGING_REACTIONS__).toBe("true");
     expect(goProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("true");
+    expect(goProxy.server.config.define?.__GO_MESSAGING_PRESENCE__).toBe("true");
     const goResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await goResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     const olderPageResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, {
@@ -154,6 +157,7 @@ describe("Messaging capability proxy", () => {
     vi.stubEnv("CHASTE_GO_MESSAGING_READ_CURSOR", "0");
     vi.stubEnv("CHASTE_GO_MESSAGING_REACTIONS", "0");
     vi.stubEnv("CHASTE_GO_MESSAGING_PINS", "0");
+    vi.stubEnv("CHASTE_GO_MESSAGING_PRESENCE", "0");
     const rollbackProxy = await startViteProxy();
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("false");
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_DELETE_SLICE__).toBe("false");
@@ -161,6 +165,7 @@ describe("Messaging capability proxy", () => {
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_READ_CURSOR__).toBe("false");
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_REACTIONS__).toBe("false");
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("false");
+    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_PRESENCE__).toBe("false");
     const rollbackResponse = await fetch(`${rollbackProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await rollbackResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     const legacyEditResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1`, { method: "PATCH" });
@@ -179,6 +184,7 @@ describe("Messaging capability proxy", () => {
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("false");
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_REACTIONS__).toBe("false");
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("false");
+    expect(legacyProxy.server.config.define?.__GO_MESSAGING_PRESENCE__).toBe("false");
     const legacyResponse = await fetch(`${legacyProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await legacyResponse.json()).toEqual({ target: "legacy", path: "/api/capabilities/execute" });
   });

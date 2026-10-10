@@ -63,6 +63,7 @@ declare const __GO_MESSAGING_THREAD_READ__: boolean;
 declare const __GO_MESSAGING_READ_CURSOR__: boolean;
 declare const __GO_MESSAGING_REACTIONS__: boolean;
 declare const __GO_MESSAGING_PINS__: boolean;
+declare const __GO_MESSAGING_PRESENCE__: boolean;
 declare const __GO_MESSAGING_ATTACHMENT_DELETE__: boolean;
 declare const __GO_POS_OPEN_SESSION_SLICE__: boolean;
 declare const __GO_POS_CLOSE_SESSION_SLICE__: boolean;

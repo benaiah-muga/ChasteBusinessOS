@@ -191,6 +191,10 @@ export function goMessagingPinsFromEnv(env: Record<string, string | undefined>):
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_PINS !== "0";
 }
 
+export function goMessagingPresenceFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_PRESENCE !== "0";
+}
+
 export function goMessagingAttachmentDownloadsFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD !== "0";
 }

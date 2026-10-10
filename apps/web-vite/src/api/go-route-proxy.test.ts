@@ -36,6 +36,7 @@ import {
   goMessagingReadCursorFromEnv,
   goMessagingReactionsFromEnv,
   goMessagingPinsFromEnv,
+  goMessagingPresenceFromEnv,
   goMessagingAttachmentDownloadsFromEnv,
   goMessagingAttachmentDeleteFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
@@ -478,6 +479,14 @@ describe("messaging pin Go selector", () => {
     expect(goMessagingPinsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingPinsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_PINS: "0" })).toBe(false);
     expect(goMessagingPinsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_PINS: "1" })).toBe(false);
+  });
+});
+
+describe("messaging presence Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_PRESENCE: "0" })).toBe(false);
+    expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_PRESENCE: "1" })).toBe(false);
   });
 });
 

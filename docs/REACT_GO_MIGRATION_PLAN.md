@@ -2373,3 +2373,9 @@ new owners and the manifest shows zero legacy runtime paths.
      rollbacks with `CHASTE_GO_MESSAGING_REACTIONS=0` and
      `CHASTE_GO_MESSAGING_PINS=0`; validate the exact output and requested
      state before refreshing the thread.
+234. (Vite implementation complete; browser proof pending) Route Vite typing
+     and online presence heartbeats through the session-authenticated
+     `messaging.updateConversationPresence` capability when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the conversation UUID,
+     typing flag, and strict previous-state output; set
+     `CHASTE_GO_MESSAGING_PRESENCE=0` for legacy rollback.

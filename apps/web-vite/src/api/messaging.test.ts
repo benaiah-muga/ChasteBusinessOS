@@ -381,7 +381,7 @@ describe("messaging API client", () => {
     const recovered = await getPendingMessageEdit(scope);
     expect(recovered).toMatchObject({ messageId, body: "Retry me" });
 
-    const fetchMock = vi.fn(async () => Response.json({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
       ok: true,
       data: { messageId, body: "Morning all", expectedBody: "Retry me", expectedEditedAt: "2026-10-01T09:00:00.000Z", editedAt: "2026-10-01T09:00:00.000Z" },
     }));
@@ -548,7 +548,7 @@ describe("messaging API client", () => {
     const recovered = await getPendingMessageDelete(scope);
     expect(recovered).toMatchObject({ messageId, conversationId });
 
-    const fetchMock = vi.fn(async () => Response.json({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
       ok: true,
       data: { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" },
     }));
@@ -708,6 +708,50 @@ describe("messaging API client", () => {
     await advanceReadCursor(conversationId, "2026-10-01T09:00:00.000Z");
     expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/read`);
     expect(lastBody(fetchMock)).toMatchObject({ readAt: "2026-10-01T09:00:00.000Z", intentId: expect.any(String) });
+  });
+
+  it("updates conversation presence through Go with the strict previous-state output", async () => {
+    vi.stubGlobal("__GO_MESSAGING_PRESENCE__", true);
+    const fetchMock = vi.fn(async () => Response.json({
+      ok: true,
+      data: { previousLastSeenAt: null, previousTypingUntil: "2026-10-01T09:00:00.000Z" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await reportConversationPresence(conversationId, false);
+
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({
+      capabilityId: "messaging.updateConversationPresence",
+      input: { conversationId, typing: false },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("fails closed on invalid input, selected Go errors, and malformed presence output", async () => {
+    vi.stubGlobal("__GO_MESSAGING_PRESENCE__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "presence denied" }, { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(reportConversationPresence("not-a-uuid", false)).rejects.toThrow();
+    await expect(reportConversationPresence(conversationId, "true" as unknown as boolean)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(reportConversationPresence(conversationId, true)).rejects.toMatchObject({ status: 403 });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { previousLastSeenAt: null } })));
+    await expect(reportConversationPresence(conversationId, false)).rejects.toThrow("unexpected format");
+  });
+
+  it("keeps conversation presence writes on the legacy route when Go is rolled back", async () => {
+    vi.stubGlobal("__GO_MESSAGING_PRESENCE__", false);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await reportConversationPresence(conversationId, true);
+
+    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/presence`);
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
+    expect(lastBody(fetchMock)).toMatchObject({ typing: true, intentId: expect.any(String) });
   });
 
   it("sets reactions and pins through their selected Go capabilities and validates their outputs", async () => {
