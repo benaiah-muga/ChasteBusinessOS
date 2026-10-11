@@ -3,6 +3,20 @@
   "overrides": [
     {
       "kind": "api",
+      "path": "/api/auth/[...all]",
+      "method": "GET",
+      "owner": "auth",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/auth/[...all]",
+      "method": "POST",
+      "owner": "auth",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
       "path": "/api/onboarding",
       "method": "POST",
       "owner": "go",

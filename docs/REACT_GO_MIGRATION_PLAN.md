@@ -303,8 +303,8 @@ Browser: React + Vite + typed HTTP client
         |                 |
         | business API     | auth endpoints
         v                 v
-   Go capability       Go auth after parity proof
-   kernel, modules      (temporary Better Auth bridge during port)
+   Go capability       Go auth (local default)
+   kernel, modules      (compatibility parity pending)
         |                 |
         +--------+--------+
                  |
@@ -314,35 +314,38 @@ Go worker: jobs + outbox + routines + durable agent runs -> same Go kernel
 ```
 
 Use one origin for browser requests so cookie scope and relative `/api/*` calls
-stay stable. A route ownership manifest is consumed by the local dev proxy and
-the production ingress. While migration is underway, it assigns each UI path
+stay stable. The route ownership manifest records the intended local route
+owners; Vite and Go use paired environment selectors, while production ingress
+is configured separately. While migration is underway, it assigns each UI path
 to either the legacy app or Vite, each business API path to either its legacy
 handler or Go, and `/api/auth/*` to the auth owner:
 
 ```text
-/api/auth/*                 -> Better Auth bridge, then Go after auth parity
+/api/auth/*                 -> Go auth locally; legacy compatibility parity pending
 /api/* owner=go             -> Go business API
 /api/* owner=legacy         -> legacy API handler until its Go port passes
 UI path owner=vite           -> Vite-built React app served as static assets
 UI path owner=legacy         -> legacy app until that page is ported
 ```
 
-Vite proxies by this manifest in development. In production, the ingress
-serves Vite assets and forwards only legacy-owned paths to the old app. Every
+Vite's method and path selectors mirror the manifest in development. In
+production, the ingress serves Vite assets and forwards only configured
+legacy-owned paths to the old app. Every
 route and capability has exactly one owner at a time. Legacy handlers may
 continue to serve unported work, but they never shadow a Go write or create a
 second audit path. Once no business API or UI path remains legacy-owned, the
-old app can be removed after the auth owner also changes to Go.
+old app can be removed after auth compatibility and production ingress gates
+pass.
 
-Initially, the existing auth catch-all remains the owner for `/api/auth/*`.
-After other routes move, host the same Better Auth configuration as an
-auth-only bridge, or keep its current adapter until standalone hosting is
-proven. The bridge is the session authority while Go reproduces session
-resolution, verified-email binding, active-organization selection, and RBAC.
-Go asks the bridge to validate the original request cookies; the bridge
-returns only the verified identity and session facts Go needs. Sign-in,
-verification, and recovery continue through the bridge during this period.
-The final Go auth cutover requires evidence that existing password hashes,
+The local Vite proxy and Go API now assign the whole `/api/auth` namespace to
+Go by default. The route ownership manifest records `owner: auth` while
+Better Auth endpoint compatibility remains `pending`: Go implements the
+Vite client's sign-in, signup, verification, recovery, session, and sign-out
+flows, and unsupported paths fail closed instead of reaching the legacy
+catch-all. This ownership entry does not claim parity for unsupported
+Better Auth endpoints. Production reverse-proxy ownership is configured
+separately and must be checked in each deployment. The final Go auth
+compatibility gate requires evidence that existing password hashes,
 active sessions, and browser cookies remain usable without a password reset
 or forced sign-in. If compatibility fails, keep the auth bridge and leave
 the Node-free retirement gate open until a compatible port is proven.

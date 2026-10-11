@@ -142,7 +142,7 @@
       "path": "/api/auth/[...all]",
       "method": "GET",
       "source": "apps/web/src/app/api/auth/[...all]/route.ts",
-      "owner": "legacy",
+      "owner": "auth",
       "parity": "pending"
     },
     {
@@ -150,7 +150,7 @@
       "path": "/api/auth/[...all]",
       "method": "POST",
       "source": "apps/web/src/app/api/auth/[...all]/route.ts",
-      "owner": "legacy",
+      "owner": "auth",
       "parity": "pending"
     },
     {

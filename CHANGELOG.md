@@ -11,6 +11,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Corrected the migration ownership manifest to record Go as the current auth
+  namespace owner while Better Auth compatibility parity remains pending.
+  Unsupported auth endpoints continue to fail closed in Go.
+
 ### Added
 
 - Go jobs worker now exclusively owns CRM deal and task jobs. TypeScript leaves

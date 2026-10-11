@@ -610,12 +610,11 @@ Manufacturing and marketing capabilities run on the Go executor and worker
 without route flags: no public route serves them today, so they are reachable
 only through governed agent and worker dispatch.
 
-The local `.env.example` mounts Go authentication. Vite sends only the auth
-methods and paths implemented by Go to it; other auth requests continue to the
-legacy Better Auth catch-all. Go auth mounts by default and requires
+The local `.env.example` mounts Go authentication. Vite sends the entire
+`/api/auth` namespace to Go by default. Go auth mounts by default and requires
 `BETTER_AUTH_SECRET` plus `GO_AUTH_MODE` set to `development` or `production`.
-Set `GO_AUTH_ROUTE=0` to disable the Go mount; Vite then keeps auth on the legacy
-bridge. `CHASTE_GO_AUTH_ROUTE=0` also explicitly selects the legacy bridge.
+Set `GO_AUTH_ROUTE=0` to disable the Go mount. To route Vite auth requests back
+to the legacy bridge as well, set `CHASTE_GO_AUTH_ROUTE=0`.
 Auth mode is independent of `NODE_ENV`. Production
 mode requires `GO_AUTH_PUBLIC_ORIGIN` to
 be an HTTPS origin and `GO_AUTH_SECURE_COOKIE=true`. Development mode may use
@@ -678,8 +677,9 @@ reverse proxy networks; forwarded addresses from other peers are ignored.
 
 When Go auth is enabled, the Vite development proxy sends every method and path
 under `/api/auth` to Go, including unsupported compatibility paths, which Go
-rejects with 404 or 405. Set `CHASTE_GO_AUTH_ROUTE=0` to restore the legacy
-Better Auth catch-all. Set `CHASTE_GO_AUTH_OIDC_ROUTE=1` or
+rejects with 404 or 405. This route ownership does not imply compatibility
+with unsupported Better Auth endpoints. Set `CHASTE_GO_AUTH_ROUTE=0` to
+restore the legacy Better Auth catch-all. Set `CHASTE_GO_AUTH_OIDC_ROUTE=1` or
 `CHASTE_GO_AUTH_SAML_ROUTE=1` alongside the matching Go auth feature flag to
 route those optional federation paths to Go. Most other Go route flags are opt-in
 and evaluated against the request method and exact path before the legacy
