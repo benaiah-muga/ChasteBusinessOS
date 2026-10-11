@@ -572,17 +572,22 @@ describe("accounting API: auxiliary reads never blank the books", () => {
   });
 
   it("keeps only active output tax codes, since invoices cannot use the others", async () => {
-    stubFetch(() =>
-      Response.json({
-        codes: [
+    const fetchMock = stubFetch((url) => {
+      expect(url).toBe("/api/capabilities/execute");
+      return Response.json({
+        ok: true,
+        data: { codes: [
           { id: "vat", code: "VAT", name: "VAT", direction: "output", rateBasisPoints: 1800, priceIncludesTax: false, active: true },
           { id: "vat-retired", code: "VAT9", name: "Retired", direction: "output", rateBasisPoints: 900, priceIncludesTax: false, active: false },
           { id: "vat-input", code: "VATIN", name: "Input", direction: "input", rateBasisPoints: 1800, priceIncludesTax: false, active: true },
-        ],
-      }),
-    );
+        ] },
+      });
+    });
     const codes = await fetchAccountingTaxCodes();
     expect(codes.map((code) => code.id)).toEqual(["vat"]);
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    expect(request).toMatchObject({ capabilityId: "accounting.listTaxCodes", input: {} });
+    expect(request.intentId).toMatch(/^[0-9a-f-]{36}$/i);
   });
 });
 

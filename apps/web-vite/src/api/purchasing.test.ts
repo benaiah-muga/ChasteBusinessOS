@@ -156,14 +156,21 @@ describe("purchasing workspace reads", () => {
   });
 
   it("keeps only active input tax codes for a vendor bill", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
-      codes: [
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      ok: true,
+      data: { codes: [
         { id: "3c9e3c30-1e5c-4b3c-9d4a-5b3c4d5e6f70", code: "VAT-IN", name: "Input VAT", direction: "input", rateBasisPoints: 500, priceIncludesTax: true, active: true },
         { id: "4daf4d41-2f6d-4c4d-8e5b-6c4d5e6f7081", code: "VAT-OUT", name: "Output VAT", direction: "output", rateBasisPoints: 500, priceIncludesTax: true, active: true },
         { id: "5eb05e52-307e-4d5e-9f6c-7d5e6f708192", code: "OLD", name: "Retired", direction: "input", rateBasisPoints: 100, priceIncludesTax: false, active: false },
-      ],
-    })));
+      ] },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
     await expect(fetchPurchasingInputTaxCodes()).resolves.toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    expect(request).toMatchObject({ capabilityId: "accounting.listTaxCodes", input: {} });
+    expect(request.intentId).toMatch(/^[0-9a-f-]{36}$/i);
   });
 });
 

@@ -17,6 +17,7 @@ const (
 	createTaxCodeCapabilityID    = "accounting.createTaxCode"
 	archiveTaxCodeCapabilityID   = "accounting.archiveTaxCode"
 	activateTaxCodeCapabilityID  = "accounting.activateTaxCode"
+	listTaxCodesCapabilityID     = "accounting.listTaxCodes"
 )
 
 var (
@@ -80,6 +81,22 @@ type ActivateTaxCodeOutput struct {
 	TaxCodeID string `json:"taxCodeId"`
 }
 
+type ListTaxCodesInput struct{}
+
+type TaxCodeSummary struct {
+	ID               string `json:"id"`
+	Code             string `json:"code"`
+	Name             string `json:"name"`
+	Direction        string `json:"direction"`
+	RateBasisPoints  int64  `json:"rateBasisPoints"`
+	PriceIncludesTax bool   `json:"priceIncludesTax"`
+	Active           bool   `json:"active"`
+}
+
+type ListTaxCodesOutput struct {
+	Codes []TaxCodeSummary `json:"codes"`
+}
+
 func parseAccountingTaxMasterInput(capabilityID string, raw json.RawMessage) (any, error) {
 	switch capabilityID {
 	case createTaxProfileCapabilityID:
@@ -92,9 +109,43 @@ func parseAccountingTaxMasterInput(capabilityID string, raw json.RawMessage) (an
 		return ParseArchiveTaxCodeInput(raw)
 	case activateTaxCodeCapabilityID:
 		return ParseActivateTaxCodeInput(raw)
+	case listTaxCodesCapabilityID:
+		return ParseListTaxCodesInput(raw)
 	default:
 		return nil, errors.New("unsupported accounting tax master capability")
 	}
+}
+
+func ParseListTaxCodesInput(raw json.RawMessage) (ListTaxCodesInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return ListTaxCodesInput{}, err
+	}
+	return ListTaxCodesInput{}, nil
+}
+
+func listTaxCodes(ctx context.Context, tx pgx.Tx, orgID string, _ ListTaxCodesInput) (ListTaxCodesOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, code, name, direction, rate_basis_points, price_includes_tax, active
+		FROM tax_codes
+		WHERE org_id = $1::uuid
+		ORDER BY active DESC, created_at DESC`, orgID)
+	if err != nil {
+		return ListTaxCodesOutput{}, err
+	}
+	defer rows.Close()
+
+	output := ListTaxCodesOutput{Codes: []TaxCodeSummary{}}
+	for rows.Next() {
+		var code TaxCodeSummary
+		if err := rows.Scan(&code.ID, &code.Code, &code.Name, &code.Direction, &code.RateBasisPoints, &code.PriceIncludesTax, &code.Active); err != nil {
+			return ListTaxCodesOutput{}, err
+		}
+		output.Codes = append(output.Codes, code)
+	}
+	if err := rows.Err(); err != nil {
+		return ListTaxCodesOutput{}, err
+	}
+	return output, nil
 }
 
 func ParseCreateTaxProfileInput(raw json.RawMessage) (CreateTaxProfileInput, error) {

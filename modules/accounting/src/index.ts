@@ -3364,6 +3364,42 @@ const salesTaxReport = (deps: ModuleDeps) =>
     },
   });
 
+const listTaxCodes = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.listTaxCodes",
+    title: "List tax codes",
+    intent: "List the organization's active and archived input and output tax codes for accounting and purchasing forms",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({}).strict(),
+    output: z.object({
+      codes: z.array(z.object({
+        id: z.string(),
+        code: z.string(),
+        name: z.string(),
+        direction: z.enum(["input", "output"]),
+        rateBasisPoints: z.number().int().safe().nonnegative(),
+        priceIncludesTax: z.boolean(),
+        active: z.boolean(),
+      }).strict()),
+    }).strict(),
+    execute: async (ctx) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const codes = await tx.select({
+        id: taxCodes.id,
+        code: taxCodes.code,
+        name: taxCodes.name,
+        direction: taxCodes.direction,
+        rateBasisPoints: taxCodes.rateBasisPoints,
+        priceIncludesTax: taxCodes.priceIncludesTax,
+        active: taxCodes.active,
+      }).from(taxCodes)
+        .where(eq(taxCodes.orgId, ctx.actor.orgId))
+        .orderBy(desc(taxCodes.active), desc(taxCodes.createdAt));
+      return { codes };
+    }),
+  });
+
 const createTaxProfile = (deps: ModuleDeps) =>
   defineCapability({
     id: "accounting.createTaxProfile",
@@ -4278,6 +4314,7 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(bankReconciliation(deps));
   registry.register(bankSummary(deps));
   registry.register(salesTaxReport(deps));
+  registry.register(listTaxCodes(deps));
   registry.register(createTaxProfile(deps));
   registry.register(removeTaxProfile(deps));
   registry.register(createTaxCode(deps));

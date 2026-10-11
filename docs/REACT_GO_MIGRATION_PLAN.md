@@ -2938,3 +2938,17 @@ new owners and the manifest shows zero legacy runtime paths.
      `iam.setOrgPolicy` through the capability executor. Cookie writes require
      same-origin validation. The generated route manifest records exact GET
      and POST ownership as Go with parity pending under a narrow policy rule.
+
+283. (Implemented; runtime-role capability DB proof and focused Vite API tests
+     passed; authenticated browser proof and live legacy differential remain
+     pending) Route Vite Accounting and Purchasing tax-code catalog reads
+     through Go's `accounting.listTaxCodes` capability. Go requires
+     `accounting.read`, executes the read in the active organization's
+     `dbx.WithOrgTx`, and returns all tax codes in legacy active-first,
+     newest-first order with the fields both Vite forms consume. Accounting
+     continues to select active output codes; Purchasing continues to select
+     active input codes. The existing `/api/accounting/tax` route remains for
+     the legacy Next app. The canonical accounting registry and generated
+     capability manifest now expose the shared schema and intent for other
+     clients. The capability endpoint is already Go-owned; no global route
+     ownership change is implied. `graft build` completed.

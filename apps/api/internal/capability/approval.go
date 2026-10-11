@@ -481,7 +481,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
 		case createTaxProfileCapabilityID, removeTaxProfileCapabilityID, createTaxCodeCapabilityID,
-			archiveTaxCodeCapabilityID, activateTaxCodeCapabilityID:
+			archiveTaxCodeCapabilityID, activateTaxCodeCapabilityID, listTaxCodesCapabilityID:
 			parsed, parseErr := parseAccountingTaxMasterInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
@@ -889,6 +889,8 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID:
 		return "accounting.write", true
 	case listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID:
+		return "accounting.read", true
+	case listTaxCodesCapabilityID:
 		return "accounting.read", true
 	case createTaxProfileCapabilityID, removeTaxProfileCapabilityID, createTaxCodeCapabilityID,
 		archiveTaxCodeCapabilityID, activateTaxCodeCapabilityID:

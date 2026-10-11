@@ -19,6 +19,7 @@ func TestPermissionForCapability(t *testing.T) {
 		{id: assignProjectTaskCapabilityID, permission: "projects.write"},
 		{id: ProjectBoardReadCapabilityID, permission: "projects.read"},
 		{id: iamSetModulesCapabilityID, permission: "iam.admin"},
+		{id: listTaxCodesCapabilityID, permission: "accounting.read"},
 	}
 	for _, test := range tests {
 		t.Run(test.id, func(t *testing.T) {

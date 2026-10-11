@@ -81,7 +81,6 @@ function purchasingFetch(overrides: Overrides = {}) {
     const method = (init?.method ?? "GET").toUpperCase();
     if (url === "/api/modules") return resolve(overrides.modules ?? switchboard);
     if (url === "/api/inventory") return resolve(overrides.inventory ?? { items: [] });
-    if (url === "/api/accounting/tax") return resolve(overrides.tax ?? { codes: [] });
     if (url === "/api/purchasing") {
       if (method === "GET") return resolve(overrides.workspace ?? workspaceFixture());
       return post(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
@@ -94,6 +93,9 @@ function purchasingFetch(overrides: Overrides = {}) {
       };
       if (body.capabilityId === "purchasing.listPurchaseWorkflow") {
         return resolve(overrides.workflow ?? { ok: true, data: { requests: [] } });
+      }
+      if (body.capabilityId === "accounting.listTaxCodes") {
+        return resolve(overrides.tax ?? { ok: true, data: { codes: [] } });
       }
       if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.receiveGoods" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote" && body.capabilityId !== "purchasing.supplierStatement" && body.capabilityId !== "purchasing.priceHistory" && body.capabilityId !== "purchasing.supplierPerformance") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
@@ -133,6 +135,7 @@ function postsTo(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, 
   return fetchMock.mock.calls
     .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
     .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
+    .filter((body) => body.capabilityId !== "accounting.listTaxCodes")
     .map((body) => body.capabilityId === "purchasing.createVendor"
       ? { ...(body.input as Record<string, unknown>), action: "createVendor", intentId: body.intentId }
       : body.capabilityId === "purchasing.createPurchaseOrder"
@@ -143,7 +146,8 @@ function postsTo(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, 
 function capabilityPosts(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, unknown>[] {
   return fetchMock.mock.calls
     .filter(([url, init]) => String(url) === "/api/capabilities/execute" && (init as RequestInit | undefined)?.method === "POST")
-    .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
+    .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
+    .filter((body) => body.capabilityId !== "accounting.listTaxCodes");
 }
 
 function stubPurchasingLocks(): void {

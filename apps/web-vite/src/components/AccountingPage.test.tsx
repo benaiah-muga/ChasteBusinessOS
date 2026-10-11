@@ -164,6 +164,12 @@ function stubAccounting(options: StubOptions = {}) {
     }
     if (url === "/api/capabilities/execute") {
       const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
+      if (capabilityId === "accounting.bankSummary") {
+        const summary = typeof options.banking === "object" && options.banking !== null && "summary" in options.banking
+          ? options.banking.summary
+          : { accounts: [], unmatchedCount: 0 };
+        return Response.json({ ok: true, data: summary });
+      }
       if (capabilityId === "accounting.overview") {
         return options.goOverviewResponse?.() ?? Response.json({ ok: true, data: overview });
       }
@@ -179,6 +185,9 @@ function stubAccounting(options: StubOptions = {}) {
       }
       if (capabilityId === "accounting.listBudgetScenarios") {
         return options.goBudgetScenarioResponse?.() ?? Response.json({ ok: true, data: { scenarios: [] } });
+      }
+      if (capabilityId === "accounting.listTaxCodes") {
+        return Response.json({ ok: true, data: options.taxCodes ?? { codes: [] } });
       }
       if (capabilityId === "accounting.cashForecast") {
         return options.goCashForecastResponse?.() ?? Response.json({ ok: true, data: {
@@ -291,9 +300,6 @@ function stubAccounting(options: StubOptions = {}) {
       return options.banking === null
         ? Response.json({ error: "no banking" }, { status: 500 })
         : Response.json(options.banking ?? { accounts: [], unmatched: [], payments: [], summary: { accounts: [], unmatchedCount: 0 } });
-    }
-    if (url === "/api/accounting/tax") {
-      return Response.json(options.taxCodes ?? { codes: [] });
     }
     return Response.json({ ok: true, data: {} });
   });
@@ -1047,6 +1053,7 @@ describe("AccountingPage tabs", () => {
     const reportCalls = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body ?? "{}") as { capabilityId?: string });
     expect(reportCalls.map((call) => call.capabilityId).sort()).toEqual([
       "accounting.balanceSheet",
+      "accounting.bankSummary",
       "accounting.cashFlow",
       "accounting.incomeStatement",
       "accounting.overview",

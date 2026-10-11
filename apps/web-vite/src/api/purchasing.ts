@@ -160,6 +160,7 @@ const TaxCodeSchema = z.object({
   priceIncludesTax: z.boolean(),
   active: z.boolean(),
 }).strict();
+const GoTaxCodesOutputSchema = z.object({ codes: z.array(TaxCodeSchema) }).strict();
 
 const SwitchboardSchema = z.object({
   catalog: z.array(z.object({ id: z.string().min(1) })),
@@ -562,13 +563,18 @@ export async function fetchPurchasingProducts(signal?: AbortSignal): Promise<Pur
 }
 
 export async function fetchPurchasingInputTaxCodes(signal?: AbortSignal): Promise<PurchasingTaxCode[]> {
-  const tax = await getValidated(
-    "/api/accounting/tax",
-    z.object({ codes: z.array(TaxCodeSchema) }).passthrough(),
-    "input tax codes",
-    signal,
-  );
-  return tax.codes.filter((code) => code.active && code.direction === "input");
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ capabilityId: "accounting.listTaxCodes", input: {}, intentId: crypto.randomUUID() }),
+  }, "load input tax codes", signal);
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  if (response.status !== 200 || !envelope.success) {
+    throw new PurchasingApiError(response.status, "The Go Accounting service returned an unexpected response.", true);
+  }
+  const tax = GoTaxCodesOutputSchema.safeParse(envelope.data.data);
+  if (!tax.success) throw new PurchasingApiError(response.status, "The Go Accounting service returned an unexpected result.", true);
+  return tax.data.codes.filter((code) => code.active && code.direction === "input");
 }
 
 /**

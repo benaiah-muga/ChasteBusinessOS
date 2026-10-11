@@ -18,6 +18,13 @@ The full v1 changelog is preserved at the bottom of this file.
   remain on the existing `/api/banking` response; the banking route remains
   parity pending until authenticated browser and live legacy differential proof.
 
+- Vite Accounting and Purchasing now load tax codes through Go's
+  `accounting.listTaxCodes` capability. Go returns the tenant's full catalog in
+  legacy active-first, newest-first order; each client retains its existing
+  active output or input filtering. The Next route remains available to the
+  legacy app. Authenticated browser and live legacy differential proof remain
+  pending.
+
 - Vite Settings now sends exact `GET` and `POST /api/policy` requests to Go by
   default. Go resolves the signed session and active organization, reads policy
   through tenant-scoped RLS, and derives `canEdit` from resolved `iam.admin`

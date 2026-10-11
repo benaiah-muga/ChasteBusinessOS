@@ -755,9 +755,13 @@ export async function fetchAccountingBanking(signal?: AbortSignal): Promise<Acco
 }
 
 export async function fetchAccountingTaxCodes(signal?: AbortSignal): Promise<AccountingTaxCode[]> {
-  // TaxCodesSchema wraps the list, so unwrap before filtering: invoices can only
-  // ever charge an active output code.
-  const { codes } = await get("/api/accounting/tax", TaxCodesSchema, "load the tax codes", signal);
+  const { codes } = await readGoAccountingCapability(
+    "accounting.listTaxCodes",
+    {},
+    TaxCodesSchema,
+    "load the tax codes",
+    signal,
+  );
   return codes.filter((code) => code.active && code.direction === "output");
 }
 
@@ -773,7 +777,7 @@ export async function fetchAccountingBudgetScenarios(signal?: AbortSignal): Prom
 }
 
 async function readGoAccountingCapability<T>(
-  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.buildReminders" | "accounting.cashBasisReport" | "accounting.overview" | "accounting.bankSummary",
+  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.listTaxCodes" | "accounting.buildReminders" | "accounting.cashBasisReport" | "accounting.overview" | "accounting.bankSummary",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   context: string,

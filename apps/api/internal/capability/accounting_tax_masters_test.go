@@ -11,6 +11,15 @@ import (
 )
 
 func TestAccountingTaxMastersParsersMirrorZodContracts(t *testing.T) {
+	if _, err := ParseListTaxCodesInput(json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("ParseListTaxCodesInput({}) = %v", err)
+	}
+	for _, raw := range []string{`[]`, `"x"`, `null`} {
+		if _, err := ParseListTaxCodesInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("ParseListTaxCodesInput accepted %s", raw)
+		}
+	}
+
 	profileID := "22222222-2222-4222-8222-222222222222"
 	taxCodeID := "33333333-3333-4333-8333-333333333333"
 
@@ -135,6 +144,7 @@ func TestAccountingTaxMastersParsersMirrorZodContracts(t *testing.T) {
 		createTaxCodeCapabilityID:    `{"code":"VAT","name":"VAT standard","direction":"output","rateBasisPoints":0}`,
 		archiveTaxCodeCapabilityID:   `{"taxCodeId":"` + taxCodeID + `"}`,
 		activateTaxCodeCapabilityID:  `{"taxCodeId":"` + taxCodeID + `"}`,
+		listTaxCodesCapabilityID:     `{}`,
 	}
 	for capabilityID, raw := range validByCapability {
 		if _, err := parseAccountingTaxMasterInput(capabilityID, json.RawMessage(raw)); err != nil {
@@ -143,6 +153,71 @@ func TestAccountingTaxMastersParsersMirrorZodContracts(t *testing.T) {
 	}
 	if _, err := parseAccountingTaxMasterInput("accounting.unknown", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("parseAccountingTaxMasterInput accepted an unsupported capability")
+	}
+}
+
+func TestAccountingTaxMastersListsTaxCodesWithOrgScope(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupTaxMasterFixtures(t, fx)
+	input := json.RawMessage(`{}`)
+	claims := fx.humanClaims(input, executorUUID(t))
+	claims.CapabilityID = listTaxCodesCapabilityID
+	claims.Permissions = []string{"accounting.read"}
+
+	denied, err := fx.executor.Execute(fx.ctx, claims, listTaxCodesCapabilityID, input)
+	if err != nil || denied.OK || denied.Error != "forbidden: missing permission: accounting.read" {
+		t.Fatalf("list tax codes without persisted permission = %+v, %v", denied, err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'accounting.read', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+
+	activeOutput := seedTaxMasterCode(t, fx, fx.orgID, "US", "OUT-ACTIVE", "output", 1800, true)
+	activeInput := seedTaxMasterCode(t, fx, fx.orgID, "US", "IN-ACTIVE", "input", 500, true)
+	inactiveOutput := seedTaxMasterCode(t, fx, fx.orgID, "US", "OUT-INACTIVE", "output", 900, false)
+	inactiveInput := seedTaxMasterCode(t, fx, fx.orgID, "US", "IN-INACTIVE", "input", 100, false)
+	foreign := seedTaxMasterCode(t, fx, fx.otherOrgID, "DE", "FOREIGN", "output", 1900, true)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		UPDATE tax_codes SET created_at = CASE id
+			WHEN $1::uuid THEN '2026-10-11T04:00:00Z'::timestamptz
+			WHEN $2::uuid THEN '2026-10-11T03:00:00Z'::timestamptz
+			WHEN $3::uuid THEN '2026-10-11T02:00:00Z'::timestamptz
+			WHEN $4::uuid THEN '2026-10-11T01:00:00Z'::timestamptz END
+		WHERE id IN ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`, activeOutput, activeInput, inactiveOutput, inactiveInput); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := fx.executor.Execute(fx.ctx, claims, listTaxCodesCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("list tax codes = %+v, %v", result, err)
+	}
+	var output ListTaxCodesOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatalf("decode list tax codes %s: %v", result.Data, err)
+	}
+	if len(output.Codes) != 4 {
+		t.Fatalf("list tax codes returned %d rows, want 4: %+v", len(output.Codes), output.Codes)
+	}
+	wantIDs := []string{activeOutput, activeInput, inactiveOutput, inactiveInput}
+	for i, code := range output.Codes {
+		if code.ID != wantIDs[i] {
+			t.Errorf("codes[%d].ID = %s, want %s (active-first, newest-first): %+v", i, code.ID, wantIDs[i], output.Codes)
+		}
+	}
+	if output.Codes[0].Direction != "output" || output.Codes[1].Direction != "input" ||
+		output.Codes[2].Direction != "output" || output.Codes[3].Direction != "input" ||
+		!output.Codes[0].Active || !output.Codes[1].Active || output.Codes[2].Active || output.Codes[3].Active {
+		t.Fatalf("list tax codes lost direction or active status: %+v", output.Codes)
+	}
+	for _, code := range output.Codes {
+		if code.ID == foreign {
+			t.Fatalf("list tax codes crossed organization boundary: %+v", output.Codes)
+		}
+	}
+	if encoded, err := json.Marshal(output); err != nil || !strings.Contains(string(encoded), `"priceIncludesTax":false`) {
+		t.Fatalf("list tax code contract JSON = %s, %v", encoded, err)
+	} else if strings.Contains(string(encoded), `"jurisdictionCode"`) || strings.Contains(string(encoded), `"recoverable"`) {
+		t.Fatalf("list tax code response included fields outside the shared Vite contract: %s", encoded)
 	}
 }
 

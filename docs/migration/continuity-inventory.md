@@ -321,6 +321,22 @@ supplies transaction state/detail and payment rows used by reconciliation
 controls. `/api/banking` remains legacy-owned and parity pending until the
 authenticated browser flow and live legacy differential are proven.
 
+Vite Accounting and Purchasing now read tax codes with Go's
+`accounting.listTaxCodes` capability through the existing
+`/api/capabilities/execute` session route. The executor requires
+`accounting.read` and performs an organization-scoped read inside
+`dbx.WithOrgTx`. It returns all active and inactive codes for both directions,
+sorted active-first then newest-first; the Accounting API keeps active output
+codes and the Purchasing API keeps active input codes. The Next
+`/api/accounting/tax` handler remains in place for the legacy app. Runtime-role
+DB and Vite API tests cover authorization, tenant isolation, sorting, both
+directions, active/inactive rows, and each client's filtering. Authenticated
+browser proof and live legacy differential remain pending
+([`route.ts`](../../apps/web/src/app/api/accounting/tax/route.ts),
+[`accounting_tax_masters.go`](../../apps/api/internal/capability/accounting_tax_masters.go),
+[`accounting.ts`](../../apps/web-vite/src/api/accounting.ts),
+[`purchasing.ts`](../../apps/web-vite/src/api/purchasing.ts)).
+
 ## Required parity evidence before cutover
 
 1. A cloned-database comparison proves table shape and all existing rows remain

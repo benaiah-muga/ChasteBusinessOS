@@ -218,6 +218,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	restoreBudgetScenarioVersionCapabilityID:            {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.undoBudgetScenarioVersion"},
 	listBudgetScenariosCapabilityID:                     {module: "accounting", permission: "accounting.read", risk: "read"},
 	budgetActualVsPlanCapabilityID:                      {module: "accounting", permission: "accounting.read", risk: "read"},
+	listTaxCodesCapabilityID:                            {module: "accounting", permission: "accounting.read", risk: "read"},
 	createTaxProfileCapabilityID:                        {module: "accounting", permission: "accounting.admin", risk: "write", inverseCapabilityID: "accounting.removeTaxProfile"},
 	removeTaxProfileCapabilityID:                        {module: "accounting", permission: "accounting.admin", risk: "write", inverseCapabilityID: "accounting.createTaxProfile"},
 	createTaxCodeCapabilityID:                           {module: "accounting", permission: "accounting.admin", risk: "write", inverseCapabilityID: "accounting.archiveTaxCode"},
@@ -467,7 +468,7 @@ func supportedCapability(capabilityID string) bool {
 		saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID,
 		listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID,
 		createTaxProfileCapabilityID, removeTaxProfileCapabilityID, createTaxCodeCapabilityID,
-		archiveTaxCodeCapabilityID, activateTaxCodeCapabilityID,
+		archiveTaxCodeCapabilityID, activateTaxCodeCapabilityID, listTaxCodesCapabilityID,
 		createTaxReturnCapabilityID, cancelTaxReturnDraftCapabilityID, restoreTaxReturnDraftCapabilityID,
 		recordTaxReturnSubmissionCapabilityID, createTaxReturnAmendmentCapabilityID,
 		recordTaxReturnAcknowledgmentCapabilityID, fileSalesTaxReturnCapabilityID,
@@ -1188,7 +1189,7 @@ func (e *Executor) executeWithFinalizer(
 			}
 			input = parsed
 		case createTaxProfileCapabilityID, removeTaxProfileCapabilityID, createTaxCodeCapabilityID,
-			archiveTaxCodeCapabilityID, activateTaxCodeCapabilityID:
+			archiveTaxCodeCapabilityID, activateTaxCodeCapabilityID, listTaxCodesCapabilityID:
 			parsed, err := parseAccountingTaxMasterInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -2737,6 +2738,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case ListTaxCodesInput:
+			output, err := listTaxCodes(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case CreateTaxReturnInput:
 			output, err := executeCreateTaxReturn(ctx, tx, claims, parsed, now)
 			if err != nil {
@@ -3544,7 +3551,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput, ListPaymentRunBillsInput, APAgingInput,
 		ClosePeriodInput, PeriodCloseCheckInput, CloseYearInput,
 		SaveBudgetScenarioInput, BudgetScenarioVersionInput, ListBudgetScenariosInput, BudgetActualVsPlanInput,
-		CreateTaxProfileInput, RemoveTaxProfileInput, CreateTaxCodeInput, ArchiveTaxCodeInput, ActivateTaxCodeInput,
+		CreateTaxProfileInput, RemoveTaxProfileInput, CreateTaxCodeInput, ArchiveTaxCodeInput, ActivateTaxCodeInput, ListTaxCodesInput,
 		CreateTaxReturnInput, TaxReturnIDInput, RecordTaxReturnSubmissionInput, RecordTaxReturnAcknowledgmentInput,
 		HRRequestLeaveInput, HRCancelLeaveInput, HRDecideLeaveInput, HRLogTimeInput, HRDecideTimeEntryInput,
 		HRClockInInput, HRClockOutInput, HRLeaveBalanceInput, HRLeaveCalendarInput, HRTimeReportInput, HRPendingTimeEntriesInput,
