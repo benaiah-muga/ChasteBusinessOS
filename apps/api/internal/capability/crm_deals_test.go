@@ -389,7 +389,8 @@ func TestGoCRMDealsLostReasonClearsWhenLeavingLostStage(t *testing.T) {
 		t.Fatalf("first move result=%+v, want a newly completed move", first)
 	}
 	replay := executeCRMDeal(t, fx, moveDealStageCapabilityID, lostPayload, "crm-deal-lost-reason")
-	if !replay.OK || !replay.Replayed || string(replay.Data) != string(first.Data) {
+	var firstOutput, replayOutput MoveDealStageOutput
+	if !replay.OK || !replay.Replayed || json.Unmarshal(first.Data, &firstOutput) != nil || json.Unmarshal(replay.Data, &replayOutput) != nil || replayOutput != firstOutput {
 		t.Fatalf("exact stage retry result=%+v, want the original output as a replay", replay)
 	}
 	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2`, fx.orgID, moveDealStageCapabilityID); got != 1 {

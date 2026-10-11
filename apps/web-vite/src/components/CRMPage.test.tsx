@@ -17,6 +17,25 @@ function deal(stage: string) {
   return { id: dealId, title: "Annual renewal", stage, valueMinor: 480000, note: null, customerId, customerName: "Northwind", updatedAt: "2026-09-29T12:00:00.000Z" };
 }
 
+function stubCrmDealStageLocks() {
+  const tails = new Map<string, Promise<void>>();
+  const request = vi.fn(async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+    const previous = tails.get(name) ?? Promise.resolve();
+    let release = (): void => {};
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    tails.set(name, current);
+    await previous;
+    try { return await callback(); }
+    finally {
+      release();
+      if (tails.get(name) === current) tails.delete(name);
+    }
+  });
+  const testNavigator = Object.create(navigator) as Navigator;
+  Object.defineProperty(testNavigator, "locks", { configurable: true, value: { request } });
+  vi.stubGlobal("navigator", testNavigator);
+}
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
@@ -504,6 +523,7 @@ describe("Vite CRM page", () => {
   });
 
   it("uses Go for lost-stage moves and keeps the reason draft after a pending approval", async () => {
+    stubCrmDealStageLocks();
     vi.stubGlobal("__GO_CRM_DEAL_STAGE_MOVE__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);

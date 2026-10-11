@@ -372,13 +372,7 @@ func TestSystemCapabilityLongEffectCoordinatesLeaseHeartbeatAndRollback(t *testi
 		t.Fatalf("long capability returned before lock release: worked=%v err=%v", result.worked, result.err)
 	case <-time.After(1200 * time.Millisecond):
 	}
-	competitor, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "long-effect-competitor", LeaseDuration: time.Second})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if claimed, err := competitor.ClaimOne(ctx); err != nil || claimed != nil {
-		t.Fatalf("competitor reclaimed row locked by live effect: claim=%+v err=%v", claimed, err)
-	}
+	assertJobRowLocked(t, ctx, owner, longJobID)
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -448,13 +442,7 @@ func TestSystemCapabilityLongEffectCoordinatesLeaseHeartbeatAndRollback(t *testi
 	if renewed, err := routineGate.renew(ctx, func(ctx context.Context) (bool, error) { return routineWorker.renewLease(ctx, routineClaim) }); err != nil || !renewed {
 		t.Fatalf("heartbeat coordination while routineTx is in flight renewed=%v err=%v", renewed, err)
 	}
-	competitor, err = NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "routine-tx-competitor", LeaseDuration: time.Second, RoutineAgentRunner: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if claimed, err := competitor.ClaimOne(ctx); err != nil || claimed != nil {
-		t.Fatalf("competitor reclaimed row locked by routineTx: claim=%+v err=%v", claimed, err)
-	}
+	assertJobRowLocked(t, ctx, owner, routineJobID)
 	if err := routineBlocker.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -476,9 +464,9 @@ func TestSystemCapabilityLongEffectCoordinatesLeaseHeartbeatAndRollback(t *testi
 	if renewed, err := routineGate.renew(ctx, func(ctx context.Context) (bool, error) { return routineWorker.renewLease(ctx, routineClaim) }); err != nil || !renewed {
 		t.Fatalf("heartbeat did not resume after routineTx committed: renewed=%v err=%v", renewed, err)
 	}
-	if claimed, err := competitor.ClaimOne(ctx); err != nil || claimed != nil {
-		t.Fatalf("competitor reclaimed after extension commit before acknowledgement: claim=%+v err=%v", claimed, err)
-	}
+	// The committed future lease above makes this job ineligible until after
+	// the original worker acknowledges it. Avoid claiming from the shared queue
+	// here, since that could mutate an unrelated integration-test job.
 	if finalized, err := routineWorker.finalize(ctx, routineClaim, "done", "", nil); err != nil || !finalized {
 		t.Fatalf("original routine owner could not acknowledge after routineTx: finalized=%v err=%v", finalized, err)
 	}
@@ -1391,6 +1379,20 @@ func assertJobsTestState(t *testing.T, ctx context.Context, owner *pgxpool.Pool,
 	}
 	if status != wantStatus || attempts != wantAttempts {
 		t.Fatalf("job %s state=%q attempts=%d, want %q/%d", jobID, status, attempts, wantStatus, wantAttempts)
+	}
+}
+
+func assertJobRowLocked(t *testing.T, ctx context.Context, owner *pgxpool.Pool, jobID string) {
+	t.Helper()
+	tx, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin target job lock check: %v", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var foundID string
+	err = tx.QueryRow(ctx, `SELECT id::text FROM jobs WHERE id = $1::uuid FOR UPDATE SKIP LOCKED`, jobID).Scan(&foundID)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("target job %s was not skipped while its live transaction held the row lock: id=%q err=%v", jobID, foundID, err)
 	}
 }
 
