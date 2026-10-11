@@ -129,7 +129,7 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ customers }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchPosCustomers(undefined, { useGo: true })).resolves.toEqual(customers);
+    await expect(fetchPosCustomers()).resolves.toEqual(customers);
     expect(fetchMock).toHaveBeenCalledWith("/api/pos/customers", expect.objectContaining({
       credentials: "same-origin",
       cache: "no-store",
@@ -141,14 +141,14 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async (_url: string) => Response.json({ error: "route not mounted" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchPosCustomers(undefined, { useGo: true })).rejects.toMatchObject({ status: 404 });
+    await expect(fetchPosCustomers()).rejects.toMatchObject({ status: 404 });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/pos/customers"]);
   });
 
   it.each([401, 403, 500])("does not fall back after Go customer lookup HTTP %s", async (status) => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ error: "Go rejected customer read" }, { status }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(fetchPosCustomers(undefined, { useGo: true })).rejects.toMatchObject({ status });
+    await expect(fetchPosCustomers()).rejects.toMatchObject({ status });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

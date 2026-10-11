@@ -1560,9 +1560,9 @@ new owners and the manifest shows zero legacy runtime paths.
      verified organization members with either `crm.read` or `pos.sell` may
      read active canonical customer options, with no CRM module requirement.
      Keep name ordering, the 500-row limit, purchase counts, and lifetime net
-     spend. Set `CHASTE_GO_POS_CUSTOMERS_SLICE=0` to restore the legacy lookup;
-     only a missing Go route falls back automatically. Set
-     `GO_POS_CUSTOMERS_ROUTE=0` to unmount the endpoint. CRM and Support callers
+     spend. Vite always sends this lookup to Go; the legacy request path and
+     rollback selector have been removed. `GO_POS_CUSTOMERS_ROUTE=0` disables
+     the Go endpoint, causing lookup to fail closed. CRM and Support callers
      remain unchanged. The generated route ownership manifest records the
      Go-only GET as `owner: go, parity: verified`. Focused Go/Vite and manifest
      checks pass; browser proof remains open.

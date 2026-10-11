@@ -76,7 +76,6 @@ function stubWebLocks() {
 }
 
 beforeEach(() => {
-  vi.stubGlobal("__GO_POS_CUSTOMERS_SLICE__", true);
   stubWebLocks();
 });
 

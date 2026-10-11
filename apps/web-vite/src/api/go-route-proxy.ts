@@ -41,7 +41,6 @@ export type GoRouteProxyFlags = {
   crmReads: boolean;
   posRead: boolean;
   posShiftSummary: boolean;
-  posCustomers: boolean;
   onboarding: boolean;
   messageAttachmentDownloads: boolean;
   approvalsRead: boolean;
@@ -358,10 +357,6 @@ export function goBankReconciliationWritesFromEnv(env: Record<string, string | u
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_BANK_RECONCILIATION_WRITES === "1";
 }
 
-export function goPosCustomersSliceFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_POS_CUSTOMERS_SLICE !== "0";
-}
-
 export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>): GoRouteProxyFlags {
   return {
     supportPublic: env.CHASTE_GO_SUPPORT_PUBLIC_ROUTE === "1",
@@ -402,7 +397,6 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     crmReads: env.CHASTE_GO_CRM_READS !== "0",
     posRead: env.CHASTE_GO_POS_READ_ROUTE !== "0",
     posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
-    posCustomers: goPosCustomersSliceFromEnv(env),
     onboarding: env.CHASTE_GO_ONBOARDING_ROUTE === "1",
     messageAttachmentDownloads: goMessagingAttachmentDownloadsFromEnv(env),
     approvalsRead: env.CHASTE_GO_APPROVALS_READ_ROUTE !== "0",
@@ -451,7 +445,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.inventoryRead && method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
   if (flags.crmReads && method === "GET" && isGoCrmReadRequest(path)) return true;
   if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;
-  if (flags.posCustomers && method === "GET" && /^\/api\/pos\/customers(?:\?.*)?$/.test(path)) return true;
+  if (method === "GET" && /^\/api\/pos\/customers(?:\?.*)?$/.test(path)) return true;
   if (flags.posShiftSummary && method === "POST" && /^\/api\/pos\/shift-summary(?:\?.*)?$/.test(path)) return true;
   if (flags.dashboard && method === "GET" && /^\/api\/dashboard(?:\?.*)?$/.test(path)) return true;
   if (flags.setup && isGoSetupRequest(method, path)) return true;

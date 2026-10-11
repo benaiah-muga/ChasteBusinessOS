@@ -80,7 +80,6 @@ import {
   goAccountingCustomerStatementReadsFromEnv,
   goAccountingReportsFromEnv,
   goBankReconciliationWritesFromEnv,
-  goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
   isGoRouteRequest,
@@ -742,14 +741,6 @@ describe("sales order read Go selector", () => {
   });
 });
 
-describe("POS customer lookup Go selector", () => {
-  it("enables the direct Go reader independently and supports rollback", () => {
-    expect(goPosCustomersSliceFromEnv({})).toBe(true);
-    expect(goPosCustomersSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(true);
-    expect(goPosCustomersSliceFromEnv({ CHASTE_GO_POS_CUSTOMERS_SLICE: "0" })).toBe(false);
-  });
-});
-
 afterEach(async () => {
   await Promise.all(runningServers.splice(0).map((server) => server.close()));
 });
@@ -871,7 +862,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.dashboard).toBe(true);
     expect(flags.setup).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "posCustomers", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -1478,15 +1469,10 @@ describe("Vite Go route proxy selection", () => {
 
   it("routes only the exact POS customer GET independently of the generic capability route", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" });
-    expect(flags.posCustomers).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/pos/customers")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/pos/customers?active=1")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/pos/customers")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/pos/customers/extra")).toBe(false);
-
-    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_CUSTOMERS_SLICE: "0" });
-    expect(disabled.posCustomers).toBe(false);
-    expect(isGoRouteRequest(disabled, "GET", "/api/pos/customers")).toBe(false);
   });
 
   it("keeps SCIM read and write selectors independent", () => {
