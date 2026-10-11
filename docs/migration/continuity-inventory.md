@@ -114,6 +114,15 @@ production requests and writes. No production traffic has moved to Go.
   [`HrPage.tsx`](../../apps/web-vite/src/components/HrPage.tsx),
   [`hr.ts`](../../apps/web-vite/src/api/hr.ts), and
   [`wave5_executor_integration_test.go`](../../apps/api/internal/capability/wave5_executor_integration_test.go).
+- Vite Accounting Overview reads through Go's authenticated
+  `accounting.overview` capability unconditionally. The client validates the
+  strict response and fails closed on errors; there is no legacy retry or
+  overview-specific selector. The Go executor integration proof checks
+  `accounting.read`, overview semantics, audit recording, and tenant isolation
+  with the runtime database role. The shared capability proxy must be enabled
+  for Go execution. See [`accounting.ts`](../../apps/web-vite/src/api/accounting.ts),
+  [`AccountingPage.tsx`](../../apps/web-vite/src/components/AccountingPage.tsx),
+  and [`accounting_overview_test.go`](../../apps/api/internal/capability/accounting_overview_test.go).
 
 ## Capabilities, approvals, transactions, and audit
 

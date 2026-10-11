@@ -460,8 +460,7 @@ describe("AccountingPage states", () => {
     expect(screen.getByText("Invoice #1042")).toBeTruthy();
   });
 
-  it("renders the books from the selected Go overview capability", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_OVERVIEW_READS__", true);
+  it("renders the books from the Go overview capability", async () => {
     const { calls } = stubAccounting();
 
     await renderReady();
@@ -479,7 +478,7 @@ describe("AccountingPage states", () => {
   });
 
   it("surfaces a load failure with a retry that refetches", async () => {
-    const { mock } = stubAccounting({ accounting: { nope: true } });
+    const { mock } = stubAccounting({ goOverviewResponse: () => Response.json({ ok: true, data: { nope: true } }) });
     render(<AccountingPage />);
 
     expect(await screen.findByRole("heading", { name: "Could not load your books" })).toBeTruthy();
@@ -611,7 +610,7 @@ describe("AccountingPage governed writes", () => {
 
     expect(await screen.findByRole("button", { name: "Retry exact bill payment" })).not.toBeNull();
     expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("payBill"))).toBe(false);
-    const firstWrite = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute")!.body!) as {
+    const firstWrite = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"purchasing.payBill"'))!.body!) as {
       capabilityId: string;
       input: Record<string, unknown>;
       intentId: string;
@@ -623,7 +622,7 @@ describe("AccountingPage governed writes", () => {
     render(<AccountingPage {...ids} />);
     fireEvent.click(await screen.findByRole("button", { name: "Retry exact bill payment" }));
     expect(await screen.findByText(/^Payment for bill #77 done\.$/)).not.toBeNull();
-    const writes = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body!) as typeof firstWrite);
+    const writes = calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"purchasing.payBill"')).map((call) => JSON.parse(call.body!) as typeof firstWrite);
     expect(writes).toHaveLength(2);
     expect(writes[1]).toEqual(firstWrite);
   });
@@ -650,7 +649,7 @@ describe("AccountingPage governed writes", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Pay $40.00" }));
 
     expect(await screen.findByRole("button", { name: "Retry exact bill payment" })).not.toBeNull();
-    const firstWrites = calls.filter((call) => call.url === "/api/capabilities/execute");
+    const firstWrites = calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"purchasing.payBill"'));
     expect(firstWrites).toHaveLength(1);
     expect(calls.some((call) => call.method === "POST" && (call.url === "/api/purchasing" || call.url === "/api/accounting" && call.body?.includes("payBill")))).toBe(false);
     const firstWrite = JSON.parse(firstWrites[0]!.body!) as Record<string, unknown>;
@@ -659,7 +658,7 @@ describe("AccountingPage governed writes", () => {
     render(<AccountingPage {...ids} />);
     fireEvent.click(await screen.findByRole("button", { name: "Retry exact bill payment" }));
     expect(await screen.findByText(/^Payment for bill #77 done\.$/)).not.toBeNull();
-    const writes = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body!) as Record<string, unknown>);
+    const writes = calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"purchasing.payBill"')).map((call) => JSON.parse(call.body!) as Record<string, unknown>);
     expect(writes).toHaveLength(2);
     expect(writes[1]).toEqual(firstWrite);
     expect(calls.some((call) => call.method === "POST" && (call.url === "/api/purchasing" || call.url === "/api/accounting" && call.body?.includes("payBill")))).toBe(false);
@@ -758,7 +757,7 @@ describe("AccountingPage governed writes", () => {
     const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
     let attempt = 0;
     const { calls } = stubAccounting({
-      accounting: { ...overview, invoices: [] },
+      goOverviewResponse: () => Response.json({ ok: true, data: { ...overview, invoices: [] } }),
       goPaymentResponse: () => {
         const body = JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
         sent.push(body);
@@ -788,7 +787,7 @@ describe("AccountingPage governed writes", () => {
     const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
     let attempt = 0;
     const { calls } = stubAccounting({
-      accounting: { ...overview, invoices: [] },
+      goOverviewResponse: () => Response.json({ ok: true, data: { ...overview, invoices: [] } }),
       goCreateInvoiceResponse: () => {
         const body = JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
         sent.push(body);
@@ -845,7 +844,7 @@ describe("AccountingPage governed writes", () => {
     expect(screen.queryByRole("button", { name: "Retry exact invoice" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "New invoice" }));
     expect((screen.getByLabelText("Line 1 description") as HTMLInputElement).value).toBe("");
-    expect(calls.filter((call) => call.url === "/api/capabilities/execute" && call.method === "POST")).toHaveLength(2);
+    expect(calls.filter((call) => call.url === "/api/capabilities/execute" && call.method === "POST" && call.body?.includes('"capabilityId":"accounting.createInvoice"'))).toHaveLength(2);
   });
 
   it("guards a credit note behind a positive amount and a real reason", async () => {
@@ -959,7 +958,7 @@ describe("AccountingPage governed writes", () => {
     const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
     let attempt = 0;
     const { calls } = stubAccounting({
-      accounting: { ...overview, entries: [{ ...invoiceEntry, sourceType: "manual" }] },
+      goOverviewResponse: () => Response.json({ ok: true, data: { ...overview, entries: [{ ...invoiceEntry, sourceType: "manual" }] } }),
       goReverseEntryResponse: () => {
         const body = JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
         sent.push(body);
@@ -1020,11 +1019,11 @@ describe("AccountingPage tabs", () => {
 
   it("filters receivables by aging range", async () => {
     stubAccounting({
-      accounting: {
+      goOverviewResponse: () => Response.json({ ok: true, data: {
         ...overview,
         aging: { current: 0, d30: 10_000, d60: 0, d90plus: 0, totalOutstanding: 10_000 },
         agingInvoices: [{ number: 1042, currency: "USD", outstandingMinor: 10_000, ageDays: 45 }],
-      },
+      } }),
     });
     await renderReady();
 
@@ -1050,6 +1049,7 @@ describe("AccountingPage tabs", () => {
       "accounting.balanceSheet",
       "accounting.cashFlow",
       "accounting.incomeStatement",
+      "accounting.overview",
       "accounting.reportCurrencyMetadata",
       "accounting.unrealizedFxExposure",
     ]);
@@ -1080,10 +1080,10 @@ describe("AccountingPage tabs", () => {
 
   it("shows reports and keeps foreign bills out of the base-currency payable total", async () => {
     stubAccounting({
-      accounting: {
+      goOverviewResponse: () => Response.json({ ok: true, data: {
         ...overview,
         bills: [overview.bills[0], { ...overview.bills[0], id: "bill-2", number: 78, currency: "EUR", outstandingMinor: 9_000 }],
-      },
+      } }),
     });
     await renderReady();
 
@@ -1174,7 +1174,7 @@ describe("AccountingPage tabs", () => {
     });
     expect(screen.getByLabelText("Match Incoming transfer against payment")).toHaveProperty("disabled", true);
     expect(calls.some((call) => call.url === "/api/banking" && call.method === "POST")).toBe(false);
-    const initial = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute")!.body!) as Record<string, unknown>;
+    const initial = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.matchBankTransaction"'))!.body!) as Record<string, unknown>;
 
     cleanup();
     await renderReady();
@@ -1182,7 +1182,7 @@ describe("AccountingPage tabs", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Retry exact match" }));
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "Retry exact match" })).toBeNull());
-    const writes = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body!) as Record<string, unknown>);
+    const writes = calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.matchBankTransaction"')).map((call) => JSON.parse(call.body!) as Record<string, unknown>);
     expect(writes).toHaveLength(2);
     expect(writes[0]).toEqual(initial);
     expect(writes[1]).toEqual(initial);
@@ -1208,7 +1208,7 @@ describe("AccountingPage tabs", () => {
     fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Unmatch" }));
     await screen.findByRole("button", { name: "Retry exact unmatch" });
-    const initial = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute")!.body!) as Record<string, unknown>;
+    const initial = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.unmatchBankTransaction"'))!.body!) as Record<string, unknown>;
 
     cleanup();
     await renderReady();
@@ -1216,7 +1216,7 @@ describe("AccountingPage tabs", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Retry exact unmatch" }));
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "Retry exact unmatch" })).toBeNull());
-    const writes = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body!) as Record<string, unknown>);
+    const writes = calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.unmatchBankTransaction"')).map((call) => JSON.parse(call.body!) as Record<string, unknown>);
     expect(writes).toHaveLength(2);
     expect(writes[0]).toEqual(initial);
     expect(writes[1]).toEqual(initial);
@@ -1322,10 +1322,10 @@ describe("AccountingPage tabs", () => {
     let statementRequest = 0;
     const secondCustomerId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     stubAccounting({
-      accounting: {
+      goOverviewResponse: () => Response.json({ ok: true, data: {
         ...overview,
         customers: [...overview.customers, { id: secondCustomerId, name: "Second customer", paymentTermDays: 14 }],
-      },
+      } }),
       goCustomerStatementResponse: () => {
         statementRequest += 1;
         if (statementRequest === 1) return firstStatement;

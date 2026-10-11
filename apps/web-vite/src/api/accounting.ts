@@ -525,10 +525,6 @@ export function goAccountingCashBasisUseGo(): boolean {
   return typeof __GO_ACCOUNTING_CASH_BASIS__ !== "undefined" && __GO_ACCOUNTING_CASH_BASIS__;
 }
 
-export function goAccountingOverviewReadsUseGo(): boolean {
-  return typeof __GO_ACCOUNTING_OVERVIEW_READS__ !== "undefined" && __GO_ACCOUNTING_OVERVIEW_READS__;
-}
-
 export function goAccountingBankReconciliationWritesUseGo(): boolean {
   return typeof __GO_BANK_RECONCILIATION_WRITES__ !== "undefined" && __GO_BANK_RECONCILIATION_WRITES__;
 }
@@ -641,16 +637,13 @@ export async function fetchAccountingEnabled(signal?: AbortSignal): Promise<bool
 }
 
 export async function fetchAccountingOverview(signal?: AbortSignal): Promise<AccountingOverview> {
-  if (goAccountingOverviewReadsUseGo()) {
-    return readGoAccountingCapability(
-      "accounting.overview",
-      {},
-      GoAccountingOverviewSchema,
-      "load your books",
-      signal,
-    );
-  }
-  return get("/api/accounting", AccountingOverviewSchema, "load your books", signal);
+  return readGoAccountingCapability(
+    "accounting.overview",
+    {},
+    GoAccountingOverviewSchema,
+    "load your books",
+    signal,
+  );
 }
 
 export async function fetchAccountingReports(signal?: AbortSignal): Promise<AccountingReports> {

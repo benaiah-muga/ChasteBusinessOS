@@ -2569,12 +2569,10 @@ new owners and the manifest shows zero legacy runtime paths.
      five-field UI shape. Keep failures nullable and do not fall back after a
      selected Go request; set `CHASTE_GO_ACCOUNTING_CASH_BASIS=0` for rollback.
 245. (Go/Vite implementation complete; browser proof pending) Route Vite
-     Accounting overview reads through the session-authenticated
-     `accounting.overview` capability when
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the strict overview
-     response and safe-integer entry debit aggregates, fail closed on selected
-     Go errors, and set `CHASTE_GO_ACCOUNTING_OVERVIEW_READS=0` for explicit
-     legacy rollback.
+     Accounting overview reads through the session-authenticated Go
+     `accounting.overview` capability unconditionally. Validate the strict
+     overview response and safe-integer entry debit aggregates, and fail closed
+     on Go errors without retrying the legacy overview route.
 246. (Vite implementation complete; browser proof pending) Route Vite Support
      inbox and selected-thread reads through the session-authenticated
      `support.listConversations` and `support.readConversation` capabilities

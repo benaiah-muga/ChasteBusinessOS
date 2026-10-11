@@ -14,7 +14,6 @@ import {
   goAccountingCustomerStatementReadsUseGo,
   fetchPaymentReminders,
   goAccountingCashBasisUseGo,
-  goAccountingOverviewReadsUseGo,
   goAccountingPaymentRemindersUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
@@ -171,34 +170,23 @@ describe("accounting API: module switchboard", () => {
 });
 
 describe("accounting API: books and reports", () => {
-  it("accepts the string-encoded debit aggregate the real route sends", async () => {
-    // The journal row spreads a SQL sum over a bigint column, and Postgres
-    // serialises bigint aggregates as JSON strings. A numeric-only schema made
-    // the live page report an unexpected format for a valid response.
-    stubFetch(() => Response.json({
+  it("accepts the Go integer debit aggregate", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: {
       ...overview,
-      entries: [{ ...entry, debitMinor: "12500" }],
-    }));
+      entries: [{ ...entry, debitMinor: 12_500 }],
+    } }));
     const result = await fetchAccountingOverview();
     expect(result.entries[0]?.debitMinor).toBe(12_500);
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
   });
 
   it("still rejects a non-numeric aggregate", async () => {
-    stubFetch(() => Response.json({ ...overview, entries: [{ ...entry, debitMinor: "not-a-number" }] }));
+    stubFetch(() => Response.json({ ok: true, data: { ...overview, entries: [{ ...entry, debitMinor: "not-a-number" }] } }));
     await expect(fetchAccountingOverview()).rejects.toBeInstanceOf(AccountingApiError);
   });
 
-  it("validates the legacy accounting overview strictly", async () => {
-    const mock = stubFetch(() => Response.json(overview));
-    await expect(fetchAccountingOverview()).resolves.toEqual(overview);
-    expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "GET" }));
-  });
-
-  it("loads the strict overview from Go with a session capability request", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_OVERVIEW_READS__", true);
+  it("always loads the strict overview from Go with a session capability request", async () => {
     const mock = stubFetch(() => Response.json({ ok: true, data: overview }));
-
-    expect(goAccountingOverviewReadsUseGo()).toBe(true);
     await expect(fetchAccountingOverview()).resolves.toEqual(overview);
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
@@ -212,8 +200,7 @@ describe("accounting API: books and reports", () => {
     expect(requestBody.intentId).toEqual(expect.any(String));
   });
 
-  it("fails closed on a selected Go error without retrying the legacy overview", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_OVERVIEW_READS__", true);
+  it("fails closed on a Go error without retrying the legacy overview", async () => {
     const mock = stubFetch(() => Response.json({ message: "service unavailable" }, { status: 503 }));
 
     await expect(fetchAccountingOverview()).rejects.toMatchObject({ status: 503 });
@@ -222,7 +209,6 @@ describe("accounting API: books and reports", () => {
   });
 
   it("rejects an unsafe Go debit aggregate", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_OVERVIEW_READS__", true);
     stubFetch(() => Response.json({
       ok: true,
       data: { ...overview, entries: [{ ...entry, debitMinor: Number.MAX_SAFE_INTEGER + 1 }] },
@@ -235,15 +221,15 @@ describe("accounting API: books and reports", () => {
   });
 
   it("rejects a body that drifts from the ledger contract", async () => {
-    stubFetch(() => Response.json({ ...overview, entries: [{ ...entry, amountMinor: 12.5 }] }));
+    stubFetch(() => Response.json({ ok: true, data: { ...overview, entries: [{ ...entry, amountMinor: 12.5 }] } }));
     await expect(fetchAccountingOverview()).rejects.toMatchObject({
       name: "AccountingApiError",
-      message: "The Accounting service returned data in an unexpected format.",
+      message: "The Go Accounting service returned an unexpected result.",
     });
   });
 
   it("rejects money that is not an integer in minor units", async () => {
-    stubFetch(() => Response.json({ ...overview, baseCurrency: "USD", aging: { ...overview.aging, totalOutstanding: 1.5 } }));
+    stubFetch(() => Response.json({ ok: true, data: { ...overview, baseCurrency: "USD", aging: { ...overview.aging, totalOutstanding: 1.5 } } }));
     await expect(fetchAccountingOverview()).rejects.toBeInstanceOf(AccountingApiError);
   });
 
