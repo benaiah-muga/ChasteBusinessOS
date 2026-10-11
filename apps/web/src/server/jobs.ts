@@ -122,7 +122,10 @@ export async function claimJob(
         'crm.createTask',
         'crm.completeTask',
         'crm.updateTaskDetails',
-        'crm.restoreTaskDetails'
+        'crm.restoreTaskDetails',
+        'crm.createDeal',
+        'crm.moveDealStage',
+        'crm.convertLead'
       )
       ORDER BY available_at, created_at
       LIMIT 1

@@ -2679,3 +2679,12 @@ new owners and the manifest shows zero legacy runtime paths.
      including completion state, receipt, and system audit. The focused
      TypeScript jobs suite passed all 10 tests, including skip checks for all
      four Go-owned CRM task types.
+
+257. (Implemented and verified) Make the Go jobs worker the sole owner of
+     `crm.createDeal`, `crm.moveDealStage`, and `crm.convertLead`. Their Go
+     capability handlers, worker permissions, and database-backed execution
+     proof already existed. TypeScript ownership checks now prove the legacy
+     claimant leaves each job pending; the Go deal worker DB test passed for
+     deal creation, stage changes, and conversion. Other CRM capability job
+     types remain unchanged. The focused TypeScript jobs suite passed all 13
+     tests.

@@ -357,6 +357,20 @@ and record system audit events. The TypeScript `jobs.test.ts` ownership checks
 prove the legacy claimant leaves all four job types pending without
 incrementing their attempts.
 
+## CRM deal jobs
+
+The Go worker is the sole queue owner for `crm.createDeal`,
+`crm.moveDealStage`, and `crm.convertLead`. Go runs each through the governed
+executor under `crm.write`, using the existing job ID receipt intent and
+organization scope. The TypeScript claimant excludes these types; other CRM
+capability job ownership is unchanged.
+
+`TestCRMDealJobsClaimAndExecuteThroughSystemPath` proves the Go worker creates
+a deal, moves its stage, converts it into a customer, records the create-job
+action receipt, and writes system audit events. TypeScript ownership checks
+prove the legacy claimant leaves each of these jobs pending without
+incrementing its attempts.
+
 ## Other scheduled capability candidate
 
 `accounting.generateDueInvoices` is described as a durable-job worker entry

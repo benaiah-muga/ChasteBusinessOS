@@ -115,7 +115,14 @@ describe("capability job queue", () => {
     expect(row!.attempts).toBe(0);
   });
 
-  it.each(["crm.completeTask", "crm.updateTaskDetails", "crm.restoreTaskDetails"] as const)(
+  it.each([
+    "crm.completeTask",
+    "crm.updateTaskDetails",
+    "crm.restoreTaskDetails",
+    "crm.createDeal",
+    "crm.moveDealStage",
+    "crm.convertLead",
+  ] as const)(
     "leaves %s jobs for the Go worker",
     async (type) => {
       const jobId = await enqueueCapabilityJob(db, {

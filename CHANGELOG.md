@@ -13,9 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
-- Go jobs worker now exclusively owns CRM task creation, completion, and detail
-  update/restore jobs. The TypeScript worker leaves all four job types pending
-  for Go, which executes them through the governed path with action receipts.
+- Go jobs worker now exclusively owns CRM deal and task jobs. TypeScript leaves
+  deal creation, stage moves, lead conversion, and task creation, completion,
+  and detail update/restore pending for Go, which executes them through the
+  governed path with action receipts.
 
 - Go jobs worker now owns asynchronous document parsing. The TypeScript worker
   leaves `documents.parseDocument` queued for Go, which records the governed
