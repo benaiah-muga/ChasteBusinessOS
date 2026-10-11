@@ -409,7 +409,11 @@ covered by `modules/accounting/src/recurring.test.ts:64-82`. The inspected
 production worker loop does not schedule it; the only enqueue of this
 capability ID found is the test at
 `apps/web/src/server/gaps.test.ts:247-260`. Treat its production trigger as an
-open question. If it is activated in the target,
+open question. `TestAccountingDueInvoiceJobClaimAndExecute` now proves that the
+Go worker can execute an explicitly queued job through `ProcessOne` and
+`ClaimOne`, including the generated invoice, unique occurrence, governed
+receipt, and system audit event. This does not establish a production
+enqueue path or move ownership. If it is activated in the target,
 preserve the posting capability, unique occurrence, and atomic schedule
 advancement; do not silently fold it into the routine scheduler.
 

@@ -1246,6 +1246,151 @@ func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
 	}
 }
 
+func TestAccountingDueInvoiceJobClaimAndExecute(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the recurring invoice jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := envOr("CHASTE_APP_DB_PASSWORD", "chaste_app_dev_only")
+	workerPassword := envOr("CHASTE_JOBS_WORKER_DB_PASSWORD", "chaste_jobs_worker_dev_only")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+	if GoCapabilityPermissions["accounting.generateDueInvoices"] != "accounting.write" {
+		t.Fatalf("Go due invoice permission = %q, want accounting.write", GoCapabilityPermissions["accounting.generateDueInvoices"])
+	}
+
+	tag := fmt.Sprintf("accounting-due-invoice-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cleanupCancel()
+		tx, err := owner.Begin(cleanupCtx)
+		if err != nil {
+			t.Errorf("begin recurring invoice fixture cleanup: %v", err)
+			return
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		if _, err := tx.Exec(cleanupCtx, `SELECT set_config('app.ledger_maintenance', 'on', true)`); err != nil {
+			t.Errorf("enable recurring invoice fixture cleanup: %v", err)
+			return
+		}
+		for _, statement := range []string{
+			`DELETE FROM journal_lines WHERE entry_id IN (SELECT id FROM journal_entries WHERE org_id=$1::uuid)`,
+			`DELETE FROM journal_entries WHERE org_id=$1::uuid`,
+			`DELETE FROM recurring_invoice_runs WHERE org_id=$1::uuid`,
+			`DELETE FROM recurring_invoices WHERE org_id=$1::uuid`,
+			`DELETE FROM invoices WHERE org_id=$1::uuid`,
+			`DELETE FROM doc_counters WHERE org_id=$1::uuid`,
+			`DELETE FROM customers WHERE org_id=$1::uuid`,
+		} {
+			if _, err := tx.Exec(cleanupCtx, statement, orgID); err != nil {
+				t.Errorf("recurring invoice fixture cleanup failed: %v", err)
+				return
+			}
+		}
+		if err := tx.Commit(cleanupCtx); err != nil {
+			t.Errorf("commit recurring invoice fixture cleanup: %v", err)
+		}
+	}()
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO accounts (org_id, code, name, type) VALUES
+		($1::uuid, '1100', 'Accounts Receivable', 'asset'),
+		($1::uuid, '2100', 'Sales Tax Payable', 'liability'),
+		($1::uuid, '4000', 'Sales Revenue', 'income')`, orgID); err != nil {
+		t.Fatalf("seed recurring invoice accounts: %v", err)
+	}
+	var customerID, templateID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO customers (org_id, name, payment_term_days)
+		VALUES ($1::uuid, 'Go worker recurring invoice customer', NULL)
+		RETURNING id::text`, orgID).Scan(&customerID); err != nil {
+		t.Fatalf("seed recurring invoice customer: %v", err)
+	}
+	scheduledFor := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO recurring_invoices (org_id, customer_id, frequency, lines, memo, active, next_run_at, created_by_actor_type)
+		VALUES ($1::uuid, $2::uuid, 'monthly', '[{"description":"Managed hosting","quantity":1000,"unitPriceMinor":500000,"taxMinor":50000}]'::jsonb, 'Go worker recurring invoice', true, $3, 'system')
+		RETURNING id::text`, orgID, customerID, scheduledFor).Scan(&templateID); err != nil {
+		t.Fatalf("seed recurring invoice template: %v", err)
+	}
+
+	jobID := insertJobsTestJob(t, ctx, owner, orgID, "accounting.generateDueInvoices", json.RawMessage(`{}`), 3, time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC))
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:      "accounting-due-invoice-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worked, err := worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("due invoice job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, jobID, "done", 1)
+
+	var invoiceID, memo, status string
+	var invoiceNumber, totalMinor, taxMinor int64
+	if err := owner.QueryRow(ctx, `
+		SELECT id::text, number, total_minor, tax_minor, memo, status
+		FROM invoices WHERE org_id=$1::uuid AND customer_id=$2::uuid`, orgID, customerID).
+		Scan(&invoiceID, &invoiceNumber, &totalMinor, &taxMinor, &memo, &status); err != nil {
+		t.Fatalf("read generated recurring invoice: %v", err)
+	}
+	if invoiceNumber != 1 || totalMinor != 550000 || taxMinor != 50000 || memo != "Go worker recurring invoice" || status != "sent" {
+		t.Fatalf("generated invoice number=%d total=%d tax=%d memo=%q status=%q", invoiceNumber, totalMinor, taxMinor, memo, status)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM invoice_lines WHERE invoice_id=$1::uuid AND description='Managed hosting' AND quantity=1000 AND unit_price_minor=500000 AND tax_minor=50000`, invoiceID); got != 1 {
+		t.Fatalf("generated recurring invoice lines=%d, want one frozen line", got)
+	}
+	var runScheduledFor, nextRunAt, lastRunAt time.Time
+	var runInvoiceID *string
+	var runStatus string
+	if err := owner.QueryRow(ctx, `
+		SELECT r.scheduled_for, r.invoice_id::text, r.status, t.next_run_at, t.last_run_at
+		FROM recurring_invoice_runs r
+		JOIN recurring_invoices t ON t.id=r.recurring_invoice_id
+		WHERE r.org_id=$1::uuid AND r.recurring_invoice_id=$2::uuid`, orgID, templateID).
+		Scan(&runScheduledFor, &runInvoiceID, &runStatus, &nextRunAt, &lastRunAt); err != nil {
+		t.Fatalf("read recurring invoice occurrence: %v", err)
+	}
+	if !runScheduledFor.Equal(scheduledFor) || runInvoiceID == nil || *runInvoiceID != invoiceID || runStatus != "completed" || !nextRunAt.After(scheduledFor) || lastRunAt.IsZero() {
+		t.Fatalf("recurring occurrence scheduled=%s invoice=%v status=%q next=%s last=%s", runScheduledFor, runInvoiceID, runStatus, nextRunAt, lastRunAt)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+jobID); got != 1 {
+		t.Fatalf("due invoice job receipts=%d, want one governed receipt", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id='accounting.generateDueInvoices' AND actor_type='system' AND actor_id IS NULL AND session_id IS NULL`, orgID); got != 1 {
+		t.Fatalf("due invoice system audit events=%d, want one", got)
+	}
+}
+
 func TestPurchasingReturnGoodsWorkerClaimAndExecution(t *testing.T) {
 	ownerURL := os.Getenv("DATABASE_URL")
 	if ownerURL == "" {
