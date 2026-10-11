@@ -138,7 +138,7 @@ production requests and writes. No production traffic has moved to Go.
   capability, and strictly validates the `{ok:true,data:{valid,reason?}}`
   response. A bad signature is a successful `valid:false` verdict, not an
   HTTP 422 response; capability permission errors remain visible. Publish,
-  install, and uninstall retain their current request route. Existing Go tests
+  install, and uninstall also use their authenticated Go capabilities. Existing Go tests
   cover a plugin-kit valid signature, invalid verdicts, and governed execution;
   focused Vite tests assert valid and invalid behavior with no legacy
   verification call. Authenticated browser proof remains pending. See
@@ -177,10 +177,30 @@ production requests and writes. No production traffic has moved to Go.
   install preservation, inability to claim another organization, and blocked
   publisher-field updates. Vite API and page tests verify the capability
   payload, Go listing refresh, installed state, and absence of the legacy
-  install POST. Uninstall remains on its previous route. Authenticated browser
-  proof remains pending. See [`marketplace.ts`](../../apps/web-vite/src/api/marketplace.ts),
+  install POST. Authenticated browser proof remains pending. See
+  [`marketplace.ts`](../../apps/web-vite/src/api/marketplace.ts),
   [`creator.go`](../../apps/api/internal/capability/creator.go),
   [`0130_go_marketplace_install_state.sql`](../../packages/db/drizzle/0130_go_marketplace_install_state.sql),
+  and [`creator_executor_test.go`](../../apps/api/internal/capability/creator_executor_test.go).
+- Vite Marketplace uninstall sends only the listing ID through Go's
+  authenticated `creator.uninstallListing` capability and refreshes the Go
+  marketplace projection after success. Go takes the same advisory lock and
+  calls the existing cross-publisher row-lock helper before invoking a new
+  one-argument database writer. The writer derives the active org from
+  transaction-local `app.org_id`, validates that installed-org state is an
+  array of UUID strings, removes only the active org, and returns both the
+  persisted array and confirmed removal state. It updates no publisher fields;
+  `updated_at` retains the existing refresh behavior, including repeat
+  uninstall. PUBLIC cannot execute the function; only `chaste_app` can.
+  Runtime-role proof covers foreign publishers, other-org preservation,
+  idempotent and initially absent uninstall, malformed-state refusal without
+  mutation, stale IDs, transaction-org mismatch, helper ACL/search path, RLS
+  publisher-field denial, and human audit. Vite tests verify strict success
+  and pending envelopes, refresh, and absence of legacy uninstall requests.
+  Authenticated browser proof remains pending. See
+  [`marketplace.ts`](../../apps/web-vite/src/api/marketplace.ts),
+  [`creator.go`](../../apps/api/internal/capability/creator.go),
+  [`0131_go_marketplace_uninstall_state.sql`](../../packages/db/drizzle/0131_go_marketplace_uninstall_state.sql),
   and [`creator_executor_test.go`](../../apps/api/internal/capability/creator_executor_test.go).
 - Vite Accounting Overview reads through Go's authenticated
   `accounting.overview` capability unconditionally. The client validates the

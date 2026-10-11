@@ -17,20 +17,27 @@ The full v1 changelog is preserved at the bottom of this file.
   capability with the manifest and publisher signature material. Valid and
   invalid signature results use Go's strict capability envelope; invalid
   signatures are returned as a normal verdict and do not use the legacy HTTP
-  422 response. Publish and install also use Go, while uninstall remains on
-  its existing route.
+  422 response. Publish, install, and uninstall use their authenticated Go
+  capabilities.
 
 - Vite Marketplace publish now uses the authenticated Go `creator.publishListing`
   capability, with strict success and pending approval validation. Successful
   publishes refresh the Go listing read, and errors do not retry through the
-  legacy route. Install also uses Go, and uninstall keeps its existing route.
+  legacy route. Install and uninstall also use Go.
 
 - Vite Marketplace install now uses the authenticated Go
   `creator.installListing` capability. Go re-verifies the signed listing and
   derives the installer organization from transaction-scoped RLS context. The
   installer state update is narrowly delegated to a database function; install
   remains idempotent and does not fall back to the legacy route. Uninstall is
-  unchanged.
+  now routes through Go as well.
+
+- Vite Marketplace uninstall now calls the authenticated Go
+  `creator.uninstallListing` capability using only the listing ID. Go removes
+  only the active organization from install state and confirms the persisted
+  result; repeat and not-installed requests remain idempotent. The database
+  update runs through a narrowly granted helper so publisher-owned columns
+  stay protected by RLS.
 
 - Vite Purchasing now loads vendors, recent purchase orders and bills, accounts
   payable aging, requests and RFQs, price history, and supplier performance

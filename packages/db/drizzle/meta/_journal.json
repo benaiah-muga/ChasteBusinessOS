@@ -919,6 +919,13 @@
       "when": 1791744080500,
       "tag": "0130_go_marketplace_install_state",
       "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1791744080501,
+      "tag": "0131_go_marketplace_uninstall_state",
+      "breakpoints": true
     }
   ]
 }

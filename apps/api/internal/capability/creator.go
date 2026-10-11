@@ -1328,38 +1328,42 @@ func creatorUninstallListing(ctx context.Context, tx pgx.Tx, orgID string, input
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 43))`, input.ListingID); err != nil {
 		return CreatorUninstallListingOutput{}, err
 	}
-	var listingID, signature, publisherKey string
-	var manifestJSON json.RawMessage
-	var installedJSON []byte
+	var activeOrgID string
+	if err := tx.QueryRow(ctx, `SELECT current_setting('app.org_id', true)`).Scan(&activeOrgID); err != nil {
+		return CreatorUninstallListingOutput{}, err
+	}
+	if activeOrgID != orgID {
+		return CreatorUninstallListingOutput{}, errors.New("marketplace uninstall organization scope mismatch")
+	}
+	var listingID string
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, manifest, signature, publisher_public_key, installed_by_org_ids
-		FROM marketplace_listings WHERE id=$1::uuid LIMIT 1`, input.ListingID).Scan(
-		&listingID, &manifestJSON, &signature, &publisherKey, &installedJSON)
+		SELECT id::text
+		FROM public.chaste_marketplace_lock_listing($1::uuid)`, input.ListingID).Scan(&listingID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CreatorUninstallListingOutput{}, errors.New("listing not found")
 	}
 	if err != nil {
 		return CreatorUninstallListingOutput{}, err
 	}
-	valid, _, _ := creatorVerifyPlugin(manifestJSON, signature, publisherKey)
-	_ = valid
-	var installed []string
-	_ = json.Unmarshal(installedJSON, &installed)
-	var kept []string
-	for _, installer := range installed {
-		if installer != orgID {
-			kept = append(kept, installer)
+	var installedJSON []byte
+	var uninstalled bool
+	if err := tx.QueryRow(ctx, `SELECT installed_by_org_ids, uninstalled
+		FROM public.chaste_marketplace_uninstall_listing($1::uuid)`, listingID).Scan(&installedJSON, &uninstalled); err != nil {
+		return CreatorUninstallListingOutput{}, err
+	}
+	var remaining []string
+	if err := json.Unmarshal(installedJSON, &remaining); err != nil {
+		return CreatorUninstallListingOutput{}, errors.New("marketplace uninstall returned malformed installed state")
+	}
+	for _, installerOrgID := range remaining {
+		if installerOrgID == orgID {
+			return CreatorUninstallListingOutput{}, errors.New("marketplace uninstall left the active organization installed")
 		}
 	}
-	encoded, err := json.Marshal(kept)
-	if err != nil {
-		return CreatorUninstallListingOutput{}, err
+	if !uninstalled {
+		return CreatorUninstallListingOutput{}, errors.New("marketplace uninstall helper did not confirm removal")
 	}
-	if _, err := tx.Exec(ctx, `UPDATE marketplace_listings SET installed_by_org_ids=$2::jsonb, updated_at=$3 WHERE id=$1::uuid`,
-		listingID, string(encoded), time.Now()); err != nil {
-		return CreatorUninstallListingOutput{}, err
-	}
-	return CreatorUninstallListingOutput{Uninstalled: true}, nil
+	return CreatorUninstallListingOutput{Uninstalled: uninstalled}, nil
 }
 
 func creatorListMarketplace(ctx context.Context, tx pgx.Tx, orgID string) (CreatorListMarketplaceOutput, error) {

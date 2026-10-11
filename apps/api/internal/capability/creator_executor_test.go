@@ -387,6 +387,194 @@ func TestGoCreatorMarketplaceHumanInstallIsSignedIdempotentAndTenantScoped(t *te
 	}
 }
 
+func TestGoCreatorMarketplaceHumanUninstallIsIdempotentAndTenantScoped(t *testing.T) {
+	fx := newExecutorFixture(t)
+	fx.setModuleList(`["creator"]`)
+	grantWavePermission(t, fx, "platform.creator")
+	type listingFixture struct {
+		id        string
+		slug      string
+		manifest  string
+		signature string
+		publicKey string
+		updatedAt time.Time
+	}
+	seedListing := func(slug string, installedState any) listingFixture {
+		t.Helper()
+		manifestRaw := strings.Replace(creatorTestManifest, "acme-warehouse", slug, 1)
+		manifest, err := creatorValidateManifest(json.RawMessage(manifestRaw))
+		if err != nil {
+			t.Fatalf("validate uninstall manifest %s: %v", slug, err)
+		}
+		signature, publicKey := creatorTestPublisher(t, manifest)
+		installed, err := json.Marshal(installedState)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture := listingFixture{id: executorUUID(t), slug: slug, manifest: manifestRaw, signature: signature, publicKey: publicKey}
+		if _, err := fx.owner.Exec(fx.ctx, `
+			INSERT INTO marketplace_listings
+				(id, slug, name, version, summary, manifest, signature, publisher_public_key,
+				 capability_ids, status, submitted_by_org_id, installed_by_org_ids)
+			VALUES ($1::uuid, $2, 'Uninstall proof listing', '1.2.3', 'Tenant uninstall proof',
+				 $3::jsonb, $4, $5, '["acme.cycleCount"]'::jsonb, 'verified', $6::uuid, $7::jsonb)`,
+			fixture.id, fixture.slug, fixture.manifest, fixture.signature, fixture.publicKey, fx.otherOrgID, string(installed)); err != nil {
+			t.Fatalf("seed marketplace uninstall listing %s: %v", slug, err)
+		}
+		if err := fx.owner.QueryRow(fx.ctx, `SELECT updated_at FROM marketplace_listings WHERE id=$1::uuid`, fixture.id).Scan(&fixture.updatedAt); err != nil {
+			t.Fatalf("read initial marketplace listing timestamp %s: %v", fixture.id, err)
+		}
+		return fixture
+	}
+	installedListing := seedListing("uninstall-installed-"+executorUUID(t)[:8], []string{fx.orgID, fx.otherOrgID})
+	notInstalledListing := seedListing("uninstall-absent-"+executorUUID(t)[:8], []string{fx.otherOrgID})
+	malformedListing := seedListing("uninstall-malformed-"+executorUUID(t)[:8], map[string]string{"unexpected": "shape"})
+	malformedElementListing := seedListing("uninstall-bad-element-"+executorUUID(t)[:8], []any{17, fx.otherOrgID})
+	listings := []listingFixture{installedListing, notInstalledListing, malformedListing, malformedElementListing}
+	t.Cleanup(func() {
+		for _, listing := range listings {
+			if _, err := fx.owner.Exec(context.Background(), `DELETE FROM marketplace_listings WHERE id=$1::uuid`, listing.id); err != nil {
+				t.Errorf("clean marketplace uninstall fixture %s: %v", listing.id, err)
+			}
+		}
+	})
+	uninstall := func(listingID, intent string) (Result, error) {
+		t.Helper()
+		input, err := json.Marshal(CreatorUninstallListingInput{ListingID: listingID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims := waveModuleClaims(fx, creatorUninstallListingCapabilityID, "platform.creator", input, "human", "", intent)
+		return fx.executor.Execute(fx.ctx, claims, creatorUninstallListingCapabilityID, input)
+	}
+	initialUpdatedAt := installedListing.updatedAt
+	first, err := uninstall(installedListing.id, "marketplace-human-uninstall-first")
+	if err != nil || !first.OK || first.PendingApproval {
+		t.Fatalf("first direct-human uninstall result=%+v err=%v, want completed uninstall", first, err)
+	}
+	var firstOutput CreatorUninstallListingOutput
+	if err := json.Unmarshal(first.Data, &firstOutput); err != nil || !firstOutput.Uninstalled {
+		t.Fatalf("first uninstall data=%s output=%+v err=%v", first.Data, firstOutput, err)
+	}
+	readInstalled := func(id string) []string {
+		t.Helper()
+		var raw []byte
+		if err := fx.owner.QueryRow(fx.ctx, `SELECT installed_by_org_ids FROM marketplace_listings WHERE id=$1::uuid`, id).Scan(&raw); err != nil {
+			t.Fatalf("read installed organizations for %s: %v", id, err)
+		}
+		var installed []string
+		if err := json.Unmarshal(raw, &installed); err != nil {
+			t.Fatalf("decode installed organizations %s: %v", raw, err)
+		}
+		return installed
+	}
+	if got := readInstalled(installedListing.id); !reflect.DeepEqual(got, []string{fx.otherOrgID}) {
+		t.Fatalf("uninstall organizations=%v, want only the other organization's installation", got)
+	}
+	var firstUpdatedAt time.Time
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT updated_at FROM marketplace_listings WHERE id=$1::uuid`, installedListing.id).Scan(&firstUpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !firstUpdatedAt.After(initialUpdatedAt) {
+		t.Fatalf("first uninstall updated_at=%s, want later than seeded value %s", firstUpdatedAt, initialUpdatedAt)
+	}
+	time.Sleep(2 * time.Millisecond)
+	repeated, err := uninstall(installedListing.id, "marketplace-human-uninstall-repeat")
+	if err != nil || !repeated.OK {
+		t.Fatalf("repeated direct-human uninstall result=%+v err=%v, want idempotent success", repeated, err)
+	}
+	var repeatUpdatedAt time.Time
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT updated_at FROM marketplace_listings WHERE id=$1::uuid`, installedListing.id).Scan(&repeatUpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !repeatUpdatedAt.After(firstUpdatedAt) {
+		t.Fatalf("repeat uninstall updated_at=%s, want later than first uninstall value %s", repeatUpdatedAt, firstUpdatedAt)
+	}
+	notInstalled, err := uninstall(notInstalledListing.id, "marketplace-human-uninstall-absent")
+	if err != nil || !notInstalled.OK {
+		t.Fatalf("uninstall of absent organization result=%+v err=%v, want idempotent success", notInstalled, err)
+	}
+	if got := readInstalled(notInstalledListing.id); !reflect.DeepEqual(got, []string{fx.otherOrgID}) {
+		t.Fatalf("uninstall of absent organization changed state to %v, want other organization preserved", got)
+	}
+	malformed, err := uninstall(malformedListing.id, "marketplace-human-uninstall-malformed")
+	if err == nil || malformed.OK || !strings.Contains(err.Error(), "installation state") {
+		t.Fatalf("malformed state uninstall result=%+v err=%v, want shape validation refusal", malformed, err)
+	}
+	var malformedState []byte
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT installed_by_org_ids FROM marketplace_listings WHERE id=$1::uuid`, malformedListing.id).Scan(&malformedState); err != nil {
+		t.Fatal(err)
+	}
+	var decodedMalformed map[string]string
+	if err := json.Unmarshal(malformedState, &decodedMalformed); err != nil || !reflect.DeepEqual(decodedMalformed, map[string]string{"unexpected": "shape"}) {
+		t.Fatalf("malformed-state uninstall mutated installed_by_org_ids=%s err=%v", malformedState, err)
+	}
+	malformedElement, err := uninstall(malformedElementListing.id, "marketplace-human-uninstall-bad-element")
+	if err == nil || malformedElement.OK || !strings.Contains(err.Error(), "organization ID") {
+		t.Fatalf("malformed-element uninstall result=%+v err=%v, want shape validation refusal", malformedElement, err)
+	}
+	var malformedElements []any
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT installed_by_org_ids FROM marketplace_listings WHERE id=$1::uuid`, malformedElementListing.id).Scan(&malformedState); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(malformedState, &malformedElements); err != nil || !reflect.DeepEqual(malformedElements, []any{float64(17), fx.otherOrgID}) {
+		t.Fatalf("malformed-element uninstall mutated installed_by_org_ids=%s err=%v", malformedState, err)
+	}
+	missing, err := uninstall(executorUUID(t), "marketplace-human-uninstall-missing")
+	if err == nil || missing.OK || !strings.Contains(err.Error(), "listing not found") {
+		t.Fatalf("stale listing uninstall result=%+v err=%v, want not-found error", missing, err)
+	}
+	_, scopeMismatchErr := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreatorUninstallListingOutput, error) {
+		return creatorUninstallListing(fx.ctx, tx, fx.otherOrgID, CreatorUninstallListingInput{ListingID: installedListing.id})
+	})
+	if scopeMismatchErr == nil || !strings.Contains(scopeMismatchErr.Error(), "organization scope mismatch") {
+		t.Fatalf("uninstall with a claimed organization outside transaction scope returned %v, want scope mismatch", scopeMismatchErr)
+	}
+	type helperPrivileges struct {
+		role               string
+		canUninstall       bool
+		publicCanExecute   bool
+		oneArgumentCount   int
+		pinnedDefinerCount int
+	}
+	privileges, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (helperPrivileges, error) {
+		var result helperPrivileges
+		err := tx.QueryRow(fx.ctx, `
+			SELECT current_user,
+				pg_catalog.has_function_privilege(current_user, 'public.chaste_marketplace_uninstall_listing(uuid)', 'EXECUTE'),
+				(SELECT EXISTS (
+					SELECT 1 FROM pg_catalog.pg_proc AS function
+					CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(function.proacl, pg_catalog.acldefault('f', function.proowner))) AS grant_row
+					WHERE function.oid='public.chaste_marketplace_uninstall_listing(uuid)'::regprocedure
+						AND grant_row.grantee=0 AND grant_row.privilege_type='EXECUTE')),
+				(SELECT count(*)::int FROM pg_catalog.pg_proc AS function
+					WHERE function.oid='public.chaste_marketplace_uninstall_listing(uuid)'::regprocedure
+						AND function.pronargs=1),
+				(SELECT count(*)::int FROM pg_catalog.pg_proc AS function
+					WHERE function.oid='public.chaste_marketplace_uninstall_listing(uuid)'::regprocedure
+						AND function.pronargs=1 AND function.prosecdef
+						AND function.proconfig @> ARRAY['search_path=pg_catalog, pg_temp'])`).Scan(
+			&result.role, &result.canUninstall, &result.publicCanExecute, &result.oneArgumentCount, &result.pinnedDefinerCount)
+		return result, err
+	})
+	if err != nil {
+		t.Fatalf("read uninstall helper privileges as runtime role: %v", err)
+	}
+	if privileges.role != "chaste_app" || !privileges.canUninstall || privileges.publicCanExecute || privileges.oneArgumentCount != 1 || privileges.pinnedDefinerCount != 1 {
+		t.Fatalf("uninstall helper privileges=%+v, want one-argument pinned SECURITY DEFINER executable only by chaste_app", privileges)
+	}
+	updatedPublisherRows, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (int64, error) {
+		tag, err := tx.Exec(fx.ctx, `UPDATE marketplace_listings SET name='unauthorized publisher edit' WHERE id=$1::uuid`, installedListing.id)
+		return tag.RowsAffected(), err
+	})
+	if err != nil || updatedPublisherRows != 0 {
+		t.Fatalf("runtime publisher-field update rows=%d err=%v, want RLS rejection", updatedPublisherRows, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2 AND kind='capability.executed' AND actor_type='human'`, fx.orgID, creatorUninstallListingCapabilityID); got != 3 {
+		t.Fatalf("creator.uninstallListing audit rows=%d, want one governed record for each successful uninstall", got)
+	}
+}
+
 func TestGoCreatorMarketplaceReadMatchesLegacyRowsAndWireFields(t *testing.T) {
 	fx := newExecutorFixture(t)
 	baseTime := time.Date(2099, time.September, 1, 12, 30, 45, 987654321, time.UTC)

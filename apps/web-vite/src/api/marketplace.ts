@@ -22,11 +22,6 @@ const VerifyPluginCapabilityResponseSchema = z.object({
   ok: z.literal(true),
   data: z.object({ valid: z.boolean(), reason: z.string().optional() }).strict(),
 }).strict();
-const PendingActionSchema = z.object({
-  ok: z.literal(false),
-  pendingApproval: z.literal(true),
-  reason: z.string(),
-}).strict();
 const CapabilityPendingActionSchema = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
@@ -117,7 +112,8 @@ export async function submitMarketplaceAction(input: Record<string, unknown>, si
   const action = typeof input.action === "string" ? input.action : undefined;
   const isPublish = action === "publish";
   const isInstall = action === "install";
-  const usesGoCapability = isPublish || isInstall;
+  const isUninstall = action === "uninstall";
+  const usesGoCapability = isPublish || isInstall || isUninstall;
   const capabilityInput = isPublish ? {
     manifest: input.manifest,
     signatureBase64: input.signatureBase64,
@@ -131,7 +127,7 @@ export async function submitMarketplaceAction(input: Record<string, unknown>, si
       headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
       body: JSON.stringify(usesGoCapability ? {
-        capabilityId: isPublish ? "creator.publishListing" : "creator.installListing",
+        capabilityId: isPublish ? "creator.publishListing" : isInstall ? "creator.installListing" : "creator.uninstallListing",
         input: capabilityInput,
         intentId: crypto.randomUUID(),
       } : { ...input, intentId: crypto.randomUUID() }),
@@ -143,7 +139,7 @@ export async function submitMarketplaceAction(input: Record<string, unknown>, si
   }
   const body: unknown = await readJson(response);
   if (response.status === 202) {
-    const parsed = (usesGoCapability ? CapabilityPendingActionSchema : PendingActionSchema).safeParse(body);
+    const parsed = CapabilityPendingActionSchema.safeParse(body);
     if (!parsed.success) throw new MarketplaceApiError(response.status, "The marketplace returned an unexpected approval response.");
     return { kind: "pending", reason: parsed.data.reason };
   }

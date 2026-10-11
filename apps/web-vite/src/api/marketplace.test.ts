@@ -297,4 +297,66 @@ describe("marketplace publish requests", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
+
+  it("uninstalls through the Go capability using only the listing ID", async () => {
+    const listingId = "7de066f0-4bdb-4f46-9b6a-193064f5b235";
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { uninstalled: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketplaceAction({ action: "uninstall", listingId })).resolves.toEqual({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    }));
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body).toEqual({
+      capabilityId: "creator.uninstallListing",
+      input: { listingId },
+      intentId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
+  });
+
+  it("preserves Go uninstall approval envelopes and rejects malformed success without fallback", async () => {
+    const listingId = "7de066f0-4bdb-4f46-9b6a-193064f5b235";
+    const pendingFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      ok: false,
+      pendingApproval: true,
+      reason: "An owner must approve this uninstall.",
+      approvalId: "d81d8459-9a20-4c8e-a88c-27866dd552aa",
+    }, { status: 202 }));
+    vi.stubGlobal("fetch", pendingFetch);
+    await expect(submitMarketplaceAction({ action: "uninstall", listingId })).resolves.toEqual({
+      kind: "pending", reason: "An owner must approve this uninstall.",
+    });
+    expect(pendingFetch).toHaveBeenCalledTimes(1);
+    expect(pendingFetch.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+
+    const malformedFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { uninstalled: true, extra: true } }));
+    vi.stubGlobal("fetch", malformedFetch);
+    await expect(submitMarketplaceAction({ action: "uninstall", listingId })).rejects.toMatchObject({
+      name: "MarketplaceApiError",
+      status: 200,
+      message: "The marketplace returned an unexpected action response.",
+    });
+    expect(malformedFetch).toHaveBeenCalledTimes(1);
+    expect(malformedFetch.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+
+    const malformedPendingFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      ok: false,
+      pendingApproval: true,
+      reason: "An owner must approve this uninstall.",
+      extra: true,
+    }, { status: 202 }));
+    vi.stubGlobal("fetch", malformedPendingFetch);
+    await expect(submitMarketplaceAction({ action: "uninstall", listingId })).rejects.toMatchObject({
+      name: "MarketplaceApiError",
+      status: 202,
+      message: "The marketplace returned an unexpected approval response.",
+    });
+    expect(malformedPendingFetch).toHaveBeenCalledTimes(1);
+    expect(malformedPendingFetch.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
 });

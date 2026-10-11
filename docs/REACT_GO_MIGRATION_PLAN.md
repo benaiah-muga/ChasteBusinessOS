@@ -3008,30 +3008,31 @@ new owners and the manifest shows zero legacy runtime paths.
      `/hr?tab=time` must render the employee picker using Go, request all three
      capabilities, and never call legacy `GET /api/hr`.
 
-289. (Implemented; focused Vite API/page tests and existing Go verification
-     tests passed; authenticated browser proof remains pending) Route Vite
+289. (Implemented; focused Vite API/page tests and authenticated browser proof
+     passed) Route Vite
      Marketplace Verify through the session-authenticated
      `creator.verifyPlugin` capability. Send only `manifest`,
      `signatureBase64`, and `publisherPublicKeyBase64` in the capability input,
      and strictly validate `{ok:true,data:{valid,reason?}}`. An invalid
      signature is a successful Go verdict with `valid:false`, not an HTTP 422
-     response. Preserve permission errors; publish and install also use their
-     Go capability cutovers, while uninstall remains on its existing route.
+     response. Preserve permission errors; publish, install, and uninstall use
+     their authenticated Go capability cutovers.
 
-290. (Implemented; focused Vite API/page tests and Go runtime-role DB proof
-     passed; authenticated browser proof remains pending) Route Vite Marketplace
+290. (Implemented; focused Vite API/page tests, Go runtime-role DB proof, and
+     authenticated browser proof passed) Route Vite Marketplace
      publish through the session-authenticated Go `creator.publishListing`
      capability. Send only `manifest`, `signatureBase64`, and
      `publisherPublicKeyBase64`, strictly validate success and pending approval
-     envelopes, and route install through Go while keeping uninstall on its
-     current route. The Go runtime-role proof verifies governed persistence,
-     submitting-organization ownership, and refusal to overwrite another
-     publisher's slug. Vite tests
-     cover publish success and list refresh, pending approval, errors, strict
-     envelope validation, and no legacy publish request.
+     envelopes, and route install and uninstall through Go. The Go runtime-role
+     proof verifies governed persistence, submitting-organization ownership,
+     and refusal to overwrite another publisher's slug. Vite tests cover
+     publish success and list refresh, pending approval, errors, strict envelope
+     validation, and no legacy publish request. The authenticated browser proof
+     verified a signed manifest, published it through Go, and saw it in the
+     Go-refreshed marketplace list with no browser page errors.
 
-291. (Implemented; focused Vite API/page tests and a direct-human runtime-role
-     DB proof passed; authenticated browser proof remains pending) Route Vite
+291. (Implemented; focused Vite API/page tests, a direct-human runtime-role DB
+     proof, and authenticated browser proof passed) Route Vite
      Marketplace install through the session-authenticated Go
      `creator.installListing` capability, sending only the listing ID. Preserve
      signature and verified-status checks, idempotency, the installed-list
@@ -3039,8 +3040,32 @@ new owners and the manifest shows zero legacy runtime paths.
      `SECURITY DEFINER` helpers: one locks and returns signature fields without
      mutation, and the other derives the installer from transaction-local
      `app.org_id` and updates only install state. Both pin search path and are
-     executable only by `chaste_app`. Keep uninstall on its existing route.
+     executable only by `chaste_app`. Keep uninstall idempotent and preserve
+     publisher-owned fields.
      Vite tests cover the capability request, Go list refresh, pending approval,
-     errors, and no legacy install request; runtime-role coverage proves signed install,
-     idempotent repeat, invalid/unverified refusal, tenant preservation, and
-     publisher-field protection.
+     errors, and no legacy install request; runtime-role coverage proves signed
+     install, idempotent repeat, invalid/unverified refusal, tenant preservation,
+     and publisher-field protection. The authenticated Vite browser installed
+     the signed listing through Go and rendered the refreshed installed state.
+
+292. (Implemented; focused Vite API/page tests, a direct-human runtime-role DB
+     proof, and authenticated browser proof passed) Route Vite
+     Marketplace uninstall through the session-authenticated Go
+     `creator.uninstallListing` capability, sending only the listing ID. Reuse
+     the cross-publisher listing lock helper, then call a one-argument
+     `SECURITY DEFINER` helper that derives the active org from
+     transaction-local `app.org_id`, validates the JSONB installed-org array,
+     and removes only that org. Pin `search_path`, revoke PUBLIC execution, and
+     grant the helper only to `chaste_app`. Preserve idempotent success for
+     repeated and initially absent installs; stale listing IDs must return
+     not-found. Runtime-role proof covers another publisher, membership
+     preservation, malformed state refusal without mutation, transaction/org
+     mismatch, helper ACL/search path, publisher-field RLS, and human audit.
+     Vite tests cover the listing-ID-only capability request, strict success
+     and pending envelopes, Go listing refresh, and no legacy uninstall POST.
+     The authenticated Vite browser removed the installed state through Go and
+     the refreshed row returned to Install; all Marketplace and module requests
+     returned 200 and page errors were empty. Local Go SMTP captured the
+     verification email, and Go onboarding created a test workspace. Signing in
+     with no workspace still redirects to the legacy onboarding URL; a separate
+     Vite routing cutover remains open.

@@ -183,14 +183,20 @@ describe("Vite marketplace page", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
   });
 
-  it("keeps uninstall on its existing same-origin route", async () => {
+  it("uninstalls through Go and refreshes installed state without the legacy route", async () => {
+    let installedHere = true;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return modules();
-      if (String(input) === "/api/marketplace" && init?.method === "POST") {
-        expect(JSON.parse(String(init.body))).toMatchObject({ action: "uninstall", listingId: listing.id });
+      if (isCapabilityRequest(input, init, "creator.uninstallListing")) {
+        const payload = JSON.parse(String(init?.body)) as { input?: { listingId?: string }; intentId?: string };
+        expect(payload.input).toEqual({ listingId: listing.id });
+        expect(payload.intentId).toEqual(expect.any(String));
+        installedHere = false;
         return Response.json({ ok: true, data: { uninstalled: true } });
       }
-      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([{ ...listing, installedHere: true }]);
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) {
+        return marketplaceListings([{ ...listing, installedHere }]);
+      }
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -200,7 +206,9 @@ describe("Vite marketplace page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Uninstall" }));
 
     expect(await screen.findByText("Plugin uninstalled.")).not.toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith("/api/marketplace", expect.objectContaining({ credentials: "same-origin" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Install (signature-checked)" })).not.toBeNull());
+    expect(fetchMock.mock.calls.filter(([input, callInit]) => isCapabilityRequest(input, callInit, "creator.listMarketplace"))).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
   });
 
   it("does not report success when a mutation response violates its contract", async () => {
