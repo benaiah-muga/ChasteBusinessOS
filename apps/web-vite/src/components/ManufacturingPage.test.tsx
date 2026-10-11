@@ -180,11 +180,14 @@ describe("Vite manufacturing page", () => {
   });
 
   it("previews production cost in minor units before producing", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", false);
     const fetchMock = manufacturingFetch({
       onPost: (body) => body.action === "costPreview"
         ? Response.json({
           ok: true,
           data: {
+            plannedThousandths: 2000,
+            expectedGoodThousandths: 2000,
             producible: true,
             lines: [{ sku: "LEG-1", name: "Oak leg", requiredThousandths: 8000, unitCostMinor: 3000, costMinor: 24_000 }],
             totalCostMinor: 24_000,
@@ -207,13 +210,15 @@ describe("Vite manufacturing page", () => {
     expect(screen.getAllByText("$240.00")).toHaveLength(2);
     expect(screen.getByText("$120.00")).not.toBeNull();
     expect(postedActions(fetchMock).find((body) => body.action === "costPreview")).toMatchObject({ assemblySku: "DESK-1", quantityThousandths: 2000 });
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/manufacturing" && (init as RequestInit | undefined)?.method === "POST")).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/capabilities/execute")).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Produce now" }));
     expect(await screen.findByText("Produce DESK-1 done.")).not.toBeNull();
     expect(postedActions(fetchMock).find((body) => body.action === "produceFromBom")).toMatchObject({ assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "DESK-MAY" });
   });
 
-  it("keeps production planning reads working when routed through Go", async () => {
+  it("routes selected production planning reads and overview through Go", async () => {
     vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
     const fetchMock = manufacturingFetch({
       onPost: (body) => {
@@ -265,6 +270,7 @@ describe("Vite manufacturing page", () => {
       "manufacturing.costPreview",
     ]);
     expect(capabilityRequests.every((body) => typeof body.intentId === "string")).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/manufacturing")).toBe(false);
   });
 
   it("drives work orders from draft through release, completion, and cancellation", async () => {

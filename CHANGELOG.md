@@ -43,6 +43,11 @@ The full v1 changelog is preserved at the bottom of this file.
   report shape from organization-scoped reads, including BOMs, assemblies,
   work orders, production runs, and lot balances.
 
+- Vite Manufacturing production planning reads use Go's cost preview,
+  feasibility, and BOM report capabilities when both route selectors are on.
+  Setting the module selector to 0, or disabling the global Go capability
+  route, selects the legacy Manufacturing endpoint. Go failures never retry it.
+
 - Go now serves onboarding state reads and setup-step updates for the Vite
   wizard. Session identity and organization scope are resolved by the Go API;
   changed deferred steps record a notification in the same transaction.
@@ -140,6 +145,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Go email verification now creates a signed, persistent session cookie on the
+  first successful verification, matching Better Auth's automatic sign-in
+  behavior. Reusing a valid token for an already verified account does not
+  create another session.
 - Vite Accounting now preserves Go FX exposure permission errors and rejects
   incomplete exchange-rate result tuples instead of treating rejected reads as
   missing report data.

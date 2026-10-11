@@ -164,7 +164,7 @@ describe("manufacturing API", () => {
     await expect(fetchManufacturingEnabled()).resolves.toBe(true);
   });
 
-  it("routes planning reads through their Go capabilities when selected", async () => {
+  it("routes planning reads through the selected Go capabilities", async () => {
     vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: true, data: {
@@ -206,6 +206,27 @@ describe("manufacturing API", () => {
     expect(requests.every(({ body }) => typeof body.intentId === "string")).toBe(true);
   });
 
+  it("uses the explicit legacy route when the module selector is rolled back", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", false);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: {
+      producible: true,
+      lines: [],
+      totalCostMinor: 0,
+      resultingAvgFinishedUnitCostMinor: 0,
+    } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchProductionCostPreview("DESK-1", 2000)).resolves.toMatchObject({ producible: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/manufacturing");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      action: "costPreview",
+      assemblySku: "DESK-1",
+      quantityThousandths: 2000,
+      intentId: expect.any(String),
+    });
+  });
+
   it("validates planning read inputs before sending a request", async () => {
     vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
     const fetchMock = vi.fn();
@@ -234,7 +255,7 @@ describe("manufacturing API", () => {
     [401, { error: "unauthorized" }, "Your session has ended. Sign in again to continue."],
     [403, { error: "manufacturing.read missing" }, "You do not have permission to use manufacturing."],
     [404, { error: "capability unavailable" }, "capability unavailable"],
-  ])("fails closed on selected Go planning read response %i without legacy fallback", async (status, body, expected) => {
+  ])("fails closed on Go planning read response %i without legacy fallback", async (status, body, expected) => {
     vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
     const fetchMock = stubSequenced([Response.json(body, { status })]);
     await expect(fetchProductionCostPreview("DESK-1", 1000)).rejects.toThrow(expected);
@@ -673,12 +694,24 @@ describe("manufacturing API", () => {
     await expect(fetchManufacturingBomReport("DESK-1", 2000)).resolves.toMatchObject({ totalShortfallThousandths: 3000 });
   });
 
-  it("keeps read actions on the same-origin POST path with an intent id", async () => {
-    const fetchMock = stubSequenced([Response.json({ ok: true, data: { producible: true, lines: [], totalCostMinor: 0, resultingAvgFinishedUnitCostMinor: 0 } })]);
+  it("sends planning reads to the Go capability with a fresh intent id", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    const fetchMock = stubSequenced([Response.json({ ok: true, data: {
+      producible: true,
+      plannedThousandths: 1000,
+      expectedGoodThousandths: 1000,
+      lines: [],
+      totalCostMinor: 0,
+      resultingAvgFinishedUnitCostMinor: 0,
+    } })]);
     await fetchProductionCostPreview("DESK-1", 1000);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/manufacturing");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
-    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ action: "costPreview", assemblySku: "DESK-1", quantityThousandths: 1000 });
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({
+      capabilityId: "manufacturing.costPreview",
+      input: { assemblySku: "DESK-1", quantityThousandths: 1000 },
+      intentId: expect.any(String),
+    });
   });
 
   it("rejects read responses that drift from the capability output", async () => {

@@ -2200,8 +2200,10 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other Manufacturing
      routes unchanged, validate request and response schemas, and surface
      pending, malformed, and unavailable results without falling back to
-     `/api/manufacturing`. Add focused Vite API, page, proxy selector, and Go
-     parser/executor contract tests. (Vite/Go implementation complete; browser
+     `/api/manufacturing` when Go is selected; selector rollback explicitly
+     sends the legacy action request to that endpoint. Add focused Vite API,
+     page, proxy selector, and Go parser/executor contract tests. (Vite/Go
+     implementation complete; browser
      proof pending) The focused Vite API/page/proxy suite passed all 222 tests;
      four DB-backed Go parser, feasibility, governed execution, and permission
      tests passed with runtime integration required, including permission
@@ -2605,7 +2607,10 @@ new owners and the manifest shows zero legacy runtime paths.
 
 252. Route the Vite Manufacturing overview report through a new
      `manufacturing.overviewReport` Go capability under the existing
-     `CHASTE_GO_MANUFACTURING_PLANNING_READS` selector. The Go read preserves
+     paired `CHASTE_GO_SESSION_CAPABILITY_ROUTE` and
+     `CHASTE_GO_MANUFACTURING_PLANNING_READS` selectors. Setting either selector
+     to `0` sends Vite overview and planning reads through the legacy
+     `/api/manufacturing` endpoint. The Go read preserves
      the legacy strict response shape and limits: all organization BOM edges
      and items, the latest 100 work orders, up to 100 production runs grouped
      from the latest 2,000 stock movements, and the latest 200 lot balances.
