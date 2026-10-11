@@ -3,6 +3,7 @@ import {
   createSupportCustomer,
   fetchSupportChannels,
   fetchSupportConversations,
+  fetchSupportCustomerOptions,
   fetchSupportDraft,
   fetchSupportEnabled,
   fetchSupportLibrary,
@@ -242,6 +243,31 @@ describe("support thread reads", () => {
 
     await expect(fetchSupportThread("not-a-uuid")).rejects.toMatchObject({ status: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("support customer picker read", () => {
+  it("reads the Go picker projection with same-origin credentials", async () => {
+    const customer = { id: customerId, name: "Ada Lovelace", email: "ada@example.test", purchaseCount: 2, lifetimeSpendMinor: 2500 };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("/api/support/customers");
+      expect(init?.credentials).toBe("same-origin");
+      return jsonResponse({ customers: [customer] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSupportCustomerOptions()).resolves.toEqual([customer]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects malformed picker rows and preserves HTTP errors", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ customers: [{ id: "not-a-uuid", name: "Ada" }] }))
+      .mockResolvedValueOnce(jsonResponse({ error: "forbidden" }, 403));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSupportCustomerOptions()).rejects.toMatchObject({ status: 200, message: "The support service returned data in an unexpected format." });
+    await expect(fetchSupportCustomerOptions()).rejects.toMatchObject({ status: 403, message: expect.stringContaining("permission") });
   });
 });
 

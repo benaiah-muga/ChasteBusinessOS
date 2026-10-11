@@ -337,6 +337,22 @@ browser proof and live legacy differential remain pending
 [`accounting.ts`](../../apps/web-vite/src/api/accounting.ts),
 [`purchasing.ts`](../../apps/web-vite/src/api/purchasing.ts)).
 
+The Vite Support conversation picker reads customer options from exact
+`GET /api/support/customers`. Go resolves the signed session and active
+organization, accepts `crm.read` or `pos.sell`, and runs its projection through
+`dbx.WithOrgTx`. CRM readers see deactivated, non-merged customers; POS-only
+readers see active, non-merged customers. Results preserve the picker fields
+`id`, `name`, and `email`, name ordering, and the 500-row limit. The broader
+`/api/customers` GET remains with the existing owner because Vite CRM uses its
+full directory projection as a fallback; `/api/customers` writes are unchanged.
+Runtime-role DB proof covers both permission projections and tenant isolation,
+and Vite API tests cover the same-origin URL, schema validation, and HTTP
+errors. Authenticated Support browser proof remains pending
+([`support.ts#L361-L363`](../../apps/web-vite/src/api/support.ts#L361-L363),
+[`support_customers_session.go#L22-L66`](../../apps/api/internal/httpapi/support_customers_session.go#L22-L66),
+[`support_customers_session.go#L86-L132`](../../apps/api/internal/httpapi/support_customers_session.go#L86-L132),
+[`support_customers_session_integration_test.go`](../../apps/api/internal/httpapi/support_customers_session_integration_test.go)).
+
 ## Required parity evidence before cutover
 
 1. A cloned-database comparison proves table shape and all existing rows remain

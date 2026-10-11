@@ -352,6 +352,21 @@ func MountGoPOSCustomersRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoSupportCustomersRoute mounts only the Support customer-picker GET.
+// CRM writes and the broader CRM customer directory remain with their owner.
+func MountGoSupportCustomersRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/support/customers", route)
+	if base != nil {
+		mux.Handle("HEAD /api/support/customers", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoPOSShiftSummaryRoute sends only the POS shift summary POST to Go.
 func MountGoPOSShiftSummaryRoute(base, route http.Handler) http.Handler {
 	if route == nil {

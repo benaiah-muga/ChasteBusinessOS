@@ -116,6 +116,10 @@ func goPosCustomersRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goSupportCustomersRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goApprovalsReadRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -429,6 +433,15 @@ func run(logger *slog.Logger) error {
 		posCustomersRoute = httpapi.NewPosCustomersSessionHandler(pool, resolver, logger)
 		logger.Info("Go POS customer lookup route mounted", "path", "GET /api/pos/customers")
 	}
+	var supportCustomersRoute http.Handler
+	if goSupportCustomersRouteEnabledFromEnv(os.Getenv("GO_SUPPORT_CUSTOMERS_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		supportCustomersRoute = httpapi.NewSupportCustomersSessionHandler(pool, resolver, logger)
+		logger.Info("Go Support customer picker route mounted", "path", "GET /api/support/customers")
+	}
 	var posShiftSummaryRoute http.Handler
 	if goPosShiftSummaryRouteEnabledFromEnv(os.Getenv("GO_POS_SHIFT_SUMMARY_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
@@ -721,6 +734,7 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoMemoryRoute(apiHandler, memoryRoute)
 	apiHandler = httpapi.MountGoModuleSettingsRoute(apiHandler, moduleSettingsRoute)
 	apiHandler = httpapi.MountGoPolicySessionRoute(apiHandler, policyRoute)
+	apiHandler = httpapi.MountGoSupportCustomersRoute(apiHandler, supportCustomersRoute)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,

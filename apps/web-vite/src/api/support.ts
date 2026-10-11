@@ -359,7 +359,7 @@ const CustomerOptionSchema = z.object({ id: uuid, name: z.string(), email: z.str
 export type SupportCustomerOption = z.infer<typeof CustomerOptionSchema>;
 
 export async function fetchSupportCustomerOptions(signal?: AbortSignal): Promise<SupportCustomerOption[]> {
-  const result = await get("/api/customers", z.object({ customers: z.array(CustomerOptionSchema) }), signal);
+  const result = await get("/api/support/customers", z.object({ customers: z.array(CustomerOptionSchema) }), signal);
   return result.customers;
 }
 

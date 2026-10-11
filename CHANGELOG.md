@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- The Vite Support customer picker now reads from Go's session-authenticated
+  customer projection. Go enforces organization membership and `crm.read` or
+  `pos.sell`, preserving deactivated customers for CRM readers and active-only
+  results for POS users. The shared `/api/customers` route and write methods
+  remain unchanged.
+
 - Vite Accounting now gets the bank account totals and unmatched count from Go's
   `accounting.bankSummary` capability. Bank transaction and payment detail rows
   remain on the existing `/api/banking` response; the banking route remains

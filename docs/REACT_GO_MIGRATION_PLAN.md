@@ -2952,3 +2952,16 @@ new owners and the manifest shows zero legacy runtime paths.
      capability manifest now expose the shared schema and intent for other
      clients. The capability endpoint is already Go-owned; no global route
      ownership change is implied. `graft build` completed.
+
+284. (Implemented; runtime-role DB projection proof and focused Vite API/proxy
+     tests passed; authenticated Support browser proof remains pending) Move
+     only the Vite Support create-conversation customer picker to Go's exact
+     `GET /api/support/customers` endpoint. Keep the shared `/api/customers`
+     route and its POST writes with their existing owner because Vite CRM still
+     uses that full directory contract as a fallback. Go resolves the signed
+     session and active organization, permits `crm.read` or `pos.sell`, and
+     applies legacy filtering: CRM readers can select deactivated customers;
+     POS-only readers see active, non-merged customers. The query uses
+     `dbx.WithOrgTx` and returns the picker `id`, `name`, and `email` fields in
+     name order with the existing 500-row limit. The generated manifest adds
+     only the new exact Go GET route.

@@ -81,6 +81,7 @@ function supportFetch(handlers: Handlers = {}) {
       return handlers.post?.(payload) ?? Response.json({ ok: true, data: { updated: true } });
     }
     if (path === "/api/modules") return moduleSwitchboard();
+    if (path === "/api/support/customers") return Response.json({ customers: [] });
     if (path === "/api/support") return Response.json({ conversations });
     if (path.startsWith("/api/support?")) return Response.json(thread);
     return new Response(null, { status: 404 });

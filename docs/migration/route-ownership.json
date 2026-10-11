@@ -1219,6 +1219,14 @@
     },
     {
       "kind": "api",
+      "path": "/api/support/customers",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/support_customers_session.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
       "path": "/api/support/public",
       "method": "POST",
       "source": "apps/web/src/app/api/support/public/route.ts",
