@@ -140,7 +140,7 @@ describe("Vite home dashboard", () => {
       const promptLink = screen.getByRole("link", { name: label }) as HTMLAnchorElement;
       const destination = new URL(promptLink.href);
       expect(destination.origin).toBe("http://localhost:3001");
-      expect(destination.pathname).toBe("/");
+      expect(destination.pathname).toBe("/login");
       expect(destination.searchParams.get("workmatePrompt")).toBe(prompt);
     }
   });

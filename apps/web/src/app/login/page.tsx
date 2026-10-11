@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/client";
+import { workmateLoginReturnHref } from "./workmate-return";
 import { LogoMark } from "@/components/logo";
 import {
   IconAlertTriangle,
@@ -86,7 +87,7 @@ export default function LoginPage() {
   useEffect(() => {
     let mounted = true;
     void authClient.getSession().then((res) => {
-      if (mounted && res.data?.user) router.replace("/");
+      if (mounted && res.data?.user) router.replace(workmateLoginReturnHref(window.location.search));
     });
     return () => {
       mounted = false;
@@ -116,7 +117,7 @@ export default function LoginPage() {
         setBusy(false);
         return;
       }
-      router.replace("/");
+      router.replace(workmateLoginReturnHref(window.location.search));
       router.refresh();
     } catch (err) {
       setError(authErrorMessage(err));

@@ -133,7 +133,7 @@ export function DashboardPage({ baseCurrency = null }: { baseCurrency?: string |
           <div className="quick-actions" aria-label="Ask your workmate">
             <span>Ask</span>
             {QUICK_PROMPTS.map((action) => (
-              <a key={action.label} href={legacyUrl(`/?workmatePrompt=${encodeURIComponent(action.prompt)}`)}>{action.label}</a>
+              <a key={action.label} href={legacyUrl(`/login?workmatePrompt=${encodeURIComponent(action.prompt)}`)}>{action.label}</a>
             ))}
           </div>
         </div>
