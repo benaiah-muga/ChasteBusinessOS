@@ -118,15 +118,18 @@ by default. Its report-permission fallbacks, tenant-scoped metrics, operations,
 pipeline, trend, activity, and signals response were independently reviewed
 against the legacy and Vite contracts; set both dashboard route selectors to
 `0` for explicit rollback.
-The current application
-continues to own production traffic, and no writes have changed owner.
-The Vite `/approvals` preview now reads the legacy pending queue and decision
-history and submits decisions through the same governed legacy endpoint by
-default. `GO_APPROVAL_DECISION=1` opts POST decisions into the signed Go
-service using the exact organization-scoped payload stored with the approval;
-unknown outcomes fail closed and require a queue refresh. GET queue/history
-and production route ownership remain unchanged. The UI refreshes after
-organization changes and redacts credential-shaped fields in previews.
+The existing Next.js application continues to own production traffic during
+the transition. Vite routes use their paired selectors independently.
+The Vite `/approvals` preview reads the tenant-scoped inbox through Go and
+submits decisions through the session-authenticated Go handler by default.
+`GO_APPROVALS_READ_ROUTE` / `CHASTE_GO_APPROVALS_READ_ROUTE` and
+`GO_APPROVALS_DECISION_ROUTE` / `CHASTE_GO_APPROVALS_DECISION_ROUTE` control the
+Vite routes independently. `GO_APPROVAL_DECISION` and `GO_APPROVALS_READ` are
+separate selectors for the legacy Next.js signed Go bridges. Go derives the
+approval capability and payload digest from the organization-scoped database
+row; authenticated Vite browser proof for approval and rejection is recorded
+in item 266. The UI refreshes after organization changes and redacts
+credential-shaped fields in previews.
 
 The Vite `/ledger` preview now reads existing audit rows through the current
 legacy API contract. It preserves the event filters and exposes the full hash
@@ -2756,9 +2759,22 @@ new owners and the manifest shows zero legacy runtime paths.
      resolves the verified session and active organization, then reuses the
      tenant-scoped approval inbox reader and Go capability permissions. The
      paired Go and Vite route selectors default on with explicit `=0` rollback
-     settings. Vite proxies only the exact GET; POST decisions and page
-     ownership stay unchanged. Handler, reader parity, ownership manifest, and
-     Vite middleware tests cover the slice. On 2026-10-11, agent-browser opened
+     settings. Vite proxies only the exact GET. Handler, reader parity, ownership
+     manifest, and Vite middleware tests cover the slice. On 2026-10-11,
+     agent-browser opened
      `/approvals` in the authenticated Vite app, confirmed the empty inbox
      rendered, and observed `GET /api/approvals` return 200 through Go with no
      browser console errors.
+
+266. (Runtime verified) Move only
+     Vite `POST /api/approvals` decisions to Go. Go resolves the verified
+     session and active organization, derives capability ID and payload digest
+     from the tenant-scoped approval row, then uses the governed approval
+     decider. Both approval and rejection require the row capability's mapped
+     permission. The paired Go and Vite selectors default on and support
+     independent `=0` rollback. The exact POST route is covered by router and
+     proxy tests; other methods keep their current owner. On 2026-10-11, an
+     authenticated Vite browser session approved and rejected seeded requests
+     through Go. Both POSTs returned 200, the UI showed the matching success
+     state, each row left the pending inbox and appeared in recent decisions,
+     and the browser reported no errors.

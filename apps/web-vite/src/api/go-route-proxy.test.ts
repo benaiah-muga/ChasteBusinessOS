@@ -794,6 +794,7 @@ function requestRecorder(target: string, streamed = false): Server {
 
 const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method: string; url: string }> = [
   { env: "CHASTE_GO_SUPPORT_PUBLIC_ROUTE", flag: "supportPublic", method: "POST", url: "/api/support/public?widget=1" },
+  { env: "CHASTE_GO_APPROVALS_DECISION_ROUTE", flag: "approvalsDecision", method: "POST", url: "/api/approvals?id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
   { env: "CHASTE_GO_AUTH_ROUTE", flag: "auth", method: "POST", url: "/api/auth/sign-in/email" },
   { env: "CHASTE_GO_SUPPORT_CHANNELS_ROUTE", flag: "supportChannelsRead", method: "GET", url: "/api/support/channels?view=settings" },
   { env: "CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE", flag: "supportChannelsWrite", method: "POST", url: "/api/support/channels" },
@@ -870,7 +871,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.dashboard).toBe(true);
     expect(flags.setup).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "posCustomers", "setup", "approvalsRead"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "posCustomers", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -967,22 +968,28 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "GET", href)).toBe(false);
   });
 
-  it("routes only the exact approvals inbox GET to Go by default and supports legacy rollback", () => {
+  it("routes only exact approvals GET and POST requests to Go by default with independent rollbacks", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(defaults.approvalsRead).toBe(true);
+    expect(defaults.approvalsDecision).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/approvals")).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/approvals?state=pending")).toBe(true);
-    expect(isGoRouteRequest(defaults, "POST", "/api/approvals?id=approval-id")).toBe(false);
+    expect(isGoRouteRequest(defaults, "POST", "/api/approvals?id=approval-id")).toBe(true);
     expect(isGoRouteRequest(defaults, "HEAD", "/api/approvals")).toBe(false);
+    expect(isGoRouteRequest(defaults, "PUT", "/api/approvals?id=approval-id")).toBe(false);
     expect(isGoRouteRequest(defaults, "GET", "/api/approvals/extra")).toBe(false);
     expect(isGoRouteRequest(defaults, "GET", "/api/approvals/")).toBe(false);
+    expect(isGoRouteRequest(defaults, "POST", "/api/approvals/extra?id=approval-id")).toBe(false);
 
-    const rollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_APPROVALS_READ_ROUTE: "0" });
-    expect(rollback.approvalsRead).toBe(false);
-    expect(isGoRouteRequest(rollback, "GET", "/api/approvals")).toBe(false);
+    const readRollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_APPROVALS_READ_ROUTE: "0" });
+    expect(isGoRouteRequest(readRollback, "GET", "/api/approvals")).toBe(false);
+    expect(isGoRouteRequest(readRollback, "POST", "/api/approvals?id=approval-id")).toBe(true);
+    const decisionRollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_APPROVALS_DECISION_ROUTE: "0" });
+    expect(isGoRouteRequest(decisionRollback, "GET", "/api/approvals")).toBe(true);
+    expect(isGoRouteRequest(decisionRollback, "POST", "/api/approvals?id=approval-id")).toBe(false);
   });
 
-  it("preserves the approvals GET session and query while leaving POST on the legacy proxy", async () => {
+  it("preserves the approvals GET and POST session, query, and decision body through Go", async () => {
     const go = requestRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
@@ -1018,16 +1025,38 @@ describe("Vite Go route proxy selection", () => {
 
     const decision = await fetch(`http://127.0.0.1:${address.port}/api/approvals?id=approval-id`, {
       method: "POST",
-      headers: { cookie: "auth.session=verified-browser-session", "content-type": "application/json" },
+      headers: { cookie: "auth.session=verified-browser-session", "content-type": "application/json", origin: `http://127.0.0.1:${address.port}` },
       body: JSON.stringify({ decision: "approve" }),
     });
     expect(await decision.json()).toMatchObject({
-      target: "legacy",
+      target: "go",
       method: "POST",
       url: "/api/approvals?id=approval-id",
       cookie: "auth.session=verified-browser-session",
+      origin: `http://127.0.0.1:${address.port}`,
       body: JSON.stringify({ decision: "approve" }),
     });
+
+    const rollbackVite = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_APPROVALS_DECISION_ROUTE: "0" }), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+      },
+    });
+    await rollbackVite.listen();
+    runningServers.push({ close: () => rollbackVite.close() });
+    const rollbackAddress = rollbackVite.httpServer?.address() as AddressInfo;
+    const fallback = await fetch(`http://127.0.0.1:${rollbackAddress.port}/api/approvals?id=approval-id`, {
+      method: "POST",
+      headers: { cookie: "auth.session=verified-browser-session", "content-type": "application/json" },
+      body: JSON.stringify({ decision: "reject" }),
+    });
+    expect(await fallback.json()).toMatchObject({ target: "legacy", method: "POST", url: "/api/approvals?id=approval-id" });
   });
 
   it("preserves the attachment href, session identity, and range headers when proxying to Go", async () => {

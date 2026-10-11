@@ -13,9 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
-- Vite now sends only `GET /api/approvals` to the Go API by default. Go resolves
-  the verified browser session and active organization for the inbox read;
-  approval decision POSTs and the existing page owner are unchanged.
+- Vite now sends `GET` and `POST /api/approvals` to Go by default. Go resolves
+  the verified session and active organization for each request, and decisions
+  use the governed capability approval path. Reject decisions now require the
+  same capability permission as approvals. The existing page owner is unchanged.
 
 - The Go jobs worker now discovers due recurring invoice templates and enqueues
   one linked occurrence job. The TypeScript worker leaves

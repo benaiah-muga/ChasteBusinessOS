@@ -197,10 +197,10 @@ reader; it also requires `pnpm dev:api` and fails closed on errors. The
 development-only `GO_PROJECTS_SHADOW=1` compares the unaudited collection list
 while returning legacy data. Board reads are not shadowed because their
 capability audit entry must stay single.
-`GO_APPROVAL_DECISION=1` opts approval POST decisions into the signed Go
-service. It uses the exact payload stored with the pending approval and fails
-closed if Go is unavailable or the outcome is unknown; approval queue and
-history reads remain on the legacy handler.
+`GO_APPROVAL_DECISION=1` opts the legacy Next.js approval POST route into its
+signed Go bridge. It uses the exact payload stored with the pending approval
+and fails closed if Go is unavailable or the outcome is unknown. This selector
+does not control the Vite route.
 `GO_ACCOUNTING_CREATE_INVOICE=1` opts only `action: "createInvoice"` on
 `POST /api/accounting` into the signed Go capability bridge. It requires
 `pnpm dev:api`, keeps the legacy approval response shape, and fails closed when
@@ -296,15 +296,20 @@ signed Go capability bridge. It requires `pnpm dev:api`; the complete
 registry-derived permission catalog stays available, identity actions retain
 their approval rules, and uncertain writes fail closed without a TypeScript
 retry. The flag defaults to `0`.
-`GO_APPROVALS_READ=1` opts the approvals inbox and decision history GET into
-the signed Go read bridge. It requires `pnpm dev:api`; the full TypeScript
+`GO_APPROVALS_READ=1` opts the legacy Next.js approvals inbox and decision
+history GET into the signed Go read bridge. It requires `pnpm dev:api`; the full TypeScript
 capability registry still controls row visibility, and Go rechecks the active
 session, organization membership, and live permissions. The flag defaults to
-`0`. This is the legacy Next.js bridge selector. The Vite app sends only
-`GET /api/approvals` directly to Go by default with
-`GO_APPROVALS_READ_ROUTE=1` and `CHASTE_GO_APPROVALS_READ_ROUTE=1`; set both to
-`0` to roll that route back to the legacy API. Approval decisions remain on
-their existing route path.
+`0`. This is the legacy Next.js bridge selector. Vite sends exact `GET` and
+`POST /api/approvals` requests directly to Go by default using the paired
+`GO_APPROVALS_READ_ROUTE` / `CHASTE_GO_APPROVALS_READ_ROUTE` and
+`GO_APPROVALS_DECISION_ROUTE` / `CHASTE_GO_APPROVALS_DECISION_ROUTE` switches.
+Set both flags in either pair to `0` to roll that method back. Direct Go
+decisions resolve the browser session and organization in Go, require the
+capability permission for both approval and rejection, and use the governed
+approval decider. The authenticated browser proof for Vite decisions passed:
+approve and reject both returned 200, updated the pending and recent decision
+lists, and produced no browser errors.
 `GO_SALES_WRITE=1` opts sales order creation, confirmation, delivery, and
 cancellation into the signed Go capability bridge. It requires `pnpm dev:api`;
 order listing and other sales actions remain on the legacy handler, and

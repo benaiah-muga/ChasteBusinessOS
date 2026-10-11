@@ -50,6 +50,61 @@ func NewApprovalDecider(pool dbx.Beginner, executor ApprovalCapabilityExecutor) 
 	return &ApprovalDecider{pool: pool, executor: executor}
 }
 
+// DecideForSession binds the approval capability and canonical payload digest
+// from the tenant-scoped database row before using the shared decision path.
+func (d *ApprovalDecider) DecideForSession(ctx context.Context, subject, organizationID, authSessionID string, permissions []string, input ApprovalDecisionInput) (ApprovalDecisionResult, error) {
+	if d == nil || d.pool == nil || d.executor == nil {
+		return ApprovalDecisionResult{}, errors.New("approval decision service is unavailable")
+	}
+	if !isUUID(subject) || !isUUID(organizationID) || authSessionID == "" {
+		return decisionFailure(401, ErrSessionInvalid.Error()), nil
+	}
+	if !isUUID(input.ApprovalID) {
+		return decisionFailure(404, "not found"), nil
+	}
+
+	type approvalBinding struct {
+		capabilityID string
+		payload      json.RawMessage
+	}
+	binding, err := dbx.WithOrgTx(ctx, d.pool, organizationID, func(tx pgx.Tx) (approvalBinding, error) {
+		var row approvalBinding
+		err := tx.QueryRow(ctx, `
+			SELECT capability_id, payload
+			FROM approvals WHERE id = $1::uuid AND org_id = $2::uuid`, input.ApprovalID, organizationID).
+			Scan(&row.capabilityID, &row.payload)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return row, nil
+		}
+		if err != nil {
+			return approvalBinding{}, err
+		}
+		return row, nil
+	})
+	if err != nil {
+		return ApprovalDecisionResult{}, err
+	}
+	if binding.capabilityID == "" {
+		return decisionFailure(404, "not found"), nil
+	}
+	inputHash, err := InputHash(binding.payload)
+	if err != nil {
+		return decisionFailure(422, "invalid approval payload"), nil
+	}
+	actorID := subject
+	claims := authbridge.CapabilityClaims{
+		Subject:        subject,
+		OrganizationID: organizationID,
+		CapabilityID:   binding.capabilityID,
+		InputSHA256:    inputHash,
+		ActorID:        &actorID,
+		ActorType:      "human",
+		Permissions:    permissions,
+		AuthSessionID:  authSessionID,
+	}
+	return d.Decide(ctx, claims, input)
+}
+
 type approvalRecord struct {
 	ID           string
 	OrgID        string
@@ -127,6 +182,18 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 			return approvalTransition{result: approvalAlreadyDecided(row.Status)}, nil
 		}
 
+		permission, supported := permissionForCapability(row.CapabilityID)
+		if !supported {
+			return approvalTransition{result: decisionFailure(422, "unknown capability: "+row.CapabilityID)}, nil
+		}
+		permissions, err := effectivePermissions(ctx, tx, claims)
+		if err != nil {
+			return approvalTransition{}, err
+		}
+		if !permissions["*"] && !permissions[permission] {
+			return approvalTransition{result: decisionFailure(403, "you lack authority over this action")}, nil
+		}
+
 		if input.Decision == "reject" {
 			var rejectedID string
 			err := tx.QueryRow(ctx, `
@@ -147,18 +214,6 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				row:    row,
 				result: ApprovalDecisionResult{OK: true, Status: "rejected", HTTPStatus: 200},
 			}, nil
-		}
-
-		permission, supported := permissionForCapability(row.CapabilityID)
-		if !supported {
-			return approvalTransition{result: decisionFailure(422, "unknown capability: "+row.CapabilityID)}, nil
-		}
-		permissions, err := effectivePermissions(ctx, tx, claims)
-		if err != nil {
-			return approvalTransition{}, err
-		}
-		if !permissions["*"] && !permissions[permission] {
-			return approvalTransition{result: decisionFailure(403, "you lack authority over this action")}, nil
 		}
 
 		var claimedID string

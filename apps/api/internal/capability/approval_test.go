@@ -139,7 +139,7 @@ func TestGoCustomerExecutionMatchesLegacyHumanWritePolicy(t *testing.T) {
 	}
 }
 
-func TestGoApprovalDecisionRejectNeedsMembershipButNotCapabilityPermission(t *testing.T) {
+func TestGoApprovalDecisionRejectRequiresCapabilityPermission(t *testing.T) {
 	fx := newExecutorFixture(t)
 	input := json.RawMessage(`{"name":"Rejected customer","preferredContactMethod":"email","doNotContact":false}`)
 	approvalID := createPendingCustomerApproval(t, fx, input)
@@ -147,6 +147,15 @@ func TestGoApprovalDecisionRejectNeedsMembershipButNotCapabilityPermission(t *te
 	claims.Permissions = nil
 	comment := "not the right customer"
 	decider := NewApprovalDecider(fx.runtime, fx.executor)
+	denied, err := decider.Decide(fx.ctx, claims, ApprovalDecisionInput{ApprovalID: approvalID, Decision: "reject", Comment: &comment})
+	if err != nil || denied.HTTPStatus != 403 || denied.Error != "you lack authority over this action" {
+		t.Fatalf("unauthorized rejection result=%+v err=%v, want 403", denied, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM approvals WHERE id = $1::uuid AND status = 'pending'`, approvalID); got != 1 {
+		t.Fatalf("unauthorized rejection changed pending row count to %d", got)
+	}
+
+	claims = fx.humanClaims(input, "")
 	result, err := decider.Decide(fx.ctx, claims, ApprovalDecisionInput{ApprovalID: approvalID, Decision: "reject", Comment: &comment})
 	if err != nil || !result.OK || result.Status != "rejected" {
 		t.Fatalf("rejection result=%+v err=%v, want rejected", result, err)
@@ -163,6 +172,36 @@ func TestGoApprovalDecisionRejectNeedsMembershipButNotCapabilityPermission(t *te
 	}
 	if got := fx.count(`SELECT count(*) FROM customers WHERE org_id = $1::uuid`, fx.orgID); got != 0 {
 		t.Fatalf("rejection created %d customers, want none", got)
+	}
+}
+
+func TestGoApprovalDecisionForSessionUsesStoredRowBindingAndPermission(t *testing.T) {
+	fx := newExecutorFixture(t)
+	input := json.RawMessage(`{"name":"Session-bound rejection","preferredContactMethod":"email","doNotContact":false}`)
+	approvalID := createPendingCustomerApproval(t, fx, input)
+	claims := fx.humanClaims(input, "")
+	decider := NewApprovalDecider(fx.runtime, fx.executor)
+
+	denied, err := decider.DecideForSession(fx.ctx, fx.userID, fx.orgID, claims.AuthSessionID, nil, ApprovalDecisionInput{
+		ApprovalID: approvalID,
+		Decision:   "reject",
+	})
+	if err != nil || denied.HTTPStatus != 403 || denied.Error != "you lack authority over this action" {
+		t.Fatalf("session rejection without permission=%+v err=%v, want 403", denied, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM approvals WHERE id = $1::uuid AND status = 'pending'`, approvalID); got != 1 {
+		t.Fatalf("unauthorized session rejection changed pending row count to %d", got)
+	}
+
+	result, err := decider.DecideForSession(fx.ctx, fx.userID, fx.orgID, claims.AuthSessionID, claims.Permissions, ApprovalDecisionInput{
+		ApprovalID: approvalID,
+		Decision:   "reject",
+	})
+	if err != nil || !result.OK || result.HTTPStatus != 200 || result.Status != "rejected" {
+		t.Fatalf("session-bound rejection=%+v err=%v, want successful rejection", result, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id = $1::uuid AND kind = 'approval.rejected' AND actor_type = 'human' AND actor_id = $2::uuid`, fx.orgID, fx.userID); got != 1 {
+		t.Fatalf("session-bound rejection wrote %d decision audit events, want one", got)
 	}
 }
 

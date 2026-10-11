@@ -219,6 +219,30 @@ func MountGoApprovalsReadRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoApprovalsDecisionRoute mounts only approval decision POSTs. Inbox reads
+// and every other method or path retain their existing owner.
+func MountGoApprovalsDecisionRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/approvals", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			route.ServeHTTP(w, r)
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoMessageAttachmentDownloadRoute mounts the session-authenticated Go
 // binary download handler for one message attachment.
 func MountGoMessageAttachmentDownloadRoute(base, route http.Handler) http.Handler {

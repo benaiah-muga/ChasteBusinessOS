@@ -24,6 +24,13 @@
     },
     {
       "kind": "api",
+      "path": "/api/approvals",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
       "path": "/api/onboarding",
       "method": "POST",
       "owner": "go",

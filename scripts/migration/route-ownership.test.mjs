@@ -53,7 +53,7 @@ test("Go-only POS shift summary has exact generated ownership", () => {
   );
 });
 
-test("approvals inbox GET is Go-owned while POST decisions retain legacy ownership", () => {
+test("approvals inbox and decisions have verified Go ownership", () => {
   assert.deepEqual(
     manifest.entries.filter((entry) => entry.path === "/api/approvals"),
     [
@@ -70,8 +70,8 @@ test("approvals inbox GET is Go-owned while POST decisions retain legacy ownersh
         path: "/api/approvals",
         method: "POST",
         source: "apps/web/src/app/api/approvals/route.ts",
-        owner: "legacy",
-        parity: "pending",
+        owner: "go",
+        parity: "verified",
       },
     ],
   );

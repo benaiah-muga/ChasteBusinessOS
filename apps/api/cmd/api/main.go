@@ -104,6 +104,10 @@ func goApprovalsReadRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goApprovalsDecisionRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goOnboardingRouteEnabledFromEnv(value string) bool {
 	return value == "1"
 }
@@ -381,6 +385,15 @@ func run(logger *slog.Logger) error {
 		approvalsReadRoute = httpapi.NewApprovalInboxSessionHandler(resolver, approvalInboxReader, logger)
 		logger.Info("Go approvals read route mounted", "path", "GET /api/approvals")
 	}
+	var approvalsDecisionRoute http.Handler
+	if goApprovalsDecisionRouteEnabledFromEnv(os.Getenv("GO_APPROVALS_DECISION_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		approvalsDecisionRoute = httpapi.NewApprovalDecisionSessionHandler(resolver, approvalDecider, logger, trustedProxyCIDRs)
+		logger.Info("Go approvals decision route mounted", "path", "POST /api/approvals")
+	}
 	var dashboardRoute http.Handler
 	if goDashboardRouteEnabledFromEnv(os.Getenv("GO_DASHBOARD_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
@@ -642,6 +655,7 @@ func run(logger *slog.Logger) error {
 		approvalDecider,
 	), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute)
 	apiHandler = httpapi.MountGoApprovalsReadRoute(apiHandler, approvalsReadRoute)
+	apiHandler = httpapi.MountGoApprovalsDecisionRoute(apiHandler, approvalsDecisionRoute)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,

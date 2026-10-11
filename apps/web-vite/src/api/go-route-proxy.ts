@@ -45,6 +45,7 @@ export type GoRouteProxyFlags = {
   onboarding: boolean;
   messageAttachmentDownloads: boolean;
   approvalsRead: boolean;
+  approvalsDecision: boolean;
 };
 
 export function goPosOpenSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
@@ -405,6 +406,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     onboarding: env.CHASTE_GO_ONBOARDING_ROUTE === "1",
     messageAttachmentDownloads: goMessagingAttachmentDownloadsFromEnv(env),
     approvalsRead: env.CHASTE_GO_APPROVALS_READ_ROUTE !== "0",
+    approvalsDecision: env.CHASTE_GO_APPROVALS_DECISION_ROUTE !== "0",
   };
 }
 
@@ -445,6 +447,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.notifications && method === "GET" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
   if (flags.notificationsWrite && method === "POST" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
   if (flags.approvalsRead && method === "GET" && /^\/api\/approvals(?:\?.*)?$/.test(path)) return true;
+  if (flags.approvalsDecision && method === "POST" && /^\/api\/approvals(?:\?.*)?$/.test(path)) return true;
   if (flags.inventoryRead && method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
   if (flags.crmReads && method === "GET" && isGoCrmReadRequest(path)) return true;
   if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;
