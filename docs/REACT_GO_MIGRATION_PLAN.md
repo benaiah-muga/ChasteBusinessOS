@@ -2313,7 +2313,7 @@ new owners and the manifest shows zero legacy runtime paths.
      responses, and uncertain send results. Keep the Marketing snapshot read
      separate on its existing path. Add focused Vite contract and retry tests;
      browser proof remains open.
-212. (Implemented) Route Vite CRM saved-view create, pin, and share writes
+212. (Done) Route Vite CRM saved-view create, pin, and share writes
      through `crm.saveCustomerView` behind paired
      `CHASTE_GO_CRM_VIEW_WRITES=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Persist exact retry
@@ -2321,7 +2321,10 @@ new owners and the manifest shows zero legacy runtime paths.
      after reload, and block duplicate saves and legacy fallback while a Go
      result is unresolved. Preserve the current saved-view read path. Focused
      Vite API/page/proxy tests pass; existing Go parser and integration coverage
-     covers the capability contract. Browser proof remains open.
+     covers the capability contract. The authenticated Vite browser proof
+     created, pinned, and shared a customer view through the Go capability
+     executor with HTTP 200 for each mutation. Reload preserved the starred,
+     shared view, Go CRM reads returned HTTP 200, and browser errors were empty.
 213. (Implemented) Route the Vite Purchasing A/P aging report through Go's
      session-authenticated `purchasing.apAging` capability behind paired
      `CHASTE_GO_PURCHASING_AP_AGING_READS=1` and

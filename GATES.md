@@ -554,3 +554,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests .* passed|ok.*internal\/httpapi|ok.*cmd\/api/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: 212 focused Vite tests, Vite typecheck and production build, repo lint, and Go AI-config route tests passed (including required runtime integration). Independent review found no actionable issues. Authenticated agent-browser GET and POST `/api/ai-config` both returned HTTP 200 from Go; reload showed the saved workspace override, the page exposed no credential, and browser errors were empty.
+
+- [x] G109: Vite CRM saved-view create, pin, and share writes use the authenticated Go capability executor and survive reload.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/crm.test.ts src/components/CRMPage.test.tsx src/api/go-route-proxy.test.ts && GO_RUNTIME_INTEGRATION_REQUIRED=1 DATABASE_URL=postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2 CHASTE_APP_DB_PASSWORD=chaste_app_dev_only PATH=/home/benaiah/.local/share/go/1.27.1/bin:$PATH go -C apps/api test ./internal/capability -run '^TestGoCustomerViewWritesAreOwnedReversibleAndReplaySafe$' -count=1 -v
+  EXPECT: /Tests  263 passed|PASS.*TestGoCustomerViewWritesAreOwnedReversibleAndReplaySafe/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: The required runtime Go integration proof and 263 focused Vite tests passed. Authenticated agent-browser created, pinned, and shared a synthetic saved view. Each POST `/api/capabilities/execute` returned HTTP 200; after reload the view remained starred and shared. The Vite CRM read family returned HTTP 200 from Go and browser errors were empty.
