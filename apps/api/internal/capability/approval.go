@@ -430,7 +430,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 			}
 		case addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
 			unmatchBankTransactionCapabilityID, bankReconciliationCapabilityID, excludeBankTransactionCapabilityID,
-			unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID:
+			unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID, listBankingWorkspaceCapabilityID:
 			parsed, parseErr := parseBankingInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
@@ -854,7 +854,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
 		unmatchBankTransactionCapabilityID, excludeBankTransactionCapabilityID, unexcludeBankTransactionCapabilityID:
 		return "accounting.write", true
-	case bankReconciliationCapabilityID, bankSummaryCapabilityID:
+	case bankReconciliationCapabilityID, bankSummaryCapabilityID, listBankingWorkspaceCapabilityID:
 		return "accounting.read", true
 	case createPurchaseRequestCapabilityID, decidePurchaseRequestCapabilityID, createRfqCapabilityID, recordQuoteCapabilityID,
 		selectWinningQuoteCapabilityID:

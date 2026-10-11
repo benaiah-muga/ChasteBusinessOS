@@ -24,6 +24,7 @@ const (
 	excludeBankTransactionCapabilityID   = "accounting.excludeBankTransaction"
 	unexcludeBankTransactionCapabilityID = "accounting.unexcludeBankTransaction"
 	bankSummaryCapabilityID              = "accounting.bankSummary"
+	listBankingWorkspaceCapabilityID     = "accounting.listBankingWorkspace"
 )
 
 type AddBankAccountInput struct {
@@ -167,6 +168,8 @@ func parseBankingInput(capabilityID string, raw json.RawMessage) (any, error) {
 		return ParseUnexcludeBankTransactionInput(raw)
 	case bankSummaryCapabilityID:
 		return ParseBankSummaryInput(raw)
+	case listBankingWorkspaceCapabilityID:
+		return ParseListBankingWorkspaceInput(raw)
 	default:
 		return nil, errors.New("unsupported banking capability")
 	}
@@ -441,6 +444,13 @@ func ParseBankSummaryInput(raw json.RawMessage) (BankSummaryInput, error) {
 		return BankSummaryInput{}, err
 	}
 	return BankSummaryInput{}, nil
+}
+
+func ParseListBankingWorkspaceInput(raw json.RawMessage) (ListBankingWorkspaceInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return ListBankingWorkspaceInput{}, err
+	}
+	return ListBankingWorkspaceInput{}, nil
 }
 
 // N14 bank-reconciliation allocation math, ported from erp-core bankrec.ts.

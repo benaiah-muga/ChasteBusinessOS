@@ -178,6 +178,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	excludeBankTransactionCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.unexcludeBankTransaction"},
 	unexcludeBankTransactionCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
 	bankSummaryCapabilityID:                             {module: "accounting", permission: "accounting.read", risk: "read"},
+	listBankingWorkspaceCapabilityID:                    {module: "accounting", permission: "accounting.read", risk: "read"},
 	createPurchaseRequestCapabilityID:                   {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	decidePurchaseRequestCapabilityID:                   {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	createRfqCapabilityID:                               {module: "purchasing", permission: "purchasing.write", risk: "write"},
@@ -452,7 +453,7 @@ func supportedCapability(capabilityID string) bool {
 		creditNoteCapabilityID, shareInvoiceCapabilityID, generateDueInvoicesCapabilityID, reverseEntryCapabilityID,
 		addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
 		unmatchBankTransactionCapabilityID, bankReconciliationCapabilityID, excludeBankTransactionCapabilityID,
-		unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID,
+		unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID, listBankingWorkspaceCapabilityID,
 		createPurchaseRequestCapabilityID, decidePurchaseRequestCapabilityID, createRfqCapabilityID, recordQuoteCapabilityID,
 		selectWinningQuoteCapabilityID, listPurchaseWorkflowCapabilityID,
 		inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
@@ -1133,7 +1134,7 @@ func (e *Executor) executeWithFinalizer(
 			input = parsed
 		case addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
 			unmatchBankTransactionCapabilityID, bankReconciliationCapabilityID, excludeBankTransactionCapabilityID,
-			unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID:
+			unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID, listBankingWorkspaceCapabilityID:
 			parsed, err := parseBankingInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -2485,6 +2486,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case ListBankingWorkspaceInput:
+			output, err := listBankingWorkspace(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case CreatePurchaseRequestInput:
 			output, err := createPurchaseRequest(ctx, tx, claims, parsed)
 			if err != nil {
@@ -3548,7 +3555,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreditNoteInput, ShareInvoiceInput, GenerateDueInvoicesInput, ReverseEntryInput,
 		AddBankAccountInput, ImportBankFeedInput, DeleteBankTransactionInput, MatchBankTransactionInput,
 		UnmatchBankTransactionInput, BankReconciliationInput, ExcludeBankTransactionInput,
-		UnexcludeBankTransactionInput, BankSummaryInput,
+		UnexcludeBankTransactionInput, BankSummaryInput, ListBankingWorkspaceInput,
 		CreatePurchaseRequestInput, DecidePurchaseRequestInput, CreateRfqInput, RecordQuoteInput,
 		SelectWinningQuoteInput, ListPurchaseWorkflowInput,
 		InventoryCreateItemInput, InventoryItemPatchInput, InventoryArchiveItemInput, InventoryCreateLocationInput,

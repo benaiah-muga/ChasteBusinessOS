@@ -2383,6 +2383,286 @@
       }
     },
     {
+      "id": "accounting.listBankingWorkspace",
+      "title": "List banking workspace",
+      "intent": "Load bank accounts, statement lines, payment candidates, and reconciliation totals for the active organization",
+      "module": "accounting",
+      "risk": "read",
+      "permission": "accounting.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "currencyCode": {
+                  "type": "string"
+                },
+                "last4": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "balanceMinor": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "currencyCode",
+                "last4",
+                "balanceMinor"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unmatched": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "bankAccountId": {
+                  "type": "string"
+                },
+                "currencyCode": {
+                  "type": "string"
+                },
+                "postedAt": {
+                  "type": "string"
+                },
+                "amountMinor": {
+                  "type": "number"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "bankAccountId",
+                "currencyCode",
+                "postedAt",
+                "amountMinor",
+                "description"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "matched": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "bankAccountId": {
+                  "type": "string"
+                },
+                "currencyCode": {
+                  "type": "string"
+                },
+                "postedAt": {
+                  "type": "string"
+                },
+                "amountMinor": {
+                  "type": "number"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "bankAccountId",
+                "currencyCode",
+                "postedAt",
+                "amountMinor",
+                "description"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "excluded": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "bankAccountId": {
+                  "type": "string"
+                },
+                "currencyCode": {
+                  "type": "string"
+                },
+                "postedAt": {
+                  "type": "string"
+                },
+                "amountMinor": {
+                  "type": "number"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "bankAccountId",
+                "currencyCode",
+                "postedAt",
+                "amountMinor",
+                "description"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "invoiceNumber": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currencyCode": {
+                  "type": "string"
+                },
+                "customerName": {
+                  "type": "string"
+                },
+                "amountMinor": {
+                  "type": "number"
+                },
+                "receivedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "invoiceNumber",
+                "currencyCode",
+                "customerName",
+                "amountMinor",
+                "receivedAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "accounts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "bankAccountId": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "currencyCode": {
+                      "type": "string"
+                    },
+                    "last4": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "balanceMinor": {
+                      "type": "number"
+                    },
+                    "count": {
+                      "type": "number"
+                    },
+                    "moneyInMinor": {
+                      "type": "number"
+                    },
+                    "moneyOutMinor": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "bankAccountId",
+                    "name",
+                    "currencyCode",
+                    "last4",
+                    "balanceMinor",
+                    "count",
+                    "moneyInMinor",
+                    "moneyOutMinor"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "unmatchedCount": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "accounts",
+              "unmatchedCount"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "accounts",
+          "unmatched",
+          "matched",
+          "excluded",
+          "payments",
+          "summary"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "accounting.listBudgetScenarios",
       "title": "List budget scenarios",
       "intent": "List saved budget versions for a fiscal year so the team can switch between plans and inspect the version history",

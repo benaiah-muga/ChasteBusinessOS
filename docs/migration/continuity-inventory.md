@@ -320,12 +320,18 @@ authenticated browser and live legacy differential proofs complete
 [`iam_org_settings.go#L173-L213`](../../apps/api/internal/capability/iam_org_settings.go#L173-L213),
 [`policy_session.go`](../../apps/api/internal/httpapi/policy_session.go)).
 
-Vite Accounting now combines the existing `/api/banking` detail response with
-the Go `accounting.bankSummary` capability result. Go supplies account totals,
-transaction counts, money in/out totals, and unmatched count; legacy still
-supplies transaction state/detail and payment rows used by reconciliation
-controls. `/api/banking` remains legacy-owned and parity pending until the
-authenticated browser flow and live legacy differential are proven.
+Vite Accounting reads bank accounts, unmatched/matched/excluded statement
+lines, payment candidates, and account totals from Go's
+`accounting.listBankingWorkspace` capability. The executor requires
+`accounting.read` and queries all data in one `dbx.WithOrgTx` transaction,
+preserving account order, transaction status order and limits, payment
+candidates, and the existing `accounting.bankSummary` projection. The client
+strictly validates the full response and no longer requests `GET /api/banking`.
+Reconciliation writes continue through their current route. Runtime-role Go
+coverage checks permission denial, cross-organization isolation, ordering,
+limits, and embedded summary parity; Vite tests prove every detail section
+renders from the capability and writes remain routed. Authenticated browser
+proof remains pending.
 
 Vite Accounting and Purchasing now read tax codes with Go's
 `accounting.listTaxCodes` capability through the existing

@@ -2987,3 +2987,14 @@ new owners and the manifest shows zero legacy runtime paths.
      and legacy amount calculations, and keep every section populated when
      the dedicated workflow and Intel selectors are disabled. Do not change
      Purchasing writes or route ownership for the legacy Next app.
+
+287. (Implemented; focused Vite API/page tests, Go runtime-role projection
+     proof, module checks, and manifest parity check passed; authenticated
+     browser proof remains pending) Replace the Vite Accounting Banking detail
+     GET with the authenticated Go `accounting.listBankingWorkspace` capability.
+     Return accounts, newest unmatched/matched/excluded statement lines, recent
+     payment candidates, and the `accounting.bankSummary` projection from one
+     `dbx.WithOrgTx` transaction. Require `accounting.read`, preserve the
+     existing ordering and limits, and validate the full response in Vite.
+     Keep reconciliation writes on their current route and do not change the
+     legacy Next route owner.

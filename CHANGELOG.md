@@ -30,10 +30,11 @@ The full v1 changelog is preserved at the bottom of this file.
   results for POS users. The shared `/api/customers` route and write methods
   remain unchanged.
 
-- Vite Accounting now gets the bank account totals and unmatched count from Go's
-  `accounting.bankSummary` capability. Bank transaction and payment detail rows
-  remain on the existing `/api/banking` response; the banking route remains
-  parity pending until authenticated browser and live legacy differential proof.
+- Vite Accounting now loads bank accounts, unmatched/matched/excluded statement
+  lines, payment candidates, and account totals from Go's authenticated
+  `accounting.listBankingWorkspace` capability. Banking detail no longer reads
+  `GET /api/banking`; existing reconciliation writes continue to use their
+  current route.
 
 - Vite Accounting and Purchasing now load tax codes through Go's
   `accounting.listTaxCodes` capability. Go returns the tenant's full catalog in

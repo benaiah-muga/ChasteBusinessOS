@@ -179,6 +179,7 @@ var GoCapabilityPermissions = map[string]string{
 	"accounting.excludeBankTransaction":        "accounting.write",
 	"accounting.unexcludeBankTransaction":      "accounting.write",
 	"accounting.bankSummary":                   "accounting.read",
+	"accounting.listBankingWorkspace":          "accounting.read",
 	"purchasing.createPurchaseRequest":         "purchasing.write",
 	"purchasing.decidePurchaseRequest":         "purchasing.write",
 	"purchasing.createRfq":                     "purchasing.write",

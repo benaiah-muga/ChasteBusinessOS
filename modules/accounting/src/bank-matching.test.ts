@@ -107,6 +107,41 @@ afterAll(async () => {
 });
 
 describe("bank matching equivalence (N14)", () => {
+  it("lists the banking workspace projections and keeps the standalone summary contract", async () => {
+    const postedAt = new Date("2026-09-17T12:00:00.000Z");
+    const [line] = await db.db.insert(bankTransactions).values({
+      orgId,
+      bankAccountId: usdAccountId,
+      postedAt,
+      amountMinor: 42_00,
+      description: "workspace projection probe",
+      status: "unmatched",
+    }).returning({ id: bankTransactions.id });
+
+    const workspace = await run("accounting.listBankingWorkspace", {});
+    expect(workspace.accounts).toContainEqual(expect.objectContaining({
+      id: usdAccountId,
+      name: "Operating USD",
+      currencyCode: "USD",
+      last4: null,
+    }));
+    expect(workspace.unmatched).toContainEqual({
+      id: line!.id,
+      bankAccountId: usdAccountId,
+      currencyCode: "USD",
+      postedAt: postedAt.toISOString(),
+      amountMinor: 42_00,
+      description: "workspace projection probe",
+    });
+    expect(workspace.payments).toContainEqual(expect.objectContaining({
+      id: paymentId,
+      invoiceNumber,
+      currencyCode: "USD",
+      customerName: "Bank Probe Buyer",
+    }));
+    expect(workspace.summary).toEqual(await run("accounting.bankSummary", {}));
+  });
+
   it("an exact same-currency receipt matches", async () => {
     const lineId = await feedLine(100_000, "wire from buyer exact");
     const matched = await run("accounting.matchBankTransaction", { transactionId: lineId, paymentId });

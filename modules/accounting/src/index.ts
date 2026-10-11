@@ -3026,6 +3026,124 @@ const unexcludeBankTransaction = (deps: ModuleDeps) =>
     },
   });
 
+const listBankingWorkspace = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.listBankingWorkspace",
+    title: "List banking workspace",
+    intent:
+      "Load bank accounts, statement lines, payment candidates, and reconciliation totals for the active organization",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({}),
+    output: z.object({
+      accounts: z.array(z.object({
+        id: z.string(), name: z.string(), currencyCode: z.string(), last4: z.string().nullable(), balanceMinor: z.number(),
+      })),
+      unmatched: z.array(z.object({
+        id: z.string(), bankAccountId: z.string(), currencyCode: z.string(), postedAt: z.string(), amountMinor: z.number(), description: z.string(),
+      })),
+      matched: z.array(z.object({
+        id: z.string(), bankAccountId: z.string(), currencyCode: z.string(), postedAt: z.string(), amountMinor: z.number(), description: z.string(),
+      })),
+      excluded: z.array(z.object({
+        id: z.string(), bankAccountId: z.string(), currencyCode: z.string(), postedAt: z.string(), amountMinor: z.number(), description: z.string(),
+      })),
+      payments: z.array(z.object({
+        id: z.string(), invoiceNumber: z.number().nullable(), currencyCode: z.string(), customerName: z.string(), amountMinor: z.number(), receivedAt: z.string(),
+      })),
+      summary: z.object({
+        accounts: z.array(z.object({
+          bankAccountId: z.string(), name: z.string(), currencyCode: z.string(), last4: z.string().nullable(), balanceMinor: z.number(),
+          count: z.number(), moneyInMinor: z.number(), moneyOutMinor: z.number(),
+        })),
+        unmatchedCount: z.number(),
+      }),
+    }),
+    execute: async (ctx) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const orgId = ctx.actor.orgId;
+      const accountRows = await tx
+        .select({ id: bankAccounts.id, name: bankAccounts.name, currencyCode: bankAccounts.currencyCode, last4: bankAccounts.last4, balanceMinor: bankAccounts.balanceMinor })
+        .from(bankAccounts)
+        .where(eq(bankAccounts.orgId, orgId))
+        .orderBy(desc(bankAccounts.createdAt));
+      const summaryAccountRows = await tx
+        .select({ id: bankAccounts.id, name: bankAccounts.name, currencyCode: bankAccounts.currencyCode, last4: bankAccounts.last4, balanceMinor: bankAccounts.balanceMinor })
+        .from(bankAccounts)
+        .where(eq(bankAccounts.orgId, orgId))
+        .orderBy(bankAccounts.createdAt);
+      const loadTransactions = (status: "unmatched" | "matched" | "excluded", limit: number) => tx
+        .select({
+          id: bankTransactions.id,
+          bankAccountId: bankTransactions.bankAccountId,
+          currencyCode: bankAccounts.currencyCode,
+          postedAt: bankTransactions.postedAt,
+          amountMinor: bankTransactions.amountMinor,
+          description: bankTransactions.description,
+        })
+        .from(bankTransactions)
+        .innerJoin(bankAccounts, eq(bankAccounts.id, bankTransactions.bankAccountId))
+        .where(and(eq(bankTransactions.orgId, orgId), eq(bankTransactions.status, status)))
+        .orderBy(desc(bankTransactions.postedAt))
+        .limit(limit);
+      const [unmatchedRows, matchedRows, excludedRows, paymentRows, stats, unmatchedCount] = await Promise.all([
+        loadTransactions("unmatched", 200),
+        loadTransactions("matched", 100),
+        loadTransactions("excluded", 100),
+        tx.select({
+          id: payments.id,
+          invoiceNumber: invoices.number,
+          currencyCode: invoices.currency,
+          customerName: customers.name,
+          amountMinor: payments.amountMinor,
+          receivedAt: payments.receivedAt,
+        })
+          .from(payments)
+          .innerJoin(invoices, eq(invoices.id, payments.invoiceId))
+          .innerJoin(customers, eq(customers.id, invoices.customerId))
+          .where(eq(payments.orgId, orgId))
+          .orderBy(desc(payments.receivedAt))
+          .limit(50),
+        tx.select({
+          bankAccountId: bankTransactions.bankAccountId,
+          count: sql<number>`count(*)`,
+          moneyIn: sql<number>`coalesce(sum(case when ${bankTransactions.amountMinor} > 0 then ${bankTransactions.amountMinor} else 0 end), 0)`,
+          moneyOut: sql<number>`coalesce(sum(case when ${bankTransactions.amountMinor} < 0 then -${bankTransactions.amountMinor} else 0 end), 0)`,
+        })
+          .from(bankTransactions)
+          .where(eq(bankTransactions.orgId, orgId))
+          .groupBy(bankTransactions.bankAccountId),
+        tx.select({ n: sql<number>`count(*)` })
+          .from(bankTransactions)
+          .where(and(eq(bankTransactions.orgId, orgId), eq(bankTransactions.status, "unmatched"))),
+      ]);
+      const byAccount = new Map(stats.map((s) => [s.bankAccountId, s]));
+      return {
+        accounts: accountRows.map((a) => ({ id: a.id, name: a.name, currencyCode: a.currencyCode, last4: a.last4, balanceMinor: Number(a.balanceMinor) })),
+        unmatched: unmatchedRows.map((row) => ({ ...row, postedAt: row.postedAt.toISOString() })),
+        matched: matchedRows.map((row) => ({ ...row, postedAt: row.postedAt.toISOString() })),
+        excluded: excludedRows.map((row) => ({ ...row, postedAt: row.postedAt.toISOString() })),
+        payments: paymentRows.map((row) => ({ ...row, receivedAt: row.receivedAt.toISOString() })),
+        summary: {
+          accounts: summaryAccountRows.map((a) => {
+            const accountStats = byAccount.get(a.id);
+            return {
+              bankAccountId: a.id,
+              name: a.name,
+              currencyCode: a.currencyCode,
+              last4: a.last4,
+              balanceMinor: Number(a.balanceMinor),
+              count: Number(accountStats?.count ?? 0),
+              moneyInMinor: Number(accountStats?.moneyIn ?? 0),
+              moneyOutMinor: Number(accountStats?.moneyOut ?? 0),
+            };
+          }),
+          unmatchedCount: Number(unmatchedCount[0]?.n ?? 0),
+        },
+      };
+    }),
+  });
+
 const bankSummary = (deps: ModuleDeps) =>
   defineCapability({
     id: "accounting.bankSummary",
@@ -4313,6 +4431,7 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(unexcludeBankTransaction(deps));
   registry.register(bankReconciliation(deps));
   registry.register(bankSummary(deps));
+  registry.register(listBankingWorkspace(deps));
   registry.register(salesTaxReport(deps));
   registry.register(listTaxCodes(deps));
   registry.register(createTaxProfile(deps));

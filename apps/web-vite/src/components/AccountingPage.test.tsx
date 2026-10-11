@@ -164,6 +164,15 @@ function stubAccounting(options: StubOptions = {}) {
     }
     if (url === "/api/capabilities/execute") {
       const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
+      if (capabilityId === "accounting.listBankingWorkspace") {
+        if (options.rejectBanking) throw new TypeError("Network unavailable");
+        return options.banking === null
+          ? Response.json({ error: "no banking" }, { status: 500 })
+          : Response.json({ ok: true, data: options.banking ?? {
+            accounts: [], unmatched: [], matched: [], excluded: [], payments: [],
+            summary: { accounts: [], unmatchedCount: 0 },
+          } });
+      }
       if (capabilityId === "accounting.bankSummary") {
         const summary = typeof options.banking === "object" && options.banking !== null && "summary" in options.banking
           ? options.banking.summary
@@ -295,11 +304,11 @@ function stubAccounting(options: StubOptions = {}) {
         ? Response.json({ error: "reports unavailable" }, { status: options.reportsStatus })
         : Response.json(options.reports ?? reports);
     }
-    if (url === "/api/banking") {
-      if (options.rejectBanking) throw new TypeError("Network unavailable");
-      return options.banking === null
-        ? Response.json({ error: "no banking" }, { status: 500 })
-        : Response.json(options.banking ?? { accounts: [], unmatched: [], payments: [], summary: { accounts: [], unmatchedCount: 0 } });
+    if (url === "/api/banking" && method === "POST") {
+      if (options.actionResponse) {
+        return typeof options.actionResponse === "function" ? options.actionResponse() : options.actionResponse.clone();
+      }
+      return Response.json({ ok: true, data: {} });
     }
     return Response.json({ ok: true, data: {} });
   });
@@ -1053,9 +1062,9 @@ describe("AccountingPage tabs", () => {
     const reportCalls = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body ?? "{}") as { capabilityId?: string });
     expect(reportCalls.map((call) => call.capabilityId).sort()).toEqual([
       "accounting.balanceSheet",
-      "accounting.bankSummary",
       "accounting.cashFlow",
       "accounting.incomeStatement",
+      "accounting.listBankingWorkspace",
       "accounting.overview",
       "accounting.reportCurrencyMetadata",
       "accounting.unrealizedFxExposure",
@@ -1133,6 +1142,8 @@ describe("AccountingPage tabs", () => {
       banking: {
         accounts: [{ id: "acct-1", name: "Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000 }],
         unmatched: [],
+        matched: [],
+        excluded: [],
         payments: [],
         summary: { accounts: [{ bankAccountId: "acct-1", name: "Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000, count: 2, moneyInMinor: 125_000, moneyOutMinor: 0 }], unmatchedCount: 0 },
       },
@@ -1154,6 +1165,37 @@ describe("AccountingPage tabs", () => {
     });
   });
 
+  it("renders the Go Banking workspace and keeps reconciliation writes on the existing route", async () => {
+    const { calls } = stubAccounting({
+      banking: {
+        accounts: [{ id: "acct-1", name: "Go Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000 }],
+        unmatched: [{ id: "line-unmatched", bankAccountId: "acct-1", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 2_500, description: "Go unmatched wire" }],
+        matched: [{ id: "line-matched", bankAccountId: "acct-1", currencyCode: "USD", postedAt: "2026-06-02T00:00:00.000Z", amountMinor: 3_000, description: "Go matched receipt" }],
+        excluded: [{ id: "line-excluded", bankAccountId: "acct-1", currencyCode: "USD", postedAt: "2026-06-03T00:00:00.000Z", amountMinor: -500, description: "Go excluded fee" }],
+        payments: [{ id: "payment-1", invoiceNumber: 1042, currencyCode: "USD", customerName: "Go Customer", amountMinor: 2_500, receivedAt: "2026-06-01T00:00:00.000Z" }],
+        summary: { accounts: [{ bankAccountId: "acct-1", name: "Go Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000, count: 3, moneyInMinor: 5_500, moneyOutMinor: 500 }], unmatchedCount: 1 },
+      },
+    });
+    await renderReady();
+
+    fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
+    expect(await screen.findByText("Go Operating")).toBeTruthy();
+    expect(screen.getByText("3 lines")).toBeTruthy();
+    expect(screen.getByText("Go unmatched wire")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Matched transactions" })).toBeTruthy();
+    expect(screen.getByText("Go matched receipt")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Excluded transactions" })).toBeTruthy();
+    expect(screen.getByText("Go excluded fee")).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Go Customer.*1042/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Exclude" }));
+    await waitFor(() => {
+      expect(calls.some((call) => call.url === "/api/banking" && call.method === "POST" && call.body?.includes('"action":"excludeBankTransaction"'))).toBe(true);
+    });
+    expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.listBankingWorkspace"'))).toBe(true);
+    expect(calls.some((call) => call.url === "/api/banking" && call.method === "GET")).toBe(false);
+  });
+
   it("keeps a pending Go match exact across reload and locks the match form", async () => {
     vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
     let responseCount = 0;
@@ -1164,6 +1206,8 @@ describe("AccountingPage tabs", () => {
       banking: {
         accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: null, balanceMinor: 0 }],
         unmatched: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 2_500, description: "Incoming transfer" }],
+        matched: [],
+        excluded: [],
         payments: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", invoiceNumber: 1042, currencyCode: "USD", customerName: "Kampala Coffee", amountMinor: 2_500, receivedAt: "2026-06-01T00:00:00.000Z" }],
         summary: { accounts: [], unmatchedCount: 1 },
       },
@@ -1207,6 +1251,7 @@ describe("AccountingPage tabs", () => {
         accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: null, balanceMinor: 0 }],
         unmatched: [],
         matched: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 2_500, description: "Incoming transfer" }],
+        excluded: [],
         payments: [],
         summary: { accounts: [], unmatchedCount: 0 },
       },

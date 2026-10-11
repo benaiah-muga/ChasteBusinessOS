@@ -233,8 +233,8 @@ const BankSummarySchema = z.object({
 const BankingSchema = z.object({
   accounts: z.array(BankAccountSchema),
   unmatched: z.array(BankTransactionSchema),
-  matched: z.array(BankTransactionSchema).optional(),
-  excluded: z.array(BankTransactionSchema).optional(),
+  matched: z.array(BankTransactionSchema),
+  excluded: z.array(BankTransactionSchema),
   payments: z.array(BankPaymentSchema),
   summary: BankSummarySchema,
 }).strict();
@@ -739,19 +739,14 @@ export async function fetchAccountingCashBasis(year: number, signal?: AbortSigna
   return parsed.success ? parsed.data : null;
 }
 
-export async function fetchAccountingBanking(signal?: AbortSignal): Promise<AccountingBanking | null> {
-  const { response, body } = await getJson("/api/banking", { method: "GET" }, signal);
-  if (!response.ok) return null;
-  const parsed = BankingSchema.safeParse(body);
-  if (!parsed.success) return null;
-  const summary = await readGoAccountingCapability(
-    "accounting.bankSummary",
+export async function fetchAccountingBanking(signal?: AbortSignal): Promise<AccountingBanking> {
+  return readGoAccountingCapability(
+    "accounting.listBankingWorkspace",
     {},
-    BankSummarySchema,
-    "load bank account summary",
+    BankingSchema,
+    "load bank feeds",
     signal,
   );
-  return { ...parsed.data, summary };
 }
 
 export async function fetchAccountingTaxCodes(signal?: AbortSignal): Promise<AccountingTaxCode[]> {
@@ -777,7 +772,7 @@ export async function fetchAccountingBudgetScenarios(signal?: AbortSignal): Prom
 }
 
 async function readGoAccountingCapability<T>(
-  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.listTaxCodes" | "accounting.buildReminders" | "accounting.cashBasisReport" | "accounting.overview" | "accounting.bankSummary",
+  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.listTaxCodes" | "accounting.buildReminders" | "accounting.cashBasisReport" | "accounting.overview" | "accounting.bankSummary" | "accounting.listBankingWorkspace",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   context: string,
