@@ -22,6 +22,10 @@ The full v1 changelog is preserved at the bottom of this file.
   default. The Go handler is mounted by default and can be unmounted with
   `GO_PORTAL_INVOICE_ROUTE=0`; other methods and suffix paths keep their current
   owner.
+- Vite now sends exact `GET` and `POST /api/support/channels` requests to Go
+  unconditionally. The Go handler mounts by default; set
+  `GO_SUPPORT_CHANNELS_ROUTE=0` to unmount it. Other methods and paths retain
+  their current owner.
 
 - Vite marketplace listing reads now execute `creator.listMarketplace` through
   the Go session capability API. Marketplace writes and signature verification
@@ -759,7 +763,6 @@ The full v1 changelog is preserved at the bottom of this file.
 - Enable the Vite Sessions page metrics read through Go by default. Set `CHASTE_GO_METRICS_ROUTE=0` to restore the legacy proxy, or `GO_METRICS_ROUTE=0` to unmount the Go handler; unsupported methods and extra paths retain legacy fallback.
 - Route exact session-authenticated `GET /api/analytics` requests through Go by default for dataset discovery and previews. Go report `POST /api/analytics` remains on the legacy handler; setting both analytics route flags to `0` rolls back the GET route.
 - Enable eligible Vite conversation sends through Go's governed `messaging.sendMessage` capability by default. Mentions, replies, attachments, stable retry intents, inverse metadata, and pending approvals are preserved; agent-enabled conversations and @agent messages remain on the legacy route.
-- Enable the exact `POST /api/support/channels` settings update through Go in local Vite setups with `CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE=1`. Set it to `0` to return writes to legacy; GET keeps its existing selector, and other methods and paths remain on legacy.
 - Enable cycle-count create, record, post, and cancel through Go's session capability route. Inventory permission and module checks, approvals, and intent receipts apply; posted counts are corrected with a fresh count and only open counts can be cancelled.
 - Enable POS sales and returns together through Go's session capability route. A sale can be compensated with a governed full or partial return that credits the invoice and restores returned stock; approval, permission, module checks, and intent receipts remain in force.
 - Enable the tenant-scoped Go `GET /api/my-work` reader by default. PostgreSQL-backed coverage verifies approval and receipt-remainder cards remain isolated by organization.

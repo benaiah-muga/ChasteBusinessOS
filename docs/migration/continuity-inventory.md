@@ -78,6 +78,21 @@ production requests and writes. No production traffic has moved to Go.
   shape to Go; other methods, trailing slashes, and suffix paths retain their
   existing owner. `GO_SALES_INVOICE_ROUTE=0` unmounts the Go handler.
 
+## Vite Go route cutovers
+
+- Vite Support channel settings use exact `GET` and `POST /api/support/channels`
+  requests. Both route directly to Go regardless of the former Vite selectors;
+  the Go handler mounts by default, and `GO_SUPPORT_CHANNELS_ROUTE=0` unmounts
+  it, causing the Vite requests to fail closed. Other methods and extra paths
+  retain their existing owner. The Go handler resolves Better Auth sessions,
+  validates verified organization membership and Support module access, checks
+  same-origin writes and `iam.admin`, and uses organization-scoped transactions
+  for settings reads and writes. Handler tests cover response privacy and
+  validation, but currently use a fake store; there is no runtime-role database
+  upsert proof. See [`support_channels.go`](../../apps/api/internal/httpapi/support_channels.go),
+  [`support.ts`](../../apps/web-vite/src/api/support.ts), and
+  [`go-route-proxy.test.ts`](../../apps/web-vite/src/api/go-route-proxy.test.ts).
+
 ## Capabilities, approvals, transactions, and audit
 
 - The live capability manifest records 311 registrations across 21 modules.

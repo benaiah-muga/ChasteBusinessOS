@@ -787,8 +787,6 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_SUPPORT_PUBLIC_ROUTE", flag: "supportPublic", method: "POST", url: "/api/support/public?widget=1" },
   { env: "CHASTE_GO_APPROVALS_DECISION_ROUTE", flag: "approvalsDecision", method: "POST", url: "/api/approvals?id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
   { env: "CHASTE_GO_AUTH_ROUTE", flag: "auth", method: "POST", url: "/api/auth/sign-in/email" },
-  { env: "CHASTE_GO_SUPPORT_CHANNELS_ROUTE", flag: "supportChannelsRead", method: "GET", url: "/api/support/channels?view=settings" },
-  { env: "CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE", flag: "supportChannelsWrite", method: "POST", url: "/api/support/channels" },
   { env: "CHASTE_GO_SCIM_READ_ROUTE", flag: "scimRead", method: "GET", url: "/api/scim/v2/Users?startIndex=1" },
   { env: "CHASTE_GO_SCIM_READ_ROUTE", flag: "scimRead", method: "GET", url: "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001" },
   { env: "CHASTE_GO_SCIM_WRITE_ROUTE", flag: "scimWrite", method: "POST", url: "/api/scim/v2/Users" },
@@ -1276,22 +1274,19 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/modules/")).toBe(false);
   });
 
-  it("keeps support channel read and write selectors separate and exact", () => {
-    const readFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SUPPORT_CHANNELS_ROUTE: "1" });
-    expect(isGoRouteRequest(readFlags, "GET", "/api/support/channels?view=settings")).toBe(true);
-    expect(isGoRouteRequest(readFlags, "POST", "/api/support/channels")).toBe(false);
-    expect(isGoRouteRequest(readFlags, "GET", "/api/support/channels/extra")).toBe(false);
-    expect(isGoRouteRequest(readFlags, "GET", "/api/support/channels/")).toBe(false);
-
-    const writeFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE: "1" });
-    expect(isGoRouteRequest(writeFlags, "POST", "/api/support/channels?source=settings")).toBe(true);
-    expect(isGoRouteRequest(writeFlags, "GET", "/api/support/channels")).toBe(false);
-    expect(isGoRouteRequest(writeFlags, "PUT", "/api/support/channels")).toBe(false);
-    expect(isGoRouteRequest(writeFlags, "POST", "/api/support/channels/extra")).toBe(false);
-    expect(isGoRouteRequest(writeFlags, "POST", "/api/support/channels/")).toBe(false);
-
-    const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE: "0" });
-    expect(isGoRouteRequest(rolledBack, "POST", "/api/support/channels")).toBe(false);
+  it("routes only exact support channel GET and POST requests to Go regardless of old selectors", () => {
+    for (const env of [
+      {},
+      { CHASTE_GO_SUPPORT_CHANNELS_ROUTE: "0", CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE: "0" },
+      { CHASTE_GO_SUPPORT_CHANNELS_ROUTE: "1", CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE: "1" },
+    ]) {
+      const flags = goRouteProxyFlagsFromEnv(env);
+      expect(isGoRouteRequest(flags, "GET", "/api/support/channels?view=settings")).toBe(true);
+      expect(isGoRouteRequest(flags, "POST", "/api/support/channels?source=settings")).toBe(true);
+      expect(isGoRouteRequest(flags, "PUT", "/api/support/channels")).toBe(false);
+      expect(isGoRouteRequest(flags, "GET", "/api/support/channels/extra")).toBe(false);
+      expect(isGoRouteRequest(flags, "POST", "/api/support/channels/")).toBe(false);
+    }
   });
 
   it("keeps branding selection limited to exact GET and POST requests", () => {
@@ -1623,8 +1618,6 @@ describe("Vite Go route proxy selection", () => {
 
     const flags = goRouteProxyFlagsFromEnv({
       CHASTE_GO_SUPPORT_PUBLIC_ROUTE: "1",
-      CHASTE_GO_SUPPORT_CHANNELS_ROUTE: "1",
-      CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE: "1",
       CHASTE_GO_SCIM_READ_ROUTE: "1",
       CHASTE_GO_SCIM_WRITE_ROUTE: "1",
       CHASTE_GO_MODULES_ROUTE: "1",
@@ -1770,6 +1763,10 @@ describe("Vite Go route proxy selection", () => {
       body: JSON.stringify({ greeting: "Hello" }),
     });
     expect((await supportChannelsWrite.json())).toMatchObject({ target: "go", method: "POST", url: "/api/support/channels" });
+    const unsupportedSupportChannelsMethod = await fetch(`${origin}/api/support/channels`, { method: "PUT" });
+    expect((await unsupportedSupportChannelsMethod.json()).target).toBe("legacy");
+    const supportChannelsSuffix = await fetch(`${origin}/api/support/channels/extra`);
+    expect((await supportChannelsSuffix.json()).target).toBe("legacy");
 
     const teamRead = await fetch(`${origin}/api/team?view=members`);
     expect((await teamRead.json())).toMatchObject({ target: "go", method: "GET", url: "/api/team?view=members" });

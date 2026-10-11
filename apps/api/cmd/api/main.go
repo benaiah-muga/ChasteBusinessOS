@@ -124,6 +124,10 @@ func goSalesInvoiceRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goSupportChannelsRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("GO_DATABASE_URL")
 	if databaseURL == "" {
@@ -216,7 +220,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go message attachment download route mounted", "path", "GET /api/message-attachments/{id}")
 	}
 	var supportChannelsRoute http.Handler
-	if os.Getenv("GO_SUPPORT_CHANNELS_ROUTE") == "1" {
+	if goSupportChannelsRouteEnabledFromEnv(os.Getenv("GO_SUPPORT_CHANNELS_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

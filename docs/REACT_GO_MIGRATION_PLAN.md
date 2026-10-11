@@ -1517,16 +1517,16 @@ new owners and the manifest shows zero legacy runtime paths.
      their legacy fallback. Pair `GO_SALES_ORDERS_ROUTE` with
      `CHASTE_GO_SALES_ORDERS_ROUTE` for rollback. Handler, router, and selector
      tests pass; browser proof remains open.
-151. (Implemented; Go route ownership verified) Route the Support settings
-     `POST /api/support/channels` through the existing Go handler with the
-     separate `CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE` selector. The handler
-     requires same-origin cookie writes and rechecks verified organization
-     membership, Support module availability, and `iam.admin` inside the
-     organization-scoped upsert. The existing GET selector is unchanged;
-     unsupported methods and extra paths remain on legacy. Set the Vite write
-     selector to `0` for rollback. Focused proxy tests pass; the existing Go
-     handler tests use a fake store, so runtime-role database upsert proof is
-     not part of this route-only tranche. Browser proof remains open.
+151. (Implemented; Go route ownership verified) Route exact Vite `GET` and
+     `POST /api/support/channels` requests to Go unconditionally and mount the
+     handler by default. Set `GO_SUPPORT_CHANNELS_ROUTE=0` to unmount Go; Vite
+     then fails closed for these requests. Other methods and extra paths retain
+     their current owner. The handler requires verified organization
+     membership, Support module availability, and `iam.admin` for writes, with
+     same-origin checks and organization-scoped database access. Focused Go
+     handler and Vite proxy tests pass. The Go handler tests use a fake store;
+     no runtime-role database upsert proof exists yet. Authenticated browser
+     proof remains open.
 152. (Implemented; verified) Route only the Vite POS collection
      `GET /api/pos` through Go's verified-session, organization-scoped reader
      and preserve the legacy `{ sessions, sales }` response.

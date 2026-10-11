@@ -8,8 +8,6 @@ export type GoRouteProxyFlags = {
   auth: boolean;
   authOidc: boolean;
   authSaml: boolean;
-  supportChannelsRead: boolean;
-  supportChannelsWrite: boolean;
   scimRead: boolean;
   scimWrite: boolean;
   salesOrders: boolean;
@@ -361,8 +359,6 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     auth: env.CHASTE_GO_AUTH_ROUTE !== "0" && env.GO_AUTH_ROUTE !== "0",
     authOidc: env.CHASTE_GO_AUTH_OIDC_ROUTE === "1",
     authSaml: env.CHASTE_GO_AUTH_SAML_ROUTE === "1",
-    supportChannelsRead: env.CHASTE_GO_SUPPORT_CHANNELS_ROUTE === "1",
-    supportChannelsWrite: env.CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE === "1",
     scimRead: env.CHASTE_GO_SCIM_READ_ROUTE === "1",
     scimWrite: env.CHASTE_GO_SCIM_WRITE_ROUTE === "1",
     salesOrders: env.CHASTE_GO_SALES_ORDERS_ROUTE !== "0",
@@ -403,8 +399,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.onboarding && ["GET", "POST", "PATCH"].includes(method ?? "") && /^\/api\/onboarding(?:\?.*)?$/.test(path)) return true;
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/org(?:\?.*)?$/.test(path)) return true;
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
-  if (flags.supportChannelsRead && method === "GET" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
-  if (flags.supportChannelsWrite && method === "POST" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
+  if (["GET", "POST"].includes(method ?? "") && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   const attachmentID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
   if (flags.messageAttachmentDownloads && method === "GET" && new RegExp(`^/api/message-attachments/${attachmentID}(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.auth && isGoAuthRequest(path)) return true;
