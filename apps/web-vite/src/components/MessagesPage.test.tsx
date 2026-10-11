@@ -264,7 +264,7 @@ describe("messages page states", () => {
         const request = JSON.parse(String(init.body)) as { capabilityId?: string; input?: { conversationId?: string; limit?: number } };
         if (request.capabilityId !== "messaging.readMessages") return Response.json({ error: "unexpected capability" }, { status: 400 });
         expect(request.input).toEqual({ conversationId: channelId, limit: 60 });
-        return Response.json({ ok: true, data: threadBody() });
+        return Response.json({ ok: true, data: threadBody({ messages: [message({ body: "Go thread from the selected capability" })] }) });
       }
       return Response.json({ error: "unexpected legacy thread read" }, { status: 500 });
     });
@@ -272,8 +272,11 @@ describe("messages page states", () => {
 
     render(<MessagesPage />);
 
-    expect(await screen.findByText("Morning all")).not.toBeNull();
-    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/capabilities/execute")).toBe(true);
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/capabilities/execute")).toBe(true);
+    });
+    const thread = await screen.findByLabelText("Messages in general");
+    expect(await within(thread).findByText("Go thread from the selected capability")).not.toBeNull();
     expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/conversations/${channelId}/messages`)).toBe(false);
   });
 

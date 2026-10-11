@@ -133,6 +133,19 @@ describe("CRM API client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("supports opaque Better Auth user IDs for durable Go CRM intents", async () => {
+    const scope = { actorId: "auth_user_a5zVJvRUGPkJNBQMEuSH_CkoB7ubSjXd", organizationId: dealId };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { moved: true, stage: "won" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(readPendingCrmDealCreate(scope)).resolves.toBeNull();
+    await expect(submitCrmDealStageMove({ dealId, stage: "won" }, undefined, true, scope)).resolves.toEqual({
+      kind: "completed",
+      data: { moved: true, stage: "won" },
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
   it("reuses the Go stage intent while pending or uncertain, then clears it on success", async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("connection reset"))
@@ -573,7 +586,7 @@ describe("CRM API client", () => {
     const noScopeLegacy = vi.fn();
     vi.stubGlobal("fetch", noScopeLegacy);
     await expect(submitCrmCustomerDeactivate(customerId, undefined, false)).rejects.toMatchObject({ status: 0 });
-    await expect(submitCrmCustomerDeactivate(customerId, undefined, false, { actorId: "not-a-uuid", organizationId: customerId })).rejects.toMatchObject({ status: 0 });
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, false, { actorId: "x".repeat(256), organizationId: customerId })).rejects.toMatchObject({ status: 0 });
     expect(noScopeLegacy).not.toHaveBeenCalled();
     vi.stubGlobal("fetch", unavailable);
     await expect(submitCrmCustomerDeactivate(customerId, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });

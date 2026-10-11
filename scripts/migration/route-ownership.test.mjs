@@ -102,3 +102,27 @@ test("approvals page has verified Vite ownership after the authenticated decisio
     }],
   );
 });
+
+test("CRM reads have verified Go ownership after the authenticated Vite browser proof", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.kind === "api" && entry.path === "/api/crm"),
+    [
+      {
+        kind: "api",
+        path: "/api/crm",
+        method: "GET",
+        source: "apps/web/src/app/api/crm/route.ts",
+        owner: "go",
+        parity: "verified",
+      },
+      {
+        kind: "api",
+        path: "/api/crm",
+        method: "POST",
+        source: "apps/web/src/app/api/crm/route.ts",
+        owner: "legacy",
+        parity: "pending",
+      },
+    ],
+  );
+});

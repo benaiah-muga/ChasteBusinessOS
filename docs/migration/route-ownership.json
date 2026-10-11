@@ -318,8 +318,8 @@
       "path": "/api/crm",
       "method": "GET",
       "source": "apps/web/src/app/api/crm/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

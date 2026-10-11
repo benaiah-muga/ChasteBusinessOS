@@ -44,6 +44,24 @@ afterEach(() => {
 });
 
 describe("Vite CRM page", () => {
+  it("enables Go-backed customer creation for opaque Better Auth user IDs", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId="a5zVJvRUGPkJNBQMEuSH_CkoB7ubSjXd" organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add customer" })).toHaveProperty("disabled", false));
+    expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(false);
+  });
+
   it("shows the duplicate warning returned after customer creation", async () => {
     vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", false);
     const createdId = "d79382ac-743f-4d27-8b5f-92f2cba74d8e";

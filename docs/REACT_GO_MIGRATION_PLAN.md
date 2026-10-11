@@ -1927,8 +1927,10 @@ new owners and the manifest shows zero legacy runtime paths.
      in the local template and can be set to `0` to restore legacy reads. Keep
      the signed assertion route for legacy Next callers; Vite must not depend
      on Next to mint CRM read assertions. CRM writes and AI follow-up drafting
-     remain on their existing routes. Authenticated browser proof remains
-     open.
+     remain on their existing routes. On 2026-10-11, an authenticated
+     agent-browser session opened `/crm` in the Vite app. Deals, customers,
+     tasks, saved views, and customer timeline reads each returned 200 through
+     the Go selector, with no browser console errors.
 186. (Implemented) Route only Vite CRM customer deactivation through Go's
      session-authenticated `crm.deactivateCustomer` capability under the
      paired `CHASTE_GO_CRM_CUSTOMER_DEACTIVATE=1` and
@@ -2783,3 +2785,10 @@ new owners and the manifest shows zero legacy runtime paths.
      browser proof loaded the page in the Vite app and exercised both Go-backed
      decisions. The generated route-ownership manifest and its exact ownership
      test now record the Vite page owner.
+
+268. (Implemented and tested) Accept Better Auth's opaque user IDs when Vite
+     scopes durable CRM retry intents. Keep organization IDs UUID-validated and
+     keep the client actor identifier out of authorization claims; Go continues
+     to derive authority from the authenticated session. API and CRM page tests
+     cover opaque IDs and overlong-ID rejection. Browser verification of the
+     newly enabled CRM write controls remains open.
