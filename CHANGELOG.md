@@ -39,10 +39,12 @@ The full v1 changelog is preserved at the bottom of this file.
   provider send counts, and recent delivery log contract, with all reads
   scoped to the active organization.
 
-- Vite can route the organization switcher GET and active-organization POST
-  through the existing Go `/api/org` handler with `CHASTE_GO_ORG_ROUTE=1`
-  paired with `GO_ORG_ROUTE=1`. The default keeps the route on the legacy
-  handler until the Go route is explicitly enabled.
+- Vite now routes the organization switcher GET and active-organization POST
+  through the existing Go `/api/org` handler by default with the paired
+  `CHASTE_GO_ORG_ROUTE=1` and `GO_ORG_ROUTE=1` settings. Set both to `0` for
+  legacy rollback. An authenticated browser check confirmed a same-org switch
+  returns 200 and sets the active-org cookie; a forged nonmember target returns
+  403.
 
 - Vite Marketing segment creation now reserves its exact intent in durable,
   actor- and organization-scoped storage. Browser-wide Web Locks prevent

@@ -177,11 +177,12 @@ flags; the client never reads or writes the active-org cookie
 In development, set `GO_ORG_ROUTE=1` and `CHASTE_GO_ORG_ROUTE=1` to proxy the
 organization switcher's GET and active-organization POST to Go. The proxy
 preserves the session cookie, Origin, body, and response cookies, and fails
-closed when Go is selected. GET is Go-owned in the route manifest after
-focused handler and proxy tests and an authenticated Vite read. POST is still
-legacy-owned pending browser proof of an actual organization switch; PUT and
-PATCH remain legacy-owned. The authenticated Vite onboarding flow verified Go
-organization reads.
+closed when Go is selected. GET and POST are Go-owned in the route manifest
+after focused handler and proxy tests and authenticated Vite browser checks.
+The browser verified a 200 same-org POST and active-org cookie change, plus a
+403 for a forged nonmember target. PUT and PATCH remain legacy-owned. The
+checked-in environment enables both Go route flags by default; set both to `0`
+for full legacy rollback.
 
 ## Required parity evidence before cutover
 

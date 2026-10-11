@@ -2649,7 +2649,13 @@ new owners and the manifest shows zero legacy runtime paths.
      selection and forwarding; Go handler tests cover GET and POST membership,
      session, and cookie contracts. The authenticated onboarding journey
      completed with Go `POST /api/onboarding` and observed Go `GET /api/org`
-     returning 200. GET moves to Go ownership after browser verification. POST
-     is still legacy-owned because the browser did not exercise an organization
-     switch; PUT and PATCH also remain legacy-owned. The temporary user,
-     organization, and dependent rows were removed after browser verification.
+     returning 200. An authenticated Vite browser POSTed the active member org
+     to `/api/org`, received 200 `{ok:true}`, and the browser's HttpOnly
+     `chaste_active_org` cookie changed from a deliberately invalid value to
+     that org ID. The browser HAR omits `Set-Cookie` response headers, so the
+     cookie jar before and after the request is the browser evidence. A forged
+     nonmember UUID returned 403. GET and POST are Go-owned in the generated
+     manifest; PUT and PATCH remain legacy-owned. `.env.example` enables both
+     route flags by default; set both flags to `0` for full legacy rollback.
+     The temporary user, organization, and dependent rows were removed after
+     verification.
