@@ -97,6 +97,24 @@ describe("capability job queue", () => {
     expect(row!.attempts).toBe(0);
   });
 
+  it("leaves CRM task creation jobs for the Go worker", async () => {
+    const jobId = await enqueueCapabilityJob(db, {
+      orgId,
+      type: "crm.createTask",
+      payload: { title: "Go-owned follow-up" },
+    });
+
+    await pg.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM jobs WHERE id <> ${jobId}::uuid FOR UPDATE`);
+      const claim = await claimJob(db, "legacy-worker-crm-task-ownership-test", 30_000, new Date());
+      expect(claim).toBeNull();
+    });
+
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(row!.status).toBe("pending");
+    expect(row!.attempts).toBe(0);
+  });
+
   it("returns false when the queue is empty", async () => {
     // Drain defensively in case any other pending job exists globally.
     for (let i = 0; i < 10; i += 1) await processOneJob(db, logger);

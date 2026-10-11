@@ -340,6 +340,23 @@ webhook adapter `apps/web/src/app/api/routines/webhook/[token]/route.ts:6-26`.
   proof covers uploaded files through the configured parser path without a
   live provider request.
 
+## CRM task creation jobs
+
+`crm.createTask` uses the generic capability job contract: the job payload is
+validated and executed through the governed executor with the job ID as its
+stable receipt intent, and the target organization is taken from the queued
+row. The Go jobs worker already supports this capability under `crm.write`
+and the restricted worker role's RLS policy. The TypeScript claimant now
+excludes this one job type, so Go is its sole queue owner. The TypeScript
+claimant remains eligible for `crm.completeTask`, `crm.updateTaskDetails`, and
+`crm.restoreTaskDetails`; the Go worker can claim those types too, pending
+their explicit cutover from dual-worker eligibility.
+
+`TestCRMTaskJobsClaimAndExecuteThroughSystemPath` proves a Go claim creates a
+task, stores one action receipt, and records system audit events. The
+TypeScript `jobs.test.ts` ownership check proves the legacy claimant leaves a
+`crm.createTask` row pending without incrementing its attempts.
+
 ## Other scheduled capability candidate
 
 `accounting.generateDueInvoices` is described as a durable-job worker entry

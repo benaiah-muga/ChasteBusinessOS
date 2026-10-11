@@ -2659,3 +2659,13 @@ new owners and the manifest shows zero legacy runtime paths.
      route flags by default; set both flags to `0` for full legacy rollback.
      The temporary user, organization, and dependent rows were removed after
      verification.
+
+255. (Implemented and verified) Make the Go jobs worker the sole owner of
+     `crm.createTask` jobs. The Go capability executor and worker RLS policy
+     already support the operation; the TypeScript claimant excludes this
+     type. `crm.completeTask`, `crm.updateTaskDetails`, and
+     `crm.restoreTaskDetails` remain eligible for both workers pending their
+     explicit cutover. The Go database-backed CRM task worker test passed,
+     proving task creation and action receipt; the focused TypeScript jobs
+     suite passed all 7 tests, including that the legacy claimant skips the
+     row without changing its status or attempts.
