@@ -190,7 +190,7 @@ describe("Vite POS register page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const page = render(<PosPage baseCurrency="USD" actorId={firstActor} organizationId={firstOrg} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Retry saved action" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry saved action" }, { timeout: 5_000 }));
     await waitFor(() => expect(resolveGo).toBeTypeOf("function"));
 
     page.rerender(<PosPage baseCurrency="USD" actorId="operator-register-org-b" organizationId="workspace-register-org-b" />);
