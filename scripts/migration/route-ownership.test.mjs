@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { allowsPendingAuthOwner } from "./route-ownership-policy.mjs";
+import {
+  allowsPendingAuthOwner,
+  allowsPendingGoOrgPersonaOwner,
+} from "./route-ownership-policy.mjs";
 
 const manifest = JSON.parse(readFileSync("docs/migration/route-ownership.json", "utf8"));
+const overrides = JSON.parse(readFileSync("docs/migration/route-ownership-overrides.json", "utf8"));
 
 test("Go-owned auth namespace stays distinct from pending Better Auth parity", () => {
   const authRoutes = manifest.entries.filter(
@@ -23,6 +27,40 @@ test("pending auth ownership is limited to the Better Auth catch-all", () => {
   assert.equal(allowsPendingAuthOwner("api", "/api/auth/[...all]", "auth", "pending"), true);
   assert.equal(allowsPendingAuthOwner("api", "/api/analytics", "auth", "pending"), false);
   assert.equal(allowsPendingAuthOwner("page", "/api/auth/[...all]", "auth", "pending"), false);
+});
+
+test("pending Go persona ownership is limited to exact organization PUT and PATCH overrides", () => {
+  for (const method of ["PUT", "PATCH"]) {
+    assert.equal(allowsPendingGoOrgPersonaOwner("api", "/api/org", method, "go", "pending"), true);
+  }
+
+  for (const candidate of [
+    ["page", "/api/org", "PUT", "go", "pending"],
+    ["api", "/api/org/extra", "PUT", "go", "pending"],
+    ["api", "/api/org", "GET", "go", "pending"],
+    ["api", "/api/org", "DELETE", "go", "pending"],
+    ["api", "/api/org", "PATCH", "legacy", "pending"],
+    ["api", "/api/org", "PATCH", "go", "verified"],
+  ]) {
+    assert.equal(allowsPendingGoOrgPersonaOwner(...candidate), false, JSON.stringify(candidate));
+  }
+});
+
+test("generated Go route declarations still require verified parity", () => {
+  assert.ok(overrides.goRoutes.length > 0);
+  assert.ok(overrides.goRoutes.every((route) => route.kind === "api" && route.owner === "go" && route.parity === "verified"));
+});
+
+test("organization persona manifest ownership stays Go with parity pending", () => {
+  assert.deepEqual(
+    manifest.entries
+      .filter((entry) => entry.kind === "api" && entry.path === "/api/org" && ["PUT", "PATCH"].includes(entry.method))
+      .map(({ method, owner, parity }) => ({ method, owner, parity })),
+    [
+      { method: "PUT", owner: "go", parity: "pending" },
+      { method: "PATCH", owner: "go", parity: "pending" },
+    ],
+  );
 });
 
 test("Go-only POS customer lookup has exact generated ownership", () => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchAiConfig,
+  fetchAgentSoul,
   fetchBranding,
   fetchCompositions,
   fetchModuleSettings,
@@ -9,6 +10,7 @@ import {
   isProtectedModule,
   PROTECTED_MODULE_IDS,
   saveAiConfig,
+  saveAgentSoul,
   sendEmailTest,
   SettingsApiError,
   submitGoverned,
@@ -50,6 +52,28 @@ afterEach(() => {
 });
 
 describe("Vite settings API", () => {
+  it("reads and saves the persona through the exact organization contract", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+      .mockResolvedValueOnce(Response.json({ agentSoul: "Be concise." }))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchAgentSoul()).resolves.toBe("Be concise.");
+    await expect(saveAgentSoul("Be thoughtful.")).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/org", expect.objectContaining({
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/org", expect.objectContaining({
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ agentSoul: "Be thoughtful." }),
+    }));
+  });
+
   it("reads the module switchboard over the authenticated same-origin session", async () => {
     const fetchMock = vi.fn(async () => Response.json(switchboard));
     vi.stubGlobal("fetch", fetchMock);

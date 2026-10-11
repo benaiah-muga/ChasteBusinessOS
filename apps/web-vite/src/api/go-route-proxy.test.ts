@@ -1097,17 +1097,20 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(rollback, "PATCH", "/api/onboarding")).toBe(false);
   });
 
-  it("routes only organization GET and POST to Go regardless of environment flags", () => {
+  it("routes exact organization GET, POST, PUT, and PATCH requests to Go regardless of environment flags", () => {
     for (const env of [{}, { CHASTE_GO_ORG_ROUTE: "1" }, { CHASTE_GO_ORG_ROUTE: "0" }]) {
       const flags = goRouteProxyFlagsFromEnv(env);
       expect(isGoRouteRequest(flags, "GET", "/api/org")).toBe(true);
       expect(isGoRouteRequest(flags, "GET", "/api/org?source=workspace")).toBe(true);
       expect(isGoRouteRequest(flags, "POST", "/api/org")).toBe(true);
-      expect(isGoRouteRequest(flags, "PATCH", "/api/org")).toBe(false);
-      expect(isGoRouteRequest(flags, "PUT", "/api/org")).toBe(false);
+      expect(isGoRouteRequest(flags, "PATCH", "/api/org")).toBe(true);
+      expect(isGoRouteRequest(flags, "PATCH", "/api/org?tab=persona")).toBe(true);
+      expect(isGoRouteRequest(flags, "PUT", "/api/org")).toBe(true);
       expect(isGoRouteRequest(flags, "DELETE", "/api/org")).toBe(false);
       expect(isGoRouteRequest(flags, "GET", "/api/org/extra")).toBe(false);
       expect(isGoRouteRequest(flags, "POST", "/api/org/extra")).toBe(false);
+      expect(isGoRouteRequest(flags, "PUT", "/api/org/extra")).toBe(false);
+      expect(isGoRouteRequest(flags, "PATCH", "/api/org/extra")).toBe(false);
     }
   });
 
@@ -1181,12 +1184,15 @@ describe("Vite Go route proxy selection", () => {
     expect(switched.headers.get("set-cookie")).toContain("proxy-result=preserved");
 
     for (const request of [
-      { method: "PATCH", path: "/api/org" },
-      { method: "GET", path: "/api/org/extra" },
+      { method: "PUT", path: "/api/org", target: "go" },
+      { method: "PATCH", path: "/api/org", target: "go" },
+      { method: "DELETE", path: "/api/org", target: "legacy" },
+      { method: "PATCH", path: "/api/org/extra", target: "legacy" },
+      { method: "GET", path: "/api/org/extra", target: "legacy" },
     ]) {
       const response = await fetch(`http://127.0.0.1:${address.port}${request.path}`, { method: request.method });
       const payload = await response.json() as { target: string; method: string; url: string };
-      expect(payload).toMatchObject({ target: "legacy", method: request.method, url: request.path });
+      expect(payload).toMatchObject({ target: request.target, method: request.method, url: request.path });
     }
   });
 

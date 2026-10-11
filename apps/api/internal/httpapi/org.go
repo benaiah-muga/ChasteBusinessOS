@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
@@ -41,8 +42,14 @@ type OrgSummary struct {
 	BaseCurrency string `json:"baseCurrency"`
 }
 
-// maxSoulLength mirrors the TypeScript z.string().max(8000) contract.
+// maxSoulLength mirrors the TypeScript z.string().max(8000) contract, which
+// counts UTF-16 code units rather than UTF-8 bytes.
 const maxSoulLength = 8000
+
+// maxSoulBodyBytes allows an 8,000-code-unit string encoded as JSON escapes
+// (six bytes per code unit), plus the object wrapper, while keeping the input
+// bounded.
+const maxSoulBodyBytes = 64 * 1024
 
 // OrgHandler serves the public /api/org surface: the organization switcher, the
 // active-organization switch, and the organization's agent persona.
@@ -235,11 +242,11 @@ func decodeSoul(r *http.Request, w http.ResponseWriter) (string, bool) {
 	var body struct {
 		AgentSoul *string `json:"agentSoul"`
 	}
-	if !decodeJSONBody(w, r, 16*1024, &body) {
+	if !decodeJSONBody(w, r, maxSoulBodyBytes, &body) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return "", false
 	}
-	if body.AgentSoul == nil || len(*body.AgentSoul) > maxSoulLength {
+	if body.AgentSoul == nil || utf16CodeUnits(*body.AgentSoul) > maxSoulLength {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return "", false
 	}
@@ -247,6 +254,14 @@ func decodeSoul(r *http.Request, w http.ResponseWriter) (string, bool) {
 		return "", true
 	}
 	return strings.TrimSpace(*body.AgentSoul), true
+}
+
+func utf16CodeUnits(value string) int {
+	length := 0
+	for _, r := range value {
+		length += utf16.RuneLen(r)
+	}
+	return length
 }
 
 // decodeJSONBody decodes exactly one JSON object of bounded size and rejects

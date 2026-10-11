@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite now sends exact `PUT` and `PATCH /api/org` persona settings requests to
+  Go alongside organization list and switch requests. Go applies an 8,000
+  UTF-16-code-unit limit with a bounded 64 KiB JSON body. Authenticated
+  browser proof of persona read and save remains pending.
+
 - Vite now sends exact `GET /api/sales/{orderId}` invoice reads to Go
   unconditionally. Go mounts the handler by default; set
   `GO_SALES_INVOICE_ROUTE=0` to unmount it. Other methods and non-exact paths

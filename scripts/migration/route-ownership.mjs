@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 
 import { basename, dirname, join, relative, sep } from "node:path";
 import { createRequire } from "node:module";
 import process from "node:process";
-import { allowsPendingAuthOwner } from "./route-ownership-policy.mjs";
+import { allowsPendingAuthOwner, allowsPendingGoOrgPersonaOwner } from "./route-ownership-policy.mjs";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
@@ -104,7 +104,9 @@ if (existsSync(overridePath)) {
     // Auth owns the namespace while compatibility parity with the legacy
     // Better Auth catch-all remains pending. Go intentionally rejects
     // unsupported paths, so namespace ownership does not imply endpoint parity.
-    if (owner !== "legacy" && parity !== "verified" && !allowsPendingAuthOwner(kind, path, owner, parity)) {
+    const pendingOwnerAllowed = allowsPendingAuthOwner(kind, path, owner, parity)
+      || allowsPendingGoOrgPersonaOwner(kind, path, method, owner, parity);
+    if (owner !== "legacy" && parity !== "verified" && !pendingOwnerAllowed) {
       throw new Error(`Route ${path} cannot move to ${owner} before parity is verified.`);
     }
 

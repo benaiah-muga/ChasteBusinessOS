@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -250,6 +251,10 @@ func TestGoOrgRouteMatchesTheLegacyApp(t *testing.T) {
 	fixture := seedOrgParityFixture(t, pool, goServer.secret)
 
 	foreign := "99999999-9999-4999-8999-999999999999"
+	multibytePersona, err := json.Marshal(map[string]string{"agentSoul": strings.Repeat("界", maxSoulLength)})
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		label     string
 		method    string
@@ -276,6 +281,7 @@ func TestGoOrgRouteMatchesTheLegacyApp(t *testing.T) {
 		{"PATCH missing field", http.MethodPatch, `{}`, fixture.cookie, ""},
 		{"PATCH unknown field", http.MethodPatch, `{"agentSoul":"x","y":1}`, fixture.cookie, ""},
 		{"PATCH too long", http.MethodPatch, `{"agentSoul":"` + strings.Repeat("a", maxSoulLength+1) + `"}`, fixture.cookie, ""},
+		{"PATCH multibyte at 8000 UTF16 units", http.MethodPatch, string(multibytePersona), fixture.cookie, fixture.orgA},
 		{"PATCH no session", http.MethodPatch, `{"agentSoul":"x"}`, "", ""},
 	}
 
@@ -368,7 +374,12 @@ func TestGoOrgRouteWorksThroughRuntimeRLS(t *testing.T) {
 		t.Fatalf("runtime agent persona read status = %d, body = %s", putResponse.Code, putResponse.Body.String())
 	}
 
-	patchRequest := httptest.NewRequest(http.MethodPatch, "/api/org", strings.NewReader(`{"agentSoul":"runtime proof"}`))
+	multibytePersona := strings.Repeat("界", maxSoulLength)
+	patchBody, err := json.Marshal(map[string]string{"agentSoul": multibytePersona})
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchRequest := httptest.NewRequest(http.MethodPatch, "/api/org", bytes.NewReader(patchBody))
 	patchRequest.Header.Set("Content-Type", "application/json")
 	patchRequest.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: fixture.cookie})
 	patchRequest.AddCookie(&http.Cookie{Name: session.ActiveOrgCookieName, Value: fixture.orgA})
@@ -385,7 +396,7 @@ func TestGoOrgRouteWorksThroughRuntimeRLS(t *testing.T) {
 	var persona struct {
 		AgentSoul string `json:"agentSoul"`
 	}
-	if readResponse.Code != http.StatusOK || json.Unmarshal(readResponse.Body.Bytes(), &persona) != nil || persona.AgentSoul != "runtime proof" {
+	if readResponse.Code != http.StatusOK || json.Unmarshal(readResponse.Body.Bytes(), &persona) != nil || persona.AgentSoul != multibytePersona {
 		t.Fatalf("runtime agent persona read status=%d body=%s", readResponse.Code, readResponse.Body.String())
 	}
 }

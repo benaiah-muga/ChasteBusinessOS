@@ -71,6 +71,20 @@
     },
     {
       "kind": "api",
+      "path": "/api/org",
+      "method": "PUT",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
       "path": "/api/my-work",
       "method": "GET",
       "owner": "go",

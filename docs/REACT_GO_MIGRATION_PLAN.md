@@ -2870,3 +2870,16 @@ new owners and the manifest shows zero legacy runtime paths.
      unknown or revoked links, and rate limiting. `agent-browser` confirms the
      public Vite route renders the safe not-found state for an invalid share
      token and the exact GET returns 404 without browser console errors.
+
+278. (Implemented; handler and proxy proof added; authenticated persona browser
+     proof remains pending) Route exact Vite `PUT` and `PATCH /api/org` persona
+     requests through Go. Keep exact path matching, preserve existing GET and
+     POST routing, and leave DELETE and suffix paths with their current owner.
+     Go enforces an 8,000 UTF-16-code-unit persona limit, including multibyte
+     text, and bounds escaped JSON request bodies. Focused unit, runtime DB,
+     settings client, and Vite proxy tests cover Go behavior and forwarding.
+     The manifest assigns PUT/PATCH to Go with parity pending under the narrow
+     `/api/org` persona policy exception. The live legacy differential fixture
+     returned 401 for its seeded session, so it did not verify a legacy
+     response. Complete that differential and the authenticated browser
+     read/save proof before closing those runtime gates.

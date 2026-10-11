@@ -407,6 +407,37 @@ func TestOrgPatchTrimsAndClearsThePersona(t *testing.T) {
 	}
 }
 
+func TestOrgPatchCountsUTF16Units(t *testing.T) {
+	orgID := "aaaaaaaa-0000-4000-8000-000000000001"
+	for _, tc := range []struct {
+		name      string
+		units     int
+		wantCode  int
+		wantCalls int
+	}{
+		{"maximum multibyte persona", maxSoulLength, http.StatusOK, 1},
+		{"one code unit over maximum", maxSoulLength + 1, http.StatusBadRequest, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &stubOrgRepo{}
+			handler := newOrgTestHandler(t, repo, func() (*session.ResolvedUser, error) {
+				return verifiedActor(orgID, "iam.admin"), nil
+			})
+			body := `{"agentSoul":` + mustJSONString(t, strings.Repeat("界", tc.units)) + `}`
+			recorder := orgRequest(t, handler, http.MethodPatch, body, nil)
+			if recorder.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d for %d UTF-16 code units (%d UTF-8 bytes)", recorder.Code, tc.wantCode, tc.units, len(body))
+			}
+			if repo.setCalls != tc.wantCalls {
+				t.Fatalf("write calls = %d, want %d", repo.setCalls, tc.wantCalls)
+			}
+			if tc.wantCalls > 0 && repo.soul != strings.Repeat("界", tc.units) {
+				t.Fatalf("stored persona length = %d UTF-16 code units, want %d", utf16CodeUnits(repo.soul), tc.units)
+			}
+		})
+	}
+}
+
 func TestOrgPatchRejectsMalformedBodies(t *testing.T) {
 	orgID := "aaaaaaaa-0000-4000-8000-000000000001"
 	long := strings.Repeat("a", maxSoulLength+1)

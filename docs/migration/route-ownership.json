@@ -854,7 +854,7 @@
       "path": "/api/org",
       "method": "PUT",
       "source": "apps/web/src/app/api/org/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -862,7 +862,7 @@
       "path": "/api/org",
       "method": "PATCH",
       "source": "apps/web/src/app/api/org/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
