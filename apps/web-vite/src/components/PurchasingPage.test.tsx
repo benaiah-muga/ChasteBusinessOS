@@ -34,6 +34,7 @@ function workspaceFixture(overrides: Record<string, unknown> = {}) {
     vendors: [vendor],
     orders: [orderFixture()],
     bills: [],
+    apAging: { buckets: { current: 12500, d30: 0, d60: 0, d90plus: 0, totalOutstanding: 12500 } },
     requests: [],
     ...overrides,
   };
@@ -82,7 +83,7 @@ function purchasingFetch(overrides: Overrides = {}) {
     if (url === "/api/modules") return resolve(overrides.modules ?? switchboard);
     if (url === "/api/inventory") return resolve(overrides.inventory ?? { items: [] });
     if (url === "/api/purchasing") {
-      if (method === "GET") return resolve(overrides.workspace ?? workspaceFixture());
+      if (method === "GET") throw new TypeError("PurchasingPage must not load its workspace from the legacy endpoint");
       return post(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
     }
     if (url === "/api/capabilities/execute" && method === "POST") {
@@ -91,6 +92,10 @@ function purchasingFetch(overrides: Overrides = {}) {
         input?: Record<string, unknown>;
         intentId?: string;
       };
+      if (body.capabilityId === "purchasing.listWorkspace") {
+        const workspace = overrides.workspace ?? workspaceFixture();
+        return resolve(workspace instanceof Response ? workspace : { ok: true, data: workspace });
+      }
       if (body.capabilityId === "purchasing.listPurchaseWorkflow") {
         return resolve(overrides.workflow ?? { ok: true, data: { requests: [] } });
       }
@@ -135,7 +140,7 @@ function postsTo(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, 
   return fetchMock.mock.calls
     .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
     .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
-    .filter((body) => body.capabilityId !== "accounting.listTaxCodes")
+    .filter((body) => body.capabilityId !== "accounting.listTaxCodes" && body.capabilityId !== "purchasing.listWorkspace")
     .map((body) => body.capabilityId === "purchasing.createVendor"
       ? { ...(body.input as Record<string, unknown>), action: "createVendor", intentId: body.intentId }
       : body.capabilityId === "purchasing.createPurchaseOrder"
@@ -147,7 +152,7 @@ function capabilityPosts(fetchMock: ReturnType<typeof purchasingFetch>): Record<
   return fetchMock.mock.calls
     .filter(([url, init]) => String(url) === "/api/capabilities/execute" && (init as RequestInit | undefined)?.method === "POST")
     .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
-    .filter((body) => body.capabilityId !== "accounting.listTaxCodes");
+    .filter((body) => body.capabilityId !== "accounting.listTaxCodes" && body.capabilityId !== "purchasing.listWorkspace");
 }
 
 function stubPurchasingLocks(): void {
@@ -311,11 +316,11 @@ describe("receiving prefills from the aggregated rollup", () => {
 /* --------------------------------------------------------------- PurchasingPage --- */
 
 describe("PurchasingPage", () => {
-  it("replaces only the aggregate requests with the direct Go workflow read", async () => {
+  it("loads vendors, orders, bills, and workflow requests from Go without a legacy workspace read", async () => {
     vi.stubGlobal("__GO_PURCHASING_WORKFLOW_READS__", true);
     const legacyRequest = { id: "legacy-request", title: "Legacy request", justification: "Legacy justification", estimatedAmountMinor: null, status: "pending", decisionReason: null, createdAt: "2026-09-24T12:00:00.000Z", rfqs: [] };
     const fetchMock = purchasingFetch({
-      workspace: workspaceFixture({ requests: [legacyRequest] }),
+      workspace: workspaceFixture({ requests: [legacyRequest], bills: [billFixture()] }),
       workflow: { ok: true, data: { requests: [{
         id: "go-request",
         title: "Go workflow request",
@@ -330,13 +335,69 @@ describe("PurchasingPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<PurchasingPage />);
 
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
+    const workspaceRead = fetchMock.mock.calls.find(([url, init]) => String(url) === "/api/capabilities/execute"
+      && JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")).capabilityId === "purchasing.listWorkspace");
+    expect(workspaceRead).toBeDefined();
+    expect(JSON.parse(String(workspaceRead?.[1]?.body))).toMatchObject({ capabilityId: "purchasing.listWorkspace", input: {}, intentId: expect.any(String) });
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/purchasing")).toBe(false);
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
+    expect(await screen.findByText("Canvas bag")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /^Vendors/ }));
+    expect(await screen.findByText("hello@harbor.test")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /^Bills & payments/ }));
+    const totalOutstanding = screen.getByText("Total outstanding");
+    expect(totalOutstanding.parentElement?.querySelector("strong")?.textContent).toBe("$125.00");
+    const billsTable = screen.getByRole("table", { name: "Vendor bills with balances and payment actions" });
+    expect(within(billsTable).getByText("Harbor Supplies")).toBeTruthy();
+    expect(within(billsTable).getByText("open")).toBeTruthy();
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
     expect(await screen.findByText("Go workflow request")).toBeTruthy();
     expect(screen.queryByText("Legacy request")).toBeNull();
     expect(screen.getAllByText("Harbor Supplies").length).toBeGreaterThan(0);
     expect(capabilityPosts(fetchMock).map((post) => post.capabilityId)).toContain("purchasing.listPurchaseWorkflow");
-    fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
-    expect(await screen.findByText("Canvas bag")).toBeTruthy();
+  });
+
+  it("uses the Go workspace requests and Intel reports when their dedicated selectors are off", async () => {
+    vi.stubGlobal("__GO_PURCHASING_WORKFLOW_READS__", false);
+    vi.stubGlobal("__GO_PURCHASING_INTEL_READS__", false);
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({
+        requests: [{
+          id: "workspace-request",
+          title: "Workspace request",
+          justification: "The last packaging order will run out before delivery.",
+          estimatedAmountMinor: 25000,
+          status: "pending_review",
+          decisionReason: null,
+          createdAt: "2026-09-25T12:15:00.000Z",
+          rfqs: [],
+        }],
+        priceHistory: { rows: [{ vendorName: "Workspace vendor", itemSku: "WS-1", itemDescription: "Workspace item", unitPriceMinor: 3200, orderedAt: null }] },
+        supplierPerformance: { vendors: [{ vendorId: vendor.id, vendorName: "Workspace vendor", orders: 4, avgLeadTimeDays: 3, onTimeRate: 100, fillRate: 95, backorderedOrders: 0 }] },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("tab", { name: /^Requests & RFQs/ }));
+    expect(await screen.findByRole("heading", { name: "Workspace request" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /^Prices & statements/ }));
+    expect(await screen.findByText("Workspace item")).toBeTruthy();
+    const performanceTable = screen.getByRole("table", { name: "Lead time, on-time arrival, and fill rate by supplier" });
+    expect(within(performanceTable).getByText("Workspace vendor")).toBeTruthy();
+
+    const capabilityIds = fetchMock.mock.calls
+      .filter(([url, init]) => String(url) === "/api/capabilities/execute" && (init as RequestInit | undefined)?.method === "POST")
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as { capabilityId: string })
+      .map((body) => body.capabilityId);
+    expect(capabilityIds).toContain("purchasing.listWorkspace");
+    expect(capabilityIds).not.toContain("purchasing.listPurchaseWorkflow");
+    expect(capabilityIds).not.toContain("purchasing.priceHistory");
+    expect(capabilityIds).not.toContain("purchasing.supplierPerformance");
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/purchasing" && ((init as RequestInit | undefined)?.method ?? "GET") === "GET")).toBe(false);
   });
 
   it("keeps the workspace failed when the selected Go requests read fails", async () => {
@@ -346,7 +407,7 @@ describe("PurchasingPage", () => {
     render(<PurchasingPage />);
 
     expect(await screen.findByText(/route disabled/)).toBeTruthy();
-    expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === "/api/purchasing" && ((init as RequestInit | undefined)?.method ?? "GET") === "GET")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/purchasing")).toBe(false);
     expect(capabilityPosts(fetchMock).map((post) => post.capabilityId)).toEqual(["purchasing.listPurchaseWorkflow"]);
   });
 
@@ -1204,7 +1265,7 @@ describe("PurchasingPage", () => {
 
   it("reports an unreachable workspace and retries", async () => {
     let attempt = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") {
         attempt += 1;
@@ -1212,8 +1273,11 @@ describe("PurchasingPage", () => {
           ? Response.json({ error: "boom" }, { status: 503 })
           : Response.json(switchboard);
       }
-      if (url === "/api/purchasing") return Response.json(workspaceFixture());
       if (url === "/api/inventory") return Response.json({ items: [] });
+      if (url === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
+        if (body.capabilityId === "purchasing.listWorkspace") return Response.json({ ok: true, data: workspaceFixture() });
+      }
       return Response.json({ codes: [] });
     });
     vi.stubGlobal("fetch", fetchMock);

@@ -529,7 +529,20 @@ export async function fetchPurchasingEnabled(signal?: AbortSignal): Promise<bool
 }
 
 export async function fetchPurchasingWorkspace(signal?: AbortSignal): Promise<PurchasingWorkspace> {
-  return getValidated("/api/purchasing", PurchasingWorkspaceSchema, "the purchasing workspace", signal);
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ capabilityId: "purchasing.listWorkspace", input: {}, intentId: crypto.randomUUID() }),
+  }, "load the purchasing workspace", signal);
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  if (response.status !== 200 || !envelope.success) {
+    throw new PurchasingApiError(response.status, "The Go Purchasing service returned an unexpected workspace response.");
+  }
+  const parsed = PurchasingWorkspaceSchema.safeParse(envelope.data.data);
+  if (!parsed.success) {
+    throw new PurchasingApiError(response.status, "The Go Purchasing service returned the purchasing workspace in an unexpected format.");
+  }
+  return parsed.data;
 }
 
 export async function fetchGoPurchasingWorkflowRequests(signal?: AbortSignal): Promise<PurchasingRequest[]> {

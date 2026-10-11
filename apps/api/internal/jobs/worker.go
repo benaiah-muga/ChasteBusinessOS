@@ -185,6 +185,7 @@ var GoCapabilityPermissions = map[string]string{
 	"purchasing.recordQuote":                   "purchasing.write",
 	"purchasing.selectWinningQuote":            "purchasing.write",
 	"purchasing.listPurchaseWorkflow":          "purchasing.read",
+	"purchasing.listWorkspace":                 "purchasing.read",
 	"inventory.createItem":                     "inventory.write",
 	"inventory.updateItem":                     "inventory.write",
 	"inventory.restoreItem":                    "inventory.write",

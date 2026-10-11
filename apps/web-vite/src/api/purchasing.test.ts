@@ -63,7 +63,19 @@ const workspace = {
     dueMinor: 12500,
     createdAt: "2026-08-12T09:30:00.000Z",
   }],
-  requests: [],
+  apAging: { buckets: { current: 12500, d30: 0, d60: 0, d90plus: 0, totalOutstanding: 12500 } },
+  requests: [{
+    id: "request-1",
+    title: "Packaging stock",
+    justification: "Existing supply will run out before replenishment.",
+    estimatedAmountMinor: 24000,
+    status: "pending_review",
+    decisionReason: null,
+    createdAt: "2026-08-13T09:30:00.000Z",
+    rfqs: [],
+  }],
+  priceHistory: { rows: [{ vendorName: "Harbor Supplies", itemSku: "CANVAS-1", itemDescription: "Canvas bag", unitPriceMinor: 5000, orderedAt: "2026-08-12T09:30:00.000Z" }] },
+  supplierPerformance: { vendors: [{ vendorId: "0569aacb-58c3-4a30-8afe-3554e38eb2ce", vendorName: "Harbor Supplies", orders: 2, avgLeadTimeDays: 4, onTimeRate: 100, fillRate: 95, backorderedOrders: 0 }] },
 };
 
 const switchboard = { catalog: [{ id: "purchasing" }], enabledModules: ["purchasing"] };
@@ -124,21 +136,34 @@ describe("purchasing API module gate", () => {
 });
 
 describe("purchasing workspace reads", () => {
-  it("returns the validated workspace and rejects an unexpected shape", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(workspace));
+  it("loads the validated workspace through the Go capability", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ ok: true, data: workspace }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchPurchasingWorkspace()).resolves.toEqual(workspace);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { accept: "application/json", "content-type": "application/json" },
+    });
+    expect(postedBody(fetchMock.mock.calls[0] ?? [])).toMatchObject({
+      capabilityId: "purchasing.listWorkspace",
+      input: {},
+      intentId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+    });
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ...workspace, orders: [{ number: 1 }] })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { ...workspace, orders: [{ number: 1 }] } })));
     await expect(fetchPurchasingWorkspace()).rejects.toMatchObject({
       status: 200,
-      message: "The Purchasing service returned the purchasing workspace in an unexpected format.",
+      message: "The Go Purchasing service returned the purchasing workspace in an unexpected format.",
     });
   });
 
   it("defaults missing requests to an empty list", async () => {
     const { requests: _requests, ...withoutRequests } = workspace;
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(withoutRequests)));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: withoutRequests })));
     await expect(fetchPurchasingWorkspace()).resolves.toMatchObject({ requests: [] });
   });
 

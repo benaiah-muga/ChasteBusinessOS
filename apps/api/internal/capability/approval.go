@@ -619,7 +619,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
-		case purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
+		case purchasingListWorkspaceCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
 			purchasingSupplierStatementCapabilityID:
 			parsed, parseErr := parsePurchasingReadsInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
@@ -936,7 +936,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetOrgPolicyCapabilityID,
 		iamSetModuleConfigCapabilityID, iamSetOrgBrandingCapabilityID:
 		return "iam.admin", true
-	case purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID, purchasingSupplierStatementCapabilityID:
+	case purchasingListWorkspaceCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID, purchasingSupplierStatementCapabilityID:
 		return "purchasing.read", true
 	case signalsListCapabilityID:
 		return "signals.read", true

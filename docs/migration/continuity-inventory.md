@@ -343,6 +343,21 @@ browser proof and live legacy differential remain pending
 [`accounting.ts`](../../apps/web-vite/src/api/accounting.ts),
 [`purchasing.ts`](../../apps/web-vite/src/api/purchasing.ts)).
 
+The Vite Purchasing workspace reads vendors, the newest 100 purchase orders
+and bills, payable aging, the newest 50 requests and their RFQs, up to 300
+price-history rows, and supplier performance from Go's
+`purchasing.listWorkspace` capability. The Go executor requires
+`purchasing.read`, uses the session's active organization inside one
+`dbx.WithOrgTx` transaction, and retains vendor name order, order and bill
+recency, line position, per-line rounding, due amounts, and nullable fields.
+Requests and Intel data stay in the workspace result when their dedicated
+read selectors are disabled, so those tabs remain populated. The Vite page no
+longer requests legacy `GET /api/purchasing`; existing writes and the Next
+application's route remain unchanged. Runtime-role Go coverage verifies
+permission denial, cross-organization isolation, ordering, limits, and each
+section's projection; Vite tests verify rendering with selectors disabled and
+reject the legacy GET. Authenticated browser proof remains pending.
+
 The Vite Support conversation picker reads customer options from exact
 `GET /api/support/customers`. Go resolves the signed session and active
 organization, accepts `crm.read` or `pos.sell`, and runs its projection through

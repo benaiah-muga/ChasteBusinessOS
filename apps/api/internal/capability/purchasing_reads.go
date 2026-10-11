@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	purchasingListWorkspaceCapabilityID       = "purchasing.listWorkspace"
 	purchasingSupplierPerformanceCapabilityID = "purchasing.supplierPerformance"
 	purchasingPriceHistoryCapabilityID        = "purchasing.priceHistory"
 	purchasingSupplierStatementCapabilityID   = "purchasing.supplierStatement"
@@ -103,6 +104,8 @@ func ParsePurchasingSupplierStatementInput(raw json.RawMessage) (PurchasingSuppl
 
 func parsePurchasingReadsInput(capabilityID string, raw json.RawMessage) (any, error) {
 	switch capabilityID {
+	case purchasingListWorkspaceCapabilityID:
+		return ParsePurchasingListWorkspaceInput(raw)
 	case purchasingSupplierPerformanceCapabilityID:
 		return ParsePurchasingSupplierPerformanceInput(raw)
 	case purchasingPriceHistoryCapabilityID:

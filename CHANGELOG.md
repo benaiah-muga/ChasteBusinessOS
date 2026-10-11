@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Purchasing now loads vendors, recent purchase orders and bills, accounts
+  payable aging, requests and RFQs, price history, and supplier performance
+  from the authenticated Go `purchasing.listWorkspace` capability. Go enforces
+  `purchasing.read` and active-organization scope; the page no longer requests
+  legacy `GET /api/purchasing`.
+
 - Vite HR People directory now uses the existing Go `hr.report` capability,
   matching Overview's session, permission, active-organization, and response
   path. The report keeps the newest-hired-first employee list and 200-row

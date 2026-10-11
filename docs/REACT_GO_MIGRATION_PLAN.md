@@ -2975,3 +2975,15 @@ new owners and the manifest shows zero legacy runtime paths.
      newest-hired-first ordering with a 200-row limit. The People tab must not
      request legacy `GET /api/hr`; Go errors fail closed as they do for
      Overview. No route ownership changes are required.
+
+286. (Implemented; focused Vite API/page tests, Go runtime-role projection
+     proof, module checks, and manifest parity check passed; authenticated
+     browser proof remains pending) Replace the Vite Purchasing workspace
+     `GET /api/purchasing` read with the authenticated Go
+     `purchasing.listWorkspace` capability. Preserve vendor, recent order and
+     bill projections, payable aging, purchase requests and RFQs, price
+     history, and supplier performance in one organization-scoped response.
+     Require `purchasing.read`, preserve ordering, limits, nullable values,
+     and legacy amount calculations, and keep every section populated when
+     the dedicated workflow and Intel selectors are disabled. Do not change
+     Purchasing writes or route ownership for the legacy Next app.

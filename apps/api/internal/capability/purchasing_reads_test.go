@@ -23,6 +23,9 @@ func seedPurchasingReadsVendorWithPO(t *testing.T, fx *executorFixture, poNumber
 }
 
 func TestPurchasingReadsParsersMirrorZodContracts(t *testing.T) {
+	if _, err := parsePurchasingReadsInput(purchasingListWorkspaceCapabilityID, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("listWorkspace parser rejected empty input: %v", err)
+	}
 	if _, err := ParsePurchasingSupplierPerformanceInput(json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("performance parse err=%v", err)
 	}

@@ -303,6 +303,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	iamSetOrgPolicyCapabilityID:                         {module: "iam", permission: "iam.admin", risk: "identity"},
 	iamSetOrgBrandingCapabilityID:                       {module: "iam", permission: "iam.admin", risk: "write"},
 	purchasingSupplierPerformanceCapabilityID:           {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	purchasingListWorkspaceCapabilityID:                 {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	purchasingPriceHistoryCapabilityID:                  {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	purchasingSupplierStatementCapabilityID:             {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	signalsListCapabilityID:                             {module: "signals", permission: "signals.read", risk: "read"},
@@ -500,7 +501,7 @@ func supportedCapability(capabilityID string) bool {
 		hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID,
 		iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
 		iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID,
-		purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
+		purchasingListWorkspaceCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
 		purchasingSupplierStatementCapabilityID,
 		signalsListCapabilityID, skillsFindCapabilityID, skillsLoadCapabilityID,
 		routinesCreateCapabilityID, routinesListCapabilityID, routinesUpdateCapabilityID,
@@ -1296,7 +1297,7 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
+		case purchasingListWorkspaceCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
 			purchasingSupplierStatementCapabilityID:
 			parsed, err := parsePurchasingReadsInput(capabilityID, rawInput)
 			if err != nil {
@@ -3199,6 +3200,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case PurchasingListWorkspaceInput:
+			output, err := purchasingListWorkspace(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case PurchasingSupplierPerformanceInput:
 			output, err := purchasingSupplierPerformance(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -3576,7 +3583,7 @@ func canonicalInputHash(input any) (string, error) {
 		AssignProjectTaskInput, RestoreProjectTaskAssigneeInput,
 		HRCreateOpeningInput, HRCloseOpeningInput,
 		IAMModulesInput, IAMSetModuleConfigInput, IAMSetOrgPolicyInput, IAMSetOrgBrandingInput,
-		PurchasingSupplierPerformanceInput, PurchasingPriceHistoryInput, PurchasingSupplierStatementInput,
+		PurchasingListWorkspaceInput, PurchasingSupplierPerformanceInput, PurchasingPriceHistoryInput, PurchasingSupplierStatementInput,
 		SignalsListInput, SkillsFindInput, SkillsLoadInput,
 		RoutinesCreateInput, RoutinesListInput, RoutinesUpdateInput, RoutinesDeleteInput, RoutinesRunNowInput,
 		AnalyticsRenderReportInput, AnalyticsPipelineByStageInput, AnalyticsRevenueByMonthInput,
