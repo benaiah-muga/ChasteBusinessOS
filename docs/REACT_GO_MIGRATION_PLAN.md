@@ -191,10 +191,10 @@ previews. Analytics preserves permission-filtered dataset discovery, governed
 previews, table and chart choices, report output, and HTML download. Its report
 composer posts to the existing `/api/analytics` handler through a same-origin
 development proxy. The Vite preview also proxies `/api/team` for project
-assignee lookup. Analytics component and API tests pass; its browser runtime
-proof remains open while the in-app browser is unavailable in this IDE session.
-Direct `/analytics` visits render the Vite `AnalyticsPage`, and the ownership
-manifest records that page as Vite-owned alongside its verified Go API routes.
+assignee lookup. Analytics component and API tests pass. An authenticated
+`agent-browser` proof on 2026-10-11 loaded the Go-backed dataset catalog and
+preview, then generated a report with the expected table and chart. The Go
+dataset, preview, and report requests all returned 200.
 
 Sessions
 preserve the existing selection, event sequence, replay, durable-run, and
@@ -202,8 +202,7 @@ metrics response contracts. Projects preserve module availability, board and
 task ordering, governed writes, archive confirmation, and `202` approval
 notices. Both use existing legacy APIs and retain legacy production route
 ownership. Projects component, API, shell, typecheck, build, and lint tests
-pass; its requested in-app browser proof remains open because no in-app browser
-connection is exposed in the current environment.
+pass; its browser runtime proof remains open.
 
 Go now implements all five Projects write capabilities through the existing
 governed executor. DB-backed proofs cover input parser parity, module and grant
@@ -231,10 +230,10 @@ explicit signed opt-in; CRM writes and unported read modes remain on the
 legacy route. The Go metrics reader matches the newest-200-session aggregate,
 null-rate, rounding, and organization-scope behavior. Its short-lived signed
 HTTP adapter is opt-in through `GO_METRICS_READ=1`; the public route remains
-legacy-owned by default. The current route census has 94 API route files, 158
-methods, and 30 pages. Seven API methods are Go-owned, 151 remain legacy-owned,
-and `/analytics` is the only Vite-owned page; the other 29 pages remain
-legacy-owned.
+legacy-owned by default. The current route census has 94 API route files, 160
+API methods, and 30 pages. Go owns 44 verified API methods, 114 API methods
+remain legacy-owned, and two auth methods remain pending Go parity. Vite owns 13
+verified pages; 17 pages remain legacy-owned.
 
 The key seams are `apps/web/src/lib/api.ts` (HTTP and 202 approval semantics),
 `apps/web/src/server/auth.ts` and `session.ts` (identity and active org),
@@ -248,16 +247,18 @@ backup behavior. Phase 0 records exact manifests from these sources.
 Method-level owner and parity changes belong in
 `route-ownership-overrides.json`; the generator rejects duplicate or stale
 keys and prevents a route from moving to Go or Vite before parity is verified.
-The current manifest records seven Go-owned API methods and the Vite-owned
-`/analytics` page, with the remaining API methods and pages assigned to legacy.
+The current manifest records 44 Go-owned API methods and 13 Vite-owned pages;
+remaining methods and pages retain their legacy or pending owners until their
+parity and runtime gates pass.
 
 Local verification on 2026-10-04 passed `pnpm typecheck`, `pnpm lint`,
 `pnpm test`, and `pnpm go:verify` with `GO_DATABASE_URL` set to the
 least-privilege runtime role. The verified local demo set includes the Go
-slice, M2-M13, M4b, and support. The Dashboard, Projects, and Analytics
-in-app-browser gates remain open. The `/analytics` page and its verified Go API
-methods are Vite- and Go-owned; remaining routes retain their recorded owners
-until their parity and cutover gates pass.
+slice, M2-M13, M4b, and support. At that time, the Dashboard, Projects, and
+Analytics browser gates remained open. Subsequent Dashboard and Analytics
+proofs passed with `agent-browser`; the Projects browser gate remains open.
+Remaining routes retain their recorded owners until their parity and runtime
+gates pass.
 
 The Phase 0 behavior census is recorded in
 [`continuity-inventory.md`](migration/continuity-inventory.md) for data,
@@ -2742,3 +2743,10 @@ new owners and the manifest shows zero legacy runtime paths.
      return, register close, shift summary, customer lookup, and the Go-backed
      empty inventory catalog. Each API used by the proof returned successfully
      from Go. The browser proof did not cover stock-tracked item effects.
+
+264. (Runtime verified) An authenticated `agent-browser` session loaded the
+     Vite dashboard and team pages through Go. Dashboard, setup, and my-work
+     reads returned 200; the team page rendered the active member and role from
+     `GET /api/team`. The `/analytics` catalog, preview, and generated report
+     also returned 200. No browser console errors were reported. The notification
+     feed and read-receipt proof is recorded in item 146.
