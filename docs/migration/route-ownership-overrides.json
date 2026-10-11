@@ -30,6 +30,12 @@
       "parity": "verified"
     },
     {
+      "kind": "page",
+      "path": "/approvals",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
       "kind": "api",
       "path": "/api/onboarding",
       "method": "POST",

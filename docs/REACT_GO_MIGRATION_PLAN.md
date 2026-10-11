@@ -2778,3 +2778,8 @@ new owners and the manifest shows zero legacy runtime paths.
      through Go. Both POSTs returned 200, the UI showed the matching success
      state, each row left the pending inbox and appeared in recent decisions,
      and the browser reported no errors.
+
+267. (Runtime verified) Mark `/approvals` as Vite-owned after the authenticated
+     browser proof loaded the page in the Vite app and exercised both Go-backed
+     decisions. The generated route-ownership manifest and its exact ownership
+     test now record the Vite page owner.

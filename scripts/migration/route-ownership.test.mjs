@@ -89,3 +89,16 @@ test("POS page has verified Vite ownership after the authenticated browser flow"
     }],
   );
 });
+
+test("approvals page has verified Vite ownership after the authenticated decision flow", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.kind === "page" && entry.path === "/approvals"),
+    [{
+      kind: "page",
+      path: "/approvals",
+      source: "apps/web/src/app/(app)/approvals/page.tsx",
+      owner: "vite",
+      parity: "verified",
+    }],
+  );
+});
