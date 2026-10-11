@@ -5,6 +5,7 @@ import process from "node:process";
 import {
   allowsPendingAuthOwner,
   allowsPendingGoOrgPersonaOwner,
+  allowsPendingGoMemoryCollectionOwner,
   allowsPendingGoRoutineCollectionOwner,
 } from "./route-ownership-policy.mjs";
 
@@ -110,6 +111,7 @@ if (existsSync(overridePath)) {
     // unsupported paths, so namespace ownership does not imply endpoint parity.
     const pendingOwnerAllowed = allowsPendingAuthOwner(kind, path, owner, parity)
       || allowsPendingGoOrgPersonaOwner(kind, path, method, owner, parity)
+      || allowsPendingGoMemoryCollectionOwner(kind, path, method, owner, parity)
       || allowsPendingGoRoutineCollectionOwner(kind, path, method, owner, parity);
     if (owner !== "legacy" && parity !== "verified" && !pendingOwnerAllowed) {
       throw new Error(`Route ${path} cannot move to ${owner} before parity is verified.`);

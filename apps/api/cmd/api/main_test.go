@@ -63,6 +63,21 @@ func TestGoRoutinesRouteEnabledFromEnvDefaultsOnAndAllowsDisable(t *testing.T) {
 	}
 }
 
+func TestGoMemoryRouteEnabledFromEnvDefaultsOnAndAllowsDisable(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: true},
+		{value: "1", want: true},
+		{value: "0", want: false},
+	} {
+		if got := goMemoryRouteEnabledFromEnv(test.value); got != test.want {
+			t.Errorf("goMemoryRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)
+		}
+	}
+}
+
 func TestGoPortalInvoiceRouteEnabledFromEnvDefaultsOnAndAllowsDisable(t *testing.T) {
 	for _, test := range []struct {
 		value string

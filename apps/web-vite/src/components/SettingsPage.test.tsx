@@ -228,6 +228,30 @@ describe("Vite settings page", () => {
     expect(postsTo(fetchMock, "/api/memory")[0]).toMatchObject({ action: "delete", memoryId: "mem-1" });
   }, 20_000);
 
+  it("searches organization memory with a one-character source query and trusts Go canEdit", async () => {
+    const fetchMock = routedFetch({
+      "/api/org": orgRoute,
+      "/api/modules": () => jsonResponse(switchboard),
+      "/api/ai-config": () => jsonResponse(aiConfig),
+      "/api/memory": () => jsonResponse({
+        memories: [
+          { id: "mem-source", kind: "sop", source: "x.pdf", content: "Full memory content", preview: "Source matched entry", createdAt: "2026-01-01T00:00:00.000Z" },
+        ],
+        total: 8,
+        canEdit: false,
+      }),
+    });
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "AI & automation" }));
+    expect(await screen.findByText("Source matched entry")).not.toBeNull();
+    const search = screen.getByRole("textbox", { name: "Search organization memory" });
+    fireEvent.change(search, { target: { value: "x" } });
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/memory?q=x")).toBe(true));
+    expect(screen.queryByRole("button", { name: "Delete memory entry" })).toBeNull();
+    expect(screen.getByText("1 shown")).not.toBeNull();
+  }, 20_000);
+
   it("creates a routine and reports the webhook trigger the server minted", async () => {
     const fetchMock = routedFetch({
       "/api/routines": (init) => (init?.method === "POST"

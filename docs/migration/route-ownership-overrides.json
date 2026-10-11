@@ -85,6 +85,20 @@
     },
     {
       "kind": "api",
+      "path": "/api/memory",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/memory",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
       "path": "/api/routines",
       "method": "GET",
       "owner": "go",

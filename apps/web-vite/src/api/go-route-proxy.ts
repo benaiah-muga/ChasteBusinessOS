@@ -15,6 +15,7 @@ export type GoRouteProxyFlags = {
   modulesWrite: boolean;
   projects: boolean;
   routines: boolean;
+  memory: boolean;
   teamRead: boolean;
   teamWrite: boolean;
   branding: boolean;
@@ -357,6 +358,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     modulesWrite: env.CHASTE_GO_MODULES_WRITE_ROUTE === "1",
     projects: env.CHASTE_GO_PROJECTS_ROUTE !== "0",
     routines: env.CHASTE_GO_ROUTINES_ROUTE !== "0",
+    memory: env.CHASTE_GO_MEMORY_ROUTE !== "0",
     teamRead: env.CHASTE_GO_TEAM_READ_ROUTE !== "0",
     teamWrite: env.CHASTE_GO_TEAM_WRITE_ROUTE !== "0",
     branding: env.CHASTE_GO_BRANDING_ROUTE === "1",
@@ -405,6 +407,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.modulesWrite && method === "POST" && /^\/api\/modules(?:\?.*)?$/.test(path)) return true;
   if (flags.projects && ["GET", "POST"].includes(method ?? "") && /^\/api\/projects(?:\?.*)?$/.test(path)) return true;
   if (flags.routines && ["GET", "POST"].includes(method ?? "") && /^\/api\/routines(?:\?.*)?$/.test(path)) return true;
+  if (flags.memory && ["GET", "POST"].includes(method ?? "") && /^\/api\/memory(?:\?.*)?$/.test(path)) return true;
   if (flags.teamRead && method === "GET" && /^\/api\/team(?:\?.*)?$/.test(path)) return true;
   if (flags.teamWrite && method === "POST" && /^\/api\/team(?:\?.*)?$/.test(path)) return true;
   if (flags.branding && ["GET", "POST"].includes(method ?? "") && /^\/api\/branding(?:\?.*)?$/.test(path)) return true;

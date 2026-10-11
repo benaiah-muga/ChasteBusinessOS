@@ -2899,3 +2899,16 @@ new owners and the manifest shows zero legacy runtime paths.
      The manifest records both collection methods as Go-owned with parity
      pending under a narrow policy exception. Webhook handling and worker
      execution remain separate migration items.
+
+280. (Implemented; runtime-role HTTP and focused Vite tests passed; authenticated
+     browser proof and live legacy differential remain pending) Route exact
+     Vite Settings `GET` and `POST /api/memory` requests through Go by default.
+     Go resolves the signed user session and active organization, uses a
+     tenant-scoped projection for the legacy 200-row list contract, and derives
+     `canEdit` from resolved permissions. Preserve empty and one-character
+     searches, source matching, kind filtering, pre-filter `total`, preview and
+     timestamp fields. Memory deletion continues through the governed
+     `documents.deleteOrgMemory` capability, which enforces permission and
+     organization scope. Unsupported methods and suffix paths retain their
+     existing owner. The generated route manifest records both methods as Go
+     owned with parity pending under an exact-path policy exception.

@@ -167,6 +167,22 @@ func MountGoRoutinesRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoMemoryRoute mounts only Settings memory collection GET and POST;
+// unsupported methods and nested paths continue to the base handler.
+func MountGoMemoryRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/memory", route)
+	mux.Handle("POST /api/memory", route)
+	if base != nil {
+		mux.Handle("HEAD /api/memory", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoInventoryReadRoute mounts only the read-only inventory collection
 // endpoint. Writes and nested inventory paths continue to the existing owner.
 func MountGoInventoryReadRoute(base, route http.Handler) http.Handler {

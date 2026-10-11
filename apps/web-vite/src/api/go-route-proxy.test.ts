@@ -779,6 +779,8 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_PROJECTS_ROUTE", flag: "projects", method: "POST", url: "/api/projects" },
   { env: "CHASTE_GO_ROUTINES_ROUTE", flag: "routines", method: "GET", url: "/api/routines" },
   { env: "CHASTE_GO_ROUTINES_ROUTE", flag: "routines", method: "POST", url: "/api/routines" },
+  { env: "CHASTE_GO_MEMORY_ROUTE", flag: "memory", method: "GET", url: "/api/memory?q=ledger" },
+  { env: "CHASTE_GO_MEMORY_ROUTE", flag: "memory", method: "POST", url: "/api/memory" },
   { env: "CHASTE_GO_TEAM_READ_ROUTE", flag: "teamRead", method: "GET", url: "/api/team" },
   { env: "CHASTE_GO_TEAM_WRITE_ROUTE", flag: "teamWrite", method: "POST", url: "/api/team" },
   { env: "CHASTE_GO_BRANDING_ROUTE", flag: "branding", method: "POST", url: "/api/branding" },
@@ -837,8 +839,9 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.dashboard).toBe(true);
     expect(flags.setup).toBe(true);
     expect(flags.routines).toBe(true);
+    expect(flags.memory).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -860,6 +863,8 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/dashboard?range=year")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/routines")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/routines")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/memory?q=ledger")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/memory")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/support/public")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/scim/v2/Users")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/scim/v2/Users")).toBe(false);
@@ -1316,6 +1321,16 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/routines/webhook/secret-token")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/routines/unknown")).toBe(false);
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_ROUTINES_ROUTE: "0" }), "GET", "/api/routines")).toBe(false);
+  });
+
+  it("keeps unsupported memory methods and subpaths on the legacy route", () => {
+    const flags = goRouteProxyFlagsFromEnv({});
+    expect(isGoRouteRequest(flags, "GET", "/api/memory?q=ledger")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/memory")).toBe(true);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/memory")).toBe(false);
+    expect(isGoRouteRequest(flags, "HEAD", "/api/memory")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/memory/extra")).toBe(false);
+    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_MEMORY_ROUTE: "0" }), "GET", "/api/memory")).toBe(false);
   });
 
   it("keeps unsupported ledger methods and subpaths on the legacy route", () => {

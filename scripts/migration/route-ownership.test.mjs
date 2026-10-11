@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   allowsPendingAuthOwner,
   allowsPendingGoOrgPersonaOwner,
+  allowsPendingGoMemoryCollectionOwner,
   allowsPendingGoRoutineCollectionOwner,
 } from "./route-ownership-policy.mjs";
 
@@ -64,6 +65,23 @@ test("pending Go routine ownership is limited to exact collection GET and POST o
   }
 });
 
+test("pending Go memory ownership is limited to exact collection GET and POST overrides", () => {
+  for (const method of ["GET", "POST"]) {
+    assert.equal(allowsPendingGoMemoryCollectionOwner("api", "/api/memory", method, "go", "pending"), true);
+  }
+
+  for (const candidate of [
+    ["page", "/api/memory", "GET", "go", "pending"],
+    ["api", "/api/memory/extra", "GET", "go", "pending"],
+    ["api", "/api/memory", "PUT", "go", "pending"],
+    ["api", "/api/memory", "DELETE", "go", "pending"],
+    ["api", "/api/memory", "POST", "legacy", "pending"],
+    ["api", "/api/memory", "GET", "go", "verified"],
+  ]) {
+    assert.equal(allowsPendingGoMemoryCollectionOwner(...candidate), false, JSON.stringify(candidate));
+  }
+});
+
 test("generated Go route declarations still require verified parity", () => {
   assert.ok(overrides.goRoutes.length > 0);
   assert.ok(overrides.goRoutes.every((route) => route.kind === "api" && route.owner === "go" && route.parity === "verified"));
@@ -85,6 +103,18 @@ test("routine collection manifest ownership stays Go with parity pending", () =>
   assert.deepEqual(
     manifest.entries
       .filter((entry) => entry.kind === "api" && entry.path === "/api/routines")
+      .map(({ method, owner, parity }) => ({ method, owner, parity })),
+    [
+      { method: "GET", owner: "go", parity: "pending" },
+      { method: "POST", owner: "go", parity: "pending" },
+    ],
+  );
+});
+
+test("memory collection manifest ownership stays Go with parity pending", () => {
+  assert.deepEqual(
+    manifest.entries
+      .filter((entry) => entry.kind === "api" && entry.path === "/api/memory")
       .map(({ method, owner, parity }) => ({ method, owner, parity })),
     [
       { method: "GET", owner: "go", parity: "pending" },

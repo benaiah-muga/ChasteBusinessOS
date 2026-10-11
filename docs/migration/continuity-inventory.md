@@ -261,6 +261,22 @@ these exact methods with parity pending until live legacy differential and
 authenticated browser proof complete. Webhook token delivery and worker
 execution retain their existing owners and lifecycle.
 
+Vite Settings sends exact `GET` and `POST /api/memory` requests to Go by
+default. Go resolves the signed Better Auth session and active organization.
+The list projection runs through `dbx.WithOrgTx`, returns up to 200 newest
+entries with the legacy fields, filters by kind and by query text in either
+content or source, and reports `total` before filtering. This projection is
+kept in the Go HTTP adapter because `documents.searchMemory` requires a query
+of at least two characters and returns at most ten results without entry IDs
+or timestamps. `canEdit` comes from Go-resolved `documents.write` permission.
+POST deletion dispatches `documents.deleteOrgMemory`, preserving the governed
+permission, organization, approval, and audit checks. Vite proxies only these
+exact methods and path; other methods and suffix paths retain their existing
+owner. Unit, runtime-role HTTP, and Settings client tests cover kind filtering,
+empty and one-character source search, pre-filter totals, permission-derived
+controls, org isolation, and deletion envelopes. Route parity remains pending
+until authenticated browser and live legacy differential proofs complete.
+
 ## Required parity evidence before cutover
 
 1. A cloned-database comparison proves table shape and all existing rows remain

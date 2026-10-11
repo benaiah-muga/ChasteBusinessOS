@@ -678,7 +678,7 @@
       "path": "/api/memory",
       "method": "GET",
       "source": "apps/web/src/app/api/memory/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -686,7 +686,7 @@
       "path": "/api/memory",
       "method": "POST",
       "source": "apps/web/src/app/api/memory/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {

@@ -13,6 +13,14 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Settings now sends exact `GET` and `POST /api/memory` requests to Go by
+  default. Go resolves the signed session and active organization, derives
+  `canEdit` from resolved permissions, and scopes list/search reads through
+  tenant RLS. Search includes source text and supports empty and one-character
+  queries; deletion runs through `documents.deleteOrgMemory`. Other methods
+  and suffix paths retain their current owner. Authenticated browser proof and
+  live legacy differential remain pending.
+
 - Vite Settings now sends exact `GET` and `POST /api/routines` collection
   requests to Go by default. Routine schedules in the Vite form are checked
   against the shared deterministic parser before submission, so unsupported

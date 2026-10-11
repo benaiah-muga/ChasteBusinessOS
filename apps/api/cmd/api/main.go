@@ -76,6 +76,10 @@ func goRoutinesRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goMemoryRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goSalesOrdersRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -308,6 +312,15 @@ func run(logger *slog.Logger) error {
 		}
 		routinesRoute = httpapi.NewRoutinesSessionHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
 		logger.Info("Go routines route mounted", "paths", []string{"GET /api/routines", "POST /api/routines"})
+	}
+	var memoryRoute http.Handler
+	if goMemoryRouteEnabledFromEnv(os.Getenv("GO_MEMORY_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		memoryRoute = httpapi.NewMemorySessionHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
+		logger.Info("Go organization memory route mounted", "paths", []string{"GET /api/memory", "POST /api/memory"})
 	}
 	var teamReadRoute http.Handler
 	if goTeamReadRouteEnabledFromEnv(os.Getenv("GO_TEAM_READ_ROUTE")) {
@@ -679,6 +692,7 @@ func run(logger *slog.Logger) error {
 	), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute)
 	apiHandler = httpapi.MountGoApprovalsReadRoute(apiHandler, approvalsReadRoute)
 	apiHandler = httpapi.MountGoApprovalsDecisionRoute(apiHandler, approvalsDecisionRoute)
+	apiHandler = httpapi.MountGoMemoryRoute(apiHandler, memoryRoute)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,
