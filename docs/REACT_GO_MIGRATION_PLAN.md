@@ -2728,7 +2728,7 @@ new owners and the manifest shows zero legacy runtime paths.
      TypeScript claimant leaves these jobs pending without incrementing
      attempts.
 
-260. (Implemented and verified; POS page runtime gate remains open) Route only
+260. (Runtime verified) Route only
      `GET /api/pos` through the Go session handler. The handler preserves the
      legacy sessions and sales JSON contract, resolves cookie or bearer
      sessions, checks `pos.read`, validates the active organization, and reads
@@ -2736,8 +2736,12 @@ new owners and the manifest shows zero legacy runtime paths.
      toolchain and required runtime integration, proving tenant isolation and
      sale, return, tender, and stock tracking mappings. The Vite proxy tests
      cover exact GET path/method selection and rollback. `POST /api/pos` and
-     `/pos` page ownership remain unchanged; authenticated browser proof for
-     the complete POS page flow remains open.
+     `/pos` page ownership remain unchanged. On 2026-10-11, authenticated
+     agent-browser opened `/pos` in Vite with the paired Go selectors enabled.
+     The register workspace rendered its closed-register state, and both
+     `/api/pos` and `/api/pos/customers` returned HTTP 200. No browser page
+     errors were reported. The POS test fixture now mirrors the Go customer
+     picker endpoint and fails if the legacy shared customer path is used.
 
 261. (Implemented and verified) Make the Go jobs worker discover due recurring
      invoice templates, create one linked occurrence and job per scheduled

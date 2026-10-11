@@ -93,7 +93,7 @@ function registerRoute(overrides: (url: string, payload: Payload | null) => Resp
     if (override) return override;
     if (url === "/api/modules") return Response.json({ catalog: [{ id: "pos" }, { id: "inventory" }], enabledModules: ["pos", "inventory"] });
     if (url === "/api/inventory") return Response.json({ items: [catalogItem] });
-    if (url === "/api/customers") return Response.json({ customers: [{ id: "20000000-0000-4000-8000-000000000001", name: "Amina", email: "amina@example.test", purchaseCount: 2, lifetimeSpendMinor: 10000 }] });
+    if (url === "/api/pos/customers") return Response.json({ customers: [{ id: "20000000-0000-4000-8000-000000000001", name: "Amina", email: "amina@example.test", purchaseCount: 2, lifetimeSpendMinor: 10000 }] });
     if (url === "/api/pos" && !payload) return Response.json({ sessions: [openSession, closedSession], sales: [sale] });
     if (url === "/api/pos" && payload?.action === "shiftSummary") return Response.json({ ok: true, data: shiftSummary });
     if (url === "/api/pos" && payload?.action === "sale") {
@@ -211,7 +211,8 @@ describe("Vite POS register page", () => {
       countedCashMinor: 14000,
       varianceReason: "cash refund entered after count",
     }, undefined, { useGo: true, scopeId });
-    vi.stubGlobal("fetch", registerRoute());
+    const fetchMock = registerRoute();
+    vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
     render(<PosPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
 
@@ -356,13 +357,16 @@ describe("Vite POS register page", () => {
   });
 
   it("keeps the selected customer's email on the receipt after checkout clears the selection", async () => {
-    vi.stubGlobal("fetch", registerRoute());
+    const fetchMock = registerRoute();
+    vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
     render(<PosPage baseCurrency="USD" />);
 
     fireEvent.click(await screen.findByText(/^Attach customer/));
     fireEvent.change(await screen.findByLabelText("Customer lookup"), { target: { value: "amina" } });
     const customerResults = within(await screen.findByRole("list", { name: "Matching customers" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/pos/customers", expect.any(Object));
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/customers", expect.anything());
     fireEvent.click(customerResults.getByRole("button", { name: /Amina/ }));
 
     fireEvent.change(await screen.findByLabelText("Search products by name, SKU, or barcode"), { target: { value: "bread" } });
@@ -370,6 +374,7 @@ describe("Vite POS register page", () => {
     fireEvent.click(await completeSaleButton());
 
     expect(await screen.findByText("Receipt ready for Amina.")).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("/api/pos/customers", expect.any(Object));
     fireEvent.click(screen.getByRole("button", { name: "Change customer" }));
     expect(await screen.findByText(/^Attach customer/)).not.toBeNull();
 
@@ -839,6 +844,7 @@ describe("Vite POS register page", () => {
     expect(await screen.findByText("Offline sales queue")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Send sale" }));
     expect(await screen.findByText("Receipt ready for Amina.")).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("/api/pos/customers", expect.any(Object));
     fireEvent.click(screen.getByRole("button", { name: "Preview and share" }));
 
     const dialog = within(await screen.findByRole("dialog", { name: "Receipt preview" }));
