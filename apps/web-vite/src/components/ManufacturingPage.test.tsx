@@ -98,7 +98,7 @@ describe("Vite manufacturing page", () => {
     expect(screen.getByText(/WO #8/)).not.toBeNull();
     expect(screen.getByRole("heading", { name: "Watch list" })).not.toBeNull();
     expect(screen.getByText((_, element) => element?.tagName === "LI" && element.textContent?.includes("Lot LEG-MAY of LEG-1") === true)).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open full manufacturing workspace" }).getAttribute("href")).toContain("/manufacturing");
+    expect(screen.queryByRole("link", { name: "Open full manufacturing workspace" })).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith("/api/manufacturing", expect.any(Object));
   });

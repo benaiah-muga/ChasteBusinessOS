@@ -18,6 +18,10 @@ The full v1 changelog is preserved at the bottom of this file.
   marketing, support, projects, and purchasing payment runs. Organization IDs
   remain UUID-validated.
 
+- The Vite Manufacturing page no longer links back to the legacy workspace.
+  Its overview, BOM, production, work order, and runs/lot sections remain in
+  the React app.
+
 - Vite now sends `GET` and `POST /api/approvals` to Go by default. Go resolves
   the verified session and active organization for each request, and decisions
   use the governed capability approval path. Reject decisions now require the

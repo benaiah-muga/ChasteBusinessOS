@@ -21,8 +21,6 @@ import {
   type ManufacturingWorkOrder,
   type ManufacturingWriteAction,
 } from "../api/manufacturing";
-import { legacyUrl } from "../legacy";
-import "./ManufacturingPage.css";
 
 type Tab = "overview" | "boms" | "production" | "orders" | "runs";
 const TABS: readonly Tab[] = ["overview", "boms", "production", "orders", "runs"];
@@ -49,7 +47,6 @@ const styles = {
   eyebrow: { margin: "0 0 6px", color: "#84744e", fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase" },
   heading: { margin: "0 0 6px", fontSize: 26, letterSpacing: "-0.04em" },
   lede: { margin: 0, maxWidth: "58ch", color: "#6e6d65", fontSize: 13, lineHeight: 1.6 },
-  fullWorkspace: { color: "#6b5a2e", fontSize: 12, fontWeight: 600 },
   notice: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, border: "1px solid #dedbd2", borderRadius: 10, padding: "10px 14px", fontSize: 13 },
   noticeSuccess: { border: "1px solid #b7d6c1", background: "#f1f8f3" },
   noticePending: { border: "1px solid #e2d3a2", background: "#fbf7ea" },
@@ -573,7 +570,6 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
           <h1 style={styles.heading}>Manufacturing</h1>
           <p style={styles.lede}>Bills of materials, production runs, and work orders.</p>
         </div>
-        <a style={styles.fullWorkspace} href={legacyUrl("/manufacturing")}>Open full manufacturing workspace</a>
       </header>
 
       <nav style={styles.tabs} aria-label="Manufacturing sections">
@@ -965,7 +961,7 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
                     </span>
                     <button
                       type="button"
-                      style={{ ...styles.fullWorkspace, border: 0, background: "transparent", padding: 0, textDecoration: "underline", cursor: "pointer" }}
+                      style={{ ...styles.ghostButton, padding: 0, textDecoration: "underline" }}
                       onClick={() => void traceLot(lot)}
                       disabled={lotTrace?.key === `${lot.sku}\u0000${lot.lotCode}` && lotTrace.status === "loading"}
                       aria-expanded={lotTrace?.key === `${lot.sku}\u0000${lot.lotCode}` && lotTrace.status === "ready"}

@@ -2806,3 +2806,9 @@ new owners and the manifest shows zero legacy runtime paths.
      IDs remain UUID-validated, and the actor ID is only a local recovery key;
      Go derives identity and authorization from the verified session. Focused
      tests cover the opaque actor format and fail-closed invalid scopes.
+
+271. (Implemented and tested; authenticated browser proof remains open) Remove
+     the Vite Manufacturing page's link to the legacy workspace. The Vite page
+     contains the overview, BOM, production, work order, and runs/lot sections.
+     Keep `/manufacturing` ownership pending until the authenticated browser
+     proof verifies the Go-backed route and key interactions.
