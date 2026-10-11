@@ -138,6 +138,7 @@ interface StubOptions {
   goCashForecastResponse?: () => Response;
   goCashBasisResponse?: () => Response;
   goOverviewResponse?: () => Response;
+  goUnavailableReport?: string;
   goReportResponse?: (capabilityId: string) => Response;
 }
 
@@ -199,6 +200,9 @@ function stubAccounting(options: StubOptions = {}) {
         "accounting.reportCurrencyMetadata",
       ].includes(capabilityId)) {
         if (options.goReportResponse) return options.goReportResponse(capabilityId);
+        if (options.goUnavailableReport === capabilityId) {
+          return Response.json({ ok: false, error: "forbidden: missing accounting.read" }, { status: 422 });
+        }
         const reportData: Record<string, unknown> = {
           "accounting.incomeStatement": reports.pnl,
           "accounting.balanceSheet": reports.balanceSheet,
@@ -1050,6 +1054,15 @@ describe("AccountingPage tabs", () => {
       "accounting.unrealizedFxExposure",
     ]);
     expect(calls.some((call) => call.url === "/api/reports")).toBe(false);
+  });
+
+  it("surfaces Go FX permission failures instead of presenting missing report data", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    stubAccounting({ goUnavailableReport: "accounting.unrealizedFxExposure" });
+    render(<AccountingPage />);
+
+    expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+    expect(screen.getByText("forbidden: missing accounting.read")).toBeTruthy();
   });
 
   it("fails the report load on a pending required Go capability", async () => {

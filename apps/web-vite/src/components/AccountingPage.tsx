@@ -2512,7 +2512,11 @@ function ReportsSection({
         <header>
           <h2>FX exposure and rates</h2>
         </header>
-        {exposures.length === 0 ? (
+        {reports.fxExposure === null || reports.fxExposure === undefined ? (
+          <p className="accounting-callout">
+            FX exposure data is unavailable right now. Reload reports before relying on this section.
+          </p>
+        ) : exposures.length === 0 ? (
           <p className="accounting-quiet">
             No foreign-currency receivables outstanding, so there is no unrealized exposure.
           </p>

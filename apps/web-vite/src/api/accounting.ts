@@ -159,10 +159,15 @@ const FxExposureSchema = z.object({
   exposures: z.array(z.object({
     currency,
     outstandingForeignMinor: minor,
-    latestRateNum: z.number().safe().nullable(),
-    latestRateDen: z.number().safe().nullable(),
+    latestRateNum: z.number().safe().int().positive().nullable(),
+    latestRateDen: z.number().safe().int().positive().nullable(),
     outstandingBaseMinor: minor.nullable(),
-  }).strict()),
+  }).strict().refine((exposure) => {
+    const hasRate = exposure.latestRateNum !== null && exposure.latestRateDen !== null && exposure.outstandingBaseMinor !== null;
+    const hasNoRate = exposure.latestRateNum === null && exposure.latestRateDen === null && exposure.outstandingBaseMinor === null;
+    return hasRate || hasNoRate;
+  }),
+  ),
 }).strict();
 
 const ReportCurrencyMetadataSchema = z.object({
@@ -653,7 +658,7 @@ export async function fetchAccountingReports(signal?: AbortSignal): Promise<Acco
       readGoAccountingReport("accounting.incomeStatement", PnlSchema, "income statement", signal),
       readGoAccountingReport("accounting.balanceSheet", BalanceSheetSchema, "balance sheet", signal),
       readGoAccountingReport("accounting.cashFlow", CashFlowSchema, "cash flow statement", signal, true),
-      readGoAccountingReport("accounting.unrealizedFxExposure", FxExposureSchema, "foreign exchange exposure", signal, true),
+      readGoAccountingReport("accounting.unrealizedFxExposure", FxExposureSchema, "foreign exchange exposure", signal),
       readGoAccountingReport("accounting.reportCurrencyMetadata", ReportCurrencyMetadataSchema, "report currency metadata", signal),
     ]);
     if (!pnl || !balanceSheet || !metadata) throw new AccountingApiError(503, "A required Accounting report was unavailable.");
@@ -686,8 +691,11 @@ async function readGoAccountingReport<T>(
   if (response.status === 422) {
     const error = CapabilityErrorSchema.safeParse(body);
     if (!error.success) throw new AccountingApiError(503, "The Accounting reports service returned an unexpected response.");
+    if (optional && error.data.error.startsWith("forbidden:")) {
+      throw new AccountingApiError(response.status, error.data.error.slice(0, 240));
+    }
     if (optional) return null;
-    throw new AccountingApiError(500, error.data.error.slice(0, 240));
+    throw new AccountingApiError(response.status, error.data.error.slice(0, 240));
   }
   if (response.status !== 200) {
     throw new AccountingApiError(response.status, errorMessage(response.status, body, `load ${subject}`));

@@ -279,7 +279,7 @@ describe("accounting API: books and reports", () => {
     };
     const mock = stubFetch((_url, init) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
-      if (body.capabilityId === "accounting.cashFlow" || body.capabilityId === "accounting.unrealizedFxExposure") {
+      if (body.capabilityId === "accounting.cashFlow") {
         return Response.json({ ok: false, error: "No optional report data." }, { status: 422 });
       }
       return Response.json({ ok: true, data: dataByCapability[body.capabilityId ?? ""] });
@@ -292,7 +292,7 @@ describe("accounting API: books and reports", () => {
       pnl: reports.pnl,
       balanceSheet: reports.balanceSheet,
       cashFlow: null,
-      fxExposure: null,
+      fxExposure: { exposures: [] },
     });
     expect(mock).toHaveBeenCalledTimes(5);
     const calls = mock.mock.calls.map(([url, init]) => ({
@@ -315,11 +315,76 @@ describe("accounting API: books and reports", () => {
     }
   });
 
+  it("preserves Go FX permission errors instead of treating them as missing data", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
+      if (body.capabilityId === "accounting.unrealizedFxExposure") {
+        return Response.json({ ok: false, error: "forbidden: missing accounting.read" }, { status: 422 });
+      }
+      if (body.capabilityId === "accounting.cashFlow") return Response.json({ ok: false, error: "cash basis unavailable" }, { status: 422 });
+      if (body.capabilityId === "accounting.incomeStatement") return Response.json({ ok: true, data: reports.pnl });
+      if (body.capabilityId === "accounting.balanceSheet") return Response.json({ ok: true, data: reports.balanceSheet });
+      return Response.json({ ok: true, data: { baseCurrency: "USD", unsupportedCurrencies: [] } });
+    });
+    await expect(fetchAccountingReports()).rejects.toMatchObject({
+      status: 422,
+      message: "forbidden: missing accounting.read",
+    });
+  });
+
+  it("preserves Go cash-flow permission errors instead of treating them as optional data", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
+      if (body.capabilityId === "accounting.cashFlow") {
+        return Response.json({ ok: false, error: "forbidden: missing accounting.read" }, { status: 422 });
+      }
+      if (body.capabilityId === "accounting.incomeStatement") return Response.json({ ok: true, data: reports.pnl });
+      if (body.capabilityId === "accounting.balanceSheet") return Response.json({ ok: true, data: reports.balanceSheet });
+      if (body.capabilityId === "accounting.unrealizedFxExposure") return Response.json({ ok: true, data: { exposures: [] } });
+      return Response.json({ ok: true, data: { baseCurrency: "USD", unsupportedCurrencies: [] } });
+    });
+    await expect(fetchAccountingReports()).rejects.toMatchObject({
+      status: 422,
+      message: "forbidden: missing accounting.read",
+    });
+  });
+
+  it.each([
+    { label: "incomplete Go FX rate tuple", latestRateNum: null, latestRateDen: null, outstandingBaseMinor: 120 },
+    { label: "zero Go FX numerator", latestRateNum: 0, latestRateDen: 1, outstandingBaseMinor: 120 },
+    { label: "negative Go FX numerator", latestRateNum: -1, latestRateDen: 1, outstandingBaseMinor: 120 },
+    { label: "zero Go FX denominator", latestRateNum: 1, latestRateDen: 0, outstandingBaseMinor: 120 },
+    { label: "negative Go FX denominator", latestRateNum: 1, latestRateDen: -1, outstandingBaseMinor: 120 },
+  ])("rejects $label", async ({ latestRateNum, latestRateDen, outstandingBaseMinor }) => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
+      if (body.capabilityId === "accounting.incomeStatement") return Response.json({ ok: true, data: reports.pnl });
+      if (body.capabilityId === "accounting.balanceSheet") return Response.json({ ok: true, data: reports.balanceSheet });
+      if (body.capabilityId === "accounting.cashFlow") return Response.json({ ok: false, error: "cash basis unavailable" }, { status: 422 });
+      if (body.capabilityId === "accounting.unrealizedFxExposure") {
+        return Response.json({ ok: true, data: { exposures: [{
+          currency: "EUR",
+          outstandingForeignMinor: 100,
+          latestRateNum,
+          latestRateDen,
+          outstandingBaseMinor,
+        }] } });
+      }
+      return Response.json({ ok: true, data: { baseCurrency: "USD", unsupportedCurrencies: [] } });
+    });
+    await expect(fetchAccountingReports()).rejects.toMatchObject({
+      message: "The Accounting reports service returned an unexpected result.",
+    });
+  });
+
   it.each([
     { label: "pending", response: () => Response.json({ pendingApproval: true }, { status: 202 }), status: 202 },
     { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }), status: 404 },
     { label: "malformed", response: () => Response.json({ ok: true, data: { revenueMinor: "12" } }), status: 200 },
-    { label: "required domain error", response: () => Response.json({ ok: false, error: "P&L failed" }, { status: 422 }), status: 500 },
+    { label: "required domain error", response: () => Response.json({ ok: false, error: "P&L failed" }, { status: 422 }), status: 422 },
   ])("fails closed on $label Go report responses", async ({ response, status }) => {
     vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
     const mock = stubFetch((url, init) => {
