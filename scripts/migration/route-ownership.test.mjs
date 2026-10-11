@@ -5,6 +5,7 @@ import {
   allowsPendingAuthOwner,
   allowsPendingGoOrgPersonaOwner,
   allowsPendingGoMemoryCollectionOwner,
+  allowsPendingGoModuleSettingsOwner,
   allowsPendingGoRoutineCollectionOwner,
 } from "./route-ownership-policy.mjs";
 
@@ -82,6 +83,22 @@ test("pending Go memory ownership is limited to exact collection GET and POST ov
   }
 });
 
+test("pending Go module settings ownership is limited to exact collection GET and POST overrides", () => {
+  for (const method of ["GET", "POST"]) {
+    assert.equal(allowsPendingGoModuleSettingsOwner("api", "/api/module-settings", method, "go", "pending"), true);
+  }
+  for (const candidate of [
+    ["page", "/api/module-settings", "GET", "go", "pending"],
+    ["api", "/api/module-settings/extra", "GET", "go", "pending"],
+    ["api", "/api/module-settings", "PUT", "go", "pending"],
+    ["api", "/api/module-settings", "DELETE", "go", "pending"],
+    ["api", "/api/module-settings", "POST", "legacy", "pending"],
+    ["api", "/api/module-settings", "GET", "go", "verified"],
+  ]) {
+    assert.equal(allowsPendingGoModuleSettingsOwner(...candidate), false, JSON.stringify(candidate));
+  }
+});
+
 test("generated Go route declarations still require verified parity", () => {
   assert.ok(overrides.goRoutes.length > 0);
   assert.ok(overrides.goRoutes.every((route) => route.kind === "api" && route.owner === "go" && route.parity === "verified"));
@@ -115,6 +132,18 @@ test("memory collection manifest ownership stays Go with parity pending", () => 
   assert.deepEqual(
     manifest.entries
       .filter((entry) => entry.kind === "api" && entry.path === "/api/memory")
+      .map(({ method, owner, parity }) => ({ method, owner, parity })),
+    [
+      { method: "GET", owner: "go", parity: "pending" },
+      { method: "POST", owner: "go", parity: "pending" },
+    ],
+  );
+});
+
+test("module settings collection manifest ownership stays Go with parity pending", () => {
+  assert.deepEqual(
+    manifest.entries
+      .filter((entry) => entry.kind === "api" && entry.path === "/api/module-settings")
       .map(({ method, owner, parity }) => ({ method, owner, parity })),
     [
       { method: "GET", owner: "go", parity: "pending" },

@@ -99,6 +99,20 @@
     },
     {
       "kind": "api",
+      "path": "/api/module-settings",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/module-settings",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
       "path": "/api/routines",
       "method": "GET",
       "owner": "go",

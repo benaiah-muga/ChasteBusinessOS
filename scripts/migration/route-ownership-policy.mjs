@@ -28,3 +28,11 @@ export function allowsPendingGoMemoryCollectionOwner(kind, path, method, owner, 
     && owner === "go"
     && parity === "pending";
 }
+
+export function allowsPendingGoModuleSettingsOwner(kind, path, method, owner, parity) {
+  return kind === "api"
+    && path === "/api/module-settings"
+    && ["GET", "POST"].includes(method)
+    && owner === "go"
+    && parity === "pending";
+}

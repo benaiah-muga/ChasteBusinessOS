@@ -277,6 +277,26 @@ empty and one-character source search, pre-filter totals, permission-derived
 controls, org isolation, and deletion envelopes. Route parity remains pending
 until authenticated browser and live legacy differential proofs complete.
 
+The Vite Inventory defaults panel sends exact `GET` and `POST
+/api/module-settings` requests to Go by default. Both methods resolve the
+verified Better Auth session and active organization. GET is member-readable,
+validates module IDs against `^[a-z][a-z0-9_-]{0,39}$`, and selects through
+`dbx.WithOrgTx`; missing rows return `{}`. Inventory is the only registered
+settings schema today. Its GET projection trims the unit label, validates
+reorder-point values, and strips unknown stored keys, matching
+`settingsSchemaFor("inventory")`. Other syntactically valid module IDs remain
+readable as stored, while POST returns 404 for modules without a registered
+settings schema, matching the existing route. Supported saves pass through the
+Go `iam.setModuleConfig` capability executor, which enforces `iam.admin` and
+keeps approval and audit handling server-side. Runtime-role HTTP proof covers
+member reads, missing defaults, tenant isolation, denied writes, and an
+authorized audited write. The route manifest remains parity pending until the
+authenticated browser and live legacy differential proofs complete
+([`route.ts#L1-L76`](../../apps/web/src/app/api/module-settings/route.ts#L1-L76),
+[`module-settings.ts#L1-L26`](../../apps/web/src/server/module-settings.ts#L1-L26),
+[`iam_org_settings.go#L123-L169`](../../apps/api/internal/capability/iam_org_settings.go#L123-L169),
+[`SettingsPage.tsx#L512-L605`](../../apps/web-vite/src/components/SettingsPage.tsx#L512-L605)).
+
 ## Required parity evidence before cutover
 
 1. A cloned-database comparison proves table shape and all existing rows remain

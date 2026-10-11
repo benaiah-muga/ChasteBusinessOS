@@ -591,7 +591,10 @@ function ModuleSettingsPanel({ moduleId, title, hint, fields }: (typeof MODULE_S
                   value={values[field.key] ?? ""}
                   placeholder={field.placeholder}
                   aria-label={`${title} ${field.label}`}
-                  onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.currentTarget.value }))}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setValues((current) => ({ ...current, [field.key]: value }));
+                  }}
                   style={ui.field}
                 />
               </label>

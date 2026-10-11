@@ -13,6 +13,14 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Inventory module defaults now use Go for exact `GET` and `POST
+  /api/module-settings` requests. Go resolves the signed session and organization,
+  keeps reads available to members, and executes saves through
+  `iam.setModuleConfig`, which checks `iam.admin` and retains approval and
+  audit handling. Missing inventory settings remain `{}`; unsupported module
+  writes return 404 as before. Authenticated browser proof and live legacy
+  differential remain pending.
+
 - Vite Settings now sends exact `GET` and `POST /api/memory` requests to Go by
   default. Go resolves the signed session and active organization, derives
   `canEdit` from resolved permissions, and scopes list/search reads through

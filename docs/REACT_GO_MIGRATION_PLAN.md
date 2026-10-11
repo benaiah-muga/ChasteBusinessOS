@@ -2912,3 +2912,16 @@ new owners and the manifest shows zero legacy runtime paths.
      organization scope. Unsupported methods and suffix paths retain their
      existing owner. The generated route manifest records both methods as Go
      owned with parity pending under an exact-path policy exception.
+
+281. (Implemented; runtime-role HTTP and focused Vite Settings tests passed;
+     authenticated browser proof and live legacy differential remain pending)
+     Route exact `GET` and `POST /api/module-settings` requests from the active
+     Vite Inventory settings panel through Go by default. Go resolves the
+     signed user session and active organization. Reads are available to
+     organization members and run through `dbx.WithOrgTx`; missing rows return
+     `{}`. Inventory reads apply the registered schema's trimming, validation,
+     and unknown-key stripping. Writes accept only registered module settings
+     (currently inventory) and execute `iam.setModuleConfig`, leaving
+     `iam.admin`, approval, and audit enforcement in the capability executor.
+     Unsupported module writes retain the legacy 404. The manifest records
+     only exact GET/POST collection ownership as Go with parity pending.

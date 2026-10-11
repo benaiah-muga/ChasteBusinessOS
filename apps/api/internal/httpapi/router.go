@@ -183,6 +183,22 @@ func MountGoMemoryRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoModuleSettingsRoute mounts only the Vite Settings module defaults
+// collection. Other methods and nested paths continue to the base handler.
+func MountGoModuleSettingsRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/module-settings", route)
+	mux.Handle("POST /api/module-settings", route)
+	if base != nil {
+		mux.Handle("HEAD /api/module-settings", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoInventoryReadRoute mounts only the read-only inventory collection
 // endpoint. Writes and nested inventory paths continue to the existing owner.
 func MountGoInventoryReadRoute(base, route http.Handler) http.Handler {

@@ -6,6 +6,7 @@ import {
   allowsPendingAuthOwner,
   allowsPendingGoOrgPersonaOwner,
   allowsPendingGoMemoryCollectionOwner,
+  allowsPendingGoModuleSettingsOwner,
   allowsPendingGoRoutineCollectionOwner,
 } from "./route-ownership-policy.mjs";
 
@@ -112,6 +113,7 @@ if (existsSync(overridePath)) {
     const pendingOwnerAllowed = allowsPendingAuthOwner(kind, path, owner, parity)
       || allowsPendingGoOrgPersonaOwner(kind, path, method, owner, parity)
       || allowsPendingGoMemoryCollectionOwner(kind, path, method, owner, parity)
+      || allowsPendingGoModuleSettingsOwner(kind, path, method, owner, parity)
       || allowsPendingGoRoutineCollectionOwner(kind, path, method, owner, parity);
     if (owner !== "legacy" && parity !== "verified" && !pendingOwnerAllowed) {
       throw new Error(`Route ${path} cannot move to ${owner} before parity is verified.`);

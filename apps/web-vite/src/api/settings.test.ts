@@ -85,6 +85,24 @@ describe("Vite settings API", () => {
     }));
   });
 
+  it("reads inventory settings with the registered module response shape", async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      module: "inventory",
+      settings: { defaultUnitLabel: "each", defaultReorderPointUnits: 7 },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchModuleSettings("inventory")).resolves.toEqual({
+      module: "inventory",
+      settings: { defaultUnitLabel: "each", defaultReorderPointUnits: 7 },
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/module-settings?module=inventory", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+    await expect(fetchModuleSettings("bad.module")).rejects.toBeInstanceOf(SettingsApiError);
+  });
+
   it("treats the platform spine as protected even when the flag is missing", () => {
     expect([...PROTECTED_MODULE_IDS]).toEqual(["iam", "routines", "signals"]);
     expect(isProtectedModule(switchboard.catalog[1]!)).toBe(true);

@@ -119,6 +119,34 @@ describe("Vite settings page", () => {
     expect(screen.queryByText(/Module switchboard updated/)).toBeNull();
   }, 20_000);
 
+  it("loads and saves inventory defaults through the module settings contract", async () => {
+    const fetchMock = routedFetch({
+      "/api/org": orgRoute,
+      "/api/modules": () => jsonResponse(switchboard),
+      "/api/module-settings": (init) => (init?.method === "POST"
+        ? jsonResponse({ ok: true, data: { module: "inventory", settings: { defaultUnitLabel: "case", defaultReorderPointUnits: 12 } } })
+        : jsonResponse({ module: "inventory", settings: { defaultUnitLabel: "each", defaultReorderPointUnits: 4 } })),
+    });
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Modules" }));
+
+    const unit = await screen.findByLabelText("Inventory Default unit label") as HTMLInputElement;
+    const reorder = screen.getByLabelText("Inventory Default reorder point") as HTMLInputElement;
+    expect(unit.value).toBe("each");
+    expect(reorder.value).toBe("4");
+    fireEvent.change(unit, { target: { value: "case" } });
+    fireEvent.change(reorder, { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+
+    await waitFor(() => expect(postsTo(fetchMock, "/api/module-settings")).toHaveLength(1));
+    expect(postsTo(fetchMock, "/api/module-settings")[0]).toMatchObject({
+      module: "inventory",
+      settings: { defaultUnitLabel: "case", defaultReorderPointUnits: 12 },
+    });
+    expect(String(postsTo(fetchMock, "/api/module-settings")[0]?.intentId)).toHaveLength(36);
+    expect(await screen.findByText("Saved. New defaults apply right away.")).not.toBeNull();
+  }, 20_000);
+
   it("refuses to empty the switchboard", async () => {
     const fetchMock = routedFetch({ "/api/modules": () => jsonResponse({ ...switchboard, catalog: [switchboard.catalog[3]!], enabledModules: ["routines"] }) });
     render(<SettingsPage />);

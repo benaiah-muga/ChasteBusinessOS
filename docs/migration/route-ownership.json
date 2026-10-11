@@ -750,7 +750,7 @@
       "path": "/api/module-settings",
       "method": "GET",
       "source": "apps/web/src/app/api/module-settings/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -758,7 +758,7 @@
       "path": "/api/module-settings",
       "method": "POST",
       "source": "apps/web/src/app/api/module-settings/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
