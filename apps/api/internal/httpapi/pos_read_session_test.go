@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -54,15 +53,9 @@ func TestPosReadSessionHandlerReturnsLegacyEnvelopeAndRequiresPermission(t *test
 	if response.Code != http.StatusOK || reader.org != *identity.OrgID {
 		t.Fatalf("status=%d org=%q body=%s", response.Code, reader.org, response.Body.String())
 	}
-	var body map[string]json.RawMessage
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if len(body) != 2 || len(body["sessions"]) == 0 || len(body["sales"]) == 0 ||
-		!strings.Contains(string(body["sales"]), `"returnMode":"credit-review"`) ||
-		!strings.Contains(string(body["sales"]), `"returnedQuantity":250`) ||
-		!strings.Contains(string(body["sales"]), `"stockTracked":true`) {
-		t.Fatalf("unexpected POS response shape: %s", response.Body.String())
+	want := `{"sessions":[{"id":"session-id","orgId":"` + *identity.OrgID + `","register":"main","status":"open","openingFloatMinor":0,"countedCashMinor":null,"expectedCashMinor":0,"varianceMinor":null,"openedByUserId":null,"closedByUserId":null,"openedAt":"` + createdAt + `","closedAt":null,"varianceReason":null}],"sales":[{"id":"sale-id","number":24,"status":"paid","totalMinor":1200,"creditedMinor":200,"memo":null,"customerId":null,"customerName":null,"method":"cash + card","returnMode":"credit-review","unallocatedCreditMinor":100,"lines":[{"id":"line-id","itemId":"item-id","description":"Tea","quantity":1000,"unitPriceMinor":1200,"taxMinor":0,"returnedQuantity":250,"stockTracked":true}],"createdAt":"` + createdAt + `"}]}` + "\n"
+	if response.Body.String() != want {
+		t.Fatalf("POS response contract mismatch:\n got: %s want: %s", response.Body.String(), want)
 	}
 
 	denied := directTestIdentity()

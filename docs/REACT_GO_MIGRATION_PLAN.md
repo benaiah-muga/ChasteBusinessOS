@@ -2707,3 +2707,14 @@ new owners and the manifest shows zero legacy runtime paths.
      pinned Go toolchain in Docker. Cycle-count record,
      post, and cancel jobs retain their existing owners pending their own Go
      worker proofs.
+
+260. (Implemented and verified; POS page runtime gate remains open) Route only
+     `GET /api/pos` through the Go session handler. The handler preserves the
+     legacy sessions and sales JSON contract, resolves cookie or bearer
+     sessions, checks `pos.read`, validates the active organization, and reads
+     within `dbx.WithOrgTx`. The database-backed test passed with the pinned Go
+     toolchain and required runtime integration, proving tenant isolation and
+     sale, return, tender, and stock tracking mappings. The Vite proxy tests
+     cover exact GET path/method selection and rollback. `POST /api/pos` and
+     `/pos` page ownership remain unchanged; authenticated browser proof for
+     the complete POS page flow remains open.

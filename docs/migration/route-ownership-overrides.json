@@ -86,6 +86,13 @@
       "parity": "verified"
     },
     {
+      "kind": "api",
+      "path": "/api/pos",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
       "kind": "page",
       "path": "/login",
       "owner": "vite",

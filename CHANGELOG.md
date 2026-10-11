@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite now routes only `GET /api/pos` to Go by default. The Go handler preserves
+  the session and sale response contract and enforces the `pos.read` permission
+  with organization-scoped database access; POST actions remain unchanged.
+
 - Corrected the migration ownership manifest to record Go as the current auth
   namespace owner while Better Auth compatibility parity remains pending.
   Unsupported auth endpoints continue to fail closed in Go.
