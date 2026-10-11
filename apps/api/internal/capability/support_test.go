@@ -85,6 +85,26 @@ func TestParseSupportCreateCannedResponseRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestParseSupportSuggestCategoryValidatesInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "valid text", input: `{"text":"The item arrived damaged"}`},
+		{name: "rejects empty text", input: `{"text":""}`, wantErr: true},
+		{name: "rejects unknown fields", input: `{"text":"The item arrived damaged","organizationId":"22222222-2222-4222-8222-222222222222"}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSupportSuggestCategoryInput(json.RawMessage(tt.input))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseSupportSuggestCategoryInput(%s) error=%v, wantErr=%t", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseSupportUpdateTicketRejectsUnknownFields(t *testing.T) {
 	input := json.RawMessage(`{"conversationId":"11111111-1111-4111-8111-111111111111","orgId":"22222222-2222-4222-8222-222222222222"}`)
 	if _, err := ParseSupportUpdateTicketInput(input); err == nil {

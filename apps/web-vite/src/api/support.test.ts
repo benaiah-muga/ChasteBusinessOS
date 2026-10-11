@@ -251,6 +251,37 @@ describe("governed support writes", () => {
     expect(SupportWriteActionSchema.safeParse({ action: "createKbArticle", title: "Returns", body: "Policy", isPublic: "true" }).success).toBe(false);
   });
 
+  it("routes category suggestions through the strict Go capability and never retries the legacy Support route", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe("POST");
+      expect(init?.cache).toBe("no-store");
+      return jsonResponse({ ok: true, data: { category: "billing", draft: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportAction({ action: "suggestCategory", text: "The item arrived damaged" }))
+      .resolves.toEqual({ kind: "completed", data: { category: "billing", draft: true } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "support.suggestCategory",
+      input: { text: "The item arrived damaged" },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("fails closed on malformed Go category suggestions", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { category: "billing", draft: false } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportAction({ action: "suggestCategory", text: "The item arrived damaged" })).rejects.toMatchObject({
+      status: 200,
+      message: "The Go support service returned data in an unexpected format.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
+  });
+
   it("surfaces an approval-pending answer as pending, never as a save", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       expect(init?.method).toBe("POST");

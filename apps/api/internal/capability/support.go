@@ -579,6 +579,11 @@ func ParseSupportSuggestCategoryInput(raw json.RawMessage) (SupportSuggestCatego
 	if err != nil {
 		return SupportSuggestCategoryInput{}, err
 	}
+	for key := range fields {
+		if key != "text" {
+			return SupportSuggestCategoryInput{}, fmt.Errorf("unknown field %q", key)
+		}
+	}
 	var input SupportSuggestCategoryInput
 	if input.Text, err = requiredCRMDealString(fields, "text", 1, 2000); err != nil {
 		return SupportSuggestCategoryInput{}, err

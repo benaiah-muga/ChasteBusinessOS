@@ -227,7 +227,7 @@ async function clearSupportCannedResponseAttempt(storageKey: string, intentId: s
 }
 
 async function readGoSupportCapability<T>(
-  capabilityId: "support.listConversations" | "support.readConversation" | "support.listLibrary",
+  capabilityId: "support.listConversations" | "support.readConversation" | "support.listLibrary" | "support.suggestCategory",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   signal?: AbortSignal,
@@ -470,6 +470,16 @@ export async function submitSupportAction<Action extends SupportWriteAction>(
   const parsedAction = SupportWriteActionSchema.safeParse(action);
   if (!parsedAction.success) throw new SupportApiError(0, "The support action contains invalid details.");
   if (intentId !== undefined && !intentId.trim()) throw new SupportApiError(0, "The support action needs an intent identity. Try again.");
+
+  if (parsedAction.data.action === "suggestCategory") {
+    const output = await readGoSupportCapability(
+      "support.suggestCategory",
+      { text: parsedAction.data.text },
+      SupportActionOutputSchemas.suggestCategory,
+      signal,
+    );
+    return { kind: "completed", data: output as SupportActionOutput<Action> };
+  }
 
   const { response, body } = await request(
     "/api/support",
