@@ -549,8 +549,9 @@ func TestMalformedEnabledModulesFailsClosed(t *testing.T) {
 	}
 }
 
-// A wildcard grant must not become an empty permission set.
-func TestWildcardGrantResolves(t *testing.T) {
+// Onboarding creates the owner with a wildcard grant, which must authorize
+// named organization permissions after session resolution.
+func TestWildcardGrantResolvesNamedPermissions(t *testing.T) {
 	h := newHarness(t, true)
 	h.addMembership(t, h.orgA, h.roleA, "Superuser", "*")
 
@@ -558,8 +559,8 @@ func TestWildcardGrantResolves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !resolved.HasPermission("*") {
-		t.Fatalf("permissions = %v, want the wildcard grant", resolved.Permissions)
+	if !resolved.HasPermission("iam.admin") || !resolved.HasPermission("crm.read") {
+		t.Fatalf("permissions = %v, want wildcard authorization for named permissions", resolved.Permissions)
 	}
 }
 

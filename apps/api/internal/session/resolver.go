@@ -93,7 +93,7 @@ func (r *ResolvedUser) HasPermission(key string) bool {
 	if r == nil || r.OrgID == nil {
 		return false
 	}
-	return r.Permissions[key]
+	return r.Permissions[key] || r.Permissions["*"]
 }
 
 // IsMemberOf reports whether the identity belongs to the given organization.

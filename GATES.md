@@ -542,3 +542,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests  277 passed|PASS.*TestPostgresPosReadReaderUsesRuntimeRLSAndMapsSaleReturns|tsc --noEmit/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: The focused POS API, page, and route-proxy tests passed 277 cases. A stale page fixture still returned the former shared `/api/customers` contract; it now serves the exact `/api/pos/customers` route and asserts the legacy path is unused. The runtime-role Go reader proof passed with integration required, covering tenant RLS and session/sale mappings. Vite typecheck passed. Authenticated agent-browser loaded `/pos` on Vite, confirmed the closed register state, and observed `/api/pos` and `/api/pos/customers` return HTTP 200 with no browser page errors.
+
+- [x] G107: Go session permission checks honor an organization's wildcard grant for named permissions, allowing the owner to save Vite workspace persona settings.
+  CHECK: GO_RUNTIME_INTEGRATION_REQUIRED=1 DATABASE_URL=postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2 CHASTE_APP_DB_PASSWORD=chaste_app_dev_only PATH=/home/benaiah/.local/share/go/1.27.1/bin:$PATH go -C apps/api test ./internal/session -count=1
+  EXPECT: /ok.*internal\/session/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Session unit and runtime-role integration tests passed with integration required. An independent reviewer found no actionable issues. Authenticated agent-browser saved the owner persona through `PATCH /api/org` with HTTP 200; reload preserved the value, and browser page errors were empty.

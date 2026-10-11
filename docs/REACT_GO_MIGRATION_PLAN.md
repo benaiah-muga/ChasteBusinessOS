@@ -3120,3 +3120,13 @@ new owners and the manifest shows zero legacy runtime paths.
      Authenticated browser reload proof confirmed setup resumed at Data, undo
      receipts remained available, and completed import steps stayed done when
      continuing to Team.
+
+296. (Implemented and verified: session resolver tests, independent review, and
+     authenticated browser proof) Honor organization wildcard (`*`) role grants
+     when Go resolves named permissions. Go onboarding assigns this grant to
+     the workspace owner; checking only exact permission keys incorrectly
+     denied owner-only Go settings writes. Unit and runtime-role integration
+     tests cover named permission checks, and an independent review found no
+     tenant-scope or fail-open regression. The authenticated Vite owner saved
+     the agent persona through Go `/api/org` with HTTP 200; reload confirmed the
+     saved value persisted, and browser errors were empty.

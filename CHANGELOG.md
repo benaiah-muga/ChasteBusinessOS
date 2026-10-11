@@ -380,6 +380,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Go session authorization now expands an organization's wildcard role grant
+  when checking named permissions, so newly bootstrapped workspace owners can
+  use admin-gated settings and capabilities.
+
 - Go email verification now treats a valid token for an already verified user
   as an idempotent success without changing the account's `updated_at` value.
   Unknown accounts still receive an invalid-token response.

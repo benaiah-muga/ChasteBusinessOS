@@ -207,6 +207,17 @@ func TestHasPermissionAndMembershipRefuseAnUnresolvedActor(t *testing.T) {
 	}
 }
 
+func TestHasPermissionHonorsOrganizationWildcardGrant(t *testing.T) {
+	orgID := "org-a"
+	resolved := &ResolvedUser{OrgID: &orgID, Permissions: map[string]bool{"*": true}}
+	if !resolved.HasPermission("iam.admin") {
+		t.Fatal("organization wildcard did not grant iam.admin")
+	}
+	if !resolved.HasPermission("crm.write") {
+		t.Fatal("organization wildcard did not grant crm.write")
+	}
+}
+
 func TestIsMemberOfIgnoresEmptyAndPartialTargets(t *testing.T) {
 	resolved := &ResolvedUser{AllOrgIDs: []string{"org-a", "org-b"}}
 	cases := []struct {
