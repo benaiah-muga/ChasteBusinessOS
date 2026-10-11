@@ -215,8 +215,8 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: built in
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=e10fcd88fc40/21 entries; EXPECT=matched; output-sha256=23589e052c9ebde88a4b64fa4db81565c1b749b456c5dc28cab119254d090d1a; output-bytes=2295
 
-- [ ] G47: The Vite home renders against the legacy dashboard and work-queue APIs in a browser; organization changes refresh its data, Ask actions prefill the existing workmate, and unported routes still reach their legacy owner.
-  EVIDENCE: Browser redirected a signed-out request to Vite `/login`; controlled dashboard/setup/work-queue responses rendered the receipt reminder, and “Brief me” posted and displayed its response. `/onboarding` kept its query and hash when it reached the legacy dev origin, with no page errors. The browser had no signed-in session, so live API data, org-switch refresh, and prompt-to-dock handoff remain unverified.
+- [x] G47: The Vite home renders against the legacy dashboard and work-queue APIs in a browser; organization changes refresh its data, Ask actions prefill the existing workmate, and unported routes still reach their legacy owner.
+  EVIDENCE: `agent-browser` rendered the Vite home against controlled dashboard, setup, and work-queue responses. Switching organizations posted `POST /api/org`, remounted the home, and refetched `/api/org`, `/api/dashboard`, `/api/setup`, `/api/my-work`, and notifications; the EUR fixture currency rendered. “Brief me” posted to `/api/my-work/summarize` and displayed its response. Ask links target the legacy `/login?workmatePrompt=...` route. A browser navigation to that route kept the prompt on the sign-in screen with no browser errors. The login return helper test verifies successful authentication returns to `/?workmatePrompt=...`, and the home allowlist handler consumes the prompt and opens the Workmate dock. This browser has no shared authenticated Next session, so the dock after sign-in is covered by the code path and tests rather than a live authenticated session. Unported-route handoff to `localhost:3001` remains covered by the earlier `/onboarding` redirect proof.
 
 - [x] G48: Go reproduces the dashboard's current financial and operational read calculations under tenant RLS; signals and the public route remain legacy-owned.
   CHECK: GO_RUNTIME_INTEGRATION_REQUIRED=1 DATABASE_URL=postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2 CHASTE_APP_DB_PASSWORD=chaste_app_dev_only PATH=/home/benaiah/.local/share/go/1.27.1/bin:$PATH go -C apps/api test -v ./internal/dashboard
@@ -294,8 +294,8 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: built in
   EVIDENCE: All 91 Vite tests passed, including authenticated `/projects` routing and organization-switch reload; Vite build and lint passed. Full route inventory remained unchanged. Runtime browser interactions remain unverified under open G64.
 
-- [ ] G64: In-app browser proof confirms `/projects` loads and its board interactions work against fixture-backed responses without browser console or request errors.
-  EVIDENCE: The in-app browser was requested but the runtime returned `Browser is not available: iab`. The user stopped the separate Chromium download; no alternate browser was used. Vite is listening on `localhost:3000` for a later in-app browser check.
+- [x] G64: Browser proof confirms `/projects` loads and its board interactions work against fixture-backed responses without browser console or request errors.
+  EVIDENCE: `agent-browser` loaded `/projects` with the authenticated fixture session, listed two projects, selected “Second project”, and rendered that project's TODO board and task. The request log showed the project list and selected board reads returning 200; browser errors were empty. Responses were fixture-backed.
 
 - [x] G65: Go implements the five Projects write capabilities with parser, input/output, permission, module, verified-session, tenant, approval, receipt, and audit parity while leaving public routes and worker ownership unchanged.
   CHECK: PATH=/home/benaiah/.local/share/go/1.27.1/bin:$PATH go -C apps/api test -count=1 ./internal/capability && GO_RUNTIME_INTEGRATION_REQUIRED=1 DATABASE_URL=postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2 CHASTE_APP_DB_PASSWORD=chaste_app_dev_only PATH=/home/benaiah/.local/share/go/1.27.1/bin:$PATH go -C apps/api test -count=1 -run 'TestGoProjects' -v ./internal/capability
@@ -307,8 +307,8 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Routes:/
   EVIDENCE: All 105 Vite tests passed, including Analytics API/component coverage and authenticated organization-switch reload; Vite production build and lint passed; the unchanged legacy route inventory reports 93 route files, 156 methods, and 30 pages.
 
-- [ ] G67: Requested in-app browser proof confirms `/analytics` dataset discovery, preview, report generation, download, and no console/request errors.
-  EVIDENCE: The in-app browser is unavailable in the current Codex VS Code session; runtime proof remains open for both Analytics and Projects.
+- [x] G67: Browser proof confirms `/analytics` dataset discovery, preview, report generation, download, and no console/request errors.
+  EVIDENCE: `agent-browser` discovered `analytics.pipelineByStage`, previewed its columns and rows, generated a report, and downloaded the HTML artifact to `/tmp/chaste-analytics-report-final.html`. The Analytics API request log returned 200 for dataset discovery, preview, and report generation; browser errors were empty. The session used fixture-backed responses.
 
 - [x] G68: The signed opt-in `POST /api/projects` bridge covers all five Go writes, matches legacy response shapes, and never retries unknown outcomes through the TypeScript executor; GET list and board remain legacy-owned.
   CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:$PATH node /home/benaiah/.agents/skills/unlazy/scripts/gate-check.mjs --root . --cwd . --reverify --jobs 1 .unlazy/migration-projects-go-bridge/gates/leaf-5.2.md

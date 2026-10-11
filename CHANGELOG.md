@@ -140,12 +140,26 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Vite Accounting now preserves Go FX exposure permission errors and rejects
+  incomplete exchange-rate result tuples instead of treating rejected reads as
+  missing report data.
+- Vite home Ask links now preserve their Workmate prompt through the legacy
+  sign-in screen until the authenticated home opens the dock.
+- Vite HR time reporting and actions now always use Go capability APIs, with
+  the obsolete time-route selector removed.
 - Vite Manufacturing now gives expired sessions and denied permissions clear
   guidance when Go planning reads fail. Active Manufacturing tabs also update
   their border without conflicting shorthand styles.
 - Vite Accounting clears a displayed customer statement when its customer
   changes, ignores late results from the previous selection, and rejects rows
   with malformed timestamps.
+- Vite Manufacturing lot-trace reads now ignore stale responses when a user
+  selects another lot before the first trace finishes loading.
+- Vite Documents editor detail, version history, and archived-version reads
+  now use Go session capabilities without legacy GET fallbacks. Go document
+  reads require the explicit `GO_DOCUMENTS_EDITOR_READS=1` opt-in.
+- Vite Support category suggestions now use the Go capability path and reject
+  unknown request fields, including caller-supplied organization IDs.
 
 ### Changed
 
