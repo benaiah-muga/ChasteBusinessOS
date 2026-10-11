@@ -2925,3 +2925,16 @@ new owners and the manifest shows zero legacy runtime paths.
      `iam.admin`, approval, and audit enforcement in the capability executor.
      Unsupported module writes retain the legacy 404. The manifest records
      only exact GET/POST collection ownership as Go with parity pending.
+
+282. (Implemented; runtime-role HTTP and focused Vite tests, typecheck, lint,
+     route manifest, and continuity inventory checks passed; authenticated
+     browser proof and live legacy differential remain pending) Route exact
+     `GET` and `POST /api/policy`
+     requests from Vite Settings through Go by default. Reads require a signed
+     session and active organization membership, use `policy.Reader.ForOrg`
+     through `dbx.WithOrgTx`, return legacy defaults for a missing policy, and
+     derive `canEdit` from resolved `iam.admin` permission. Writes preserve the
+     legacy input constraints and pending/success envelopes and execute
+     `iam.setOrgPolicy` through the capability executor. Cookie writes require
+     same-origin validation. The generated route manifest records exact GET
+     and POST ownership as Go with parity pending under a narrow policy rule.

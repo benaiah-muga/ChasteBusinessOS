@@ -297,6 +297,23 @@ authenticated browser and live legacy differential proofs complete
 [`iam_org_settings.go#L123-L169`](../../apps/api/internal/capability/iam_org_settings.go#L123-L169),
 [`SettingsPage.tsx#L512-L605`](../../apps/web-vite/src/components/SettingsPage.tsx#L512-L605)).
 
+The Vite Settings Governance panel sends exact `GET` and `POST /api/policy`
+requests to Go by default. Reads resolve the signed session and active
+organization, use `policy.Reader.ForOrg` through `dbx.WithOrgTx`, retain the
+legacy `write`/`50000`/empty-list defaults, and derive `canEdit` from resolved
+`iam.admin`. Writes keep the legacy risk enum, optional bounded integer,
+approval-risk list defaults and limits, plus exact success and pending
+approval envelopes. Go validates and dispatches writes through
+`iam.setOrgPolicy`, so the capability executor remains authoritative for
+permissions, approval, and audit. Explicit `moneyThresholdMinor: null` is
+rejected, matching the legacy Zod route; the Go parser now has a regression
+test for this difference. The route manifest remains parity pending until
+authenticated browser and live legacy differential proofs complete
+([`route.ts#L108-L158`](../../apps/web/src/app/api/policy/route.ts#L108-L158),
+[`policy.go#L15-L55`](../../apps/api/internal/policy/policy.go#L15-L55),
+[`iam_org_settings.go#L173-L213`](../../apps/api/internal/capability/iam_org_settings.go#L173-L213),
+[`policy_session.go`](../../apps/api/internal/httpapi/policy_session.go)).
+
 ## Required parity evidence before cutover
 
 1. A cloned-database comparison proves table shape and all existing rows remain

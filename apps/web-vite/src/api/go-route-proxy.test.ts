@@ -783,6 +783,8 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_MEMORY_ROUTE", flag: "memory", method: "POST", url: "/api/memory" },
   { env: "CHASTE_GO_MODULE_SETTINGS_ROUTE", flag: "moduleSettings", method: "GET", url: "/api/module-settings?module=inventory" },
   { env: "CHASTE_GO_MODULE_SETTINGS_ROUTE", flag: "moduleSettings", method: "POST", url: "/api/module-settings" },
+  { env: "CHASTE_GO_POLICY_ROUTE", flag: "policy", method: "GET", url: "/api/policy" },
+  { env: "CHASTE_GO_POLICY_ROUTE", flag: "policy", method: "POST", url: "/api/policy" },
   { env: "CHASTE_GO_TEAM_READ_ROUTE", flag: "teamRead", method: "GET", url: "/api/team" },
   { env: "CHASTE_GO_TEAM_WRITE_ROUTE", flag: "teamWrite", method: "POST", url: "/api/team" },
   { env: "CHASTE_GO_BRANDING_ROUTE", flag: "branding", method: "POST", url: "/api/branding" },
@@ -844,7 +846,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.memory).toBe(true);
     expect(flags.moduleSettings).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "moduleSettings", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "moduleSettings", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -870,6 +872,11 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/memory")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/module-settings?module=inventory")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/module-settings")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/policy")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/policy?source=settings")).toBe(true);
+    expect(isGoRouteRequest(flags, "PUT", "/api/policy")).toBe(false);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/policy")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/policy/extra")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/support/public")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/scim/v2/Users")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/scim/v2/Users")).toBe(false);
@@ -1346,6 +1353,17 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "HEAD", "/api/module-settings")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/module-settings/inventory")).toBe(false);
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_MODULE_SETTINGS_ROUTE: "0" }), "GET", "/api/module-settings?module=inventory")).toBe(false);
+  });
+
+  it("keeps unsupported policy methods and subpaths on the legacy route", () => {
+    const flags = goRouteProxyFlagsFromEnv({});
+    expect(isGoRouteRequest(flags, "GET", "/api/policy")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/policy?source=settings")).toBe(true);
+    expect(isGoRouteRequest(flags, "PUT", "/api/policy")).toBe(false);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/policy")).toBe(false);
+    expect(isGoRouteRequest(flags, "HEAD", "/api/policy")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/policy/extra")).toBe(false);
+    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_POLICY_ROUTE: "0" }), "GET", "/api/policy")).toBe(false);
   });
 
   it("keeps unsupported ledger methods and subpaths on the legacy route", () => {

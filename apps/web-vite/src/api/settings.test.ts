@@ -213,6 +213,17 @@ describe("Vite settings API", () => {
     });
   });
 
+  it("accepts the exact policy pending and success envelopes", async () => {
+    const hint = "Policy changes proposed by the workmate wait for approval in the Approvals inbox.";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true, hint }, { status: 202 })));
+    await expect(submitGoverned("/api/policy", { maxRiskAutonomous: "write" }))
+      .resolves.toEqual({ kind: "pending", reason: hint });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { saved: true } })));
+    await expect(submitGoverned("/api/policy", { maxRiskAutonomous: "write" }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true, data: { saved: true } } });
+  });
+
   it("reports a governed refusal as an error with the server reason", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "identity approval required" }, { status: 422 })));
     await expect(submitGoverned("/api/modules", { modules: ["crm"] }))

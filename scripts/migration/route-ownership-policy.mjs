@@ -36,3 +36,11 @@ export function allowsPendingGoModuleSettingsOwner(kind, path, method, owner, pa
     && owner === "go"
     && parity === "pending";
 }
+
+export function allowsPendingGoPolicyOwner(kind, path, method, owner, parity) {
+  return kind === "api"
+    && path === "/api/policy"
+    && ["GET", "POST"].includes(method)
+    && owner === "go"
+    && parity === "pending";
+}

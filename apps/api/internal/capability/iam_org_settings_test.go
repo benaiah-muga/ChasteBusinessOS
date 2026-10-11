@@ -52,6 +52,9 @@ func TestIAMOrgSettingsParsersMirrorZodContracts(t *testing.T) {
 	if _, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"cosmic"}`)); err == nil {
 		t.Fatal("unknown risk class refused")
 	}
+	if _, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"read","moneyThresholdMinor":null}`)); err == nil {
+		t.Fatal("explicit null money threshold should be rejected like the legacy route")
+	}
 	if _, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"read","requiresApprovalFor":null}`)); err == nil {
 		t.Fatal("explicit null approval list should be rejected")
 	}

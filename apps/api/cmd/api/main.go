@@ -84,6 +84,10 @@ func goModuleSettingsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goPolicyRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goSalesOrdersRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -334,6 +338,15 @@ func run(logger *slog.Logger) error {
 		}
 		moduleSettingsRoute = httpapi.NewModuleSettingsSessionHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
 		logger.Info("Go module settings route mounted", "paths", []string{"GET /api/module-settings", "POST /api/module-settings"})
+	}
+	var policyRoute http.Handler
+	if goPolicyRouteEnabledFromEnv(os.Getenv("GO_POLICY_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		policyRoute = httpapi.NewPolicySessionHandler(resolver, policy.NewPostgresReader(pool), capabilityExecutor, logger, trustedProxyCIDRs)
+		logger.Info("Go session policy route mounted", "paths", []string{"GET /api/policy", "POST /api/policy"})
 	}
 	var teamReadRoute http.Handler
 	if goTeamReadRouteEnabledFromEnv(os.Getenv("GO_TEAM_READ_ROUTE")) {
@@ -707,6 +720,7 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoApprovalsDecisionRoute(apiHandler, approvalsDecisionRoute)
 	apiHandler = httpapi.MountGoMemoryRoute(apiHandler, memoryRoute)
 	apiHandler = httpapi.MountGoModuleSettingsRoute(apiHandler, moduleSettingsRoute)
+	apiHandler = httpapi.MountGoPolicySessionRoute(apiHandler, policyRoute)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,

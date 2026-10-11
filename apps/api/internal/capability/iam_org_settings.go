@@ -179,7 +179,7 @@ func ParseIAMSetOrgPolicyInput(raw json.RawMessage) (IAMSetOrgPolicyInput, error
 	if input.MaxRiskAutonomous, err = projectRequiredEnum(fields, "maxRiskAutonomous", []string{"read", "write", "money", "identity", "destructive"}); err != nil {
 		return IAMSetOrgPolicyInput{}, err
 	}
-	if rawThreshold, ok := fields["moneyThresholdMinor"]; ok && string(rawThreshold) != "null" {
+	if _, ok := fields["moneyThresholdMinor"]; ok {
 		threshold, err := requiredSafeInteger(fields, "moneyThresholdMinor")
 		if err != nil {
 			return IAMSetOrgPolicyInput{}, err

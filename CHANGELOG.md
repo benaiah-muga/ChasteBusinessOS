@@ -13,6 +13,15 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Settings now sends exact `GET` and `POST /api/policy` requests to Go by
+  default. Go resolves the signed session and active organization, reads policy
+  through tenant-scoped RLS, and derives `canEdit` from resolved `iam.admin`
+  permission. Writes validate the legacy request contract and execute through
+  `iam.setOrgPolicy`, retaining server-side permission, approval, and audit
+  behavior. Explicit `moneyThresholdMinor: null` is rejected like the legacy
+  schema. Authenticated browser proof and live legacy differential remain
+  pending.
+
 - Vite Inventory module defaults now use Go for exact `GET` and `POST
   /api/module-settings` requests. Go resolves the signed session and organization,
   keeps reads available to members, and executes saves through

@@ -199,6 +199,22 @@ func MountGoModuleSettingsRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoPolicySessionRoute mounts only the Vite Settings policy collection.
+// Other methods and nested paths continue to the base handler.
+func MountGoPolicySessionRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/policy", route)
+	mux.Handle("POST /api/policy", route)
+	if base != nil {
+		mux.Handle("HEAD /api/policy", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoInventoryReadRoute mounts only the read-only inventory collection
 // endpoint. Writes and nested inventory paths continue to the existing owner.
 func MountGoInventoryReadRoute(base, route http.Handler) http.Handler {

@@ -870,7 +870,7 @@
       "path": "/api/policy",
       "method": "GET",
       "source": "apps/web/src/app/api/policy/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -878,7 +878,7 @@
       "path": "/api/policy",
       "method": "POST",
       "source": "apps/web/src/app/api/policy/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {

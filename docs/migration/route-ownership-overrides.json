@@ -113,6 +113,20 @@
     },
     {
       "kind": "api",
+      "path": "/api/policy",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/policy",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
       "path": "/api/routines",
       "method": "GET",
       "owner": "go",
