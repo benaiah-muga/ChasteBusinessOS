@@ -626,9 +626,11 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "Agent sessions" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Sessions" }).getAttribute("aria-current")).toBe("page");
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledWith("/api/sessions", expect.objectContaining({ credentials: "same-origin" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/durable-runs", expect.objectContaining({ credentials: "same-origin" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/metrics", expect.objectContaining({ credentials: "same-origin" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/sessions", expect.objectContaining({ credentials: "same-origin" }));
+      expect(fetchMock).toHaveBeenCalledWith("/api/durable-runs", expect.objectContaining({ credentials: "same-origin" }));
+      expect(fetchMock).toHaveBeenCalledWith("/api/metrics", expect.objectContaining({ credentials: "same-origin" }));
+    }, { timeout: 5_000 });
   });
 
   it("routes the team page to Vite and reloads its Go-owned data after an organization switch", async () => {
