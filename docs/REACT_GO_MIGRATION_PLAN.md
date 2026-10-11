@@ -2698,3 +2698,12 @@ new owners and the manifest shows zero legacy runtime paths.
      replay, approval linkage, and audit. The TypeScript claimant now skips
      customer creation without changing its pending status or attempts; other
      CRM customer job types remain with their existing owners.
+
+259. (Implemented; focused TypeScript suite passed, Go proof rerun pending)
+     Make the Go jobs worker the sole owner of `inventory.createCycleCount`
+     jobs. The TypeScript claimant leaves cycle-count creation pending without
+     incrementing attempts. The existing Go database-backed proof covers the
+     open snapshot and governed action receipt, but could not be rerun because
+     this environment has no compatible Go toolchain. Cycle-count record,
+     post, and cancel jobs retain their existing owners pending their own Go
+     worker proofs.

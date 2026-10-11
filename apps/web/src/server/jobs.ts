@@ -126,7 +126,8 @@ export async function claimJob(
         'crm.restoreTaskDetails',
         'crm.createDeal',
         'crm.moveDealStage',
-        'crm.convertLead'
+        'crm.convertLead',
+        'inventory.createCycleCount'
       )
       ORDER BY available_at, created_at
       LIMIT 1

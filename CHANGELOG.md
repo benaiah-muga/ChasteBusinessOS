@@ -19,6 +19,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Go jobs worker now exclusively owns `inventory.createCycleCount` jobs. The
+  TypeScript claimant leaves cycle-count creation queued for Go, which records
+  the open snapshot and governed action receipt.
+
 - Go jobs worker now exclusively owns CRM deal and task jobs. TypeScript leaves
   deal creation, stage moves, lead conversion, and task creation, completion,
   and detail update/restore pending for Go, which executes them through the

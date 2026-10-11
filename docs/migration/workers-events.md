@@ -378,6 +378,19 @@ executor under `crm.write`, using the existing job ID receipt intent and
 organization scope. The TypeScript claimant excludes these types; other CRM
 capability job ownership is unchanged.
 
+## Inventory cycle-count creation job
+
+The Go jobs worker is the sole queue owner for `inventory.createCycleCount`.
+It executes through the governed executor under `inventory.write`, using the
+existing job ID receipt intent and queued organization scope. The TypeScript
+claimant excludes this type; record, post, and cancel job types retain their
+current owners pending their own Go worker proofs.
+
+`TestInventoryCycleCountWorkerClaimAndExecute` proves Go claims the job,
+creates an open cycle-count snapshot, and stores the action receipt. The
+TypeScript ownership check proves the legacy claimant leaves the job pending
+without incrementing its attempts.
+
 `TestCRMDealJobsClaimAndExecuteThroughSystemPath` proves the Go worker creates
 a deal, moves its stage, converts it into a customer, records the create-job
 action receipt, and writes system audit events. TypeScript ownership checks
