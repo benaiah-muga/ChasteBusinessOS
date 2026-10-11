@@ -773,6 +773,8 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_MEMORY_ROUTE", flag: "memory", method: "POST", url: "/api/memory" },
   { env: "CHASTE_GO_MODULE_SETTINGS_ROUTE", flag: "moduleSettings", method: "GET", url: "/api/module-settings?module=inventory" },
   { env: "CHASTE_GO_MODULE_SETTINGS_ROUTE", flag: "moduleSettings", method: "POST", url: "/api/module-settings" },
+  { env: "CHASTE_GO_AI_CONFIG_ROUTE", flag: "aiConfig", method: "GET", url: "/api/ai-config" },
+  { env: "CHASTE_GO_AI_CONFIG_ROUTE", flag: "aiConfig", method: "POST", url: "/api/ai-config" },
   { env: "CHASTE_GO_POLICY_ROUTE", flag: "policy", method: "GET", url: "/api/policy" },
   { env: "CHASTE_GO_POLICY_ROUTE", flag: "policy", method: "POST", url: "/api/policy" },
   { env: "CHASTE_GO_TEAM_READ_ROUTE", flag: "teamRead", method: "GET", url: "/api/team" },
@@ -835,8 +837,9 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.routines).toBe(true);
     expect(flags.memory).toBe(true);
     expect(flags.moduleSettings).toBe(true);
+    expect(flags.aiConfig).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "moduleSettings", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "moduleSettings", "aiConfig", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -862,6 +865,12 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/memory")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/module-settings?module=inventory")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/module-settings")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/ai-config")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/ai-config?source=workspace")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/ai-config")).toBe(true);
+    expect(isGoRouteRequest(flags, "PUT", "/api/ai-config")).toBe(false);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/ai-config")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/ai-config/extra")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/policy")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/policy?source=settings")).toBe(true);
     expect(isGoRouteRequest(flags, "PUT", "/api/policy")).toBe(false);
@@ -907,6 +916,68 @@ describe("Vite Go route proxy selection", () => {
     const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_DASHBOARD_ROUTE: "0" });
     expect(rolledBack.dashboard).toBe(false);
     expect(isGoRouteRequest(rolledBack, "GET", "/api/dashboard")).toBe(false);
+  });
+
+  it("routes AI config GET and POST to Go by default and supports an explicit legacy rollback", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(defaults.aiConfig).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/ai-config")).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/ai-config")).toBe(true);
+    expect(isGoRouteRequest(defaults, "PATCH", "/api/ai-config")).toBe(false);
+
+    const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_AI_CONFIG_ROUTE: "0" });
+    expect(rolledBack.aiConfig).toBe(false);
+    expect(isGoRouteRequest(rolledBack, "GET", "/api/ai-config")).toBe(false);
+    expect(isGoRouteRequest(rolledBack, "POST", "/api/ai-config")).toBe(false);
+  });
+
+  it("forwards AI config reads and credential writes to Go without hitting the legacy proxy", async () => {
+    const go = requestRecorder("go");
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
+
+    const legacy = requestRecorder("legacy");
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
+
+    const vite = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({}), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+      },
+    });
+    await vite.listen();
+    runningServers.push({ close: () => vite.close() });
+    const address = vite.httpServer?.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const cookie = "auth.session=verified-browser-session; chaste.active-org=organization-id";
+
+    const read = await fetch(`${baseUrl}/api/ai-config?source=workspace`, { headers: { cookie } });
+    expect(await read.json()).toMatchObject({
+      target: "go",
+      method: "GET",
+      url: "/api/ai-config?source=workspace",
+      cookie,
+    });
+
+    const intentId = "aaaaaaaa-0000-4000-8000-000000000001";
+    const write = await fetch(`${baseUrl}/api/ai-config`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ provider: "nvidia", apiKey: "proof-only-key", intentId }),
+    });
+    expect(await write.json()).toMatchObject({
+      target: "go",
+      method: "POST",
+      url: "/api/ai-config",
+      cookie,
+      body: JSON.stringify({ provider: "nvidia", apiKey: "proof-only-key", intentId }),
+    });
   });
 
   it("allows explicit legacy rollback for analytics discovery, preview, and report generation", () => {

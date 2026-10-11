@@ -199,6 +199,21 @@ func MountGoModuleSettingsRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoAIConfigRoute owns the authenticated AI provider configuration API.
+func MountGoAIConfigRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/ai-config", route)
+	mux.Handle("POST /api/ai-config", route)
+	if base != nil {
+		mux.Handle("HEAD /api/ai-config", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoPolicySessionRoute mounts only the Vite Settings policy collection.
 // Other methods and nested paths continue to the base handler.
 func MountGoPolicySessionRoute(base, route http.Handler) http.Handler {

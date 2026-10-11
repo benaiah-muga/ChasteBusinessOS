@@ -1,11 +1,9 @@
 import { z } from "zod";
 
 /**
- * Settings client for the Vite app. Same-origin calls into the legacy
- * `/api/settings` family that the Next page already owns, so no endpoint is
- * invented here. Every governed write carries a fresh `intentId` for
- * idempotency and an HTTP 202 is surfaced as `pending`, never as an error
- * and never as a silent success.
+ * Settings client for the Vite app. Every governed write carries an
+ * `intentId` for idempotency and an HTTP 202 is surfaced as `pending`, never
+ * as an error and never as a silent success.
  */
 
 const READ_TIMEOUT_MS = 15_000;
@@ -184,22 +182,19 @@ const AiModelsSchema = z.object({
 }).strict();
 
 /**
- * The public model configuration. The legacy contract only ever carries a
- * short display hint (`keyHint`, at most 12 characters such as `••••1234`);
- * the stored credential itself is encrypted server-side and never crosses
- * the wire. `.strict()` keeps that honest: an unexpected field carrying key
- * material fails the parse instead of reaching a React prop.
+ * The public model configuration carries only a masked key hint. Strict
+ * shapes keep unexpected fields carrying credential material out of React.
  */
 const AiConfigSchema = z.object({
   provider: z.string().min(1),
   baseUrl: z.string(),
   models: AiModelsSchema,
   configured: z.boolean(),
-  keyHint: z.string().max(12).nullable().optional(),
-  source: z.string(),
+  keyHint: z.string().regex(/^•{4}(?: |[^\p{C}\p{Zs}\p{Zl}\p{Zp}]){1,4}$/u).nullable(),
+  source: z.enum(["workspace", "environment"]),
 }).strict();
 
-const AiConfigSaveSchema = AiConfigSchema.extend({ ok: z.literal(true).optional() }).strict();
+const AiConfigSaveSchema = AiConfigSchema.extend({ ok: z.literal(true) }).strict();
 
 export type AiModels = z.infer<typeof AiModelsSchema>;
 export type AiConfig = z.infer<typeof AiConfigSchema>;
@@ -242,20 +237,29 @@ const AiSaveBodySchema = z.object({
   models: AiModelsSchema,
   apiKey: z.string().trim().min(1).max(1000).optional(),
   clearApiKey: z.boolean().optional(),
+  intentId: z.string().uuid().optional(),
+  updatedAt: z.string().datetime({ offset: false }).optional(),
 }).strict();
 
 export type AiSaveInput = z.infer<typeof AiSaveBodySchema>;
 
-/**
- * Saves the model configuration. The legacy route owns the credential: the
- * browser sends a plaintext key exactly once, the server encrypts it and
- * answers with the public config. No `intentId` here because the route does
- * not plumb one into the capability; sending one would be silently dropped.
- */
+/** Saves the model configuration. The server encrypts credentials and returns only its public DTO. */
 export async function saveAiConfig(input: AiSaveInput, signal?: AbortSignal): Promise<AiSaveOutcome> {
   const parsed = AiSaveBodySchema.safeParse(input);
   if (!parsed.success) throw new SettingsApiError(0, "The model configuration contains invalid details.");
-  const { response, body } = await request("/api/ai-config", { method: "POST", body: JSON.stringify(parsed.data) }, signal);
+  const { intentId, updatedAt, ...saveConfigFields } = parsed.data;
+  const { response, body } = await request(
+    "/api/ai-config",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...saveConfigFields,
+        intentId: intentId ?? crypto.randomUUID(),
+        updatedAt: updatedAt ?? new Date().toISOString(),
+      }),
+    },
+    signal,
+  );
   if (response.status === 202) {
     const pending = PendingApprovalSchema.safeParse(body);
     if (!pending.success) throw new SettingsApiError(202, "The settings service returned an unexpected approval response.");
@@ -270,10 +274,12 @@ export async function saveAiConfig(input: AiSaveInput, signal?: AbortSignal): Pr
 /* --------------------------------------------------------------- governed -- */
 
 const PendingApprovalSchema = z.object({
+  ok: z.literal(false).optional(),
   pendingApproval: z.literal(true),
   hint: z.string().optional(),
   reason: z.string().optional(),
   error: z.string().nullable().optional(),
+  approvalId: z.string().uuid().optional(),
 }).strict();
 
 const CompletedRecordSchema = z.record(z.string(), z.unknown());

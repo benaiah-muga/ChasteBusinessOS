@@ -258,6 +258,10 @@ describe("Vite settings API", () => {
     await expect(fetchAiConfig()).rejects.toMatchObject({
       message: "The settings service returned data in an unexpected format.",
     });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...aiConfig, encryptedKey: "ciphertext" })));
+    await expect(fetchAiConfig()).rejects.toMatchObject({
+      message: "The settings service returned data in an unexpected format.",
+    });
   });
 
   it("rejects an oversized key hint so a whole credential can never render", async () => {
@@ -267,23 +271,63 @@ describe("Vite settings API", () => {
     });
   });
 
-  it("saves model configuration without an intent id the route cannot honor", async () => {
+  it.each(["\u00a0", "\u2003", "\u2028"])("rejects non-printable or non-ASCII spacing in a key hint", async (suffix) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...aiConfig, keyHint: `••••${suffix}` })));
+    await expect(fetchAiConfig()).rejects.toMatchObject({
+      message: "The settings service returned data in an unexpected format.",
+    });
+  });
+
+  it.each(["a", "ab", "abc", "秘密"])("accepts a masked API key hint ending in %s", async (suffix) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...aiConfig, keyHint: `••••${suffix}` })));
+    await expect(fetchAiConfig()).resolves.toMatchObject({ keyHint: `••••${suffix}` });
+  });
+
+  it("saves model configuration with an idempotency intent id", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       Response.json({ ok: true, ...aiConfig, configured: true }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await saveAiConfig({ provider: "nvidia", baseUrl: aiConfig.baseUrl, models: aiConfig.models, apiKey: "  nvapi-typed  " });
     expect(result).toEqual({ kind: "completed", config: { ok: true, ...aiConfig, configured: true } });
-    expect(postBodies(fetchMock)[0]).toEqual({
+    const body = postBodies(fetchMock)[0] as Record<string, unknown>;
+    expect(body).toMatchObject({
       provider: "nvidia",
       baseUrl: aiConfig.baseUrl,
       models: aiConfig.models,
       apiKey: "nvapi-typed",
     });
+    expect(body.intentId).toEqual(expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
+    expect(body.updatedAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/));
+  });
+
+  it("reuses caller supplied intent and timestamp values on exact retries", async () => {
+    const intentId = "aaaaaaaa-0000-4000-8000-000000000001";
+    const updatedAt = "2026-10-11T20:30:40.000Z";
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, ...aiConfig }));
+    vi.stubGlobal("fetch", fetchMock);
+    const retryableInput = { provider: "nvidia", baseUrl: aiConfig.baseUrl, models: aiConfig.models, intentId, updatedAt };
+    await saveAiConfig(retryableInput);
+    await saveAiConfig(retryableInput);
+    const [firstRequest, retryRequest] = postBodies(fetchMock);
+    expect(firstRequest).toMatchObject({ intentId, updatedAt });
+    expect(retryRequest).toEqual(firstRequest);
+  });
+
+  it("rejects credentials in the success DTO", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, ...aiConfig, credential: "plaintext-secret" })));
+    await expect(saveAiConfig({ provider: "nvidia", baseUrl: aiConfig.baseUrl, models: aiConfig.models }))
+      .rejects.toMatchObject({ message: "The settings service returned an unexpected action response." });
   });
 
   it("keeps an approval-gated credential change pending", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true, error: "secret approval required" }, { status: 202 })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ok: false,
+      pendingApproval: true,
+      approvalId: "aaaaaaaa-0000-4000-8000-000000000002",
+      reason: "secret approval required",
+      error: "secret approval required",
+    }, { status: 202 })));
     await expect(saveAiConfig({ provider: "nvidia", baseUrl: "https://a.example/v1", models: aiConfig.models, clearApiKey: true }))
       .resolves.toEqual({ kind: "pending", reason: "secret approval required" });
   });
@@ -301,6 +345,18 @@ describe("Vite settings API", () => {
     await expect(saveAiConfig({ provider: "nvidia", baseUrl: "https://a.example/v1", models: aiConfig.models, apiKey: "   " })).rejects.toMatchObject({
       message: "The model configuration contains invalid details.",
     });
+    await expect(saveAiConfig({
+      provider: "nvidia",
+      baseUrl: "https://a.example/v1",
+      models: aiConfig.models,
+      intentId: "not-a-uuid",
+    })).rejects.toMatchObject({ message: "The model configuration contains invalid details." });
+    await expect(saveAiConfig({
+      provider: "nvidia",
+      baseUrl: "https://a.example/v1",
+      models: aiConfig.models,
+      updatedAt: "2026-10-11T20:30:40+03:00",
+    })).rejects.toMatchObject({ message: "The model configuration contains invalid details." });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

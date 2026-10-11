@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Settings > AI & automation now reads and writes workspace model-provider
+  configuration through the authenticated Go API. Go returns a strict public
+  projection without stored credentials and encrypts submitted keys before
+  governed persistence.
 - Vite onboarding customer and product CSV imports and undo now use the Go
   `crm.importCustomers`, `crm.undoCustomerImport`, `inventory.importItems`,
   and `inventory.undoItemImport` capabilities. Currency-aware minor units,

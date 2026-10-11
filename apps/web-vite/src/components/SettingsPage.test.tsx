@@ -212,7 +212,8 @@ describe("Vite settings page", () => {
     await waitFor(() => expect(postsTo(fetchMock, "/api/ai-config")).toHaveLength(1));
     const body = postsTo(fetchMock, "/api/ai-config")[0]!;
     expect(body).toMatchObject({ provider: "nvidia", apiKey: "nvapi-secret-value" });
-    expect(body).not.toHaveProperty("intentId");
+    expect(String(body.intentId)).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(String(body.updatedAt)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(body).not.toHaveProperty("keyHint");
   }, 20_000);
 

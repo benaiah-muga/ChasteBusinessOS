@@ -429,6 +429,21 @@ func TestGoSessionsRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) 
 	}
 }
 
+func TestGoAIConfigRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: true},
+		{value: "1", want: true},
+		{value: "0", want: false},
+	} {
+		if got := goAIConfigRouteEnabledFromEnv(test.value); got != test.want {
+			t.Errorf("goAIConfigRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)
+		}
+	}
+}
+
 func TestGoDurableRunsRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) {
 	for _, test := range []struct {
 		value string

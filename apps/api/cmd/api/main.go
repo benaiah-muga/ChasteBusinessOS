@@ -84,6 +84,10 @@ func goModuleSettingsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goAIConfigRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goPolicyRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -207,6 +211,15 @@ func run(logger *slog.Logger) error {
 		}
 		orgRoute = httpapi.NewOrgHandler(httpapi.NewPgOrgRepository(pool), resolver, os.Getenv("BETTER_AUTH_SECRET"), logger)
 		logger.Info("Go organization route mounted", "path", "/api/org")
+	}
+	var aiConfigRoute http.Handler
+	if goAIConfigRouteEnabledFromEnv(os.Getenv("GO_AI_CONFIG_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		aiConfigRoute = httpapi.NewAIConfigSessionHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
+		logger.Info("Go AI config route mounted", "path", "/api/ai-config")
 	}
 	var portalInvoiceRoute http.Handler
 	if goPortalInvoiceRouteEnabledFromEnv(os.Getenv("GO_PORTAL_INVOICE_ROUTE")) {
@@ -735,6 +748,7 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoModuleSettingsRoute(apiHandler, moduleSettingsRoute)
 	apiHandler = httpapi.MountGoPolicySessionRoute(apiHandler, policyRoute)
 	apiHandler = httpapi.MountGoSupportCustomersRoute(apiHandler, supportCustomersRoute)
+	apiHandler = httpapi.MountGoAIConfigRoute(apiHandler, aiConfigRoute)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,

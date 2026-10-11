@@ -3130,3 +3130,17 @@ new owners and the manifest shows zero legacy runtime paths.
      tenant-scope or fail-open regression. The authenticated Vite owner saved
      the agent persona through Go `/api/org` with HTTP 200; reload confirmed the
      saved value persisted, and browser errors were empty.
+
+297. (Implemented) Move Vite Settings > AI & automation provider reads and
+     writes off the legacy `/api/ai-config` owner. Add a dedicated Go public
+     projection that never returns encrypted credentials, and execute provider
+     writes through the existing governed Go settings capability. Route Vite
+     GET and POST traffic to Go by default with an explicit rollback selector.
+     Verify authenticated owner and denied-user behavior, secret redaction,
+     approval response handling, persistence after reload, and zero legacy
+     proxy requests. Focused Vite tests (212), typecheck, lint, and Go route
+     integration tests pass. Independent review found no actionable issue.
+     Authenticated `agent-browser` proof on Vite saved provider settings through
+     Go with HTTP 200, reloaded the persisted workspace override, and showed no
+     credential value or browser error. Go returned HTTP 200 on read; no legacy
+     `/api/ai-config` proxy request occurred.
