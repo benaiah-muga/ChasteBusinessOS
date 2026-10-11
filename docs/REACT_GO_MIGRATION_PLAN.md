@@ -2688,3 +2688,10 @@ new owners and the manifest shows zero legacy runtime paths.
      deal creation, stage changes, and conversion. Other CRM capability job
      types remain unchanged. The focused TypeScript jobs suite passed all 13
      tests.
+
+258. (Implemented and verified) Make the Go jobs worker the sole owner of
+     `crm.createCustomer` jobs. The Go capability permission map and
+     database-backed worker proof already cover governed creation, receipt
+     replay, approval linkage, and audit. The TypeScript claimant now skips
+     customer creation without changing its pending status or attempts; other
+     CRM customer job types remain with their existing owners.

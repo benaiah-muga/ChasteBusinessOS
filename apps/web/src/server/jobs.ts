@@ -119,6 +119,7 @@ export async function claimJob(
         OR (status = 'processing' AND lease_expires_at <= ${now.toISOString()}::timestamptz AND attempts < max_attempts)
       ) AND type NOT IN (
         'documents.parseDocument',
+        'crm.createCustomer',
         'crm.createTask',
         'crm.completeTask',
         'crm.updateTaskDetails',

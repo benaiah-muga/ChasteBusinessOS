@@ -48,7 +48,7 @@ describe("capability job queue", () => {
   it("retries a failed capability and exhausts it after the attempt limit", async () => {
     const jobId = await enqueueCapabilityJob(db, {
       orgId,
-      type: "crm.createCustomer",
+      type: "crm.mergeCustomers",
       payload: {},
     });
 
@@ -107,6 +107,24 @@ describe("capability job queue", () => {
     await pg.db.transaction(async (tx) => {
       await tx.execute(sql`SELECT id FROM jobs WHERE id <> ${jobId}::uuid FOR UPDATE`);
       const claim = await claimJob(db, "legacy-worker-crm-task-ownership-test", 30_000, new Date());
+      expect(claim).toBeNull();
+    });
+
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(row!.status).toBe("pending");
+    expect(row!.attempts).toBe(0);
+  });
+
+  it("leaves CRM customer creation jobs for the Go worker", async () => {
+    const jobId = await enqueueCapabilityJob(db, {
+      orgId,
+      type: "crm.createCustomer",
+      payload: { name: "Go-owned customer" },
+    });
+
+    await pg.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM jobs WHERE id <> ${jobId}::uuid FOR UPDATE`);
+      const claim = await claimJob(db, "legacy-worker-crm-customer-ownership-test", 30_000, new Date());
       expect(claim).toBeNull();
     });
 

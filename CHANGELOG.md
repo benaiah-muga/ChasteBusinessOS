@@ -18,6 +18,10 @@ The full v1 changelog is preserved at the bottom of this file.
   and detail update/restore pending for Go, which executes them through the
   governed path with action receipts.
 
+- Go jobs worker now exclusively owns `crm.createCustomer` jobs. TypeScript
+  leaves customer creation queued for Go, which executes it through the
+  governed path with receipt replay, approval linkage, and system audit.
+
 - Go jobs worker now owns asynchronous document parsing. The TypeScript worker
   leaves `documents.parseDocument` queued for Go, which records the governed
   action receipt and derived memory update.

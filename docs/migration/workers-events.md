@@ -357,6 +357,19 @@ and record system audit events. The TypeScript `jobs.test.ts` ownership checks
 prove the legacy claimant leaves all four job types pending without
 incrementing their attempts.
 
+## CRM customer creation job
+
+The Go jobs worker is the sole queue owner for `crm.createCustomer`. Go
+executes it under `crm.write` through the governed executor, using the job ID
+as the receipt intent and the queued organization as scope. The TypeScript
+claimant excludes this job type; other CRM customer jobs remain eligible for
+their existing owners.
+
+`TestGoCapabilityJobWorkerMatchesLegacy` proves Go executes customer creation
+through the queue, including receipt replay, approval linkage, and system audit.
+The TypeScript ownership test proves the legacy claimant leaves a customer
+creation job pending without incrementing its attempts.
+
 ## CRM deal jobs
 
 The Go worker is the sole queue owner for `crm.createDeal`,
