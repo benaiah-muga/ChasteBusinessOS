@@ -336,9 +336,50 @@ func TestVerifyEmailHTTPAcceptsSignedVerificationToken(t *testing.T) {
 	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Referrer-Policy") != "no-referrer" {
 		t.Fatalf("verification response lacks token privacy headers: %v", response.Header())
 	}
+	if cookies := response.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("verification issued a session cookie although automatic sign-in is not configured: %v", cookies)
+	}
+	var sessionCount int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM auth_session WHERE user_id = $1`, userID).Scan(&sessionCount); err != nil || sessionCount != 0 {
+		t.Fatalf("email verification created %d sessions, want none when automatic sign-in is not configured (err=%v)", sessionCount, err)
+	}
 	var verified bool
 	if err := pool.QueryRow(t.Context(), `SELECT email_verified FROM auth_user WHERE id = $1`, userID).Scan(&verified); err != nil || !verified {
 		t.Fatalf("HTTP verification state=%t err=%v", verified, err)
+	}
+	// Use a stable timestamp so a replay that rewrites updated_at is observable
+	// even when both requests happen within the database timestamp resolution.
+	replayBaseline := time.Date(2020, time.January, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := pool.Exec(t.Context(), `UPDATE auth_user SET updated_at = $2 WHERE id = $1`, userID, replayBaseline); err != nil {
+		t.Fatal(err)
+	}
+	var firstVerifiedAt time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT updated_at FROM auth_user WHERE id = $1`, userID).Scan(&firstVerifiedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !firstVerifiedAt.Equal(replayBaseline) {
+		t.Fatalf("verification timestamp baseline=%s, want %s", firstVerifiedAt, replayBaseline)
+	}
+	replay := httptest.NewRecorder()
+	handler.ServeHTTP(replay, httptest.NewRequest(http.MethodGet, "/verify-email?token="+url.QueryEscape(token), nil))
+	if replay.Code != http.StatusOK || len(replay.Result().Cookies()) != 0 {
+		t.Fatalf("verified token replay status=%d cookies=%v body=%q", replay.Code, replay.Result().Cookies(), replay.Body.String())
+	}
+	var replayVerifiedAt time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT updated_at FROM auth_user WHERE id = $1`, userID).Scan(&replayVerifiedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !replayVerifiedAt.Equal(firstVerifiedAt) {
+		t.Fatalf("verified token replay changed updated_at from %s to %s", firstVerifiedAt, replayVerifiedAt)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM auth_session WHERE user_id = $1`, userID).Scan(&sessionCount); err != nil || sessionCount != 0 {
+		t.Fatalf("verification replay created %d sessions, want none (err=%v)", sessionCount, err)
+	}
+	unknownToken := verificationTokenForHTTPTest(fmt.Sprintf("missing-%d@example.test", stamp), secret, time.Now().UTC())
+	missing := httptest.NewRecorder()
+	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/verify-email?token="+url.QueryEscape(unknownToken), nil))
+	if missing.Code != http.StatusUnauthorized {
+		t.Fatalf("unknown account verification status=%d body=%q, want unauthorized", missing.Code, missing.Body.String())
 	}
 }
 

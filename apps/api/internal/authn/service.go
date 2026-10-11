@@ -350,11 +350,18 @@ func (s *Service) VerifyEmail(ctx context.Context, token string) error {
 	if err != nil {
 		return ErrInvalidToken
 	}
-	result, err := s.pool.Exec(ctx, `UPDATE auth_user SET email_verified = true, updated_at = $2 WHERE lower(email) = $1`, email, s.now().UTC())
+	result, err := s.pool.Exec(ctx, `UPDATE auth_user SET email_verified = true, updated_at = $2 WHERE lower(email) = $1 AND email_verified = false`, email, s.now().UTC())
 	if err != nil {
 		return err
 	}
-	if result.RowsAffected() == 0 {
+	if result.RowsAffected() > 0 {
+		return nil
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM auth_user WHERE lower(email) = $1)`, email).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
 		return ErrInvalidToken
 	}
 	return nil

@@ -149,6 +149,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Go email verification now treats a valid token for an already verified user
+  as an idempotent success without changing the account's `updated_at` value.
+  Unknown accounts still receive an invalid-token response.
+
 - Vite Accounting now preserves Go FX exposure permission errors and rejects
   incomplete exchange-rate result tuples instead of treating rejected reads as
   missing report data.
