@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/jackc/pgx/v5"
 )
@@ -135,12 +136,6 @@ func (reader *PostgresApprovalInboxReader) ReadApprovalInbox(ctx context.Context
 		if err != nil {
 			return ApprovalInboxResponse{}, err
 		}
-		visibleCapabilitySet := make(map[string]bool, len(capabilityPermissions))
-		for capabilityID, permission := range capabilityPermissions {
-			if grants["*"] || grants[permission] {
-				visibleCapabilitySet[capabilityID] = true
-			}
-		}
 		pending, err := readApprovalRows(ctx, tx, claims.OrganizationID, false)
 		if err != nil {
 			return ApprovalInboxResponse{}, err
@@ -148,6 +143,20 @@ func (reader *PostgresApprovalInboxReader) ReadApprovalInbox(ctx context.Context
 		history, err := readApprovalRows(ctx, tx, claims.OrganizationID, true)
 		if err != nil {
 			return ApprovalInboxResponse{}, err
+		}
+		if capabilityPermissions == nil {
+			capabilityPermissions = make(map[string]string)
+			for _, row := range append(pending, history...) {
+				if permission, supported := capability.PermissionForCapability(row.CapabilityID); supported {
+					capabilityPermissions[row.CapabilityID] = permission
+				}
+			}
+		}
+		visibleCapabilitySet := make(map[string]bool, len(capabilityPermissions))
+		for capabilityID, permission := range capabilityPermissions {
+			if grants["*"] || grants[permission] {
+				visibleCapabilitySet[capabilityID] = true
+			}
 		}
 		pending = filterApprovalRows(pending, visibleCapabilitySet)
 		history = filterApprovalRows(history, visibleCapabilitySet)

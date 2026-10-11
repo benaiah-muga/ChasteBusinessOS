@@ -44,6 +44,7 @@ export type GoRouteProxyFlags = {
   posCustomers: boolean;
   onboarding: boolean;
   messageAttachmentDownloads: boolean;
+  approvalsRead: boolean;
 };
 
 export function goPosOpenSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
@@ -403,6 +404,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     posCustomers: goPosCustomersSliceFromEnv(env),
     onboarding: env.CHASTE_GO_ONBOARDING_ROUTE === "1",
     messageAttachmentDownloads: goMessagingAttachmentDownloadsFromEnv(env),
+    approvalsRead: env.CHASTE_GO_APPROVALS_READ_ROUTE !== "0",
   };
 }
 
@@ -442,6 +444,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.durableRuns && method === "GET" && new RegExp(`^/api/durable-runs(?:/${uuid})?(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.notifications && method === "GET" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
   if (flags.notificationsWrite && method === "POST" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
+  if (flags.approvalsRead && method === "GET" && /^\/api\/approvals(?:\?.*)?$/.test(path)) return true;
   if (flags.inventoryRead && method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
   if (flags.crmReads && method === "GET" && isGoCrmReadRequest(path)) return true;
   if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;

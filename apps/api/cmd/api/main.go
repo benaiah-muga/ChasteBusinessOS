@@ -100,6 +100,10 @@ func goPosCustomersRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goApprovalsReadRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goOnboardingRouteEnabledFromEnv(value string) bool {
 	return value == "1"
 }
@@ -126,6 +130,7 @@ func run(logger *slog.Logger) error {
 
 	capabilityExecutor := capability.NewExecutor(pool, os.Getenv("NOTIFICATION_WEBHOOK_URL"), os.Getenv("SMTP_HOST"), os.Getenv("SMTP_TO"))
 	approvalDecider := capability.NewApprovalDecider(pool, capabilityExecutor)
+	approvalInboxReader := httpapi.NewPostgresApprovalInboxReader(pool)
 	var sessionResolver *session.Resolver
 	getSessionResolver := func() (*session.Resolver, error) {
 		if sessionResolver != nil {
@@ -366,6 +371,15 @@ func run(logger *slog.Logger) error {
 		}
 		posShiftSummaryRoute = httpapi.NewPosShiftSummarySessionHandler(resolver, capabilityExecutor, logger, trustedProxyCIDRs)
 		logger.Info("Go POS shift summary route mounted", "path", "POST /api/pos/shift-summary")
+	}
+	var approvalsReadRoute http.Handler
+	if goApprovalsReadRouteEnabledFromEnv(os.Getenv("GO_APPROVALS_READ_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		approvalsReadRoute = httpapi.NewApprovalInboxSessionHandler(resolver, approvalInboxReader, logger)
+		logger.Info("Go approvals read route mounted", "path", "GET /api/approvals")
 	}
 	var dashboardRoute http.Handler
 	if goDashboardRouteEnabledFromEnv(os.Getenv("GO_DASHBOARD_ROUTE")) {
@@ -613,22 +627,24 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go SCIM token management route mounted", "path", "/api/scim/tokens")
 	}
 
+	apiHandler := httpapi.MountGoMessageAttachmentDownloadRoute(httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoCRMReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
+		pool,
+		logger,
+		os.Getenv("GO_INTERNAL_AUTH_SECRET"),
+		policy.NewPostgresReader(pool),
+		ledger.NewPostgresReader(pool),
+		orgswitch.NewPostgresMembershipChecker(pool),
+		capabilityExecutor,
+		metrics.NewPostgresReader(pool),
+		approvalInboxReader,
+		orgRoute,
+		authRoute,
+		approvalDecider,
+	), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute)
+	apiHandler = httpapi.MountGoApprovalsReadRoute(apiHandler, approvalsReadRoute)
 	server := &http.Server{
-		Addr: addr,
-		Handler: httpapi.MountGoMessageAttachmentDownloadRoute(httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoCRMReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
-			pool,
-			logger,
-			os.Getenv("GO_INTERNAL_AUTH_SECRET"),
-			policy.NewPostgresReader(pool),
-			ledger.NewPostgresReader(pool),
-			orgswitch.NewPostgresMembershipChecker(pool),
-			capabilityExecutor,
-			metrics.NewPostgresReader(pool),
-			httpapi.NewPostgresApprovalInboxReader(pool),
-			orgRoute,
-			authRoute,
-			approvalDecider,
-		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute),
+		Addr:              addr,
+		Handler:           apiHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

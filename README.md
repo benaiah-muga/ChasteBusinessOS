@@ -300,7 +300,11 @@ retry. The flag defaults to `0`.
 the signed Go read bridge. It requires `pnpm dev:api`; the full TypeScript
 capability registry still controls row visibility, and Go rechecks the active
 session, organization membership, and live permissions. The flag defaults to
-`0`. Approval decisions remain on their existing route path.
+`0`. This is the legacy Next.js bridge selector. The Vite app sends only
+`GET /api/approvals` directly to Go by default with
+`GO_APPROVALS_READ_ROUTE=1` and `CHASTE_GO_APPROVALS_READ_ROUTE=1`; set both to
+`0` to roll that route back to the legacy API. Approval decisions remain on
+their existing route path.
 `GO_SALES_WRITE=1` opts sales order creation, confirmation, delivery, and
 cancellation into the signed Go capability bridge. It requires `pnpm dev:api`;
 order listing and other sales actions remain on the legacy handler, and

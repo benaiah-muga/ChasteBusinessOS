@@ -195,6 +195,30 @@ func MountGoCRMReadRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoApprovalsReadRoute mounts only the approvals inbox GET. Decisions
+// remain with their current owner until they pass their own migration gate.
+func MountGoApprovalsReadRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/approvals", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			route.ServeHTTP(w, r)
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoMessageAttachmentDownloadRoute mounts the session-authenticated Go
 // binary download handler for one message attachment.
 func MountGoMessageAttachmentDownloadRoute(base, route http.Handler) http.Handler {

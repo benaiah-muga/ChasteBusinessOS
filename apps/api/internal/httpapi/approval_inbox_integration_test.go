@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -97,6 +98,9 @@ func TestPostgresApprovalInboxMatchesLegacyVisibilityOrderingLimitsAndDocumentSc
 			t.Fatal(err)
 		}
 	}
+	if _, err = owner.Exec(ctx, `INSERT INTO approvals (org_id,capability_id,risk_class,payload,status,created_at) VALUES ($1::uuid,'future.unportedCapability','write','{}'::jsonb,'pending',$2)`, orgID, base.Add(204*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	for index := 0; index < 30; index++ {
 		status := []string{"approved", "executed", "rejected", "expired"}[index%4]
 		if _, err = owner.Exec(ctx, `INSERT INTO approvals (org_id,requested_by_user_id,capability_id,risk_class,payload,status,created_at,decided_at) VALUES ($1::uuid,$2::uuid,'accounting.recordPayment','money','{}'::jsonb,$3,$4,$5)`, orgID, userID, status, base.Add(time.Duration(index)*time.Minute), base.Add(time.Duration(index)*time.Minute)); err != nil {
@@ -110,6 +114,9 @@ func TestPostgresApprovalInboxMatchesLegacyVisibilityOrderingLimitsAndDocumentSc
 			t.Fatal(err)
 		}
 	}
+	if _, err = owner.Exec(ctx, `INSERT INTO approvals (org_id,capability_id,risk_class,payload,status,created_at,decided_at) VALUES ($1::uuid,'future.unportedCapability','write','{}'::jsonb,'executed',$2,$2)`, orgID, base.Add(104*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = owner.Exec(ctx, `INSERT INTO approvals (org_id,capability_id,risk_class,payload,status,created_at,decided_at) VALUES ($1::uuid,'accounting.recordPayment','money','{}'::jsonb,'executed',$2,$2)`, foreignOrgID, base.Add(500*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -120,8 +127,15 @@ func TestPostgresApprovalInboxMatchesLegacyVisibilityOrderingLimitsAndDocumentSc
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Approvals) != 96 || len(result.History) != 21 {
-		t.Fatalf("got pending=%d history=%d, want 96 and 21 after legacy limit-before-permission filtering", len(result.Approvals), len(result.History))
+	directResult, err := NewPostgresApprovalInboxReader(runtime).ReadApprovalInbox(ctx, claims, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(directResult, result) {
+		t.Fatalf("session-backed permission lookup diverged from the legacy registry read: direct pending=%d history=%d, bridge pending=%d history=%d", len(directResult.Approvals), len(directResult.History), len(result.Approvals), len(result.History))
+	}
+	if len(result.Approvals) != 95 || len(result.History) != 20 {
+		t.Fatalf("got pending=%d history=%d, want 95 and 20 after legacy limit-before-permission filtering", len(result.Approvals), len(result.History))
 	}
 	if result.Approvals[0].CapabilityID != "accounting.recordPayment" || result.Approvals[0].CreatedAt <= result.Approvals[len(result.Approvals)-1].CreatedAt {
 		t.Fatal("pending inbox is not descending by createdAt")

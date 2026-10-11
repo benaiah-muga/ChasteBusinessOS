@@ -53,6 +53,30 @@ test("Go-only POS shift summary has exact generated ownership", () => {
   );
 });
 
+test("approvals inbox GET is Go-owned while POST decisions retain legacy ownership", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.path === "/api/approvals"),
+    [
+      {
+        kind: "api",
+        path: "/api/approvals",
+        method: "GET",
+        source: "apps/web/src/app/api/approvals/route.ts",
+        owner: "go",
+        parity: "verified",
+      },
+      {
+        kind: "api",
+        path: "/api/approvals",
+        method: "POST",
+        source: "apps/web/src/app/api/approvals/route.ts",
+        owner: "legacy",
+        parity: "pending",
+      },
+    ],
+  );
+});
+
 test("POS page has verified Vite ownership after the authenticated browser flow", () => {
   assert.deepEqual(
     manifest.entries.filter((entry) => entry.kind === "page" && entry.path === "/pos"),

@@ -2750,3 +2750,15 @@ new owners and the manifest shows zero legacy runtime paths.
      `GET /api/team`. The `/analytics` catalog, preview, and generated report
      also returned 200. No browser console errors were reported. The notification
      feed and read-receipt proof is recorded in item 146.
+
+265. (Done; focused parity proofs and authenticated browser proof pass)
+     Move only the Vite approvals inbox `GET /api/approvals` read to Go. Go
+     resolves the verified session and active organization, then reuses the
+     tenant-scoped approval inbox reader and Go capability permissions. The
+     paired Go and Vite route selectors default on with explicit `=0` rollback
+     settings. Vite proxies only the exact GET; POST decisions and page
+     ownership stay unchanged. Handler, reader parity, ownership manifest, and
+     Vite middleware tests cover the slice. On 2026-10-11, agent-browser opened
+     `/approvals` in the authenticated Vite app, confirmed the empty inbox
+     rendered, and observed `GET /api/approvals` return 200 through Go with no
+     browser console errors.

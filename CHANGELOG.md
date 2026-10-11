@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite now sends only `GET /api/approvals` to the Go API by default. Go resolves
+  the verified browser session and active organization for the inbox read;
+  approval decision POSTs and the existing page owner are unchanged.
+
 - The Go jobs worker now discovers due recurring invoice templates and enqueues
   one linked occurrence job. The TypeScript worker leaves
   `accounting.generateDueInvoices` to Go, which posts the invoice and advances
