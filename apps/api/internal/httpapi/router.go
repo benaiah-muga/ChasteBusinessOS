@@ -351,8 +351,8 @@ func MountGoSalesOrdersRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
-// MountGoBusinessRoutes mounts API handlers only when their Go route is opted in.
-// Unprovided handlers continue to fall through to the existing API owner.
+// MountGoBusinessRoutes mounts the supplied API handlers. Unprovided handlers
+// continue to fall through to the existing API owner.
 func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute http.Handler, analyticsReportRoute ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	if portalInvoiceRoute != nil {

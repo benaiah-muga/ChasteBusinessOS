@@ -70,6 +70,13 @@ production requests and writes. No production traffic has moved to Go.
   reads remain explicitly opt-in through their own flags
   ([`route.ts#L26-L75`](../../apps/web/src/app/api/policy/route.ts#L26-L75),
   [`route.ts#L101-L130`](../../apps/web/src/app/api/policy/route.ts#L101-L130)).
+- The Vite invoice print page requests its invoice through Go's direct
+  Better Auth session handler at exact `GET /api/sales/{orderId}`. Go scopes
+  order, lines, customer, organization, and branding reads through
+  `dbx.WithOrgTx`; the runtime integration proof checks tenant rows and hides
+  unscoped and foreign-organization invoices. Vite sends only that exact GET
+  shape to Go; other methods, trailing slashes, and suffix paths retain their
+  existing owner. `GO_SALES_INVOICE_ROUTE=0` unmounts the Go handler.
 
 ## Capabilities, approvals, transactions, and audit
 

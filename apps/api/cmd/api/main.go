@@ -120,6 +120,10 @@ func goPortalInvoiceRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goSalesInvoiceRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("GO_DATABASE_URL")
 	if databaseURL == "" {
@@ -185,7 +189,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go portal invoice route mounted", "path", "/api/portal/invoice/{token}")
 	}
 	var salesInvoiceRoute http.Handler
-	if os.Getenv("GO_SALES_INVOICE_ROUTE") == "1" {
+	if goSalesInvoiceRouteEnabledFromEnv(os.Getenv("GO_SALES_INVOICE_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

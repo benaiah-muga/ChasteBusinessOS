@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite now sends exact `GET /api/sales/{orderId}` invoice reads to Go
+  unconditionally. Go mounts the handler by default; set
+  `GO_SALES_INVOICE_ROUTE=0` to unmount it. Other methods and non-exact paths
+  keep their current owner.
+
 - Vite now sends exact `GET /api/portal/invoice/{token}` requests to Go by
   default. The Go handler is mounted by default and can be unmounted with
   `GO_PORTAL_INVOICE_ROUTE=0`; other methods and suffix paths keep their current

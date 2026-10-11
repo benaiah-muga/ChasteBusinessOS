@@ -59,6 +59,12 @@ manifests are checked in and CI verifies them against the current source and
 runtime registry. The active Vite organization list and switch requests route
 directly to Go; the Go handler is mounted by default unless
 `GO_ORG_ROUTE=0`.
+The Vite invoice print page fetches exact `GET /api/sales/{orderId}` requests
+from Go unconditionally. Go resolves the Better Auth session, validates the
+active organization, and reads the order, lines, and branding within tenant
+RLS. `GO_SALES_INVOICE_ROUTE=0` unmounts the handler; POST, trailing-slash, and
+suffix paths retain their existing owner. Focused handler, proxy, and runtime
+database RLS tests cover the cutover.
 Phase 2 has internal Go executors for `crm.createCustomer`,
 `crm.deactivateCustomer`, `crm.mergeCustomers`, `crm.restoreCustomerMerge`,
 `crm.importCustomers`, `crm.undoCustomerImport`,

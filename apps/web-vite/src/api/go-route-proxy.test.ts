@@ -794,7 +794,6 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_SCIM_WRITE_ROUTE", flag: "scimWrite", method: "POST", url: "/api/scim/v2/Users" },
   { env: "CHASTE_GO_SCIM_WRITE_ROUTE", flag: "scimWrite", method: "DELETE", url: "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001" },
   { env: "CHASTE_GO_SALES_ORDERS_ROUTE", flag: "salesOrders", method: "GET", url: "/api/sales?status=draft" },
-  { env: "CHASTE_GO_SALES_INVOICE_ROUTE", flag: "salesInvoice", method: "GET", url: "/api/sales/order-id" },
   { env: "CHASTE_GO_MODULES_ROUTE", flag: "modulesRead", method: "GET", url: "/api/modules" },
   { env: "CHASTE_GO_MODULES_WRITE_ROUTE", flag: "modulesWrite", method: "POST", url: "/api/modules" },
   { env: "CHASTE_GO_BRANDING_ROUTE", flag: "branding", method: "GET", url: "/api/branding" },
@@ -1528,7 +1527,22 @@ describe("Vite Go route proxy selection", () => {
 
     const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_SALES_ORDERS_ROUTE: "0" });
     expect(isGoRouteRequest(rolledBack, "GET", "/api/sales")).toBe(false);
-    expect(isGoRouteRequest(rolledBack, "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001")).toBe(false);
+    expect(isGoRouteRequest(rolledBack, "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001")).toBe(true);
+  });
+
+  it("routes only exact sales invoice GET paths to Go by default", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001?print=1")).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001")).toBe(false);
+    expect(isGoRouteRequest(defaults, "HEAD", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001")).toBe(false);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001/")).toBe(false);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001/extra")).toBe(false);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales/")).toBe(false);
+
+    for (const env of [{ CHASTE_GO_SALES_INVOICE_ROUTE: "0" }, { CHASTE_GO_SALES_INVOICE_ROUTE: "1" }]) {
+      expect(isGoRouteRequest(goRouteProxyFlagsFromEnv(env), "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001")).toBe(true);
+    }
   });
 
   it("keeps team read and write selectors independent and exact", () => {
@@ -1613,7 +1627,6 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE: "1",
       CHASTE_GO_SCIM_READ_ROUTE: "1",
       CHASTE_GO_SCIM_WRITE_ROUTE: "1",
-      CHASTE_GO_SALES_INVOICE_ROUTE: "1",
       CHASTE_GO_MODULES_ROUTE: "1",
       CHASTE_GO_MODULES_WRITE_ROUTE: "1",
       CHASTE_GO_BRANDING_ROUTE: "1",
