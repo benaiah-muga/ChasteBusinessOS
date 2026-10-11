@@ -57,6 +57,26 @@ const LotSchema = z.object({
   balanceThousandths: z.number().int().safe(),
 }).strict();
 
+export interface ManufacturingLotTraceNode {
+  sku: string;
+  lotCode: string;
+  fedBy: ManufacturingLotTraceNode[];
+}
+
+const ManufacturingLotTraceNodeSchema: z.ZodType<ManufacturingLotTraceNode> = z.lazy(() => z.object({
+  sku: z.string().min(1),
+  lotCode: z.string().min(1),
+  fedBy: z.array(ManufacturingLotTraceNodeSchema),
+}).strict());
+const ManufacturingLotTraceSchema = z.object({
+  found: z.boolean(),
+  tree: z.array(ManufacturingLotTraceNodeSchema),
+}).strict();
+const ManufacturingLotTraceInputSchema = z.object({
+  sku: z.string().trim().min(1).max(120),
+  lotCode: z.string().trim().min(1).max(120),
+}).strict();
+
 const ManufacturingReportSchema = z.object({
   boms: z.array(BomEdgeSchema).default([]),
   assemblies: z.array(AssemblySchema).default([]),
@@ -209,6 +229,7 @@ export type ManufacturingAssembly = z.infer<typeof AssemblySchema>;
 export type ManufacturingWorkOrder = z.infer<typeof WorkOrderSchema>;
 export type ManufacturingProductionRun = z.infer<typeof ProductionRunSchema>;
 export type ManufacturingLot = z.infer<typeof LotSchema>;
+export type ManufacturingLotTrace = z.infer<typeof ManufacturingLotTraceSchema>;
 export type ManufacturingReport = z.infer<typeof ManufacturingReportSchema>;
 export type ManufacturingCostPreview = z.infer<typeof CostPreviewSchema>;
 export type ManufacturingFeasibility = z.infer<typeof FeasibilitySchema>;
@@ -518,4 +539,24 @@ export function fetchProductionFeasibility(assemblySku: string, desiredUnitsThou
 
 export function fetchManufacturingBomReport(assemblySku: string, quantityThousandths: number, signal?: AbortSignal): Promise<ManufacturingBomReport> {
   return postRead("bomReport", { assemblySku, quantityThousandths }, BomReportInputSchema, BomReportSchema, "Could not build the BOM report.", signal);
+}
+
+export async function fetchManufacturingLotTrace(sku: string, lotCode: string, signal?: AbortSignal): Promise<ManufacturingLotTrace> {
+  const input = ManufacturingLotTraceInputSchema.safeParse({ sku, lotCode });
+  if (!input.success) throw new ManufacturingApiError(0, "Select a valid item and lot before tracing production.");
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "manufacturing.lotTrace", input: input.data, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (response.status === 202) {
+    throw new ManufacturingApiError(202, "The manufacturing trace unexpectedly requires approval. No result was returned.");
+  }
+  if (!response.ok) throw new ManufacturingApiError(response.status, messageFor(response.status, body, "Could not trace this lot."));
+  const envelope = EnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected response.");
+  const parsed = ManufacturingLotTraceSchema.safeParse(envelope.data.data);
+  if (!parsed.success || (parsed.data.found && parsed.data.tree.length === 0)) {
+    throw new ManufacturingApiError(response.status, "The manufacturing service returned trace data in an unexpected format.");
+  }
+  return parsed.data;
 }

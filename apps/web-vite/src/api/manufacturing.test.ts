@@ -3,6 +3,7 @@ import {
   ManufacturingApiError,
   fetchManufacturingBomReport,
   fetchManufacturingEnabled,
+  fetchManufacturingLotTrace,
   fetchManufacturingReport,
   fetchProductionCostPreview,
   fetchProductionFeasibility,
@@ -58,6 +59,33 @@ afterEach(() => {
 });
 
 describe("manufacturing API", () => {
+  it("loads lot trace from the scoped Go capability with strict response validation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: {
+      found: true,
+      tree: [{ sku: "LEG-1", lotCode: "LEG-MAY", fedBy: [{ sku: "OAK-BOARD", lotCode: "OAK-APR", fedBy: [] }] }],
+    } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchManufacturingLotTrace(" LEG-1 ", " LEG-MAY ")).resolves.toMatchObject({
+      found: true, tree: [{ sku: "LEG-1", lotCode: "LEG-MAY", fedBy: [{ sku: "OAK-BOARD", lotCode: "OAK-APR" }] }],
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "manufacturing.lotTrace", input: { sku: "LEG-1", lotCode: "LEG-MAY" },
+    });
+  });
+
+  it("rejects invalid lot trace input and malformed Go output without legacy fallback", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: {
+      found: true, tree: [{ sku: "LEG-1", lotCode: "LEG-MAY", fedBy: [], extra: true }],
+    } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchManufacturingLotTrace("  ", "LEG-MAY")).rejects.toThrow("Select a valid item and lot");
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(fetchManufacturingLotTrace("LEG-1", "LEG-MAY")).rejects.toThrow("trace data in an unexpected format");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
   it("validates the manufacturing report payload", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(report)));
     const result = await fetchManufacturingReport();

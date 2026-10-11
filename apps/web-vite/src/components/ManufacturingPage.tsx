@@ -5,6 +5,7 @@ import {
   ManufacturingApiError,
   fetchManufacturingBomReport,
   fetchManufacturingEnabled,
+  fetchManufacturingLotTrace,
   fetchManufacturingReport,
   fetchProductionCostPreview,
   fetchProductionFeasibility,
@@ -14,6 +15,7 @@ import {
   type ManufacturingCostPreview,
   type ManufacturingFeasibility,
   type ManufacturingLot,
+  type ManufacturingLotTraceNode,
   type ManufacturingProductionRun,
   type ManufacturingReport,
   type ManufacturingWorkOrder,
@@ -33,6 +35,10 @@ type PageState =
   | { status: "ready"; report: ManufacturingReport };
 
 type Notice = { tone: "success" | "pending" | "error"; text: string };
+type LotTraceState =
+  | { key: string; status: "loading" }
+  | { key: string; status: "ready"; tree: ManufacturingLotTraceNode[] }
+  | { key: string; status: "failed"; error: string };
 type BomComponentRow = { sku: string; quantityThousandths: string; scrapPct: string };
 type BomComponent = { sku: string; quantityThousandths: number; scrapPctThousandths: number };
 type BomNode = { sku: string; name: string; quantityPerParentThousandths: number; scrapPctThousandths: number; children: BomNode[] };
@@ -201,6 +207,19 @@ function BomTreeRows({ nodes, depth }: { nodes: BomNode[]; depth: number }) {
   );
 }
 
+function LotTraceTree({ nodes, depth = 0 }: { nodes: ManufacturingLotTraceNode[]; depth?: number }) {
+  return (
+    <ul style={{ margin: "4px 0 4px 16px", paddingLeft: 16 }}>
+      {nodes.map((node, index) => (
+        <li key={`${node.sku}-${node.lotCode}-${depth}-${index}`}>
+          <span style={styles.code}>{node.sku}</span> lot <span style={styles.code}>{node.lotCode}</span>
+          {node.fedBy.length > 0 && <LotTraceTree nodes={node.fedBy} depth={depth + 1} />}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ShortfallTable({ lines, byItemId }: { lines: Array<{ key?: string; sku: string; name: string; requiredThousandths: number; onHandThousandths: number; shortfallThousandths: number }>; byItemId: boolean }) {
   return (
     <table style={styles.table}>
@@ -266,6 +285,8 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
   const [woCompletion, setWoCompletion] = useState<Record<string, string>>({});
 
   const [reverseRunId, setReverseRunId] = useState("");
+  const [lotTrace, setLotTrace] = useState<LotTraceState | null>(null);
+  const lotTraceGeneration = useRef(0);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const generation = scopeGeneration.current;
@@ -319,6 +340,7 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
     setWoNote("");
     setWoCompletion({});
     setReverseRunId("");
+    setLotTrace(null);
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
@@ -356,6 +378,21 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
       return false;
     } finally {
       if (requestGeneration === scopeGeneration.current) setBusy(false);
+    }
+  }
+
+  async function traceLot(lot: ManufacturingLot): Promise<void> {
+    const requestGeneration = scopeGeneration.current;
+    const traceGeneration = ++lotTraceGeneration.current;
+    const key = `${lot.sku}\u0000${lot.lotCode}`;
+    setLotTrace({ key, status: "loading" });
+    try {
+      const result = await fetchManufacturingLotTrace(lot.sku, lot.lotCode);
+      if (requestGeneration !== scopeGeneration.current || traceGeneration !== lotTraceGeneration.current) return;
+      setLotTrace({ key, status: "ready", tree: result.tree });
+    } catch (error) {
+      if (requestGeneration !== scopeGeneration.current || traceGeneration !== lotTraceGeneration.current) return;
+      setLotTrace({ key, status: "failed", error: errorText(error, "Could not trace this lot.") });
     }
   }
 
@@ -926,14 +963,23 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
                       <span style={styles.code}>{lot.lotCode}</span> of {lot.sku} - balance {qty(lot.balanceThousandths)}
                       {lot.expiresAt ? ` · expires ${formatDateTime(lot.expiresAt)}` : ""}
                     </span>
-                    <a
-                      style={{ ...styles.fullWorkspace, textDecoration: "underline" }}
-                      href={`/api/manufacturing?sku=${encodeURIComponent(lot.sku)}&lotCode=${encodeURIComponent(lot.lotCode)}`}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      style={{ ...styles.fullWorkspace, border: 0, background: "transparent", padding: 0, textDecoration: "underline", cursor: "pointer" }}
+                      onClick={() => void traceLot(lot)}
+                      disabled={lotTrace?.key === `${lot.sku}\u0000${lot.lotCode}` && lotTrace.status === "loading"}
+                      aria-expanded={lotTrace?.key === `${lot.sku}\u0000${lot.lotCode}` && lotTrace.status === "ready"}
                     >
-                      trace upstream
-                    </a>
+                      {lotTrace?.key === `${lot.sku}\u0000${lot.lotCode}` && lotTrace.status === "loading" ? "Tracing…" : "Trace upstream"}
+                    </button>
+                    {lotTrace?.key === `${lot.sku}\u0000${lot.lotCode}` && lotTrace.status === "failed" && (
+                      <p role="alert" style={{ margin: "6px 0 0", color: "#9d382c" }}>{lotTrace.error}</p>
+                    )}
+                    {lotTrace?.key === `${lot.sku}\u0000${lot.lotCode}` && lotTrace.status === "ready" && (
+                      <div aria-label={`Upstream trace for ${lot.lotCode}`} style={{ marginTop: 8 }}>
+                        {lotTrace.tree.length > 0 ? <LotTraceTree nodes={lotTrace.tree} /> : <p style={styles.empty}>No upstream production lots were recorded.</p>}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

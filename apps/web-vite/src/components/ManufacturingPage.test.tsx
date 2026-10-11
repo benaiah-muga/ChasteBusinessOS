@@ -518,8 +518,13 @@ describe("Vite manufacturing page", () => {
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/capabilities/execute")).toBe(false);
   });
 
-  it("lists production runs, reverses them, and links lots to upstream traceability", async () => {
-    const fetchMock = manufacturingFetch();
+  it("lists production runs, reverses them, and loads upstream traceability from Go", async () => {
+    const fetchMock = manufacturingFetch({ onPost: (body) => {
+      if (body.action === "lotTrace") return Response.json({ ok: true, data: {
+        found: true, tree: [{ sku: "LEG-1", lotCode: "LEG-MAY", fedBy: [{ sku: "OAK-BOARD", lotCode: "OAK-APR", fedBy: [] }] }],
+      } });
+      return Response.json({ ok: true, data: {} });
+    } });
     vi.stubGlobal("fetch", fetchMock);
     render(<ManufacturingPage />);
 
@@ -528,7 +533,10 @@ describe("Vite manufacturing page", () => {
     expect(await screen.findByRole("heading", { name: "Production history" })).not.toBeNull();
     expect(screen.getByText("LEG-1×8.000[LEG-MAY]")).not.toBeNull();
     expect(screen.getByText("reversed")).not.toBeNull();
-    expect(screen.getByRole("link", { name: "trace upstream" }).getAttribute("href")).toBe("/api/manufacturing?sku=LEG-1&lotCode=LEG-MAY");
+    fireEvent.click(screen.getByRole("button", { name: "Trace upstream" }));
+    expect(await screen.findByLabelText("Upstream trace for LEG-MAY")).not.toBeNull();
+    expect(screen.getByText("OAK-APR")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/capabilities/execute" && (init as RequestInit | undefined)?.method === "POST" && JSON.parse(String((init as RequestInit).body)).capabilityId === "manufacturing.lotTrace")).toBe(true);
 
     const reverseButtons = screen.getAllByRole("button", { name: "Reverse" });
     fireEvent.click(reverseButtons[0] as HTMLButtonElement);
@@ -537,6 +545,48 @@ describe("Vite manufacturing page", () => {
     fireEvent.change(screen.getByLabelText("Run id to reverse"), { target: { value: "run-0" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Reverse" })[1] as HTMLButtonElement);
     await waitFor(() => expect(postedActions(fetchMock).filter((body) => body.action === "reverseProductionRun").length).toBe(2));
+  });
+
+  it("keeps the latest lot trace when an earlier request resolves last", async () => {
+    const deferred = new Map<string, (response: Response) => void>();
+    const fetchMock = manufacturingFetch({
+      payload: {
+        ...report,
+        lots: [
+          ...report.lots,
+          { id: "lot-2", sku: "LEG-1", lotCode: "LEG-JUN", expiresAt: null, balanceThousandths: 4000 },
+        ],
+      },
+      onPost: (body) => new Promise<Response>((resolve) => {
+        deferred.set(String(body.lotCode), resolve);
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManufacturingPage />);
+
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: "Runs & lots" }));
+    const traceButtons = await screen.findAllByRole("button", { name: "Trace upstream" });
+    fireEvent.click(traceButtons[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Trace upstream" })[0]!);
+    await waitFor(() => expect(deferred.size).toBe(2));
+
+    await act(async () => {
+      deferred.get("LEG-JUN")?.(Response.json({ ok: true, data: {
+        found: true, tree: [{ sku: "NEW-SOURCE", lotCode: "NEWEST", fedBy: [] }],
+      } }));
+    });
+    expect(await screen.findByLabelText("Upstream trace for LEG-JUN")).not.toBeNull();
+
+    await act(async () => {
+      deferred.get("LEG-MAY")?.(Response.json({ ok: true, data: {
+        found: true, tree: [{ sku: "OLD-SOURCE", lotCode: "STALE", fedBy: [] }],
+      } }));
+    });
+    expect(screen.getByLabelText("Upstream trace for LEG-JUN")).not.toBeNull();
+    expect(screen.queryByLabelText("Upstream trace for LEG-MAY")).toBeNull();
+    expect(screen.getByText("NEWEST")).not.toBeNull();
+    expect(screen.queryByText("STALE")).toBeNull();
   });
 
   it("keeps manufacturing hidden and unfetched when the module is switched off", async () => {
