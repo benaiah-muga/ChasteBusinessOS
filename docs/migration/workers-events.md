@@ -444,7 +444,11 @@ The Go jobs worker owns `purchasing.createPaymentRun`,
 `purchasing.listPaymentRuns`. Each job runs through the governed system
 capability path with the permission declared for that capability, its queued
 organization, and the job ID as the stable receipt intent. The TypeScript
-claimant excludes these four types. The Go worker also owns
+claimant excludes these four types and leaves each pending with zero attempts.
+`TestPurchasingPaymentRunDraftJobsClaimAndExecute` executes all four with the
+runtime Go worker, checks listing excludes a foreign organization's run,
+verifies cancel then restore leaves the draft restored, and counts one matching
+action receipt and system audit per job. The Go worker also owns
 `purchasing.instructPaymentRun` and `purchasing.reversePaymentRun`. These posted
 financial actions require an approval linked to the same organization,
 capability, and exact input payload; after successful execution, Go marks the

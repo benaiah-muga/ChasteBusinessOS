@@ -91,8 +91,10 @@ The full v1 changelog is preserved at the bottom of this file.
 ### Added
 
 - Go now exclusively claims Purchasing payment-run draft creation, draft
-  cancellation and restoration, and listing jobs. Approval-bound instruction
-  and reversal jobs remain with their existing owner pending worker proof.
+  cancellation and restoration, and listing jobs. Instruction and reversal
+  jobs follow their separately approval-bound Go worker path.
+  `TestPurchasingPaymentRunDraftJobsClaimAndExecute` verifies each selected
+  job's receipt and system audit, tenant-scoped listing, and final draft state.
 
 - Go now exclusively claims purchasing purchase-order creation, goods receipt,
   and goods-return jobs. The legacy claimant leaves these job types pending

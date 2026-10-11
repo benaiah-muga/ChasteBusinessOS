@@ -2838,12 +2838,13 @@ new owners and the manifest shows zero legacy runtime paths.
      the full create, receive, and partial-return sequence, stock effect, one
      action receipt per job, and one audit event per action.
 
-274. Make Go the only claimant for Purchasing payment-run creation, draft
-     cancellation and restoration, and listing jobs. Keep instruction and
-     reversal jobs with their current owner until the worker proof binds each
-     action to its approval. The Go DB proof must exercise the four selected
-     jobs through the governed worker, verify tenant-scoped listing and final
-     draft state, and count the matching job receipt and system audit per job.
+274. (Implemented; Go worker DB proof passed; TypeScript claimant exclusion
+     passed) Make Go the only claimant for Purchasing payment-run creation,
+     draft cancellation and restoration, and listing jobs. The Go DB proof exercises
+     these four jobs through the governed worker, verifies tenant-scoped listing
+     and final draft state, and counts each matching receipt and system audit.
+     Approved instruction and reversal jobs use the separate approval-bound
+     Go worker path documented in item 275.
 275. (Implemented; worker DB proof passed; independent review clean) Make Go
      the only claimant for approved `purchasing.instructPaymentRun` and
      `purchasing.reversePaymentRun` jobs. The worker DB proof must bind each
