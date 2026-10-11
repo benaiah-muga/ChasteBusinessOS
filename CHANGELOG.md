@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite marketplace listing reads now execute `creator.listMarketplace` through
+  the Go session capability API. Marketplace writes and signature verification
+  keep their current routes.
+
 - Go-backed Vite write recovery now accepts Better Auth's opaque user IDs when
   scoping local retry intents across CRM, products, accounting, HR, expenses,
   marketing, support, projects, and purchasing payment runs. Organization IDs

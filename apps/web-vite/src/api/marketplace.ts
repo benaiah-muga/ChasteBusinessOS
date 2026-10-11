@@ -14,6 +14,10 @@ const ListingSchema = z.object({
 });
 
 const ListingResponseSchema = z.object({ listings: z.array(ListingSchema) });
+const MarketplaceListingsCapabilityResponseSchema = z.object({
+  ok: z.literal(true),
+  data: ListingResponseSchema,
+}).strict();
 const PendingActionSchema = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
@@ -74,10 +78,16 @@ export async function fetchMarketplaceEnabled(signal?: AbortSignal): Promise<boo
 export async function fetchMarketplaceListings(signal?: AbortSignal): Promise<MarketplaceListing[]> {
   let response: Response;
   try {
-    response = await fetch("/api/marketplace", {
+    response = await fetch("/api/capabilities/execute", {
+      method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
+      body: JSON.stringify({
+        capabilityId: "creator.listMarketplace",
+        input: {},
+        intentId: crypto.randomUUID(),
+      }),
       signal: requestSignal(signal),
     });
   } catch (error) {
@@ -86,9 +96,9 @@ export async function fetchMarketplaceListings(signal?: AbortSignal): Promise<Ma
   }
   const body = await readJson(response);
   if (!response.ok) throw new MarketplaceApiError(response.status, "Could not load marketplace listings.");
-  const parsed = ListingResponseSchema.safeParse(body);
+  const parsed = MarketplaceListingsCapabilityResponseSchema.safeParse(body);
   if (!parsed.success) throw new MarketplaceApiError(response.status, "The marketplace returned data in an unexpected format.");
-  return parsed.data.listings;
+  return parsed.data.data.listings;
 }
 
 export async function submitMarketplaceAction(input: Record<string, unknown>, signal?: AbortSignal): Promise<{

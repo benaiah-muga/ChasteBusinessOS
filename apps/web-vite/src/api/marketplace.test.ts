@@ -7,6 +7,65 @@ afterEach(() => {
 });
 
 describe("marketplace read requests", () => {
+  it("loads listings through the Go session capability with the legacy listing contract", async () => {
+    const listing = {
+      id: "listing-1",
+      slug: "sales-dashboard",
+      name: "Sales dashboard",
+      version: "1.2.0",
+      summary: "A sales overview plugin",
+      status: "verified",
+      capabilityIds: ["sales.read"],
+      installedByOrgIds: ["org-1"],
+      installedHere: true,
+      updatedAt: "2026-10-10T12:00:00.000Z",
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { listings: [listing] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMarketplaceListings()).resolves.toEqual([listing]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      cache: "no-store",
+      signal: expect.any(AbortSignal),
+    }));
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(requestBody).toEqual({
+      capabilityId: "creator.listMarketplace",
+      input: {},
+      intentId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+    });
+  });
+
+  it("rejects invalid Go listing responses without falling back to the legacy route", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { listings: [{ id: "incomplete" }] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMarketplaceListings()).rejects.toMatchObject({
+      name: "MarketplaceApiError",
+      status: 200,
+      message: "The marketplace returned data in an unexpected format.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
+
+  it("does not fall back to the legacy route when Go returns an HTTP error", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ error: "service unavailable" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMarketplaceListings()).rejects.toMatchObject({
+      name: "MarketplaceApiError",
+      status: 503,
+      message: "Could not load marketplace listings.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
+
   it("turns a stalled listing read into a recoverable API error", async () => {
     const timeoutController = new AbortController();
     vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutController.signal);
@@ -16,7 +75,10 @@ describe("marketplace read requests", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const request = fetchMarketplaceListings();
-    expect(fetchMock).toHaveBeenCalledWith("/api/marketplace", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      signal: expect.any(AbortSignal),
+    }));
     timeoutController.abort();
     await expect(request).rejects.toBeInstanceOf(MarketplaceApiError);
     await expect(request).rejects.toMatchObject({

@@ -2843,3 +2843,11 @@ new owners and the manifest shows zero legacy runtime paths.
      receipt and system audit for each action. A mismatched approval must be
      denied without financial effects, including wrong-payload,
      wrong-organization, and wrong-capability approval links.
+
+276. (Implemented; focused client tests added, verification pending) Route the
+     Vite marketplace listing read through Go's session-authenticated
+     `creator.listMarketplace` capability. Preserve the legacy listing schema,
+     and keep marketplace writes and signature verification on their existing
+     routes. Go DB capability tests prove legacy listing parity; Vite client
+     tests cover the capability request, response validation, and fail-closed
+     behavior without legacy fallback.
