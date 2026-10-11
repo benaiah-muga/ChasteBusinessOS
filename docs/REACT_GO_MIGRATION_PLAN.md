@@ -2827,3 +2827,10 @@ new owners and the manifest shows zero legacy runtime paths.
      those queued jobs stay pending with zero attempts. The Go DB proof covers
      the full create, receive, and partial-return sequence, stock effect, one
      action receipt per job, and one audit event per action.
+
+274. Make Go the only claimant for Purchasing payment-run creation, draft
+     cancellation and restoration, and listing jobs. Keep instruction and
+     reversal jobs with their current owner until the worker proof binds each
+     action to its approval. The Go DB proof must exercise the four selected
+     jobs through the governed worker, verify tenant-scoped listing and final
+     draft state, and count the matching job receipt and system audit per job.

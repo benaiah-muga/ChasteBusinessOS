@@ -134,7 +134,11 @@ export async function claimJob(
         'accounting.generateDueInvoices',
         'purchasing.createPurchaseOrder',
         'purchasing.receiveGoods',
-        'purchasing.returnGoods'
+        'purchasing.returnGoods',
+        'purchasing.createPaymentRun',
+        'purchasing.cancelPaymentRunDraft',
+        'purchasing.restorePaymentRunDraft',
+        'purchasing.listPaymentRuns'
       )
       ORDER BY available_at, created_at
       LIMIT 1

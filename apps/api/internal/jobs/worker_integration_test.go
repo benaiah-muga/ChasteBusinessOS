@@ -1797,3 +1797,165 @@ func cleanupJobsTestOrgs(t *testing.T, owner *pgxpool.Pool, orgIDs ...string) {
 		t.Errorf("commit jobs test cleanup: %v", err)
 	}
 }
+
+func TestPurchasingPaymentRunDraftJobsClaimAndExecute(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the payment run draft jobs proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := envOr("CHASTE_APP_DB_PASSWORD", "chaste_app_dev_only")
+	workerPassword := envOr("CHASTE_JOBS_WORKER_DB_PASSWORD", "chaste_jobs_worker_dev_only")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("payment-run-draft-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag+"-a")
+	foreignOrgID := insertJobsTestOrg(t, ctx, owner, tag+"-b")
+	defer cleanupJobsTestOrgs(t, owner, orgID, foreignOrgID)
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:      "payment-run-draft-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for capabilityID, permission := range map[string]string{
+		"purchasing.createPaymentRun":       "purchasing.write",
+		"purchasing.cancelPaymentRunDraft":  "purchasing.write",
+		"purchasing.restorePaymentRunDraft": "purchasing.write",
+		"purchasing.listPaymentRuns":        "purchasing.read",
+	} {
+		if GoCapabilityPermissions[capabilityID] != permission {
+			t.Fatalf("Go job permission for %s = %q, want %q", capabilityID, GoCapabilityPermissions[capabilityID], permission)
+		}
+	}
+
+	var vendorID, billID string
+	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Payment run worker vendor') RETURNING id::text`, orgID).Scan(&vendorID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO vendor_bills (org_id, vendor_id, number, status, currency, total_minor, paid_minor, bill_date)
+		VALUES ($1::uuid, $2::uuid, 1, 'open', 'USD', 2500, 0, current_date)
+		RETURNING id::text`, orgID, vendorID).Scan(&billID); err != nil {
+		t.Fatal(err)
+	}
+	var foreignRunID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO payment_runs (org_id, reference, currency, total_minor, status, created_by_actor_type)
+		VALUES ($1::uuid, 'PR-FOREIGN-WORKER-PROOF', 'USD', 9900, 'draft', 'human')
+		RETURNING id::text`, foreignOrgID).Scan(&foreignRunID); err != nil {
+		t.Fatal(err)
+	}
+
+	availableAt := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+	createID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.createPaymentRun", json.RawMessage(fmt.Sprintf(
+		`{"memo":"Worker draft","lines":[{"billId":%q,"amountMinor":1500}]}`, billID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("createPaymentRun job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, createID, "done", 1)
+	var paymentRunID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM payment_runs WHERE org_id=$1::uuid AND reference='PR-000001'`, orgID).Scan(&paymentRunID); err != nil {
+		t.Fatal(err)
+	}
+
+	listID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.listPaymentRuns", json.RawMessage(`{}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("listPaymentRuns job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, listID, "done", 1)
+	var listData []byte
+	if err := owner.QueryRow(ctx, `SELECT data FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+listID).Scan(&listData); err != nil {
+		t.Fatal(err)
+	}
+	var listResult struct {
+		Runs []struct {
+			ID string `json:"id"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(listData, &listResult); err != nil {
+		t.Fatalf("decode payment run list receipt data %s: %v", listData, err)
+	}
+	foundOwnRun, foundForeignRun := false, false
+	for _, run := range listResult.Runs {
+		foundOwnRun = foundOwnRun || run.ID == paymentRunID
+		foundForeignRun = foundForeignRun || run.ID == foreignRunID
+	}
+	if !foundOwnRun || foundForeignRun {
+		t.Fatalf("organization payment run list = %+v, want own run %s and no foreign run %s", listResult.Runs, paymentRunID, foreignRunID)
+	}
+
+	cancelID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.cancelPaymentRunDraft", json.RawMessage(fmt.Sprintf(`{"paymentRunId":%q}`, paymentRunID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cancelPaymentRunDraft job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, cancelID, "done", 1)
+	var status string
+	if err := owner.QueryRow(ctx, `SELECT status FROM payment_runs WHERE id=$1::uuid AND org_id=$2::uuid`, paymentRunID, orgID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("payment run status after cancel=%q, want cancelled", status)
+	}
+
+	restoreID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.restorePaymentRunDraft", json.RawMessage(fmt.Sprintf(`{"paymentRunId":%q}`, paymentRunID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("restorePaymentRunDraft job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, restoreID, "done", 1)
+	if err := owner.QueryRow(ctx, `SELECT status FROM payment_runs WHERE id=$1::uuid AND org_id=$2::uuid`, paymentRunID, orgID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "draft" {
+		t.Fatalf("final payment run status=%q, want draft", status)
+	}
+
+	for _, action := range []struct {
+		id           string
+		capabilityID string
+	}{
+		{id: createID, capabilityID: "purchasing.createPaymentRun"},
+		{id: listID, capabilityID: "purchasing.listPaymentRuns"},
+		{id: cancelID, capabilityID: "purchasing.cancelPaymentRunDraft"},
+		{id: restoreID, capabilityID: "purchasing.restorePaymentRunDraft"},
+	} {
+		if got := countJobsTestRows(t, ctx, owner, `
+			SELECT count(*) FROM action_receipts
+			WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+action.id, action.capabilityID); got != 1 {
+			t.Errorf("%s job action receipts=%d, want one", action.capabilityID, got)
+		}
+		if got := countJobsTestRows(t, ctx, owner, `
+			SELECT count(*) FROM ledger_events
+			WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system'
+			AND actor_id IS NULL AND capability_id=$2`, orgID, action.capabilityID); got != 1 {
+			t.Errorf("%s system capability audit events=%d, want one", action.capabilityID, got)
+		}
+	}
+}

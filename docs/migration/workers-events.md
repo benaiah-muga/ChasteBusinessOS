@@ -435,6 +435,17 @@ The TypeScript ownership test proves the legacy claimant leaves each queued
 type pending without incrementing attempts. Keep the Go jobs worker running
 when this ownership is enabled, or these jobs will remain pending.
 
+## Purchasing payment-run draft jobs
+
+The Go jobs worker owns `purchasing.createPaymentRun`,
+`purchasing.cancelPaymentRunDraft`, `purchasing.restorePaymentRunDraft`, and
+`purchasing.listPaymentRuns`. Each job runs through the governed system
+capability path with the permission declared for that capability, its queued
+organization, and the job ID as the stable receipt intent. The TypeScript
+claimant excludes these four types. Instruction and reversal remain on their
+current queue owner until a Go worker proof validates approval linkage for
+posted financial actions.
+
 ## Event and data boundaries
 
 - **Business data versus action audit:** Capabilities own domain writes.
