@@ -5,6 +5,7 @@ import { submitCrmTaskMutation } from "../api/crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
+const conversionIntentId = "f1f60a51-6a9d-41f9-94a7-b1bf73c8a0b2";
 
 const isDealsRead = (path: string): boolean => path === "/api/deals" || path === "/api/crm?deals=1";
 const isCustomersRead = (path: string): boolean => path === "/api/customers" || path === "/api/crm?customers=1";
@@ -1315,27 +1316,161 @@ describe("Vite CRM page", () => {
     expect(screen.queryByRole("dialog", { name: "Northwind" })).toBeNull();
   });
 
-  it("converts a lead into a new customer through the existing CRM capability route", async () => {
+  it("converts a lead into a new customer through Go's crm.convertLead capability", async () => {
+    vi.stubGlobal("__GO_CRM_LEAD_CONVERSION__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals" && init?.method === "POST") return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified" } });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified", conversionIntentId } });
       if (isDealsRead(path)) return Response.json({ deals: [deal("lead")] });
       if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
-      if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified" } });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
-    const dialog = screen.getByRole("dialog", { name: "Convert lead" });
+    const dialog = await screen.findByRole("dialog", { name: "Convert lead" });
     fireEvent.change(within(dialog).getByLabelText("Customer name"), { target: { value: "New Northwind" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Convert lead" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/capabilities/execute")).toBe(true));
+    const post = fetchMock.mock.calls.find(([path]) => String(path) === "/api/capabilities/execute");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      capabilityId: "crm.convertLead",
+      input: { dealId, createCustomer: true, customerName: "New Northwind" },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")).toBe(false);
+  });
+
+  it("converts a lead by attaching an existing customer through Go", async () => {
+    vi.stubGlobal("__GO_CRM_LEAD_CONVERSION__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified", conversionIntentId } });
+      if (isDealsRead(path)) return Response.json({ deals: [deal("lead")] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
+    const dialog = await screen.findByRole("dialog", { name: "Convert lead" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Use existing customer" }));
+    fireEvent.change(within(dialog).getByLabelText("Customer"), { target: { value: customerId } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Convert lead" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/capabilities/execute")).toBe(true));
+    const post = fetchMock.mock.calls.find(([path]) => String(path) === "/api/capabilities/execute");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      capabilityId: "crm.convertLead",
+      input: { dealId, customerId },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")).toBe(false);
+  });
+
+  it.each(["create-new", "attach-existing"] as const)("restores an uncertain %s conversion after remount and reuses its exact Go intent", async (mode) => {
+    vi.stubGlobal("__GO_CRM_LEAD_CONVERSION__", true);
+    const conversionRequests: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    let conversionCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        conversionRequests.push(JSON.parse(String(init.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string });
+        conversionCount += 1;
+        if (conversionCount === 1) return Response.json({ error: "The conversion result is uncertain." }, { status: 503 });
+        return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified", conversionIntentId } });
+      }
+      if (isDealsRead(path)) return Response.json({ deals: [deal("lead")] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const firstMount = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
+    let dialog = await screen.findByRole("dialog", { name: "Convert lead" });
+    let expectedInput: Record<string, unknown>;
+    if (mode === "attach-existing") {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Use existing customer" }));
+      fireEvent.change(within(dialog).getByLabelText("Customer"), { target: { value: customerId } });
+      expectedInput = { dealId, customerId };
+    } else {
+      fireEvent.change(within(dialog).getByLabelText("Customer name"), { target: { value: "Recovered Prospect" } });
+      expectedInput = { dealId, createCustomer: true, customerName: "Recovered Prospect" };
+    }
+    fireEvent.click(within(dialog).getByRole("button", { name: "Convert lead" }));
+    await waitFor(() => expect(conversionRequests).toHaveLength(1));
+    expect(await screen.findByRole("alert")).not.toBeNull();
+    firstMount.unmount();
+
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
+    dialog = await screen.findByRole("dialog", { name: "Convert lead" });
+    if (mode === "attach-existing") {
+      expect((within(dialog).getByLabelText("Customer") as HTMLSelectElement).value).toBe(customerId);
+    } else {
+      expect((within(dialog).getByLabelText("Customer name") as HTMLInputElement).value).toBe("Recovered Prospect");
+    }
+    fireEvent.click(within(dialog).getByRole("button", { name: "Convert lead" }));
+    await waitFor(() => expect(conversionRequests).toHaveLength(2));
+    expect(conversionRequests[0]).toMatchObject({ capabilityId: "crm.convertLead", input: expectedInput, intentId: expect.any(String) });
+    expect(conversionRequests[1]).toEqual(conversionRequests[0]);
+  });
+
+  it("keeps lead conversion closed when pending intent storage cannot be read", async () => {
+    vi.stubGlobal("__GO_CRM_LEAD_CONVERSION__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [deal("lead")] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage access denied."); });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Enable browser storage to restore an unresolved lead conversion.");
+    expect(screen.queryByRole("dialog", { name: "Convert lead" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/capabilities/execute")).toBe(false);
+  });
+
+  it("uses the legacy CRM route for lead conversion when explicitly rolled back", async () => {
+    vi.stubGlobal("__GO_CRM_LEAD_CONVERSION__", false);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified" } });
+      if (isDealsRead(path)) return Response.json({ deals: [deal("lead")] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
+    const dialog = await screen.findByRole("dialog", { name: "Convert lead" });
+    fireEvent.change(within(dialog).getByLabelText("Customer name"), { target: { value: "New Northwind" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Convert lead" }));
+
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")).toBe(true));
     const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST");
-    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ action: "convertLead", dealId, createCustomer: true, customerName: "New Northwind" });
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ action: "convertLead", dealId, createCustomer: true, customerName: "New Northwind", intentId: expect.any(String) });
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/capabilities/execute")).toBe(false);
   });
 
   it("supports deal search, table mode, and drag-and-drop stage confirmation", async () => {

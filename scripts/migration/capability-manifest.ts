@@ -7,6 +7,7 @@ import { buildRegistry } from "@/server/kernel";
 
 const root = process.cwd();
 const manifestPath = join(root, "docs/migration/capabilities.json");
+const goCapabilityOverridesPath = join(root, "docs/migration/go-capability-overrides.json");
 const unrepresentableTypes = new Set([
   "bigint",
   "symbol",
@@ -80,10 +81,15 @@ async function main(): Promise<void> {
       }))
       .sort((left, right) => left.id.localeCompare(right.id));
 
+    const overrides = JSON.parse(readFileSync(goCapabilityOverridesPath, "utf8")) as { capabilities: typeof capabilities };
+    const capabilityByID = new Map(capabilities.map((capability) => [capability.id, capability]));
+    for (const capability of overrides.capabilities) capabilityByID.set(capability.id, capability);
+    capabilities.splice(0, capabilities.length, ...[...capabilityByID.values()].sort((left, right) => left.id.localeCompare(right.id)));
+
     const manifest = `${JSON.stringify(
       {
         schemaVersion: 1,
-        source: "apps/web/src/server/kernel.ts#composeRegistry",
+        source: ["apps/web/src/server/kernel.ts#composeRegistry", "docs/migration/go-capability-overrides.json"],
         capabilities,
       },
       null,

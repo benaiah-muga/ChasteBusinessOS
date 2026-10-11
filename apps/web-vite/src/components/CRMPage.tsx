@@ -22,6 +22,7 @@ import {
   importCrmCustomers,
   CrmApiError,
   readPendingCrmDealCreate,
+  readPendingCrmLeadConversion,
   readPendingCrmCustomerCreate,
   readCrmCustomerImportUndo,
   readPendingCrmCustomerImport,
@@ -34,6 +35,7 @@ import {
   readPendingCrmTaskCreate,
   readPendingCrmTaskDetailsForScope,
   submitCrmAction,
+  submitCrmLeadConversion,
   submitCrmDealStageMove,
   submitCrmDealCreate,
   submitCrmCustomerCreate,
@@ -232,6 +234,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [convertMode, setConvertMode] = useState<"new" | "existing">("new");
   const [convertCustomerId, setConvertCustomerId] = useState("");
   const [convertCustomerName, setConvertCustomerName] = useState("");
+  const convertRestoreGeneration = useRef(0);
   const [draftState, setDraftState] = useState<{ status: "idle" } | { status: "loading" } | { status: "ready"; draft: CrmFollowUpDraft; subject: string; body: string } | { status: "failed"; message: string }>({ status: "idle" });
   const [draftCopied, setDraftCopied] = useState(false);
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
@@ -241,6 +244,9 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const customerCreateScopeGeneration = useRef(0);
   const dealCreateScopeRef = useRef<string | null>(null);
   const dealCreateScopeGeneration = useRef(0);
+  const convertRestoreScopeIdentity = `${actorId?.trim() ?? ""}:${organizationId?.trim() ?? ""}`;
+  const convertRestoreScopeRef = useRef(convertRestoreScopeIdentity);
+  convertRestoreScopeRef.current = convertRestoreScopeIdentity;
   const profileUpdateScopeRef = useRef<string | null>(null);
   const profileUpdateScopeGeneration = useRef(0);
   const savedViewScopeRef = useRef<string | null>(null);
@@ -251,6 +257,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const goCrmCustomerProfileUpdate = typeof __GO_CRM_CUSTOMER_PROFILE_UPDATE__ !== "undefined" && __GO_CRM_CUSTOMER_PROFILE_UPDATE__;
   const goCrmViewWrites = typeof __GO_CRM_VIEW_WRITES__ !== "undefined" && __GO_CRM_VIEW_WRITES__;
   const goCrmDealCreate = typeof __GO_CRM_DEAL_CREATE__ !== "undefined" && __GO_CRM_DEAL_CREATE__;
+  const goCrmLeadConversion = typeof __GO_CRM_LEAD_CONVERSION__ !== "undefined" && __GO_CRM_LEAD_CONVERSION__;
   const customerCreateScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
   if (customerCreateScopeRef.current !== customerCreateScopeIdentity) {
     customerCreateScopeRef.current = customerCreateScopeIdentity;
@@ -1054,8 +1061,42 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
 
   async function convertLead() {
     if (!convertTarget || (convertMode === "existing" && !convertCustomerId) || (convertMode === "new" && !convertCustomerName.trim())) return;
-    const accepted = await mutate("/api/crm", { action: "convertLead", dealId: convertTarget.id, ...(convertMode === "existing" ? { customerId: convertCustomerId } : { createCustomer: true, customerName: convertCustomerName.trim() }) });
+    const input = { dealId: convertTarget.id, ...(convertMode === "existing" ? { customerId: convertCustomerId } : { createCustomer: true as const, customerName: convertCustomerName.trim() }) };
+    const accepted = await mutate(
+      "/api/crm",
+      { action: "convertLead", ...input },
+      undefined,
+      () => submitCrmLeadConversion(input, undefined, goCrmLeadConversion, { actorId, organizationId }),
+    );
     if (accepted) { setConvertTarget(null); setConvertCustomerId(""); setConvertCustomerName(""); }
+  }
+
+  async function openLeadConversion(deal: CrmDeal) {
+    const generation = ++convertRestoreGeneration.current;
+    const scopeIdentity = convertRestoreScopeIdentity;
+    try {
+      const pending = await readPendingCrmLeadConversion({ actorId, organizationId }, deal.id);
+      if (generation !== convertRestoreGeneration.current || convertRestoreScopeRef.current !== scopeIdentity) return;
+      if (pending && "customerId" in pending) {
+        setConvertMode("existing");
+        setConvertCustomerId(pending.customerId);
+        setConvertCustomerName("");
+      } else if (pending) {
+        setConvertMode("new");
+        setConvertCustomerName(pending.customerName);
+        setConvertCustomerId("");
+      } else {
+        setConvertMode("new");
+        setConvertCustomerName(deal.customerName ?? "");
+        setConvertCustomerId("");
+      }
+      setNotice(null);
+      setConvertTarget(deal);
+    } catch (error) {
+      if (generation !== convertRestoreGeneration.current || convertRestoreScopeRef.current !== scopeIdentity) return;
+      setConvertTarget(null);
+      setNotice({ tone: "error", text: friendlyError(error) });
+    }
   }
 
   async function generateFollowUpDraft() {
@@ -1153,7 +1194,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       {!dealCreateReady && <p role="status">CRM is waiting for account and organization details or restoring a saved deal draft.</p>}
       {goCrmDealCreate && dealCreateLocked && <p role="status">This deal creation is pending or uncertain. Retry the same details to resolve it.</p>}
       <div className="crm-deal-controls"><label>Search deals<input type="search" value={dealSearch} onChange={(event) => setDealSearch(event.target.value)} placeholder="Deal, customer, or note" /></label><div role="group" aria-label="Deal layout"><button type="button" aria-pressed={dealView === "board"} onClick={() => setDealView("board")}>Board</button><button type="button" aria-pressed={dealView === "table"} onClick={() => setDealView("table")}>Table</button></div></div>
-      {dealView === "board" ? <div className="crm-deal-board">{stages.filter((stageName) => dealFilter === "all" || (dealFilter === "open" ? stageName !== "won" && stageName !== "lost" : stageName === dealFilter)).map((stageName) => <section className={`crm-deal-column${overStage === stageName ? " crm-deal-column-over" : ""}`} key={stageName} aria-label={`${stageLabels[stageName]} deals`} onDragOver={(event) => { event.preventDefault(); setOverStage(stageName); }} onDragLeave={() => setOverStage((current) => current === stageName ? null : current)} onDrop={(event) => { event.preventDefault(); const deal = deals.find((entry) => entry.id === draggingDealId); if (deal) requestMove(deal, stageName); setDraggingDealId(null); setOverStage(null); }}><h3>{stageLabels[stageName]} <span>{visibleDeals.filter((deal) => deal.stage === stageName).length}</span></h3>{visibleDeals.filter((deal) => deal.stage === stageName).map((deal) => <article className={`crm-deal-card${draggingDealId === deal.id ? " crm-deal-card-dragging" : ""}`} key={deal.id} draggable onDragStart={(event) => { setDraggingDealId(deal.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", deal.id); }} onDragEnd={() => { setDraggingDealId(null); setOverStage(null); }}><strong>{deal.title}</strong><span>{money(deal.valueMinor)}</span>{deal.customerName && <small>{deal.customerName}</small>}{deal.note && <small>{deal.note}</small>}<label>Move to<select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}><option value={deal.stage}>{stageLabels[deal.stage]}</option>{stages.filter((candidate) => candidate !== deal.stage).map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></label>{deal.stage === "lead" && <button type="button" onClick={() => { setConvertTarget(deal); setConvertMode("new"); setConvertCustomerName(deal.customerName ?? ""); setConvertCustomerId(""); }}>Convert lead</button>}</article>)}</section>)}</div> : <div className="crm-table-wrap"><table className="crm-table crm-deal-table"><thead><tr><th>Deal</th><th>Customer</th><th>Stage</th><th>Value</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{visibleDeals.map((deal) => <tr key={deal.id}><td><strong>{deal.title}</strong>{deal.note && <small>{deal.note}</small>}</td><td>{deal.customerName ?? "Unlinked"}</td><td><select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}>{stages.map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></td><td>{money(deal.valueMinor)}</td><td>{new Date(deal.updatedAt).toLocaleDateString()}</td><td>{deal.stage === "lead" && <button type="button" onClick={() => { setConvertTarget(deal); setConvertMode("new"); setConvertCustomerName(deal.customerName ?? ""); setConvertCustomerId(""); }}>Convert lead</button>}</td></tr>)}</tbody></table>{visibleDeals.length === 0 && <p className="crm-empty">No deals match this filter.</p>}</div>}
+      {dealView === "board" ? <div className="crm-deal-board">{stages.filter((stageName) => dealFilter === "all" || (dealFilter === "open" ? stageName !== "won" && stageName !== "lost" : stageName === dealFilter)).map((stageName) => <section className={`crm-deal-column${overStage === stageName ? " crm-deal-column-over" : ""}`} key={stageName} aria-label={`${stageLabels[stageName]} deals`} onDragOver={(event) => { event.preventDefault(); setOverStage(stageName); }} onDragLeave={() => setOverStage((current) => current === stageName ? null : current)} onDrop={(event) => { event.preventDefault(); const deal = deals.find((entry) => entry.id === draggingDealId); if (deal) requestMove(deal, stageName); setDraggingDealId(null); setOverStage(null); }}><h3>{stageLabels[stageName]} <span>{visibleDeals.filter((deal) => deal.stage === stageName).length}</span></h3>{visibleDeals.filter((deal) => deal.stage === stageName).map((deal) => <article className={`crm-deal-card${draggingDealId === deal.id ? " crm-deal-card-dragging" : ""}`} key={deal.id} draggable onDragStart={(event) => { setDraggingDealId(deal.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", deal.id); }} onDragEnd={() => { setDraggingDealId(null); setOverStage(null); }}><strong>{deal.title}</strong><span>{money(deal.valueMinor)}</span>{deal.customerName && <small>{deal.customerName}</small>}{deal.note && <small>{deal.note}</small>}<label>Move to<select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}><option value={deal.stage}>{stageLabels[deal.stage]}</option>{stages.filter((candidate) => candidate !== deal.stage).map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></label>{deal.stage === "lead" && <button type="button" onClick={() => { void openLeadConversion(deal); }}>Convert lead</button>}</article>)}</section>)}</div> : <div className="crm-table-wrap"><table className="crm-table crm-deal-table"><thead><tr><th>Deal</th><th>Customer</th><th>Stage</th><th>Value</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{visibleDeals.map((deal) => <tr key={deal.id}><td><strong>{deal.title}</strong>{deal.note && <small>{deal.note}</small>}</td><td>{deal.customerName ?? "Unlinked"}</td><td><select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}>{stages.map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></td><td>{money(deal.valueMinor)}</td><td>{new Date(deal.updatedAt).toLocaleDateString()}</td><td>{deal.stage === "lead" && <button type="button" onClick={() => { void openLeadConversion(deal); }}>Convert lead</button>}</td></tr>)}</tbody></table>{visibleDeals.length === 0 && <p className="crm-empty">No deals match this filter.</p>}</div>}
     </section>}
 
     {tab === "customers" && <section className="crm-panel" aria-label="Customer directory"><header className="crm-panel-heading"><div><h2>Customers</h2><p>Profiles retain linked records when a customer is deactivated or merged.</p></div><div>{importSummary?.ids.length ? <button type="button" onClick={() => setImportOpen(true)}>Undo last import</button> : null}<button type="button" onClick={() => { setImportOpen(true); if (!importSummary?.ids.length || importSummary.undone) { setImportSummary(null); setImportRows([]); } }}>Import CSV</button></div></header>

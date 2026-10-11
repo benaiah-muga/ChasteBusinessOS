@@ -225,6 +225,9 @@ beforeEach(() => {
     if (path === "/api/purchasing/payment-runs") return Response.json({ ok: true, data: { runs: [paymentRunFixture] } });
     if (path === "/api/capabilities/execute") {
       const { capabilityId } = JSON.parse(String(init?.body)) as { capabilityId: string };
+      if (capabilityId === "hr.report") return Response.json({ ok: true, data: {
+        employees: [], leave: [], runs: [], openings: [], applicants: [], attendance: [],
+      } });
       if (capabilityId === "purchasing.listPaymentRuns") return Response.json({ ok: true, data: { runs: [paymentRunFixture] } });
       if (capabilityId === "purchasing.listPaymentRunBills") return Response.json({ ok: true, data: { bills: [] } });
       return new Response(null, { status: 404 });

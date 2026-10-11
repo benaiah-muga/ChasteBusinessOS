@@ -3147,3 +3147,18 @@ new owners and the manifest shows zero legacy runtime paths.
      Go with HTTP 200, reloaded the persisted workspace override, and showed no
      credential value or browser error. Go returned HTTP 200 on read; no legacy
      `/api/ai-config` proxy request occurred.
+
+298. (Complete) Move Vite CRM lead conversion off legacy `/api/crm` and
+     directly through Go `crm.convertLead`. Add an inverse before exposing this
+     state change: restore the deal's prior lead state and remove only a
+     customer created by this conversion when it remains unchanged and
+     unreferenced. Preserve existing-customer conversions, organization scope,
+     capability approval/audit/idempotency behavior, and actor/org-scoped Vite
+     retries. Keep explicit selector rollback fail-closed. Verify both
+     conversion modes and undo in Go tests and authenticated Vite browser proof.
+     `TestCRMDealJobsClaimAndExecuteThroughSystemPath` proves create, approved
+     undo, and reapply through the real Go jobs worker role. The authenticated
+     Vite browser used local Go email verification and onboarding, converted
+     one lead with a new customer and one with an existing customer, and saw
+     HTTP 200 on Go capability and CRM read routes with no legacy CRM write or
+     browser errors. Independent review found no remaining blocker.

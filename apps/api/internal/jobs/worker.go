@@ -112,6 +112,8 @@ var GoCapabilityPermissions = map[string]string{
 	"crm.createDeal":                           "crm.write",
 	"crm.moveDealStage":                        "crm.write",
 	"crm.convertLead":                          "crm.write",
+	"crm.undoLeadConversion":                   "crm.write",
+	"crm.reapplyLeadConversion":                "crm.write",
 	"crm.createTask":                           "crm.write",
 	"crm.completeTask":                         "crm.write",
 	"crm.updateTaskDetails":                    "crm.write",

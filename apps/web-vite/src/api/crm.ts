@@ -270,6 +270,7 @@ const CRM_CUSTOMER_IMPORT_UNDO_INTENT_PREFIX = "chaste.crm.customer-import-undo-
 const CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX = "chaste.crm.customer-import-undo-state.v1:";
 const CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX = "chaste.crm.customer-profile-update-intent.v1:";
 const CRM_DEAL_CREATE_INTENT_PREFIX = "chaste.crm.deal-create-intent.v1:";
+const CRM_LEAD_CONVERSION_INTENT_PREFIX = "chaste.crm.lead-conversion-intent.v1:";
 const CRM_SAVED_VIEW_WRITE_INTENT_PREFIX = "chaste.crm.saved-view-write-intent.v1:";
 const CrmTaskAttemptSchema = z.object({
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
@@ -311,6 +312,10 @@ export type CrmSavedViewWriteMutation = {
 export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
 type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string };
 export type CrmDealCreateInput = Omit<CrmDealCreateMutation, "action">;
+export type CrmLeadConversionInput =
+  | { dealId: string; customerId: string }
+  | { dealId: string; createCustomer: true; customerName: string };
+type CrmLeadConversionMutation = { action: "convertLead" } & CrmLeadConversionInput;
 type CrmCustomerDeactivateMutation = { action: "deactivateCustomer"; customerId: string };
 export type CrmCustomerImportRow = {
   rowNumber: number;
@@ -350,7 +355,7 @@ export type CrmCustomerMergeResult = {
 };
 type CrmCustomerMergeMutation = { action: "mergeCustomers"; survivorCustomerId: string; duplicateCustomerId: string };
 type CrmCustomerMergeUndoMutation = { action: "restoreCustomerMerge" } & CrmCustomerMergeResult;
-type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmCustomerImportMutation | CrmCustomerImportUndoMutation | CrmCustomerMergeMutation | CrmCustomerMergeUndoMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation | CrmSavedViewWriteMutation;
+type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmCustomerImportMutation | CrmCustomerImportUndoMutation | CrmCustomerMergeMutation | CrmCustomerMergeUndoMutation | CrmDealCreateMutation | CrmLeadConversionMutation | CrmCustomerProfileUpdateMutation | CrmSavedViewWriteMutation;
 const CrmCustomerMergeInputSchema = z.object({ survivorCustomerId: uuid, duplicateCustomerId: uuid }).strict().refine((input) => input.survivorCustomerId !== input.duplicateCustomerId);
 const CrmCustomerMergeSnapshotSchema = z.object({
   customerId: uuid,
@@ -602,6 +607,15 @@ const CrmDealCreateMutationSchema = z.object({
   customerId: uuid.optional(),
 }).strict();
 const CrmDealCreateOutputSchema = z.object({ dealId: uuid }).strict();
+const CrmLeadConversionInputSchema = z.union([
+  z.object({ dealId: uuid, customerId: uuid }).strict(),
+  z.object({ dealId: uuid, createCustomer: z.literal(true), customerName: z.string().trim().min(1) }).strict(),
+]);
+const CrmLeadConversionMutationSchema = z.union([
+  z.object({ action: z.literal("convertLead"), dealId: uuid, customerId: uuid }).strict(),
+  z.object({ action: z.literal("convertLead"), dealId: uuid, createCustomer: z.literal(true), customerName: z.string().trim().min(1) }).strict(),
+]);
+const CrmLeadConversionOutputSchema = z.object({ dealId: uuid, customerId: uuid, stage: z.literal("qualified"), conversionIntentId: uuid }).strict();
 
 export async function readPendingCrmDealCreate(scope: CrmTaskRetryScope): Promise<CrmDealCreateInput | null> {
   const { scopeHash } = await crmTaskScope(scope);
@@ -655,6 +669,64 @@ export async function submitCrmDealCreate(
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
       await clearCrmDealCreateAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+export async function readPendingCrmLeadConversion(scope: CrmTaskRetryScope, dealId: string): Promise<CrmLeadConversionInput | null> {
+  if (!uuid.safeParse(dealId).success) throw new CrmApiError(0, "Choose a valid lead before conversion.");
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_LEAD_CONVERSION_INTENT_PREFIX}${scopeHash}:convert:${dealId}`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to restore an unresolved lead conversion."); }
+  if (raw === null) return null;
+  const stored = parseCrmTaskAttempt(raw);
+  const action = CrmLeadConversionMutationSchema.safeParse(stored.action);
+  if (!action.success || action.data.dealId !== dealId || await crmTaskFingerprint(action.data) !== stored.fingerprint) {
+    throw new CrmApiError(0, "An unresolved lead conversion could not be verified. Contact an administrator before retrying.", true);
+  }
+  const { action: _action, ...input } = action.data;
+  return input;
+}
+
+export async function submitCrmLeadConversion(
+  input: CrmLeadConversionInput,
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<{ dealId: string; customerId: string; stage: "qualified"; conversionIntentId: string }>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_LEAD_CONVERSION__ !== "undefined" && __GO_CRM_LEAD_CONVERSION__);
+  const parsedInput = CrmLeadConversionInputSchema.safeParse(input);
+  if (!parsedInput.success) throw new CrmApiError(0, "Review the lead and customer details before converting.");
+  const scope = await crmTaskScope(retryScope);
+  if (!useGo) {
+    const unresolved = await readPendingCrmLeadConversion(scope, parsedInput.data.dealId);
+    if (unresolved) throw new CrmApiError(0, "A Go lead conversion is unresolved. Restore the Go conversion route and retry its exact details before using the legacy route.", true);
+    return submitCrmAction("/api/crm", { action: "convertLead", ...parsedInput.data }, signal);
+  }
+
+  const action: CrmLeadConversionMutation = { action: "convertLead", ...parsedInput.data };
+  const attempt = await crmTaskAttempt(action, scope, `convert:${parsedInput.data.dealId}`, CRM_LEAD_CONVERSION_INTENT_PREFIX);
+  try {
+    const { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.convertLead", input: parsedInput.data, intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) throw new CrmApiError(404, "The Go CRM conversion route is unavailable. Check the Go session capability route configuration.", true);
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const parsed = CrmLeadConversionOutputSchema.safeParse(outcome.data);
+    if (!parsed.success || parsed.data.dealId !== parsedInput.data.dealId ||
+      ("customerId" in parsedInput.data && parsed.data.customerId !== parsedInput.data.customerId)) {
+      throw new CrmApiError(response.status, "The CRM service returned an unexpected lead conversion result.", true);
+    }
+    await clearCrmTaskAttempt(attempt.storageKey);
+    return { kind: "completed", data: parsed.data };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+      await clearCrmTaskAttempt(attempt.storageKey);
     }
     throw error;
   }

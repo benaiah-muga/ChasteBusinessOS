@@ -560,3 +560,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests  263 passed|PASS.*TestGoCustomerViewWritesAreOwnedReversibleAndReplaySafe/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: The required runtime Go integration proof and 263 focused Vite tests passed. Authenticated agent-browser created, pinned, and shared a synthetic saved view. Each POST `/api/capabilities/execute` returned HTTP 200; after reload the view remained starred and shared. The Vite CRM read family returned HTTP 200 from Go and browser errors were empty.
+
+- [x] G110: Vite CRM lead conversion uses Go `crm.convertLead`, has a safe declared inverse, and fails closed without legacy fallback.
+  CHECK: pnpm migration:capabilities:check && pnpm migration:routes:check; pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/crm.test.ts src/components/CRMPage.test.tsx src/api/go-route-proxy.test.ts; GO_RUNTIME_INTEGRATION_REQUIRED=1 DATABASE_URL=postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2 CHASTE_APP_DB_PASSWORD=chaste_app_dev_only CHASTE_JOBS_WORKER_DB_PASSWORD=chaste_jobs_worker_dev_only go -C apps/api test ./internal/capability ./internal/httpapi ./internal/jobs -run 'TestGoLeadConversion|Test.*LeadConversion|Test.*ConvertLead|TestCRMDealJobsClaimAndExecuteThroughSystemPath' -count=1
+  EXPECT: /Tests .* passed|ok.*internal\/capability|ok.*internal\/httpapi/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Capability manifest and route ownership checks passed. The Go capability tests and real worker-role DB proof passed convert -> approved undo -> reapply. An authenticated agent-browser signup, verification, sign-in, and onboarding used Go; both Vite conversion modes returned HTTP 200 from `/api/capabilities/execute`, CRM reads returned HTTP 200, no legacy CRM write request occurred, and browser console/errors were empty. Fresh independent review found no blocker.

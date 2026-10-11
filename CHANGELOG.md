@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite CRM lead conversion now uses the authenticated Go `crm.convertLead`
+  capability. Go records a receipt-bound inverse that restores the lead and
+  removes a newly created customer only when that customer is unchanged and
+  unreferenced. Approved undo and receipt-bound reapply run through the Go job
+  worker. Uncertain browser retries restore the exact input and intent.
 - Vite Settings > AI & automation now reads and writes workspace model-provider
   configuration through the authenticated Go API. Go returns a strict public
   projection without stored credentials and encrypts submitted keys before

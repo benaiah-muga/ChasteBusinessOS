@@ -1,0 +1,116 @@
+{
+  "capabilities": [
+    {
+      "id": "crm.convertLead",
+      "title": "Convert lead",
+      "intent": "Promote a lead-stage deal to qualified and attach its customer, creating a customer record when requested.",
+      "module": "crm",
+      "risk": "write",
+      "permission": "crm.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "crm.undoLeadConversion",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "dealId": { "type": "string", "format": "uuid" },
+              "customerId": { "type": "string", "format": "uuid" }
+            },
+            "required": ["dealId", "customerId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dealId": { "type": "string", "format": "uuid" },
+              "createCustomer": { "type": "boolean", "const": true },
+              "customerName": { "type": "string", "minLength": 1 }
+            },
+            "required": ["dealId", "createCustomer", "customerName"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "dealId": { "type": "string", "format": "uuid" },
+          "customerId": { "type": "string", "format": "uuid" },
+          "conversionIntentId": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "stage": { "type": "string", "const": "qualified" }
+        },
+        "required": ["dealId", "customerId", "conversionIntentId", "stage"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "crm.undoLeadConversion",
+      "title": "Undo lead conversion",
+      "intent": "Restore a converted deal to its lead state and remove its unchanged unreferenced customer when safe.",
+      "module": "crm",
+      "risk": "destructive",
+      "permission": "crm.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "crm.reapplyLeadConversion",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "conversionIntentId": { "type": "string", "minLength": 1, "maxLength": 160 }
+        },
+        "required": ["conversionIntentId"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "undone": { "type": "boolean", "const": true },
+          "dealId": { "type": "string", "format": "uuid" },
+          "customerDeleted": { "type": "boolean" },
+          "conversionIntentId": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "undoIntentId": { "type": "string", "minLength": 1, "maxLength": 160 }
+        },
+        "required": ["undone", "dealId", "customerDeleted", "conversionIntentId", "undoIntentId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "crm.reapplyLeadConversion",
+      "title": "Reapply lead conversion",
+      "intent": "Restore the exact lead conversion from its unchanged undo receipt, recreating the customer when required.",
+      "module": "crm",
+      "risk": "write",
+      "permission": "crm.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "crm.undoLeadConversion",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "undoIntentId": { "type": "string", "minLength": 1, "maxLength": 160 }
+        },
+        "required": ["undoIntentId"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "reapplied": { "type": "boolean", "const": true },
+          "dealId": { "type": "string", "format": "uuid" },
+          "customerId": { "type": "string", "format": "uuid" },
+          "conversionIntentId": { "type": "string", "minLength": 1, "maxLength": 160 }
+        },
+        "required": ["reapplied", "dealId", "customerId", "conversionIntentId"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

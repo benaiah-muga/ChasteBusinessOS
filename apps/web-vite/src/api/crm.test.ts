@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmLeadConversion, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmLeadConversion, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
+const conversionIntentId = "f1f60a51-6a9d-41f9-94a7-b1bf73c8a0b2";
 const crmRetryScope = { actorId: customerId, organizationId: dealId };
 const savedViewFilters = { status: "active" as const, owner: "all", staleOnly: false, duplicateOnly: false, tag: "" };
 
@@ -118,6 +119,89 @@ describe("CRM API client", () => {
     vi.stubGlobal("fetch", legacyFetch);
     await submitCrmDealStageMove({ dealId, stage: "qualified" }, undefined, false);
     expect(legacyFetch.mock.calls[0]?.[0]).toBe("/api/deals");
+  });
+
+  it.each([
+    ["create-customer", { dealId, createCustomer: true as const, customerName: "New Northwind" }],
+    ["attach-existing", { dealId, customerId }],
+  ])("routes %s lead conversion through crm.convertLead with the exact Go input", async (_mode, input) => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      ok: true,
+      data: { dealId, customerId, stage: "qualified", conversionIntentId },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmLeadConversion(input, undefined, true, crmRetryScope)).resolves.toEqual({
+      kind: "completed",
+      data: { dealId, customerId, stage: "qualified", conversionIntentId },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "crm.convertLead",
+      input,
+      intentId: expect.any(String),
+    });
+    await expect(readPendingCrmLeadConversion(crmRetryScope, dealId)).resolves.toBeNull();
+  });
+
+  it("keeps the exact conversion intent for approval and retries, then clears it on success", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { dealId, customerId, stage: "qualified", conversionIntentId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { dealId, createCustomer: true as const, customerName: "New Northwind" };
+
+    await expect(submitCrmLeadConversion(input, undefined, true, crmRetryScope)).resolves.toEqual({
+      kind: "pending",
+      reason: "Manager approval required.",
+    });
+    const pendingAction = await readPendingCrmLeadConversion(crmRetryScope, dealId);
+    expect(pendingAction).toEqual(input);
+
+    await expect(submitCrmLeadConversion(input, undefined, true, crmRetryScope)).resolves.toMatchObject({ kind: "completed" });
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(retryBody).toEqual(firstBody);
+    await expect(readPendingCrmLeadConversion(crmRetryScope, dealId)).resolves.toBeNull();
+  });
+
+  it("rejects a crm.convertLead DTO with a malformed conversion intent ID", async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      ok: true,
+      data: { dealId, customerId, stage: "qualified", conversionIntentId: "not-a-uuid" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmLeadConversion({ dealId, customerId }, undefined, true, crmRetryScope)).rejects.toMatchObject({
+      message: expect.stringContaining("unexpected lead conversion result"),
+      requestMayHaveReachedServer: true,
+    });
+    await expect(readPendingCrmLeadConversion(crmRetryScope, dealId)).resolves.toEqual({ dealId, customerId });
+  });
+
+  it("keeps uncertain Go conversions Go-only when the Go route is unavailable or rolled back", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ error: "Go capability unavailable" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { dealId, customerId };
+
+    await expect(submitCrmLeadConversion(input, undefined, true, crmRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingCrmLeadConversion(crmRetryScope, dealId)).resolves.toEqual(input);
+    await expect(submitCrmLeadConversion(input, undefined, false, crmRetryScope)).rejects.toMatchObject({
+      message: expect.stringContaining("A Go lead conversion is unresolved"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the legacy CRM conversion endpoint only when explicitly rolled back without an unresolved Go intent", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId, customerId, stage: "qualified" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { dealId, createCustomer: true as const, customerName: "New Northwind" };
+
+    await expect(submitCrmLeadConversion(input, undefined, false, crmRetryScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/crm");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ action: "convertLead", ...input });
   });
 
   it("fails closed with a recoverable error until Go writes have actor and organization scope", async () => {

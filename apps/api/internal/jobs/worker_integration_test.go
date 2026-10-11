@@ -965,9 +965,11 @@ func TestCRMDealJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	for capabilityID, permission := range map[string]string{
-		"crm.createDeal":    "crm.write",
-		"crm.moveDealStage": "crm.write",
-		"crm.convertLead":   "crm.write",
+		"crm.createDeal":            "crm.write",
+		"crm.moveDealStage":         "crm.write",
+		"crm.convertLead":           "crm.write",
+		"crm.undoLeadConversion":    "crm.write",
+		"crm.reapplyLeadConversion": "crm.write",
 	} {
 		if GoCapabilityPermissions[capabilityID] != permission {
 			t.Fatalf("Go job permission for %s = %q, want %q", capabilityID, GoCapabilityPermissions[capabilityID], permission)
@@ -1002,11 +1004,14 @@ func TestCRMDealJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
 	assertJobsTestState(t, ctx, owner, moveToLeadID, "done", 1)
 	assertCRMDealJobStage(t, ctx, owner, orgID, dealID, "lead")
 
-	convertID := insertJobsTestJob(t, ctx, owner, orgID, "crm.convertLead", json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true}`, dealID)), 3, availableAt)
+	convertID := insertJobsTestJob(t, ctx, owner, orgID, "crm.convertLead", json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true,"customerName":"Worker-created prospect"}`, dealID)), 3, availableAt)
 	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
 		t.Fatalf("convertLead job worked=%v err=%v", worked, err)
 	}
 	assertJobsTestState(t, ctx, owner, convertID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='crm.convertLead' AND ok`, orgID, orgID+":"+convertID); got != 1 {
+		t.Fatalf("conversion system receipt for intent %s=%d, want one", convertID, got)
+	}
 	var stage, customerName string
 	if err := owner.QueryRow(ctx, `
 		SELECT d.stage,c.name FROM deals d JOIN customers c ON c.id=d.customer_id
@@ -1016,11 +1021,47 @@ func TestCRMDealJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
 	if stage != "qualified" || customerName != "Worker-created prospect" {
 		t.Fatalf("system conversion stage/customer=%q/%q, want qualified/title-derived customer", stage, customerName)
 	}
+	insertApprovedJob := func(capabilityID string, payload json.RawMessage, risk string) string {
+		t.Helper()
+		var approvalID string
+		if err := owner.QueryRow(ctx, `
+			INSERT INTO approvals (org_id, capability_id, risk_class, payload, rationale, status, expires_at)
+			VALUES ($1::uuid, $2, $3, $4::jsonb, 'worker CRM inverse approval proof', 'executing', clock_timestamp() + interval '1 hour')
+			RETURNING id::text`, orgID, capabilityID, risk, payload).Scan(&approvalID); err != nil {
+			t.Fatal(err)
+		}
+		return insertJobsTestJobWithLinks(t, ctx, owner, orgID, capabilityID, payload, 3, availableAt, "", 0, approvalID)
+	}
+
+	undoPayload := json.RawMessage(fmt.Sprintf(`{"conversionIntentId":%q}`, convertID))
+	undoID := insertApprovedJob("crm.undoLeadConversion", undoPayload, "destructive")
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("approved undoLeadConversion job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, undoID, "done", 1)
+	assertCRMDealJobStage(t, ctx, owner, orgID, dealID, "lead")
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM customers WHERE org_id=$1::uuid AND name='Worker-created prospect'`, orgID); got != 0 {
+		t.Fatalf("worker undo retained %d created customers, want deletion", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM approvals WHERE org_id=$1::uuid AND id=(SELECT approved_approval_id FROM jobs WHERE id=$2::uuid) AND status='executed'`, orgID, undoID); got != 1 {
+		t.Fatalf("worker destructive undo finalized approvals=%d, want one executed", got)
+	}
+
+	reapplyPayload := json.RawMessage(fmt.Sprintf(`{"undoIntentId":%q}`, undoID))
+	reapplyID := insertJobsTestJob(t, ctx, owner, orgID, "crm.reapplyLeadConversion", reapplyPayload, 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("reapplyLeadConversion job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, reapplyID, "done", 1)
+	assertCRMDealJobStage(t, ctx, owner, orgID, dealID, "qualified")
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM customers WHERE org_id=$1::uuid AND name='Worker-created prospect'`, orgID); got != 1 {
+		t.Fatalf("worker reapply restored %d created customers, want one", got)
+	}
 	if got := countJobsTestRows(t, ctx, owner, `
 		SELECT count(*) FROM ledger_events
 		WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND actor_id IS NULL AND session_id IS NULL
-		AND capability_id IN ('crm.createDeal','crm.moveDealStage','crm.convertLead')`, orgID); got != 4 {
-		t.Fatalf("system CRM deal audit events=%d, want four executions", got)
+		AND capability_id IN ('crm.createDeal','crm.moveDealStage','crm.convertLead','crm.undoLeadConversion','crm.reapplyLeadConversion')`, orgID); got != 6 {
+		t.Fatalf("system CRM deal audit events=%d, want six executions", got)
 	}
 }
 

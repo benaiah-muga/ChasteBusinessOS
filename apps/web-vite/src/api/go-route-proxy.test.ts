@@ -21,6 +21,7 @@ import {
   goInventoryLocationReservationWritesFromEnv,
   goInventoryBarcodeLookupFromEnv,
   goCrmDealStageMoveFromEnv,
+  goCrmLeadConversionFromEnv,
   goCrmDealCreateFromEnv,
   goCrmCustomerCreateFromEnv,
   goCrmCustomerDeactivateFromEnv,
@@ -164,6 +165,15 @@ describe("CRM deal stage Go selector", () => {
     expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_DEAL_STAGE_MOVE: "1" })).toBe(true);
     expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_DEAL_STAGE_MOVE: "1" })).toBe(false);
+  });
+});
+
+describe("CRM lead conversion Go selector", () => {
+  it("defaults on with the session capability route and supports explicit legacy rollback", () => {
+    expect(goCrmLeadConversionFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goCrmLeadConversionFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_LEAD_CONVERSION: "1" })).toBe(true);
+    expect(goCrmLeadConversionFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_LEAD_CONVERSION: "0" })).toBe(false);
+    expect(goCrmLeadConversionFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
   });
 });
 

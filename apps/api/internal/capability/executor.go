@@ -107,7 +107,9 @@ var capabilitySpecs = map[string]capabilitySpec{
 	customerTimelineCapabilityID:                        {module: "crm", permission: "crm.read", risk: "read"},
 	createDealCapabilityID:                              {module: "crm", permission: "crm.write", risk: "write"},
 	moveDealStageCapabilityID:                           {module: "crm", permission: "crm.write", risk: "write"},
-	convertLeadCapabilityID:                             {module: "crm", permission: "crm.write", risk: "write"},
+	convertLeadCapabilityID:                             {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
+	undoLeadConversionCapabilityID:                      {module: "crm", permission: "crm.write", risk: "destructive", inverseCapabilityID: reapplyLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"undoIntentId"}},
+	reapplyLeadConversionCapabilityID:                   {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
 	createTaskCapabilityID:                              {module: "crm", permission: "crm.write", risk: "write"},
 	completeTaskCapabilityID:                            {module: "crm", permission: "crm.write", risk: "write"},
 	updateTaskDetailsCapabilityID:                       {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreTaskDetails"},
@@ -436,7 +438,7 @@ func supportedCapability(capabilityID string) bool {
 		listCustomersCapabilityID, listCRMCustomerCollectionCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID, documentsListIngestedCapabilityID,
 		documentsListDocVersionsCapabilityID, documentsGetDocVersionCapabilityID,
 		pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
-		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID,
+		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID, undoLeadConversionCapabilityID, reapplyLeadConversionCapabilityID,
 		createTaskCapabilityID, completeTaskCapabilityID, updateTaskDetailsCapabilityID, restoreTaskDetailsCapabilityID,
 		createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID,
 		createRecurringTemplateCapabilityID, pauseRecurringTemplateCapabilityID, resumeRecurringTemplateCapabilityID, listRecurringTemplatesCapabilityID,
@@ -541,13 +543,14 @@ var (
 )
 
 type Result struct {
-	OK                bool            `json:"ok"`
-	Data              json.RawMessage `json:"data,omitempty"`
-	Error             string          `json:"error,omitempty"`
-	PendingApproval   bool            `json:"pendingApproval,omitempty"`
-	ApprovalID        string          `json:"approvalId,omitempty"`
-	ApprovalRationale string          `json:"approvalRationale,omitempty"`
-	Replayed          bool            `json:"replayed,omitempty"`
+	OK                 bool            `json:"ok"`
+	Data               json.RawMessage `json:"data,omitempty"`
+	Error              string          `json:"error,omitempty"`
+	PendingApproval    bool            `json:"pendingApproval,omitempty"`
+	ApprovalID         string          `json:"approvalId,omitempty"`
+	ApprovalRationale  string          `json:"approvalRationale,omitempty"`
+	Replayed           bool            `json:"replayed,omitempty"`
+	receiptInverseData json.RawMessage
 }
 
 // SystemClaims are accepted only by ExecuteSystem, which is an internal
@@ -881,7 +884,10 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID:
+		case createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID, undoLeadConversionCapabilityID, reapplyLeadConversionCapabilityID:
+			if (capabilityID == convertLeadCapabilityID || capabilityID == undoLeadConversionCapabilityID || capabilityID == reapplyLeadConversionCapabilityID) && strings.TrimSpace(claims.IntentID) == "" {
+				return Result{OK: false, Error: "invalid input: lead conversion requires a durable action intent"}, nil
+			}
 			parsed, err := parseCRMDealInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -1548,6 +1554,7 @@ func (e *Executor) executeWithFinalizer(
 			}
 		}
 		var data json.RawMessage
+		var receiptInverseData json.RawMessage
 		var committedParseFailure *documentsCommittedParseFailure
 		switch parsed := input.(type) {
 		case CreatorSubmitProposalInput:
@@ -1947,7 +1954,25 @@ func (e *Executor) executeWithFinalizer(
 			}
 			data, err = marshalJS(output)
 		case ConvertLeadInput:
-			output, err := convertLead(ctx, tx, claims.OrganizationID, parsed, now)
+			output, snapshot, err := convertLead(ctx, tx, claims.OrganizationID, claims.IntentID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+			if err == nil {
+				receiptInverseData, err = marshalJS(snapshot)
+			}
+		case UndoLeadConversionInput:
+			output, snapshot, err := undoLeadConversion(ctx, tx, claims.OrganizationID, claims.IntentID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+			if err == nil {
+				receiptInverseData, err = marshalJS(snapshot)
+			}
+		case ReapplyLeadConversionInput:
+			output, err := reapplyLeadConversion(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3462,7 +3487,7 @@ func (e *Executor) executeWithFinalizer(
 		}); err != nil {
 			return Result{}, err
 		}
-		result := Result{OK: true, Data: data}
+		result := Result{OK: true, Data: data, receiptInverseData: receiptInverseData}
 		if committedParseFailure != nil {
 			result.OK = false
 			result.Error = committedParseFailure.message
@@ -3539,7 +3564,7 @@ func canonicalInputHash(input any) (string, error) {
 		return canonicalHash(parsed)
 	case ListCustomersInput, ListCRMCustomerCollectionInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
 		ListAuthoredDocsInput, IngestedDocumentsInput, ListDocumentVersionsInput, DocumentVersionIDInput,
-		CreateDealInput, MoveDealStageInput, ConvertLeadInput,
+		CreateDealInput, MoveDealStageInput, ConvertLeadInput, UndoLeadConversionInput, ReapplyLeadConversionInput,
 		CreateTaskInput, CompleteTaskInput, UpdateTaskDetailsInput,
 		CreateQuoteInput, AcceptQuoteInput, DeclineQuoteInput, ExpireQuoteInput, ListQuotesInput,
 		CreateRecurringTemplateInput, PauseRecurringTemplateInput, ResumeRecurringTemplateInput, ListRecurringTemplatesInput,
@@ -4107,6 +4132,7 @@ type actionReceipt struct {
 	InputHash    string
 	OK           bool
 	Data         json.RawMessage
+	InverseData  json.RawMessage
 	Error        string
 	Outcome      string
 	Replayed     bool
@@ -4126,6 +4152,17 @@ func loadReceipt(ctx context.Context, tx pgx.Tx, orgID, intentKey string) (actio
 		return actionReceipt{}, false, err
 	}
 	receipt.Data = append(json.RawMessage(nil), data...)
+	if receipt.CapabilityID == convertLeadCapabilityID || receipt.CapabilityID == undoLeadConversionCapabilityID {
+		var stored struct {
+			Version int             `json:"version"`
+			Result  json.RawMessage `json:"result"`
+			Inverse json.RawMessage `json:"inverse"`
+		}
+		if json.Unmarshal(data, &stored) == nil && stored.Version == 1 && len(stored.Result) > 0 {
+			receipt.Data = append(json.RawMessage(nil), stored.Result...)
+			receipt.InverseData = append(json.RawMessage(nil), stored.Inverse...)
+		}
+	}
 	return receipt, true, nil
 }
 
@@ -4145,10 +4182,22 @@ func loadApprovalByIntent(ctx context.Context, tx pgx.Tx, orgID, intentID string
 }
 
 func insertReceipt(ctx context.Context, tx pgx.Tx, orgID, intentKey, capabilityID, inputHash string, result Result) error {
+	data := result.Data
+	if (capabilityID == convertLeadCapabilityID || capabilityID == undoLeadConversionCapabilityID) && len(result.receiptInverseData) > 0 {
+		stored, err := marshalJS(struct {
+			Version int             `json:"version"`
+			Result  json.RawMessage `json:"result"`
+			Inverse json.RawMessage `json:"inverse"`
+		}{Version: 1, Result: result.Data, Inverse: result.receiptInverseData})
+		if err != nil {
+			return err
+		}
+		data = stored
+	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO action_receipts (org_id, intent_key, capability_id, input_hash, ok, outcome, data, error)
 		VALUES ($1::uuid, $2, $3, $4, $5, 'known', $6::jsonb, NULLIF($7, ''))`,
-		orgID, intentKey, capabilityID, inputHash, result.OK, result.Data, result.Error)
+		orgID, intentKey, capabilityID, inputHash, result.OK, data, result.Error)
 	return err
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -30,11 +31,24 @@ func TestGoCRMDealsCapabilityContractsDispatchAndOutputs(t *testing.T) {
 			output: MoveDealStageOutput{Moved: true, Stage: "lost"}, outputJSON: `{"moved":true,"stage":"lost"}`,
 		},
 		{
-			id: convertLeadCapabilityID, raw: `{"dealId":"` + dealID + `","createCustomer":false,"customerName":"Buyer"}`,
-			permission: "crm.write", want: ConvertLeadInput{DealID: dealID, CreateCustomer: boolPointer(false), CustomerName: crmStringPointer("Buyer")},
-			output:     ConvertLeadOutput{DealID: dealID, CustomerID: ownerID, Stage: "qualified"},
-			outputJSON: `{"dealId":"` + dealID + `","customerId":"` + ownerID + `","stage":"qualified"}`,
+			id: convertLeadCapabilityID, raw: `{"dealId":"` + dealID + `","customerId":"` + ownerID + `"}`,
+			permission: "crm.write", want: ConvertLeadInput{DealID: dealID, CustomerID: &ownerID},
+			output:     ConvertLeadOutput{DealID: dealID, CustomerID: ownerID, ConversionIntentID: "conversion-intent", Stage: "qualified"},
+			outputJSON: `{"dealId":"` + dealID + `","customerId":"` + ownerID + `","conversionIntentId":"conversion-intent","stage":"qualified"}`,
 		},
+	}
+	undoInput, err := ParseUndoLeadConversionInput(json.RawMessage(`{"conversionIntentId":"conversion-intent"}`))
+	if err != nil || undoInput.ConversionIntentID != "conversion-intent" {
+		t.Fatalf("ParseUndoLeadConversionInput() = %+v, %v", undoInput, err)
+	}
+	if spec := capabilitySpecs[convertLeadCapabilityID]; spec.inverseCapabilityID != undoLeadConversionCapabilityID || spec.inverseInputSource != "output" || len(spec.inverseFields) != 1 || spec.inverseFields[0] != "conversionIntentId" {
+		t.Fatalf("convertLead inverse declaration = %+v", spec)
+	}
+	if spec := capabilitySpecs[undoLeadConversionCapabilityID]; spec.risk != "destructive" || spec.inverseCapabilityID != reapplyLeadConversionCapabilityID || spec.inverseInputSource != "output" || len(spec.inverseFields) != 1 || spec.inverseFields[0] != "undoIntentId" {
+		t.Fatalf("undoLeadConversion inverse declaration = %+v", spec)
+	}
+	if spec := capabilitySpecs[reapplyLeadConversionCapabilityID]; spec.inverseCapabilityID != undoLeadConversionCapabilityID || spec.inverseInputSource != "output" || len(spec.inverseFields) != 1 || spec.inverseFields[0] != "conversionIntentId" {
+		t.Fatalf("reapplyLeadConversion inverse declaration = %+v", spec)
 	}
 	for _, test := range cases {
 		t.Run(test.id, func(t *testing.T) {
@@ -78,6 +92,96 @@ func TestGoCRMDealsCapabilityContractsDispatchAndOutputs(t *testing.T) {
 	}
 	if permission, ok := permissionForCapability(convertLeadCapabilityID); !ok || permission != "crm.write" {
 		t.Fatalf("approval permission for convertLead = %q, %t", permission, ok)
+	}
+	if permission, ok := permissionForCapability(undoLeadConversionCapabilityID); !ok || permission != "crm.write" {
+		t.Fatalf("approval permission for undoLeadConversion = %q, %t", permission, ok)
+	}
+	if permission, ok := permissionForCapability(reapplyLeadConversionCapabilityID); !ok || permission != "crm.write" {
+		t.Fatalf("approval permission for reapplyLeadConversion = %q, %t", permission, ok)
+	}
+}
+
+func TestGoCRMConvertLeadParserRequiresExclusiveInputModes(t *testing.T) {
+	dealID := "11111111-1111-4111-8111-111111111111"
+	customerID := "22222222-2222-4222-8222-222222222222"
+	for _, raw := range []string{
+		`{"dealId":"` + dealID + `","customerId":"` + customerID + `"}`,
+		`{"dealId":"` + dealID + `","createCustomer":true,"customerName":"New customer"}`,
+	} {
+		if _, err := ParseConvertLeadInput(json.RawMessage(raw)); err != nil {
+			t.Errorf("valid conversion mode was rejected: %s: %v", raw, err)
+		}
+	}
+	for _, raw := range []string{
+		`{"dealId":"` + dealID + `","customerId":"` + customerID + `","createCustomer":true,"customerName":"Mixed modes"}`,
+		`{"dealId":"` + dealID + `","createCustomer":false,"customerName":"False create flag"}`,
+		`{"dealId":"` + dealID + `","createCustomer":true}`,
+		`{"dealId":"` + dealID + `","customerName":"Missing create flag"}`,
+	} {
+		if _, err := ParseConvertLeadInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("ambiguous conversion mode was accepted: %s", raw)
+		}
+	}
+}
+
+func TestGoCRMConversionManifestMatchesGoContracts(t *testing.T) {
+	manifestBytes, err := os.ReadFile("../../../../docs/migration/capabilities.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Capabilities []struct {
+			ID          string          `json:"id"`
+			Risk        string          `json:"risk"`
+			Inverse     string          `json:"inverseCapabilityId"`
+			InputSchema json.RawMessage `json:"inputSchema"`
+			Output      struct {
+				Required []string `json:"required"`
+			} `json:"outputSchema"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	entries := make(map[string]struct {
+		Risk        string
+		Inverse     string
+		InputSchema json.RawMessage
+		Output      []string
+	}, len(manifest.Capabilities))
+	for _, entry := range manifest.Capabilities {
+		entries[entry.ID] = struct {
+			Risk        string
+			Inverse     string
+			InputSchema json.RawMessage
+			Output      []string
+		}{entry.Risk, entry.Inverse, entry.InputSchema, entry.Output.Required}
+	}
+	for id, expected := range map[string]struct {
+		risk, inverse string
+	}{
+		convertLeadCapabilityID:           {"write", undoLeadConversionCapabilityID},
+		undoLeadConversionCapabilityID:    {"destructive", reapplyLeadConversionCapabilityID},
+		reapplyLeadConversionCapabilityID: {"write", undoLeadConversionCapabilityID},
+	} {
+		entry, ok := entries[id]
+		if !ok || entry.Risk != expected.risk || entry.Inverse != expected.inverse {
+			t.Errorf("manifest contract for %s = %+v (exists=%t), want risk %q inverse %q", id, entry, ok, expected.risk, expected.inverse)
+		}
+	}
+	var convertInput struct {
+		OneOf []struct {
+			Required []string `json:"required"`
+		} `json:"oneOf"`
+	}
+	if err := json.Unmarshal(entries[convertLeadCapabilityID].InputSchema, &convertInput); err != nil {
+		t.Fatal(err)
+	}
+	if len(convertInput.OneOf) != 2 || strings.Join(convertInput.OneOf[0].Required, ",") != "dealId,customerId" || strings.Join(convertInput.OneOf[1].Required, ",") != "dealId,createCustomer,customerName" {
+		t.Fatalf("convertLead manifest input modes=%+v, want exclusive attach/create modes", convertInput.OneOf)
+	}
+	if got := strings.Join(entries[convertLeadCapabilityID].Output, ","); got != "dealId,customerId,conversionIntentId,stage" {
+		t.Fatalf("convertLead manifest output fields=%s", got)
 	}
 }
 
@@ -139,9 +243,20 @@ func TestGoCRMDealsParsersMatchCRMContracts(t *testing.T) {
 	if _, err := ParseConvertLeadInput(json.RawMessage(`{"dealId":"` + validID + `","customerName":""}`)); err == nil {
 		t.Fatal("empty customerName was accepted")
 	}
-	converted, err := ParseConvertLeadInput(json.RawMessage(`{"dealId":"` + validID + `","createCustomer":false,"customerName":"Buyer","unknown":true}`))
-	if err != nil || converted.CreateCustomer == nil || *converted.CreateCustomer || converted.CustomerName == nil || *converted.CustomerName != "Buyer" {
+	converted, err := ParseConvertLeadInput(json.RawMessage(`{"dealId":"` + validID + `","createCustomer":true,"customerName":"  Buyer  ","unknown":true}`))
+	if err != nil || converted.CreateCustomer == nil || !*converted.CreateCustomer || converted.CustomerName == nil || *converted.CustomerName != "Buyer" {
 		t.Fatalf("convert lead input=%+v err=%v", converted, err)
+	}
+	for _, raw := range []string{
+		`{"dealId":"` + validID + `","customerId":"` + validID + `","createCustomer":true,"customerName":"Buyer"}`,
+		`{"dealId":"` + validID + `","createCustomer":false,"customerName":"Buyer"}`,
+		`{"dealId":"` + validID + `","createCustomer":true}`,
+		`{"dealId":"` + validID + `","customerId":"not-a-uuid"}`,
+		`{"dealId":"not-a-uuid","customerId":"` + validID + `"}`,
+	} {
+		if _, err := ParseConvertLeadInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("ParseConvertLeadInput accepted conflicting or incomplete mode %s", raw)
+		}
 	}
 }
 
@@ -331,10 +446,11 @@ func TestGoCRMDealsEnforceTenancyConversionAuditsAndReceiptReplay(t *testing.T) 
 		t.Fatalf("convertLead with foreign customer error=%v", err)
 	}
 	noCustomer := json.RawMessage(fmt.Sprintf(`{"dealId":%q}`, localDealID))
-	if _, err := executeCRMDealWithError(fx, convertLeadCapabilityID, noCustomer, "crm-deal-convert-without-customer"); err == nil || !strings.Contains(err.Error(), "pass customerId") {
-		t.Fatalf("convertLead without a customer error=%v", err)
+	noCustomerResult, noCustomerErr := executeCRMDealWithError(fx, convertLeadCapabilityID, noCustomer, "crm-deal-convert-without-customer")
+	if noCustomerErr != nil || noCustomerResult.OK || !strings.Contains(noCustomerResult.Error, "choose either customerId or createCustomer with customerName") {
+		t.Fatalf("convertLead without a customer result=%+v error=%v", noCustomerResult, noCustomerErr)
 	}
-	converted := executeCRMDeal(t, fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true}`, localDealID)), "crm-deal-convert-create-customer")
+	converted := executeCRMDeal(t, fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true,"customerName":"Conversion prospect"}`, localDealID)), "crm-deal-convert-create-customer")
 	var convertOutput ConvertLeadOutput
 	if err := json.Unmarshal(converted.Data, &convertOutput); err != nil || !converted.OK || convertOutput.DealID != localDealID || !isUUID(convertOutput.CustomerID) || convertOutput.Stage != "qualified" {
 		t.Fatalf("convertLead result=%+v output=%+v err=%v", converted, convertOutput, err)
@@ -355,7 +471,7 @@ func TestGoCRMDealsEnforceTenancyConversionAuditsAndReceiptReplay(t *testing.T) 
 	}
 
 	namedCustomerDealID := seedCRMDeal(t, fx, fx.orgID, "Named buyer conversion", "lead", nil)
-	namedCustomerResult := executeCRMDeal(t, fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"customerName":"Converted buyer"}`, namedCustomerDealID)), "crm-deal-convert-named-customer")
+	namedCustomerResult := executeCRMDeal(t, fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true,"customerName":"Converted buyer"}`, namedCustomerDealID)), "crm-deal-convert-named-customer")
 	var namedCustomerOutput ConvertLeadOutput
 	if err := json.Unmarshal(namedCustomerResult.Data, &namedCustomerOutput); err != nil || !namedCustomerResult.OK || namedCustomerOutput.Stage != "qualified" {
 		t.Fatalf("convertLead named customer result=%+v output=%+v err=%v", namedCustomerResult, namedCustomerOutput, err)
@@ -371,7 +487,7 @@ func TestGoCRMDealsEnforceTenancyConversionAuditsAndReceiptReplay(t *testing.T) 
 	if _, err := executeCRMDealWithError(fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"customerId":%q}`, proposalID, localCustomerID)), "crm-deal-convert-nonlead"); err == nil || !strings.Contains(err.Error(), "only lead-stage deals convert") {
 		t.Fatalf("convertLead from proposal error=%v", err)
 	}
-	if _, err := executeCRMDealWithError(fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true}`, foreignDealID)), "crm-deal-convert-foreign-deal"); err == nil || err.Error() != "deal not found" {
+	if _, err := executeCRMDealWithError(fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true,"customerName":"Prospect"}`, foreignDealID)), "crm-deal-convert-foreign-deal"); err == nil || err.Error() != "deal not found" {
 		t.Fatalf("convertLead foreign deal error=%v, want deal not found", err)
 	}
 
@@ -428,8 +544,8 @@ func TestGoCRMDealsAgentWritesUseExistingApprovalPipeline(t *testing.T) {
 	if err := json.Unmarshal(result.Data, &output); err != nil || !result.OK || !isUUID(output.DealID) {
 		t.Fatalf("approved createDeal result=%+v output=%+v err=%v", result, output, err)
 	}
-	convertInput := json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true}`, output.DealID))
-	convertResult := executeCRMWriteWithActorApproval(t, fx, convertLeadCapabilityID, convertInput)
+	convertInput := json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true,"customerName":"Approval customer"}`, output.DealID))
+	convertResult := executeCRMWriteWithActorApproval(t, fx, convertLeadCapabilityID, convertInput, executorUUID(t))
 	if !convertResult.OK {
 		t.Fatalf("approved convertLead result=%+v", convertResult)
 	}
@@ -445,6 +561,124 @@ func TestGoCRMDealsAgentWritesUseExistingApprovalPipeline(t *testing.T) {
 		if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='approval.granted' AND capability_id=$2`, fx.orgID, capabilityID); got != 0 {
 			t.Errorf("%s approval grant events=%d, want legacy human re-execution behavior of zero", capabilityID, got)
 		}
+	}
+}
+
+func TestGoCRMLeadConversionUndoIsReceiptBoundSafeAndReversible(t *testing.T) {
+	fx := newExecutorFixture(t)
+
+	createdDealID := seedCRMDeal(t, fx, fx.orgID, "Undo created customer", "lead", nil)
+	conversionIntent := "crm-lead-convert-created-undo"
+	converted := executeCRMDeal(t, fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true,"customerName":"Undo created customer"}`, createdDealID)), conversionIntent)
+	var convertedOutput ConvertLeadOutput
+	if err := json.Unmarshal(converted.Data, &convertedOutput); err != nil || !converted.OK || convertedOutput.DealID != createdDealID || convertedOutput.Stage != "qualified" {
+		t.Fatalf("created conversion result=%+v output=%+v err=%v", converted, convertedOutput, err)
+	}
+	if string(converted.Data) != fmt.Sprintf(`{"dealId":%q,"customerId":%q,"conversionIntentId":%q,"stage":"qualified"}`, createdDealID, convertedOutput.CustomerID, conversionIntent) {
+		t.Fatalf("convertLead success DTO changed: %s", converted.Data)
+	}
+	var receiptEnvelope struct {
+		Version int             `json:"version"`
+		Result  json.RawMessage `json:"result"`
+		Inverse json.RawMessage `json:"inverse"`
+	}
+	var receiptData []byte
+	var receiptResult ConvertLeadOutput
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT data FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, fx.orgID, fx.orgID+":"+conversionIntent).Scan(&receiptData); err != nil || json.Unmarshal(receiptData, &receiptEnvelope) != nil || json.Unmarshal(receiptEnvelope.Result, &receiptResult) != nil || receiptEnvelope.Version != 1 || len(receiptEnvelope.Inverse) == 0 || receiptResult != convertedOutput {
+		t.Fatalf("conversion receipt envelope=%+v err=%v", receiptEnvelope, err)
+	}
+	undoPayload := json.RawMessage(fmt.Sprintf(`{"conversionIntentId":%q}`, conversionIntent))
+	undone := executeCRMDeal(t, fx, undoLeadConversionCapabilityID, undoPayload, "crm-lead-undo-created-customer")
+	var undoOutput UndoLeadConversionOutput
+	if err := json.Unmarshal(undone.Data, &undoOutput); err != nil || !undone.OK || !undoOutput.Undone || undoOutput.DealID != createdDealID || !undoOutput.CustomerDeleted {
+		t.Fatalf("created conversion undo=%+v output=%+v err=%v", undone, undoOutput, err)
+	}
+	undoReplay := executeCRMDeal(t, fx, undoLeadConversionCapabilityID, undoPayload, "crm-lead-undo-created-customer")
+	var replayedUndoOutput UndoLeadConversionOutput
+	if err := json.Unmarshal(undoReplay.Data, &replayedUndoOutput); err != nil || !undoReplay.OK || !undoReplay.Replayed || replayedUndoOutput != undoOutput {
+		t.Fatalf("undo replay=%+v, want exact output receipt", undoReplay)
+	}
+	var stage string
+	var restoredCustomerID *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT stage,customer_id::text FROM deals WHERE id=$1::uuid AND org_id=$2::uuid`, createdDealID, fx.orgID).Scan(&stage, &restoredCustomerID); err != nil || stage != "lead" || restoredCustomerID != nil {
+		t.Fatalf("restored deal=%q/%v err=%v, want lead with no customer", stage, restoredCustomerID, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM customers WHERE id=$1::uuid AND org_id=$2::uuid`, convertedOutput.CustomerID, fx.orgID); got != 0 {
+		t.Fatalf("undo left %d newly created customers", got)
+	}
+	reapplied := executeCRMDeal(t, fx, reapplyLeadConversionCapabilityID, json.RawMessage(`{"undoIntentId":"crm-lead-undo-created-customer"}`), "crm-lead-reapply-created-customer")
+	var reapplyOutput ReapplyLeadConversionOutput
+	if err := json.Unmarshal(reapplied.Data, &reapplyOutput); err != nil || !reapplied.OK || !reapplyOutput.Reapplied || reapplyOutput.DealID != createdDealID || reapplyOutput.CustomerID != convertedOutput.CustomerID || reapplyOutput.ConversionIntentID != conversionIntent {
+		t.Fatalf("created conversion reapply=%+v output=%+v err=%v", reapplied, reapplyOutput, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM customers WHERE id=$1::uuid AND org_id=$2::uuid`, convertedOutput.CustomerID, fx.orgID); got != 1 {
+		t.Fatalf("reapply did not restore created customer, rows=%d", got)
+	}
+	if result := executeCRMDeal(t, fx, undoLeadConversionCapabilityID, undoPayload, "crm-lead-undo-after-reapply"); !result.OK {
+		t.Fatalf("conversion after reapply could not be undone: %+v", result)
+	}
+
+	previousCustomerID := seedCRMDealCustomer(t, fx, fx.orgID, "Previous account")
+	attachedCustomerID := seedCRMDealCustomer(t, fx, fx.orgID, "Attached account")
+	attachDealID := seedCRMDeal(t, fx, fx.orgID, "Undo attached customer", "lead", &previousCustomerID)
+	attachIntent := "crm-lead-convert-attach-undo"
+	if result := executeCRMDeal(t, fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"customerId":%q}`, attachDealID, attachedCustomerID)), attachIntent); !result.OK {
+		t.Fatalf("attach-existing conversion=%+v", result)
+	}
+	attachUndo := executeCRMDeal(t, fx, undoLeadConversionCapabilityID, json.RawMessage(fmt.Sprintf(`{"conversionIntentId":%q}`, attachIntent)), "crm-lead-undo-attached-customer")
+	if !attachUndo.OK {
+		t.Fatalf("attach-existing undo=%+v", attachUndo)
+	}
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT stage,customer_id::text FROM deals WHERE id=$1::uuid AND org_id=$2::uuid`, attachDealID, fx.orgID).Scan(&stage, &restoredCustomerID); err != nil || stage != "lead" || restoredCustomerID == nil || *restoredCustomerID != previousCustomerID {
+		t.Fatalf("attach-existing restored deal=%q/%v err=%v", stage, restoredCustomerID, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM customers WHERE id=$1::uuid AND org_id=$2::uuid`, attachedCustomerID, fx.orgID); got != 1 {
+		t.Fatalf("undo deleted pre-existing attached customer, remaining=%d", got)
+	}
+
+	changedDealID := seedCRMDeal(t, fx, fx.orgID, "Changed conversion", "lead", nil)
+	changedIntent := "crm-lead-convert-stale-undo"
+	changed := executeCRMDeal(t, fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true,"customerName":"Changed conversion"}`, changedDealID)), changedIntent)
+	var changedOutput ConvertLeadOutput
+	if err := json.Unmarshal(changed.Data, &changedOutput); err != nil {
+		t.Fatal(err)
+	}
+	if result := executeCRMDeal(t, fx, moveDealStageCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"stage":"proposal"}`, changedDealID)), "crm-lead-stage-after-convert"); !result.OK {
+		t.Fatalf("move converted deal=%+v", result)
+	}
+	if _, err := executeCRMDealWithError(fx, undoLeadConversionCapabilityID, json.RawMessage(fmt.Sprintf(`{"conversionIntentId":%q}`, changedIntent)), "crm-lead-undo-stale"); err == nil || !strings.Contains(err.Error(), "changed since conversion") {
+		t.Fatalf("stale undo error=%v, want fail closed", err)
+	}
+	if got := fx.count(`SELECT count(*) FROM customers WHERE id=$1::uuid AND org_id=$2::uuid`, changedOutput.CustomerID, fx.orgID); got != 1 {
+		t.Fatalf("stale undo deleted customer, remaining=%d", got)
+	}
+
+	referencedDealID := seedCRMDeal(t, fx, fx.orgID, "Referenced conversion", "lead", nil)
+	referenceIntent := "crm-lead-convert-referenced-undo"
+	referenced := executeCRMDeal(t, fx, convertLeadCapabilityID, json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true,"customerName":"Referenced conversion"}`, referencedDealID)), referenceIntent)
+	var referencedOutput ConvertLeadOutput
+	if err := json.Unmarshal(referenced.Data, &referencedOutput); err != nil {
+		t.Fatal(err)
+	}
+	seedCRMDeal(t, fx, fx.orgID, "Second use of created customer", "lead", &referencedOutput.CustomerID)
+	if _, err := executeCRMDealWithError(fx, undoLeadConversionCapabilityID, json.RawMessage(fmt.Sprintf(`{"conversionIntentId":%q}`, referenceIntent)), "crm-lead-undo-referenced"); err == nil || !strings.Contains(err.Error(), "acquired references") {
+		t.Fatalf("referenced customer undo error=%v, want fail closed", err)
+	}
+	if got := fx.count(`SELECT count(*) FROM customers WHERE id=$1::uuid AND org_id=$2::uuid`, referencedOutput.CustomerID, fx.orgID); got != 1 {
+		t.Fatalf("referenced undo deleted customer, remaining=%d", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM deals WHERE id=$1::uuid AND org_id=$2::uuid AND stage='qualified' AND customer_id=$3::uuid`, referencedDealID, fx.orgID, referencedOutput.CustomerID); got != 1 {
+		t.Fatalf("failed referenced undo did not roll back deal conversion, rows=%d", got)
+	}
+
+	foreignUndo := json.RawMessage(fmt.Sprintf(`{"conversionIntentId":%q}`, referenceIntent))
+	claims := crmWriteClaims(fx, undoLeadConversionCapabilityID, foreignUndo, "human", "", "crm-lead-undo-cross-org")
+	claims.OrganizationID = fx.otherOrgID
+	if result, err := fx.executor.Execute(fx.ctx, claims, undoLeadConversionCapabilityID, foreignUndo); err == nil && result.OK {
+		t.Fatalf("cross-organization undo unexpectedly succeeded: %+v", result)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id IN ($2,$3,$4)`, fx.orgID, convertLeadCapabilityID, undoLeadConversionCapabilityID, reapplyLeadConversionCapabilityID); got < 8 {
+		t.Fatalf("successful conversion, undo, and reapply audit events=%d, want at least eight", got)
 	}
 }
 
