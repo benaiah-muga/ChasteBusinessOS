@@ -390,6 +390,14 @@
       "source": "apps/api/internal/httpapi/pos_customers_session.go",
       "owner": "go",
       "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/pos/shift-summary",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/pos_shift_summary_session.go",
+      "owner": "go",
+      "parity": "verified"
     }
   ]
 }

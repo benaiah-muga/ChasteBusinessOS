@@ -2729,3 +2729,7 @@ new owners and the manifest shows zero legacy runtime paths.
      scheduler retries, one linked job, invoice posting, schedule advancement,
      governed receipt, and system audit. The TypeScript claimant test passed
      all 19 cases, and the jobs-role metadata-boundary test passed all 10.
+
+262. (Implemented and verified) Record `POST /api/pos/shift-summary` as a
+     Go-only route in the generated ownership manifest. Its exact Go mount and
+     Vite proxy are covered by route ownership, handler, router, and proxy tests.

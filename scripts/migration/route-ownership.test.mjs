@@ -38,3 +38,17 @@ test("Go-only POS customer lookup has exact generated ownership", () => {
     }],
   );
 });
+
+test("Go-only POS shift summary has exact generated ownership", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.path === "/api/pos/shift-summary"),
+    [{
+      kind: "api",
+      path: "/api/pos/shift-summary",
+      method: "POST",
+      source: "apps/api/internal/httpapi/pos_shift_summary_session.go",
+      owner: "go",
+      parity: "verified",
+    }],
+  );
+});
