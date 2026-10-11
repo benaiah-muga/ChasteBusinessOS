@@ -1030,7 +1030,7 @@
       "path": "/api/routines",
       "method": "GET",
       "source": "apps/web/src/app/api/routines/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1038,7 +1038,7 @@
       "path": "/api/routines",
       "method": "POST",
       "source": "apps/web/src/app/api/routines/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {

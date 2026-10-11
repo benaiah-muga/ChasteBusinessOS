@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   allowsPendingAuthOwner,
   allowsPendingGoOrgPersonaOwner,
+  allowsPendingGoRoutineCollectionOwner,
 } from "./route-ownership-policy.mjs";
 
 const manifest = JSON.parse(readFileSync("docs/migration/route-ownership.json", "utf8"));
@@ -46,6 +47,23 @@ test("pending Go persona ownership is limited to exact organization PUT and PATC
   }
 });
 
+test("pending Go routine ownership is limited to exact collection GET and POST overrides", () => {
+  for (const method of ["GET", "POST"]) {
+    assert.equal(allowsPendingGoRoutineCollectionOwner("api", "/api/routines", method, "go", "pending"), true);
+  }
+
+  for (const candidate of [
+    ["page", "/api/routines", "GET", "go", "pending"],
+    ["api", "/api/routines/extra", "GET", "go", "pending"],
+    ["api", "/api/routines", "PUT", "go", "pending"],
+    ["api", "/api/routines", "DELETE", "go", "pending"],
+    ["api", "/api/routines", "POST", "legacy", "pending"],
+    ["api", "/api/routines", "GET", "go", "verified"],
+  ]) {
+    assert.equal(allowsPendingGoRoutineCollectionOwner(...candidate), false, JSON.stringify(candidate));
+  }
+});
+
 test("generated Go route declarations still require verified parity", () => {
   assert.ok(overrides.goRoutes.length > 0);
   assert.ok(overrides.goRoutes.every((route) => route.kind === "api" && route.owner === "go" && route.parity === "verified"));
@@ -59,6 +77,18 @@ test("organization persona manifest ownership stays Go with parity pending", () 
     [
       { method: "PUT", owner: "go", parity: "pending" },
       { method: "PATCH", owner: "go", parity: "pending" },
+    ],
+  );
+});
+
+test("routine collection manifest ownership stays Go with parity pending", () => {
+  assert.deepEqual(
+    manifest.entries
+      .filter((entry) => entry.kind === "api" && entry.path === "/api/routines")
+      .map(({ method, owner, parity }) => ({ method, owner, parity })),
+    [
+      { method: "GET", owner: "go", parity: "pending" },
+      { method: "POST", owner: "go", parity: "pending" },
     ],
   );
 });

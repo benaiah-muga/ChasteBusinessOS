@@ -12,3 +12,11 @@ export function allowsPendingGoOrgPersonaOwner(kind, path, method, owner, parity
     && owner === "go"
     && parity === "pending";
 }
+
+export function allowsPendingGoRoutineCollectionOwner(kind, path, method, owner, parity) {
+  return kind === "api"
+    && path === "/api/routines"
+    && ["GET", "POST"].includes(method)
+    && owner === "go"
+    && parity === "pending";
+}

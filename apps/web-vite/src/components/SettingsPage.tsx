@@ -35,6 +35,7 @@ import {
 } from "../api/settings";
 import { fetchOrganizations } from "../api/organizations";
 import { legacyUrl } from "../legacy";
+import { parseScheduleText } from "@chaste/erp-core";
 import "./SettingsPage.css";
 
 /* ------------------------------------------------------------- styling ---- */
@@ -1401,6 +1402,7 @@ function RoutinesTab() {
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  const scheduleSupported = parseScheduleText(scheduleText).ok;
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -1478,7 +1480,8 @@ function RoutinesTab() {
         </label>
         <label style={ui.label}>
           When
-          <input value={scheduleText} onChange={(event) => setScheduleText(event.currentTarget.value)} placeholder="When, e.g. weekdays at 9am" aria-label="Schedule in plain language" style={ui.field} />
+          <input value={scheduleText} onChange={(event) => setScheduleText(event.currentTarget.value)} placeholder="When, e.g. weekdays at 9am" aria-label="Schedule in plain language" aria-describedby="routine-schedule-hint" aria-invalid={scheduleText.trim() !== "" && !scheduleSupported} style={ui.field} />
+          <span id="routine-schedule-hint" style={ui.hint}>Use a supported schedule such as weekdays at 9am, daily at 08:00, every 30 minutes, or weekly on monday at 09:00.</span>
         </label>
         <label style={ui.label}>
           Instructions
@@ -1499,7 +1502,7 @@ function RoutinesTab() {
           <button
             type="button"
             onClick={() => void create()}
-            disabled={creating || !name.trim() || !scheduleText.trim() || !prompt.trim()}
+            disabled={creating || !name.trim() || !scheduleText.trim() || !scheduleSupported || !prompt.trim()}
             style={ui.primary}
           >
             {creating ? "Creating…" : "Create routine"}

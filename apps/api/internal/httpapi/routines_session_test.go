@@ -169,16 +169,16 @@ func TestRoutinesSessionHandlerRejectsInvalidWritesBeforeExecution(t *testing.T)
 
 func TestMountGoRoutinesRouteFallsThroughUnsupportedMethodsAndPaths(t *testing.T) {
 	goRoute := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("go")) })
-	legacy := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("legacy")) })
-	handler := MountGoRoutinesRoute(legacy, goRoute)
+	base := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("base")) })
+	handler := MountGoRoutinesRoute(base, goRoute)
 	for _, tc := range []struct {
 		method, path, want string
 	}{
 		{http.MethodGet, "/api/routines", "go"},
 		{http.MethodPost, "/api/routines", "go"},
-		{http.MethodDelete, "/api/routines", "legacy"},
-		{http.MethodHead, "/api/routines", "legacy"},
-		{http.MethodPost, "/api/routines/webhook/token", "legacy"},
+		{http.MethodDelete, "/api/routines", "base"},
+		{http.MethodHead, "/api/routines", "base"},
+		{http.MethodPost, "/api/routines/webhook/token", "base"},
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(tc.method, tc.path, nil))

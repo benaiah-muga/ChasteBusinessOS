@@ -72,6 +72,10 @@ func goProjectsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goRoutinesRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goSalesOrdersRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -297,7 +301,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go projects route mounted", "path", "/api/projects")
 	}
 	var routinesRoute http.Handler
-	if os.Getenv("GO_ROUTINES_ROUTE") == "1" {
+	if goRoutinesRouteEnabledFromEnv(os.Getenv("GO_ROUTINES_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

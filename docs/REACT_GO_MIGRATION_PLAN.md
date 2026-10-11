@@ -2883,3 +2883,19 @@ new owners and the manifest shows zero legacy runtime paths.
      returned 401 for its seeded session, so it did not verify a legacy
      response. Complete that differential and the authenticated browser
      read/save proof before closing those runtime gates.
+
+279. (Implemented; Go session handler, runtime-role HTTP proof, Vite form
+     validation, and exact proxy proof added; authenticated browser proof and
+     live legacy differential proof remain pending) Route exact `GET` and
+     `POST /api/routines` requests from Vite Settings through Go by default.
+     Preserve fallback ownership for unsupported methods and suffix paths, in
+     particular `/api/routines/webhook/:token`. Restrict Vite schedule entry to
+     phrases accepted by the Vite deterministic parser because Go does not
+     run the legacy model refinement fallback. Go remains authoritative and
+     validates every submitted schedule; the Vite guard is pre-submit
+     feedback. The runtime HTTP proof resolves
+     a signed session against the app database role, scopes reads and writes
+     to the active organization, and verifies a created routine by readback.
+     The manifest records both collection methods as Go-owned with parity
+     pending under a narrow policy exception. Webhook handling and worker
+     execution remain separate migration items.

@@ -253,23 +253,18 @@ describe("Vite settings page", () => {
     await waitFor(() => expect((screen.getByLabelText("Routine name") as HTMLInputElement).value).toBe(""));
   }, 20_000);
 
-  it("shows the Go routine schedule validation guidance for unsupported phrases", async () => {
-    const guidance = "could not parse the schedule: try 'twice a day', 'each morning at 8', 'every 30 minutes', 'daily at 08:00', 'weekdays at 9am' or 'weekly on monday at 09:00'";
-    routedFetch({
-      "/api/routines": (init) => (init?.method === "POST"
-        ? jsonResponse({ error: guidance }, 422)
-        : jsonResponse({ routines: [] })),
-    });
+  it("prevents unsupported schedule phrases from reaching the Go routines API", async () => {
+    const fetchMock = routedFetch({ "/api/routines": () => jsonResponse({ routines: [] }) });
     render(<SettingsPage />);
     fireEvent.click(screen.getByRole("tab", { name: "Routines" }));
     await screen.findByText("No routines yet. Create one above, or start with the daily heartbeat.");
     fireEvent.change(screen.getByLabelText("Routine name"), { target: { value: "Ad hoc check" } });
     fireEvent.change(screen.getByLabelText("Schedule in plain language"), { target: { value: "a few times a day" } });
     fireEvent.change(screen.getByLabelText("Routine instructions"), { target: { value: "Check overdue invoices" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
 
-    expect((await screen.findByRole("alert")).textContent).toBe(guidance);
-    expect(screen.queryByText("Routine created.")).toBeNull();
+    expect(screen.getByText(/Use a supported schedule such as weekdays at 9am/)).not.toBeNull();
+    expect((screen.getByRole("button", { name: "Create routine" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(postsTo(fetchMock, "/api/routines")).toHaveLength(0);
   }, 20_000);
 
   it("shows runtime compositions as metadata only and explains a refused inspection", async () => {

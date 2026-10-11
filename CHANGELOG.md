@@ -13,6 +13,15 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Settings now sends exact `GET` and `POST /api/routines` collection
+  requests to Go by default. Routine schedules in the Vite form are checked
+  against the shared deterministic parser before submission, so unsupported
+  natural-language schedules cannot reach a Go handler that cannot refine
+  them. Go remains authoritative and applies its own schedule validation; the
+  Vite guard provides pre-submit feedback. The webhook endpoint and worker
+  lifecycle remain separately owned.
+  Authenticated browser proof and live legacy differential proof remain pending.
+
 - Vite now sends exact `PUT` and `PATCH /api/org` persona settings requests to
   Go alongside organization list and switch requests. Go applies an 8,000
   UTF-16-code-unit limit with a bounded 64 KiB JSON body. Authenticated

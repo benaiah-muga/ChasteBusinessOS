@@ -152,7 +152,7 @@ func MountGoSCIMTokenManagementRoute(base, route http.Handler) http.Handler {
 }
 
 // MountGoRoutinesRoute mounts only the routine collection paths supported by
-// the Go handler; other methods and subpaths continue to the legacy route.
+// the Go handler; other methods and subpaths fall through to the base handler.
 func MountGoRoutinesRoute(base, route http.Handler) http.Handler {
 	if route == nil {
 		return base

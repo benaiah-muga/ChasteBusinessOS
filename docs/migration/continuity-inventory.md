@@ -248,6 +248,19 @@ forged nonmember target. DELETE and suffix paths remain on their existing owner.
 The Vite selector has been removed; `GO_ORG_ROUTE=0` disables the Go handler
 without restoring legacy routing.
 
+Vite Settings sends exact GET and POST `/api/routines` collection calls to Go
+by default. Set `CHASTE_GO_ROUTINES_ROUTE=0` to route Vite through the legacy
+app; set `GO_ROUTINES_ROUTE=0` as well to unmount the Go handler. The
+collection handler resolves the signed session and dispatches mutations
+through the governed capability executor. Vite uses its deterministic parser
+for pre-submit feedback because the Go path does not use the legacy model
+refinement fallback. Go remains authoritative and validates every submitted
+schedule. Runtime-role HTTP coverage verifies active organization scoping for
+list, create, and readback. The manifest records
+these exact methods with parity pending until live legacy differential and
+authenticated browser proof complete. Webhook token delivery and worker
+execution retain their existing owners and lifecycle.
+
 ## Required parity evidence before cutover
 
 1. A cloned-database comparison proves table shape and all existing rows remain

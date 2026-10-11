@@ -836,8 +836,9 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.myWork).toBe(true);
     expect(flags.dashboard).toBe(true);
     expect(flags.setup).toBe(true);
+    expect(flags.routines).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -857,7 +858,8 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/setup/extra")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/dashboard")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/dashboard?range=year")).toBe(true);
-    expect(isGoRouteRequest(flags, "GET", "/api/routines")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/routines")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/routines")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/support/public")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/scim/v2/Users")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/scim/v2/Users")).toBe(false);
@@ -1306,11 +1308,14 @@ describe("Vite Go route proxy selection", () => {
   });
 
   it("keeps unsupported routine methods and subpaths on the legacy route", () => {
-    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ROUTINES_ROUTE: "1" });
+    const flags = goRouteProxyFlagsFromEnv({});
+    expect(isGoRouteRequest(flags, "GET", "/api/routines")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/routines")).toBe(true);
     expect(isGoRouteRequest(flags, "DELETE", "/api/routines")).toBe(false);
     expect(isGoRouteRequest(flags, "HEAD", "/api/routines")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/routines/webhook/secret-token")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/routines/unknown")).toBe(false);
+    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_ROUTINES_ROUTE: "0" }), "GET", "/api/routines")).toBe(false);
   });
 
   it("keeps unsupported ledger methods and subpaths on the legacy route", () => {
