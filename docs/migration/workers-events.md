@@ -1,9 +1,9 @@
 # Durable worker and event inventory
 
-This inventory records the current TypeScript behavior for the React and Go
-migration. It describes observed source behavior, including existing gaps, so
-the Go worker can be compared against the same contract. No worker or data
-ownership is changed by this document.
+This inventory records observed TypeScript behavior and the current Go worker
+ownership proofs for the React and Go migration. It describes source behavior,
+including existing gaps, so the Go worker can be compared against the same
+contract.
 
 The `graft` executable was unavailable in this checkout. I read the checked-in
 graph summaries for `scripts/worker.ts`, jobs, outbox, routines, session events,
@@ -317,8 +317,12 @@ webhook adapter `apps/web/src/app/api/routines/webhook/[token]/route.ts:6-26`.
   `modules/documents/src/m12.test.ts:40-65` covers metadata and append-only
   document versions, not queue processing. `scripts/demo-m12.ts:114-142`
   covers document metadata/versions/signals by direct capability calls and
-  does not enqueue parsing. A successful async uploaded-file OCR worker proof
-  was not found.
+  does not enqueue parsing. `apps/api/internal/jobs/document_ocr_worker_integration_test.go`
+  proves that an uploaded-file parse job reaches an injected deterministic OCR
+  parser, writes parsed document state, one derived memory chunk, and one action
+  receipt under the queued organization's scope. It uses the real Go jobs
+  worker and capability executor with a mock parser, so it makes no provider
+  network call.
 - **Go parity:** Keep existing document rows and files/text, queued/failed/
   parsed status transitions, OCR provider choice/input/output, deterministic
   chunk replacement and embeddings, org filter, `documents.write` permission,
@@ -331,8 +335,10 @@ webhook adapter `apps/web/src/app/api/routines/webhook/[token]/route.ts:6-26`.
   `documents.write`; the TypeScript queue claimant skips this capability.
   `TestGoCapabilityJobWorkerMatchesLegacy` proves successful asynchronous
   parsing of pasted text through the Go queue, including the parsed document,
-  replacement memory chunk, and action receipt. Uploaded-file OCR remains
-  outside that integration proof.
+  replacement memory chunk, and action receipt. The separate
+  `TestGoDocumentUploadOCRJobParsesThroughConfiguredProvider` database-backed
+  proof covers uploaded files through the configured parser path without a
+  live provider request.
 
 ## Other scheduled capability candidate
 

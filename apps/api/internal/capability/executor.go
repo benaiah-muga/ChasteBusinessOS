@@ -587,6 +587,18 @@ func NewExecutor(pool dbx.Beginner, webhookURL, smtpHost, smtpTo string) *Execut
 	return &Executor{pool: pool, webhookURL: webhookURL, smtpHost: smtpHost, smtpTo: smtpTo, documentsOCR: newDocumentsImageParserFromEnvironment()}
 }
 
+// NewExecutorWithDocumentImageParser configures the document OCR provider
+// explicitly while retaining the same governed capability execution path.
+func NewExecutorWithDocumentImageParser(
+	pool dbx.Beginner,
+	webhookURL, smtpHost, smtpTo string,
+	parser DocumentImageParser,
+) *Executor {
+	executor := NewExecutor(pool, webhookURL, smtpHost, smtpTo)
+	executor.documentsOCR = parser
+	return executor
+}
+
 func (e *Executor) Execute(
 	ctx context.Context,
 	claims authbridge.CapabilityClaims,

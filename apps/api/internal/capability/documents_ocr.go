@@ -19,9 +19,14 @@ import (
 
 const documentsOCRPrompt = "</s><s><predict_bbox><predict_classes><output_markdown><predict_no_text_in_pic>"
 
-type documentsImageParser interface {
+// DocumentImageParser converts an uploaded document image into Markdown.
+// Implementations are injected into Executor when the default environment
+// configured provider is not appropriate for the runtime.
+type DocumentImageParser interface {
 	ParseDocumentImage(context.Context, string, []byte) (string, error)
 }
+
+type documentsImageParser = DocumentImageParser
 
 type documentsOCRLookup func(context.Context, string) ([]net.IP, error)
 

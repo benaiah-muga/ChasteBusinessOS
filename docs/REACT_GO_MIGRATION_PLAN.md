@@ -274,11 +274,14 @@ workers move: marketplace reads return unverified statuses and installer-org
 IDs, and plugin verification lacks the capability permission check; creating a
 webhook routine exposes its bearer token in the model tool result; the SCIM
 item-route expiry and throttling behavior needs a direct proof; no general
-production durable-run dispatcher or outbox reconciliation endpoint was found;
-and async OCR has no successful worker proof. These are recorded in the
-integration and worker inventories. Preserve current behavior only after the
-owner accepts a documented risk or defines a versioned correction, then add
-the resulting decision to the applicable parity gate.
+production durable-run dispatcher or outbox reconciliation endpoint was found.
+The earlier async OCR gap is now covered by the database-backed Go uploaded-file
+worker proof in `apps/api/internal/jobs/document_ocr_worker_integration_test.go`,
+which uses a deterministic parser and makes no provider request. The other
+open items remain recorded in the integration and worker inventories. Preserve
+current behavior only after the owner accepts a documented risk or defines a
+versioned correction, then add the resulting decision to the applicable parity
+gate.
 
 The CRM merge review found that `crm.restoreCustomerMerge` accepts
 caller-provided snapshots and checks only that the referenced customer rows
