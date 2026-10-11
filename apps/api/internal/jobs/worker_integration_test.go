@@ -1159,6 +1159,9 @@ func TestCRMTaskJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
 	if doneAt == nil {
 		t.Fatal("system completeTask left done_at null")
 	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+completeID); got != 1 {
+		t.Fatalf("completeTask system receipts=%d, want one", got)
+	}
 	if got := countJobsTestRows(t, ctx, owner, `
 		SELECT count(*) FROM ledger_events
 		WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND actor_id IS NULL AND session_id IS NULL

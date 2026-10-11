@@ -2663,9 +2663,19 @@ new owners and the manifest shows zero legacy runtime paths.
 255. (Implemented and verified) Make the Go jobs worker the sole owner of
      `crm.createTask` jobs. The Go capability executor and worker RLS policy
      already support the operation; the TypeScript claimant excludes this
-     type. `crm.completeTask`, `crm.updateTaskDetails`, and
-     `crm.restoreTaskDetails` remain eligible for both workers pending their
-     explicit cutover. The Go database-backed CRM task worker test passed,
+     type. At that point, `crm.completeTask`, `crm.updateTaskDetails`, and
+     `crm.restoreTaskDetails` remained eligible for both workers; item 256
+     completes their cutover. The Go database-backed CRM task worker test passed,
      proving task creation and action receipt; the focused TypeScript jobs
      suite passed all 7 tests, including that the legacy claimant skips the
      row without changing its status or attempts.
+
+256. (Implemented and verified) Make the Go jobs worker the sole owner of
+     `crm.completeTask`, `crm.updateTaskDetails`, and
+     `crm.restoreTaskDetails`, completing the CRM task job family cutover
+     started in item 255. The TypeScript claimant excludes all three while
+     other CRM capability job types remain unchanged. The Go database-backed
+     CRM task worker test passed for create, update, restore, and completion,
+     including completion state, receipt, and system audit. The focused
+     TypeScript jobs suite passed all 10 tests, including skip checks for all
+     four Go-owned CRM task types.

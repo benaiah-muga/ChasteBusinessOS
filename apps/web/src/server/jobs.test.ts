@@ -115,6 +115,27 @@ describe("capability job queue", () => {
     expect(row!.attempts).toBe(0);
   });
 
+  it.each(["crm.completeTask", "crm.updateTaskDetails", "crm.restoreTaskDetails"] as const)(
+    "leaves %s jobs for the Go worker",
+    async (type) => {
+      const jobId = await enqueueCapabilityJob(db, {
+        orgId,
+        type,
+        payload: {},
+      });
+
+      await pg.db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT id FROM jobs WHERE id <> ${jobId}::uuid FOR UPDATE`);
+        const claim = await claimJob(db, `legacy-worker-${type}-ownership-test`, 30_000, new Date());
+        expect(claim).toBeNull();
+      });
+
+      const [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      expect(row!.status).toBe("pending");
+      expect(row!.attempts).toBe(0);
+    },
+  );
+
   it("returns false when the queue is empty", async () => {
     // Drain defensively in case any other pending job exists globally.
     for (let i = 0; i < 10; i += 1) await processOneJob(db, logger);

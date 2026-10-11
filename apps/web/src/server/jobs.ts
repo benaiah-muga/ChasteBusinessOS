@@ -117,7 +117,13 @@ export async function claimJob(
       WHERE (
         (status = 'pending' AND attempts < max_attempts AND available_at <= ${now.toISOString()}::timestamptz)
         OR (status = 'processing' AND lease_expires_at <= ${now.toISOString()}::timestamptz AND attempts < max_attempts)
-      ) AND type NOT IN ('documents.parseDocument', 'crm.createTask')
+      ) AND type NOT IN (
+        'documents.parseDocument',
+        'crm.createTask',
+        'crm.completeTask',
+        'crm.updateTaskDetails',
+        'crm.restoreTaskDetails'
+      )
       ORDER BY available_at, created_at
       LIMIT 1
       FOR UPDATE SKIP LOCKED
