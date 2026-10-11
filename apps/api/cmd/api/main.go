@@ -112,6 +112,10 @@ func goOnboardingRouteEnabledFromEnv(value string) bool {
 	return value == "1"
 }
 
+func goOrgRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goPortalInvoiceRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -161,11 +165,10 @@ func run(logger *slog.Logger) error {
 	}
 
 	// The organization route resolves the browser session itself instead of
-	// trusting an assertion minted by the legacy app. It stays unmounted until
-	// GO_ORG_ROUTE=1, so the legacy app keeps serving /api/org until the parity
-	// gate has proven the two agree.
+	// trusting an assertion minted by the legacy app. It is mounted by default;
+	// GO_ORG_ROUTE=0 disables the Go handler.
 	var orgRoute http.Handler
-	if os.Getenv("GO_ORG_ROUTE") == "1" {
+	if goOrgRouteEnabledFromEnv(os.Getenv("GO_ORG_ROUTE")) {
 		resolver, err := getSessionResolver()
 		if err != nil {
 			return err

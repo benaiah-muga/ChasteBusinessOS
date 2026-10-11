@@ -538,10 +538,9 @@ func newRouterWithApprovalInbox(pinger Pinger, logger *slog.Logger, bridgeSecret
 	}
 	mux.Handle("POST /__go/approval/decide", NewGoApprovalDecisionHandler(bridgeSecret, approvalDecider, logger))
 	mux.Handle("POST /__go/approvals/inbox", NewGoApprovalInboxHandler(bridgeSecret, approvalInboxReader, logger))
-	// The organization route is registered only when the caller supplies it. It
-	// resolves the browser session itself rather than trusting an assertion, so
-	// it is opt-in: until the deployment provides a session resolver the route
-	// stays unmounted and the legacy app keeps serving it.
+	// The organization route is registered when the caller supplies it. The API
+	// server mounts it by default with a direct session resolver; a disabled or
+	// unavailable route does not fall back to the legacy app.
 	if orgRoute != nil {
 		mux.Handle("/api/org", orgRoute)
 	}

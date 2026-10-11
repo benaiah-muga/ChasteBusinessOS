@@ -48,15 +48,17 @@ into Go after the signed session bridge, while the default route owner remains
 legacy until service routing is wired. The ledger read has its own short-lived
 `go.ledger.read` assertion and Go PostgreSQL reader; development shadow mode
 still returns the legacy response, and `GO_LEDGER_READ=1` opts into Go without
-changing the route-ownership manifest. Organization switching now has a
-separate `go.org.switch` assertion and `GO_ORG_SWITCH=1` opt-in. Go verifies
-membership using the runtime database role and issues the existing HttpOnly
-active-organization cookie; the public `/api/org` method remains legacy-owned
-by default. A parallel React 19 and Vite client now builds as static assets and
+changing the route-ownership manifest. The active Vite organization list and
+switch requests use Go's session-authenticated `/api/org` handler, which
+verifies membership and issues the existing HttpOnly active-organization
+cookie. `GO_ORG_SWITCH` remains only for the legacy Next.js compatibility
+bridge. A parallel React 19 and Vite client now builds as static assets and
 proxies the Go health check in development.
 API-method, page, server-action, live capability, and exported database-table
 manifests are checked in and CI verifies them against the current source and
-runtime registry.
+runtime registry. The active Vite organization list and switch requests route
+directly to Go; the Go handler is mounted by default unless
+`GO_ORG_ROUTE=0`.
 Phase 2 has internal Go executors for `crm.createCustomer`,
 `crm.deactivateCustomer`, `crm.mergeCustomers`, `crm.restoreCustomerMerge`,
 `crm.importCustomers`, `crm.undoCustomerImport`,
@@ -104,8 +106,8 @@ the current CRM `write` capability, a matching `requires_approval_for: ['write']
 rule does not gate an otherwise permitted human in the TypeScript runtime; keep
 that behavior during the port rather than adding a Go-only approval gate.
 The Vite shell now includes the active-organization selector. It reads and
-switches through the existing `/api/org` route, which remains legacy-owned and
-continues to validate membership and set the HttpOnly cookie. Vite listens on
+switches through `/api/org`, which is served by Go and validates membership
+before setting the HttpOnly cookie. Vite listens on
 `localhost` so the browser can send the existing host-scoped session cookie
 across the port change. `CHASTE_LEGACY_WEB_ORIGIN` configures the development
 proxy when the legacy server is not on `http://localhost:3001`.
@@ -2656,12 +2658,14 @@ new owners and the manifest shows zero legacy runtime paths.
      200. The visible Marketing overview rendered without browser errors. The
      `/marketing` page is now Vite-owned in the generated route manifest.
 
-254. Proxy the organization switcher's `/api/org` GET and POST through the Go
-     handler when both `GO_ORG_ROUTE=1` and `CHASTE_GO_ORG_ROUTE=1` are set.
-     The proxy preserves cookies, Origin, request bodies, and response cookies,
-     and fails closed when Go is selected. Focused Vite tests cover method
-     selection and forwarding; Go handler tests cover GET and POST membership,
-     session, and cookie contracts. The authenticated onboarding journey
+254. (Implemented and runtime verified) Route the organization switcher's
+     `/api/org` GET and POST through Go unconditionally from Vite. The Go handler
+     is mounted by default unless `GO_ORG_ROUTE=0`; Vite has no rollback
+     selector. The proxy preserves cookies, Origin, request bodies, and response
+     cookies, and unsupported methods and suffix paths retain their current
+     owner. Focused Vite tests cover exact method selection and forwarding; Go
+     handler tests cover GET and POST membership, session, and cookie contracts.
+     The authenticated onboarding journey
      completed with Go `POST /api/onboarding` and observed Go `GET /api/org`
      returning 200. An authenticated Vite browser POSTed the active member org
      to `/api/org`, received 200 `{ok:true}`, and the browser's HttpOnly
@@ -2669,8 +2673,9 @@ new owners and the manifest shows zero legacy runtime paths.
      that org ID. The browser HAR omits `Set-Cookie` response headers, so the
      cookie jar before and after the request is the browser evidence. A forged
      nonmember UUID returned 403. GET and POST are Go-owned in the generated
-     manifest; PUT and PATCH remain legacy-owned. `.env.example` enables both
-     route flags by default; set both flags to `0` for full legacy rollback.
+     manifest; PUT, PATCH, DELETE, and suffix paths remain on their existing
+     owner. The Go handler's unmount switch does not route requests back to the
+     legacy server.
      The temporary user, organization, and dependent rows were removed after
      verification.
 

@@ -824,8 +824,6 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_POS_READ_ROUTE", flag: "posRead", method: "GET", url: "/api/pos?status=open" },
   { env: "CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE", flag: "posShiftSummary", method: "POST", url: "/api/pos/shift-summary" },
   { env: "CHASTE_GO_ONBOARDING_ROUTE", flag: "onboarding", method: "POST", url: "/api/onboarding" },
-  { env: "CHASTE_GO_ORG_ROUTE", flag: "organization", method: "GET", url: "/api/org" },
-  { env: "CHASTE_GO_ORG_ROUTE", flag: "organization", method: "POST", url: "/api/org" },
 ];
 
 const supportedGoAuthRoutes: Array<{ method: string; url: string }> = [
@@ -1121,24 +1119,18 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(rollback, "PATCH", "/api/onboarding")).toBe(false);
   });
 
-  it("routes the organization switcher GET and POST only when explicitly enabled", () => {
-    const defaults = goRouteProxyFlagsFromEnv({});
-    expect(defaults.organization).toBe(false);
-    expect(isGoRouteRequest(defaults, "GET", "/api/org")).toBe(false);
-    expect(isGoRouteRequest(defaults, "POST", "/api/org")).toBe(false);
-
-    const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_ORG_ROUTE: "1" });
-    expect(isGoRouteRequest(enabled, "GET", "/api/org")).toBe(true);
-    expect(isGoRouteRequest(enabled, "GET", "/api/org?source=workspace")).toBe(true);
-    expect(isGoRouteRequest(enabled, "POST", "/api/org")).toBe(true);
-    expect(isGoRouteRequest(enabled, "PATCH", "/api/org")).toBe(false);
-    expect(isGoRouteRequest(enabled, "PUT", "/api/org")).toBe(false);
-    expect(isGoRouteRequest(enabled, "DELETE", "/api/org")).toBe(false);
-    expect(isGoRouteRequest(enabled, "GET", "/api/org/extra")).toBe(false);
-
-    const rollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_ORG_ROUTE: "0" });
-    expect(isGoRouteRequest(rollback, "GET", "/api/org")).toBe(false);
-    expect(isGoRouteRequest(rollback, "POST", "/api/org")).toBe(false);
+  it("routes only organization GET and POST to Go regardless of environment flags", () => {
+    for (const env of [{}, { CHASTE_GO_ORG_ROUTE: "1" }, { CHASTE_GO_ORG_ROUTE: "0" }]) {
+      const flags = goRouteProxyFlagsFromEnv(env);
+      expect(isGoRouteRequest(flags, "GET", "/api/org")).toBe(true);
+      expect(isGoRouteRequest(flags, "GET", "/api/org?source=workspace")).toBe(true);
+      expect(isGoRouteRequest(flags, "POST", "/api/org")).toBe(true);
+      expect(isGoRouteRequest(flags, "PATCH", "/api/org")).toBe(false);
+      expect(isGoRouteRequest(flags, "PUT", "/api/org")).toBe(false);
+      expect(isGoRouteRequest(flags, "DELETE", "/api/org")).toBe(false);
+      expect(isGoRouteRequest(flags, "GET", "/api/org/extra")).toBe(false);
+      expect(isGoRouteRequest(flags, "POST", "/api/org/extra")).toBe(false);
+    }
   });
 
   it("preserves browser cookies and origin for Go-owned organization requests", async () => {
@@ -1153,7 +1145,7 @@ describe("Vite Go route proxy selection", () => {
     const vite = await createViteServer({
       configFile: false,
       appType: "custom",
-      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_ORG_ROUTE: "1" }), goOrigin)],
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({}), goOrigin)],
       server: {
         host: "127.0.0.1",
         port: 0,
@@ -1209,6 +1201,15 @@ describe("Vite Go route proxy selection", () => {
       body: JSON.stringify({ orgId: "organization-id" }),
     });
     expect(switched.headers.get("set-cookie")).toContain("proxy-result=preserved");
+
+    for (const request of [
+      { method: "PATCH", path: "/api/org" },
+      { method: "GET", path: "/api/org/extra" },
+    ]) {
+      const response = await fetch(`http://127.0.0.1:${address.port}${request.path}`, { method: request.method });
+      const payload = await response.json() as { target: string; method: string; url: string };
+      expect(payload).toMatchObject({ target: "legacy", method: request.method, url: request.path });
+    }
   });
 
   it("allows the analytics read proxy to be disabled for rollback", () => {

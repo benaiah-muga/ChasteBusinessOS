@@ -26,7 +26,6 @@ export type GoRouteProxyFlags = {
   myWork: boolean;
   dashboard: boolean;
   setup: boolean;
-  organization: boolean;
   ledger: boolean;
   metrics: boolean;
   myWorkSummary: boolean;
@@ -381,7 +380,6 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     myWork: env.CHASTE_GO_MY_WORK_ROUTE !== "0",
     dashboard: env.CHASTE_GO_DASHBOARD_ROUTE !== "0",
     setup: env.CHASTE_GO_SETUP_ROUTE !== "0",
-    organization: env.CHASTE_GO_ORG_ROUTE === "1",
     ledger: env.CHASTE_GO_LEDGER_ROUTE === "1",
     metrics: env.CHASTE_GO_METRICS_ROUTE !== "0",
     myWorkSummary: env.CHASTE_GO_MY_WORK_SUMMARY_ROUTE === "1",
@@ -405,7 +403,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
 export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?: string): boolean {
   const path = url ?? "";
   if (flags.onboarding && ["GET", "POST", "PATCH"].includes(method ?? "") && /^\/api\/onboarding(?:\?.*)?$/.test(path)) return true;
-  if (flags.organization && ["GET", "POST"].includes(method ?? "") && /^\/api\/org(?:\?.*)?$/.test(path)) return true;
+  if (["GET", "POST"].includes(method ?? "") && /^\/api\/org(?:\?.*)?$/.test(path)) return true;
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsRead && method === "GET" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsWrite && method === "POST" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;

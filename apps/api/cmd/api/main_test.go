@@ -33,6 +33,21 @@ func TestGoOnboardingRouteEnabledFromEnvDefaultsOff(t *testing.T) {
 	}
 }
 
+func TestGoOrgRouteEnabledFromEnvDefaultsOnAndAllowsDisable(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: true},
+		{value: "1", want: true},
+		{value: "0", want: false},
+	} {
+		if got := goOrgRouteEnabledFromEnv(test.value); got != test.want {
+			t.Errorf("goOrgRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)
+		}
+	}
+}
+
 func TestGoPortalInvoiceRouteEnabledFromEnvDefaultsOnAndAllowsDisable(t *testing.T) {
 	for _, test := range []struct {
 		value string

@@ -169,20 +169,20 @@ response or cookie does not match the expected contract
 [`org-route.test.ts#L1-L321`](../../apps/web/src/server/org-route.test.ts#L1-L321),
 [`org_switch_test.go`](../../apps/api/internal/httpapi/org_switch_test.go),
 [`org_switch_integration_test.go`](../../apps/api/internal/httpapi/org_switch_integration_test.go)).
-The Vite org switcher now uses a Zod-validated client for that API and returns
-to `/` after a successful response. Preserve membership denial and cookie
-flags; the client never reads or writes the active-org cookie
+The Vite org switcher uses a Zod-validated client for the Go `/api/org` handler
+and returns to `/` after a successful response. Preserve membership denial and
+cookie flags; the client never reads or writes the active-org cookie
 ([`ActiveOrganization.tsx#L1-L112`](../../apps/web-vite/src/components/ActiveOrganization.tsx#L1-L112),
 [`organizations.ts#L1-L71`](../../apps/web-vite/src/api/organizations.ts#L1-L71)).
-In development, set `GO_ORG_ROUTE=1` and `CHASTE_GO_ORG_ROUTE=1` to proxy the
-organization switcher's GET and active-organization POST to Go. The proxy
-preserves the session cookie, Origin, body, and response cookies, and fails
-closed when Go is selected. GET and POST are Go-owned in the route manifest
-after focused handler and proxy tests and authenticated Vite browser checks.
+Vite always proxies the organization switcher's GET and active-organization
+POST to Go. The Go handler mounts by default; `GO_ORG_ROUTE=0` unmounts it and
+causes these requests to fail closed. The proxy preserves the session cookie,
+Origin, body, and response cookies. GET and POST are Go-owned in the route
+manifest after focused handler and proxy tests and authenticated Vite browser checks.
 The browser verified a 200 same-org POST and active-org cookie change, plus a
-403 for a forged nonmember target. PUT and PATCH remain legacy-owned. The
-checked-in environment enables both Go route flags by default; set both to `0`
-for full legacy rollback.
+403 for a forged nonmember target. PUT, PATCH, DELETE, and suffix paths remain
+on their existing owner. The Vite selector has been removed;
+`GO_ORG_ROUTE=0` disables the Go handler without restoring legacy routing.
 
 ## Required parity evidence before cutover
 
