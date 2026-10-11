@@ -295,10 +295,6 @@ export function goHrHiringFromEnv(env: Record<string, string | undefined>): bool
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_HR_HIRING === "1";
 }
 
-export function goHrOverviewReportFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_HR_OVERVIEW_REPORT_READS === "1";
-}
-
 export function goHrEmployeeWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_HR_EMPLOYEE_WRITES === "1";
 }

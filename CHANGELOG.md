@@ -30,6 +30,9 @@ The full v1 changelog is preserved at the bottom of this file.
   queries, to Go unconditionally. The Go handler mounts by default; set
   `GO_INVENTORY_READ_ROUTE=0` to unmount it. Inventory POSTs and nested paths
   keep their current owner.
+- Vite HR Overview now reads its `hr.report` capability through Go
+  unconditionally. Go errors fail closed; the other HR tabs keep their current
+  report routes.
 
 - Vite marketplace listing reads now execute `creator.listMarketplace` through
   the Go session capability API. Marketplace writes and signature verification
@@ -337,11 +340,9 @@ The full v1 changelog is preserved at the bottom of this file.
   default; set both `CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE` and
   `GO_MANUFACTURING_DEFINE_BOM_SLICE` to `0` for explicit legacy rollback.
 
-- Vite's HR Overview report can use the authenticated Go `hr.report` capability
-  behind `CHASTE_GO_HR_OVERVIEW_REPORT_READS=1` and
-  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The selector is scoped to Overview;
-  set it to `0` to return Overview to legacy `/api/hr`. Selected-Go errors fail
-  closed without retrying `/api/hr`.
+- Vite HR Overview reads its authenticated Go `hr.report` capability
+  unconditionally. Go errors fail closed without retrying legacy `/api/hr`;
+  other HR tabs retain their existing report routes.
 
 - Vite Sales order create, deliver, and cancel writes fail closed when the
   selected Go capability route returns 404. They keep the exact actor- and

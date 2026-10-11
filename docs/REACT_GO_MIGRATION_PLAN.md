@@ -2402,12 +2402,11 @@ new owners and the manifest shows zero legacy runtime paths.
      presence, autosave, collaboration, content writes, archive reads,
      compare-owned routes, and the
      Documents library unchanged. Browser proof remains open.
-221. (Implemented; browser proof pending) Route only the Vite HR Overview report through the existing Go `hr.report`
-     capability behind paired `CHASTE_GO_HR_OVERVIEW_REPORT_READS=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other HR tabs on
-     their current route selections; set the new selector to `0` for legacy
-     rollback. A selected Go error must fail closed without retrying the legacy
-     `/api/hr` route.
+221. (Implemented; browser proof pending) Route the Vite HR Overview report
+     through the existing Go `hr.report` capability unconditionally and remove
+     the Overview selector and compile global. Keep other HR tabs on their
+     current route selections. A Go error must fail closed without retrying
+     legacy `/api/hr`.
 222. (Implemented) Remove the selected-Go 404 retry to legacy for Vite Manufacturing writes:
      BOM definition, work-order create/release/complete/cancel, BOM production,
      and production reversal. Preserve actor/org-scoped exact action and intent

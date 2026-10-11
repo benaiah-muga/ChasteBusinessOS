@@ -105,6 +105,15 @@ production requests and writes. No production traffic has moved to Go.
   [`inventory_read_session.go`](../../apps/api/internal/httpapi/inventory_read_session.go),
   [`inventory_read_executor_integration_test.go`](../../apps/api/internal/capability/inventory_read_executor_integration_test.go),
   and [`go-route-proxy.test.ts`](../../apps/web-vite/src/api/go-route-proxy.test.ts).
+- Vite HR Overview reads its report through the authenticated Go `hr.report`
+  capability unconditionally. Go errors fail closed without retrying legacy
+  `/api/hr`; other HR tabs keep their current route selections. The Go
+  capability checks `hr.read` and runs through the tenant-scoped runtime
+  database role. `TestGoWave5PayrollApplicantsGovernedExecutorPath` exercises
+  the report with the runtime role and verifies seeded tenant data. See
+  [`HrPage.tsx`](../../apps/web-vite/src/components/HrPage.tsx),
+  [`hr.ts`](../../apps/web-vite/src/api/hr.ts), and
+  [`wave5_executor_integration_test.go`](../../apps/api/internal/capability/wave5_executor_integration_test.go).
 
 ## Capabilities, approvals, transactions, and audit
 

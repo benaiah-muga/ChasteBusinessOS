@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrEmployeeWritesUseGo, goHrHiringUseGo, goHrLeaveUseGo, goHrOverviewReportUseGo, goHrPayrollUseGo, HrApiError, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeHireAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrEmployeeWritesUseGo, goHrHiringUseGo, goHrLeaveUseGo, goHrPayrollUseGo, HrApiError, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeHireAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
 import { legacyUrl } from "../legacy";
 import "./hr-page.css";
 
@@ -46,7 +46,7 @@ function formatMinutes(minutes: number): string {
 }
 
 function goHrReportForTab(tab: TabId): boolean {
-  return (tab === "overview" && goHrOverviewReportUseGo()) || (tab === "leave" && goHrLeaveUseGo()) || (tab === "payroll" && goHrPayrollUseGo()) || (tab === "hiring" && goHrHiringUseGo());
+  return tab === "overview" || (tab === "leave" && goHrLeaveUseGo()) || (tab === "payroll" && goHrPayrollUseGo()) || (tab === "hiring" && goHrHiringUseGo());
 }
 
 export function HrPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
@@ -56,6 +56,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     return tabs.find((item) => item.id === requested)?.id ?? "overview";
   });
   const reportUsesGo = useRef(goHrReportForTab(tab));
+  const reportLoaded = useRef(false);
   const currentTab = useRef(tab);
   currentTab.current = tab;
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -80,7 +81,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   const currency = baseCurrency;
 
   const load = useCallback(async (signal?: AbortSignal, useGoReportOverride?: boolean): Promise<boolean> => {
-    if (!signal) setState({ status: "loading" });
+    if (!signal && !reportLoaded.current) setState({ status: "loading" });
     try {
       const enabled = await fetchHrEnabled(signal);
       if (signal?.aborted) return false;
@@ -89,7 +90,10 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         return false;
       }
       const report = (useGoReportOverride ?? reportUsesGo.current) ? await fetchGoHrReport(signal) : await fetchHrReport(signal);
-      if (!signal?.aborted) setState({ status: "ready", report });
+      if (!signal?.aborted) {
+        reportLoaded.current = true;
+        setState({ status: "ready", report });
+      }
       return !signal?.aborted;
     } catch (error) {
       if (signal?.aborted) return false;

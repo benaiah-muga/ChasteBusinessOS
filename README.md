@@ -587,12 +587,10 @@ Go `hr.listApplicants` read. It requires `pnpm dev:api`, preserves each
 opening's applicant fields and ordering, and fails closed if Go is unavailable
 or returns invalid data. The TypeScript path remains the default and the flag
 defaults to `0`.
-The Vite HR Overview report can separately use the authenticated Go `hr.report`
-capability with `CHASTE_GO_HR_OVERVIEW_REPORT_READS=1` and
-`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The Vite example config enables it.
-Failures on the selected Go route are shown without retrying through `/api/hr`;
-set the selector to `0` to return Overview to `/api/hr`. Other HR tabs keep
-their independently selected report routes.
+The Vite HR Overview report now reads the authenticated Go `hr.report`
+capability unconditionally. It requires `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`
+and `GO_SESSION_CAPABILITY_ROUTE=1`; Go errors fail closed without retrying
+through `/api/hr`. Other HR tabs keep their existing report routes.
 `GO_PURCHASING_AP_AGING_READS=1` opts the supplier AP aging read into the
 signed Go capability bridge. It requires `pnpm dev:api`; other purchasing
 reads and all writes remain on their existing handlers. The same default-off
