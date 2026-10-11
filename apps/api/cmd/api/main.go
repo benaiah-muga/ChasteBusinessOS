@@ -124,6 +124,10 @@ func goSalesInvoiceRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goInventoryReadRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goSupportChannelsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -347,7 +351,7 @@ func run(logger *slog.Logger) error {
 		}
 	}
 	var inventoryReadRoute http.Handler
-	if os.Getenv("GO_INVENTORY_READ_ROUTE") == "1" {
+	if goInventoryReadRouteEnabledFromEnv(os.Getenv("GO_INVENTORY_READ_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

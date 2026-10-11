@@ -482,11 +482,11 @@ the signed Go `inventory.itemHistory` read. It requires `pnpm dev:api`, keeps
 the `{ movements }` response and missing-item behavior, and fails closed if
 Go is unavailable or returns invalid data. TypeScript remains the default;
 the flag defaults to `0`.
-The Vite app can route this same SKU history request through the direct
-session-authenticated Go inventory reader by pairing
-`CHASTE_GO_INVENTORY_READ_ROUTE=1` with `GO_INVENTORY_READ_ROUTE=1`. The API
-flag gates the handler server-side; selected Go errors are returned directly,
-and the Vite client validates the exact movement envelope.
+Vite sends exact `GET /api/inventory` catalog reads and SKU history queries to
+the direct session-authenticated Go inventory reader. The handler mounts by
+default; set `GO_INVENTORY_READ_ROUTE=0` to unmount it. Go errors are returned
+directly, and the Vite client validates the catalog and movement envelopes.
+Inventory POSTs and nested paths retain their current owners.
 `GO_INVENTORY_STOCK_REPORT_READS=1` opts the stock report and reorder-alert
 reads on `GET /api/inventory` into two signed Go `inventory.stockReport`
 capability calls. It requires `pnpm dev:api`, preserves the report and alert

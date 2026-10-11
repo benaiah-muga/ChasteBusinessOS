@@ -26,6 +26,10 @@ The full v1 changelog is preserved at the bottom of this file.
   unconditionally. The Go handler mounts by default; set
   `GO_SUPPORT_CHANNELS_ROUTE=0` to unmount it. Other methods and paths retain
   their current owner.
+- Vite now sends exact `GET /api/inventory` requests, including SKU history
+  queries, to Go unconditionally. The Go handler mounts by default; set
+  `GO_INVENTORY_READ_ROUTE=0` to unmount it. Inventory POSTs and nested paths
+  keep their current owner.
 
 - Vite marketplace listing reads now execute `creator.listMarketplace` through
   the Go session capability API. Marketplace writes and signature verification
@@ -389,11 +393,10 @@ The full v1 changelog is preserved at the bottom of this file.
   legacy. Authored editor/version selectors and content/write routes are
   unchanged.
 
-- Vite inventory item history can use the authenticated Go session reader via
-  the existing paired `CHASTE_GO_INVENTORY_READ_ROUTE=1` and
-  `GO_INVENTORY_READ_ROUTE=1` selectors. It preserves the `{ movements }`
-  contract and strict movement validation; selected Go errors do not retry via
-  the legacy handler.
+- Vite inventory catalog and item history reads use the authenticated Go
+  session reader unconditionally. It preserves the catalog and `{ movements }`
+  contracts and strict movement validation; Go errors do not retry via the
+  legacy handler.
 
 - Vite analytics report generation now routes only `POST /api/analytics` to
   the existing authenticated Go Analytics handler by default in `.env.example`.

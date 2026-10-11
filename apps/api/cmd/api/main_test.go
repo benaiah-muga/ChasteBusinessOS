@@ -78,6 +78,21 @@ func TestGoSalesInvoiceRouteEnabledFromEnvDefaultsOnAndAllowsDisable(t *testing.
 	}
 }
 
+func TestGoInventoryReadRouteEnabledFromEnvDefaultsOnAndAllowsDisable(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: true},
+		{value: "1", want: true},
+		{value: "0", want: false},
+	} {
+		if got := goInventoryReadRouteEnabledFromEnv(test.value); got != test.want {
+			t.Errorf("goInventoryReadRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)
+		}
+	}
+}
+
 func TestGoSupportChannelsRouteEnabledFromEnvDefaultsOnAndAllowsDisable(t *testing.T) {
 	for _, test := range []struct {
 		value string

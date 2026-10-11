@@ -2338,14 +2338,15 @@ new owners and the manifest shows zero legacy runtime paths.
      read and `analytics.report` permissions, and HTML download behavior.
      Exact method and route tests cover enabled and disabled paths; browser
      proof remains open.
-215. (Implemented) Route Vite `GET /api/inventory?sku=...` through the direct
-     session-authenticated Go inventory reader, which executes
-     `inventory.itemHistory`, behind the existing paired
-     `CHASTE_GO_INVENTORY_READ_ROUTE=1` and `GO_INVENTORY_READ_ROUTE=1`
-     selectors. Preserve the `{ movements }` contract, strict movement
-     validation, existing error behavior, and currency display. The API flag
-     gates the handler server-side, and selected Go errors never retry through
-     legacy. Focused Vite API/proxy tests pass; browser proof remains open.
+215. (Implemented; Go route ownership verified) Route exact Vite `GET
+     /api/inventory` requests, including `?sku=...` history queries, to Go
+     unconditionally. The Go reader preserves the catalog and `{ movements }`
+     contracts, strict movement validation, error behavior, and currency
+     display. `GO_INVENTORY_READ_ROUTE=0` unmounts Go and Vite requests fail
+     closed. POST and nested paths retain their current owner. Existing runtime
+     role executor proofs verify stock report valuation and item-history tenant
+     isolation. Focused Vite API/proxy and Go handler tests pass; browser proof
+     remains open.
 216. (Implemented, default-on) Route the Vite Documents library list and preview detail
      through `documents.listIngestedDocuments` using inputs `{}` and
      `{id, preview:true}`. Gate the Vite selector on the session capability

@@ -1334,15 +1334,20 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/ledger/extra")).toBe(false);
   });
 
-  it("routes only GET /api/inventory to Go and leaves writes and nested paths on legacy", () => {
-    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_INVENTORY_READ_ROUTE: "1" });
-    expect(isGoRouteRequest(flags, "GET", "/api/inventory")).toBe(true);
-    expect(isGoRouteRequest(flags, "GET", "/api/inventory?sku=MUG-1")).toBe(true);
-    expect(isGoRouteRequest(flags, "POST", "/api/inventory")).toBe(false);
-    expect(isGoRouteRequest(flags, "PATCH", "/api/inventory")).toBe(false);
-    expect(isGoRouteRequest(flags, "HEAD", "/api/inventory")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/inventory/history")).toBe(false);
-    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "GET", "/api/inventory")).toBe(false);
+  it("routes exact inventory GETs to Go regardless of the removed Vite selector", () => {
+    for (const env of [
+      {},
+      { CHASTE_GO_INVENTORY_READ_ROUTE: "0" },
+      { CHASTE_GO_INVENTORY_READ_ROUTE: "1" },
+    ]) {
+      const flags = goRouteProxyFlagsFromEnv(env);
+      expect(isGoRouteRequest(flags, "GET", "/api/inventory")).toBe(true);
+      expect(isGoRouteRequest(flags, "GET", "/api/inventory?sku=MUG-1")).toBe(true);
+      expect(isGoRouteRequest(flags, "POST", "/api/inventory")).toBe(false);
+      expect(isGoRouteRequest(flags, "PATCH", "/api/inventory")).toBe(false);
+      expect(isGoRouteRequest(flags, "HEAD", "/api/inventory")).toBe(false);
+      expect(isGoRouteRequest(flags, "GET", "/api/inventory/history")).toBe(false);
+    }
   });
 
   it("keeps a selected inventory history 404 on Go without retrying legacy", async () => {
@@ -1368,7 +1373,7 @@ describe("Vite Go route proxy selection", () => {
     const vite = await createViteServer({
       configFile: false,
       appType: "custom",
-      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_INVENTORY_READ_ROUTE: "1" }), goOrigin)],
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_INVENTORY_READ_ROUTE: "0" }), goOrigin)],
       server: {
         host: "127.0.0.1",
         port: 0,
@@ -1638,7 +1643,6 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE: "1",
       CHASTE_GO_POS_READ_ROUTE: "1",
       CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1",
-      CHASTE_GO_INVENTORY_READ_ROUTE: "1",
     });
     const vite: ViteDevServer = await createViteServer({
       configFile: false,
@@ -1813,6 +1817,14 @@ describe("Vite Go route proxy selection", () => {
       url: "/api/inventory?sku=MUG-1",
       cookie: "auth-session=browser",
     });
+    const inventoryWrite = await fetch(`${origin}/api/inventory`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "createItem" }),
+    });
+    expect((await inventoryWrite.json())).toMatchObject({ target: "legacy", method: "POST", url: "/api/inventory" });
+    const inventoryNested = await fetch(`${origin}/api/inventory/history`);
+    expect((await inventoryNested.json())).toMatchObject({ target: "legacy", method: "GET", url: "/api/inventory/history" });
 
     const myWork = await fetch(`${origin}/api/my-work?status=open`);
     expect((await myWork.json()).target).toBe("go");

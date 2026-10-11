@@ -32,7 +32,6 @@ export type GoRouteProxyFlags = {
   durableRuns: boolean;
   notifications: boolean;
   notificationsWrite: boolean;
-  inventoryRead: boolean;
   crmReads: boolean;
   posRead: boolean;
   posShiftSummary: boolean;
@@ -383,7 +382,6 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     durableRuns: env.CHASTE_GO_DURABLE_RUNS_ROUTE !== "0",
     notifications: env.CHASTE_GO_NOTIFICATIONS_ROUTE === "1",
     notificationsWrite: env.CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE === "1",
-    inventoryRead: env.CHASTE_GO_INVENTORY_READ_ROUTE === "1",
     crmReads: env.CHASTE_GO_CRM_READS !== "0",
     posRead: env.CHASTE_GO_POS_READ_ROUTE !== "0",
     posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
@@ -431,7 +429,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.notificationsWrite && method === "POST" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
   if (flags.approvalsRead && method === "GET" && /^\/api\/approvals(?:\?.*)?$/.test(path)) return true;
   if (flags.approvalsDecision && method === "POST" && /^\/api\/approvals(?:\?.*)?$/.test(path)) return true;
-  if (flags.inventoryRead && method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
+  if (method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
   if (flags.crmReads && method === "GET" && isGoCrmReadRequest(path)) return true;
   if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;
   if (method === "GET" && /^\/api\/pos\/customers(?:\?.*)?$/.test(path)) return true;

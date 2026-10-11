@@ -92,6 +92,19 @@ production requests and writes. No production traffic has moved to Go.
   upsert proof. See [`support_channels.go`](../../apps/api/internal/httpapi/support_channels.go),
   [`support.ts`](../../apps/web-vite/src/api/support.ts), and
   [`go-route-proxy.test.ts`](../../apps/web-vite/src/api/go-route-proxy.test.ts).
+- Vite inventory catalog reads and SKU history queries use exact `GET
+  /api/inventory` requests. Both route directly to Go regardless of the former
+  Vite selector; `GO_INVENTORY_READ_ROUTE=0` unmounts the handler and requests
+  fail closed. Inventory POSTs and nested paths keep their current owner. The
+  Go session handler checks verified identity, active organization,
+  `inventory.read`, and module availability before executing tenant-scoped
+  capabilities. Runtime-role database tests verify stock report valuation and
+  foreign-organization exclusion for both stock reports and SKU history
+  (`TestInventoryStockReportGovernedExecutorPreservesValuationAndTenantScope`
+  and `TestInventoryHistoryAndLotsGovernedExecutorPreservesTenantScope`). See
+  [`inventory_read_session.go`](../../apps/api/internal/httpapi/inventory_read_session.go),
+  [`inventory_read_executor_integration_test.go`](../../apps/api/internal/capability/inventory_read_executor_integration_test.go),
+  and [`go-route-proxy.test.ts`](../../apps/web-vite/src/api/go-route-proxy.test.ts).
 
 ## Capabilities, approvals, transactions, and audit
 
