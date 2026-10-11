@@ -49,9 +49,11 @@ The full v1 changelog is preserved at the bottom of this file.
   authenticated browser proof exercised its Go-backed register, manual cash
   sale and return flow. Stock-tracked item effects were not part of that proof.
 
-- Go now owns the full inventory cycle-count job lifecycle, including recording
-  counts, posting variances, and cancelling counts. The legacy worker leaves
-  these jobs to Go.
+- Go now owns the full inventory cycle-count job lifecycle: creation, recording,
+  variance posting, and cancellation. The worker proof verifies tenant
+  isolation, stock effects, action receipts, and system audit events for every
+  successful lifecycle capability; the legacy worker leaves all four jobs to
+  Go.
 
 - Vite now routes only `GET /api/pos` to Go by default. The Go handler preserves
   the session and sale response contract and enforces the `pos.read` permission

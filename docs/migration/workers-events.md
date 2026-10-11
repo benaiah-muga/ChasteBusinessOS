@@ -389,11 +389,13 @@ inventory job ownership is unchanged.
 
 `TestInventoryCycleCountWorkerClaimAndExecute` proves Go claims the four jobs,
 creates an open cycle-count snapshot, records a count, posts its stock
-variance, cancels a separate count without a stock movement, and stores the
-action receipts and audit events. It also proves a job queued for one
+variance, and cancels a separate count without a stock movement. It checks an
+action receipt for each successful lifecycle job and a system audit event for
+each successful capability execution, including both local creation jobs and
+the other organization's creation job. It also proves a job queued for one
 organization cannot record a count owned by another organization. The
-TypeScript ownership check proves the legacy claimant leaves these jobs
-pending without incrementing their attempts.
+TypeScript ownership check proves the legacy claimant leaves these jobs pending
+without incrementing their attempts.
 
 `TestCRMDealJobsClaimAndExecuteThroughSystemPath` proves the Go worker creates
 a deal, moves its stage, converts it into a customer, records the create-job

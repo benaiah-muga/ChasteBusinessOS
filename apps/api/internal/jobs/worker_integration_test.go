@@ -1254,6 +1254,12 @@ func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
 		t.Fatalf("other organization cycle-count fixture worked=%v err=%v", worked, err)
 	}
 	assertJobsTestState(t, ctx, owner, otherCreateJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.createCycleCount'`, otherOrgID, otherOrgID+":"+otherCreateJobID); got != 1 {
+		t.Fatalf("worker other-organization cycle-count action receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id='inventory.createCycleCount'`, otherOrgID); got != 1 {
+		t.Fatalf("worker other-organization inventory.createCycleCount system audit events=%d, want one", got)
+	}
 	var otherCountID string
 	if err := owner.QueryRow(ctx, `SELECT id::text FROM cycle_counts WHERE org_id=$1::uuid AND status='open'`, otherOrgID).Scan(&otherCountID); err != nil {
 		t.Fatalf("load other organization count: %v", err)
@@ -1291,8 +1297,16 @@ func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+postJobID, "inventory.postCycleCount"); got != 1 {
 		t.Fatalf("worker post cycle-count receipts=%d, want one", got)
 	}
-	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id IN ('inventory.recordCycleCounts','inventory.postCycleCount')`, orgID); got != 2 {
-		t.Fatalf("worker cycle-count lifecycle audit events=%d, want two", got)
+	for _, check := range []struct {
+		capabilityID string
+		want         int
+	}{
+		{capabilityID: "inventory.recordCycleCounts", want: 1},
+		{capabilityID: "inventory.postCycleCount", want: 1},
+	} {
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id=$2`, orgID, check.capabilityID); got != check.want {
+			t.Fatalf("worker %s system audit events=%d, want %d", check.capabilityID, got, check.want)
+		}
 	}
 
 	cancelCreateJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.createCycleCount", json.RawMessage(`{"skus":["CYCLE-WORKER"]}`), 3, availableAt)
@@ -1300,6 +1314,12 @@ func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
 		t.Fatalf("cancel fixture cycle-count job worked=%v err=%v", worked, err)
 	}
 	assertJobsTestState(t, ctx, owner, cancelCreateJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.createCycleCount'`, orgID, orgID+":"+cancelCreateJobID); got != 1 {
+		t.Fatalf("worker cancel fixture cycle-count action receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id='inventory.createCycleCount'`, orgID); got != 2 {
+		t.Fatalf("worker inventory.createCycleCount system audit events=%d, want two", got)
+	}
 	var cancelCountID string
 	if err := owner.QueryRow(ctx, `SELECT id::text FROM cycle_counts WHERE org_id=$1::uuid AND status='open' ORDER BY created_at DESC LIMIT 1`, orgID).Scan(&cancelCountID); err != nil {
 		t.Fatalf("load cancel fixture count: %v", err)
@@ -1317,6 +1337,9 @@ func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.cancelCycleCount'`, orgID, orgID+":"+cancelJobID); got != 1 {
 		t.Fatalf("worker cancel cycle-count receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id='inventory.cancelCycleCount'`, orgID); got != 1 {
+		t.Fatalf("worker inventory.cancelCycleCount system audit events=%d, want one", got)
 	}
 }
 

@@ -2710,14 +2710,15 @@ new owners and the manifest shows zero legacy runtime paths.
      customer creation without changing its pending status or attempts; other
      CRM customer job types remain with their existing owners.
 
-259. (Implemented and verified; focused TypeScript and Go database proofs passed)
-     Make the Go jobs worker the sole owner of `inventory.createCycleCount`
-     jobs. The TypeScript claimant leaves cycle-count creation pending without
-     incrementing attempts. The existing Go database-backed proof covers the
-     open snapshot and governed action receipt; the Go proof was rerun with the
-     pinned Go toolchain in Docker. Cycle-count record,
-     post, and cancel jobs retain their existing owners pending their own Go
-     worker proofs.
+259. (Implemented and verified; full Go database worker proof passed) Make the
+     Go jobs worker the sole owner of the full inventory cycle-count lifecycle:
+     `inventory.createCycleCount`, `inventory.recordCycleCounts`,
+     `inventory.postCycleCount`, and `inventory.cancelCycleCount`. The worker
+     proof verifies tenant isolation, snapshot creation, count recording,
+     variance posting, cancellation without a stock movement, action receipts,
+     and system audit events for each successful capability execution. The
+     TypeScript claimant leaves these jobs pending without incrementing
+     attempts.
 
 260. (Implemented and verified; POS page runtime gate remains open) Route only
      `GET /api/pos` through the Go session handler. The handler preserves the
