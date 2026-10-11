@@ -93,6 +93,19 @@ function threadBody(overrides: Record<string, unknown> = {}) {
 
 type Route = { match: (path: string, init?: RequestInit) => Response | null };
 
+function isGoPeopleLookup(path: string, init?: RequestInit): boolean {
+  if (path !== "/api/capabilities/execute" || init?.method !== "POST") return false;
+  try {
+    return (JSON.parse(String(init.body ?? "{}")) as { capabilityId?: string }).capabilityId === "messaging.listPeople";
+  } catch {
+    return false;
+  }
+}
+
+function peopleCapabilityResponse(found: Person[]): Response {
+  return Response.json({ ok: true, data: { people: found } });
+}
+
 function router(routes: Route[]): ReturnType<typeof vi.fn> {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -105,7 +118,7 @@ function router(routes: Route[]): ReturnType<typeof vi.fn> {
 }
 
 const moduleRoute: Route = { match: (path) => (path === "/api/modules" ? Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] }) : null) };
-const peopleRoute: Route = { match: (path) => (path.startsWith("/api/conversations/people") ? Response.json({ people }) : null) };
+const peopleRoute: Route = { match: (path, init) => (isGoPeopleLookup(path, init) ? peopleCapabilityResponse(people) : null) };
 const presenceRoute: Route = { match: (path, init) => (path.includes("/presence") && init?.method !== "POST" ? Response.json({ people: [] }) : path.includes("/presence") ? Response.json({ ok: true }) : null) };
 const emptyList = (conversations: Conversation[] = [conversation()]): Route => ({
   match: (path) => (path === "/api/conversations" ? Response.json({ conversations, me }) : null),
@@ -238,7 +251,7 @@ describe("messages page states", () => {
         attempts += 1;
         return attempts === 1 ? Response.json({}, { status: 500 }) : Response.json({ conversations: [conversation()], me });
       }
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -258,9 +271,9 @@ describe("messages page states", () => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         const request = JSON.parse(String(init.body)) as { capabilityId?: string; input?: { conversationId?: string; limit?: number } };
         if (request.capabilityId !== "messaging.readMessages") return Response.json({ error: "unexpected capability" }, { status: 400 });
         expect(request.input).toEqual({ conversationId: channelId, limit: 60 });
@@ -280,30 +293,39 @@ describe("messages page states", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/conversations/${channelId}/messages`)).toBe(false);
   });
 
-  it("shows selected Go mention-people failures instead of silently using an empty list", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PEOPLE_READS__", true);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  it("shows Go mention-people failures instead of silently using an empty list", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [], me });
-      if (path === "/api/capabilities/execute") return Response.json({ error: "disabled" }, { status: 503 });
+      if (isGoPeopleLookup(path, init)) return Response.json({ error: "disabled" }, { status: 503 });
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) return Response.json({ error: "disabled" }, { status: 503 });
       return Response.json({ error: "unexpected legacy fallback" }, { status: 500 });
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<MessagesPage />);
 
     expect((await screen.findByRole("alert")).textContent).toContain("disabled");
+    const peopleLookup = fetchMock.mock.calls.find(([url, init]) =>
+      String(url) === "/api/capabilities/execute" &&
+      (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId === "messaging.listPeople",
+    );
+    expect(JSON.parse(String(peopleLookup?.[1]?.body))).toMatchObject({ input: { limit: 100 } });
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/conversations/people"))).toBe(false);
   });
 
-  it("shows selected Go add-member lookup failures in the conversation settings dialog", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PEOPLE_READS__", true);
+  it("shows Go add-member lookup failures in the conversation settings dialog", async () => {
     let capabilityCalls = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path === "/api/capabilities/execute") {
+      if (isGoPeopleLookup(path, init)) {
+        capabilityCalls += 1;
+        if (capabilityCalls === 1) return Response.json({ ok: true, data: { people } });
+        return Response.json({ error: "service unavailable" }, { status: 503 });
+      }
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) {
         capabilityCalls += 1;
         if (capabilityCalls === 1) return Response.json({ ok: true, data: { people } });
         return Response.json({ error: "service unavailable" }, { status: 503 });
@@ -321,6 +343,11 @@ describe("messages page states", () => {
 
     const dialog = await screen.findByRole("dialog", { name: /#general/ });
     expect((await within(dialog).findByRole("alert")).textContent).toContain("service unavailable");
+    expect(fetchMock.mock.calls.some(([path, init]) => {
+      if (String(path) !== "/api/capabilities/execute") return false;
+      const body = JSON.parse(String(init?.body)) as { capabilityId?: string; input?: { query?: string; limit?: number } };
+      return body.capabilityId === "messaging.listPeople" && body.input?.query === "Grace" && body.input.limit === 30;
+    })).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/conversations/people"))).toBe(false);
   });
 
@@ -334,7 +361,7 @@ describe("messages page states", () => {
         return Response.json({ conversationId: channelId }, { status: 201 });
       }
       if (path === "/api/conversations") return Response.json({ conversations: [], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -363,8 +390,8 @@ describe("messages page states", () => {
         return Response.json({ error: "unexpected legacy create" }, { status: 500 });
       }
       if (path === "/api/conversations") return Response.json({ conversations: [], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         creates.push(body);
         if (creates.length === 1) {
@@ -420,8 +447,8 @@ describe("messages page states", () => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         creates.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         requestCount += 1;
         if (requestCount === 1) return Response.json({ error: "Connection lost after submission." }, { status: 503 });
@@ -477,8 +504,8 @@ describe("messages page states", () => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         creates.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return Response.json({ pendingApproval: true, reason: "Manager approval is required." }, { status: 202 });
       }
@@ -539,8 +566,8 @@ describe("messages page states", () => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
-      if (path === "/api/capabilities/execute") {
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) {
         const body = JSON.parse(String(init?.body)) as { capabilityId?: string };
         if (body.capabilityId === "messaging.advanceReadCursor") {
           readCalls.push(String(init?.body));
@@ -573,7 +600,7 @@ describe("messages page states", () => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages") && init?.method === "POST") {
         posts.push(String(init.body));
@@ -600,13 +627,13 @@ describe("messages page states", () => {
   it("restores the exact Go message edit after approval is pending and the page reloads", async () => {
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
     const paths: string[] = [];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       paths.push(path);
-      if (path === "/api/capabilities/execute") return Response.json({ ok: false, pendingApproval: true, reason: "Manager review required." }, { status: 202 });
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) return Response.json({ ok: false, pendingApproval: true, reason: "Manager review required." }, { status: 202 });
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -633,20 +660,23 @@ describe("messages page states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Restore Go message editing");
     expect(paths).toHaveLength(requestCount);
-    const goBody = JSON.parse(String(fetchMock.mock.calls.find(([path]) => String(path) === "/api/capabilities/execute")?.[1]?.body)) as Record<string, unknown>;
+    const goBody = JSON.parse(String(fetchMock.mock.calls.find(([path, init]) =>
+      String(path) === "/api/capabilities/execute" &&
+      (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId === "messaging.editMessage",
+    )?.[1]?.body)) as Record<string, unknown>;
     expect(goBody).toMatchObject({ capabilityId: "messaging.editMessage", input: { body: "Corrected after reload" }, intentId: expect.any(String) });
   });
 
   it("keeps a Go edit 404 locked across selector rollback without calling legacy PATCH", async () => {
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
     const paths: string[] = [];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       paths.push(path);
-      if (path === "/api/capabilities/execute") return Response.json({ error: "route unavailable" }, { status: 404 });
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) return Response.json({ error: "route unavailable" }, { status: 404 });
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -678,10 +708,10 @@ describe("messages page states", () => {
     const writes: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (init?.method === "PATCH" || (path === "/api/capabilities/execute" && init?.method === "POST")) writes.push(path);
+      if (init?.method === "PATCH" || (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init))) writes.push(path);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -706,7 +736,7 @@ describe("messages page states", () => {
       if (init?.method === "PATCH") writes.push(path);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ ok: true });
@@ -727,12 +757,12 @@ describe("messages page states", () => {
     let finishRequest: (response: Response) => void = () => undefined;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const path = String(input);
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         return new Promise((resolve) => { finishRequest = resolve; });
       }
       if (path === "/api/modules") return Promise.resolve(Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] }));
       if (path === "/api/conversations") return Promise.resolve(Response.json({ conversations: [conversation()], me }));
-      if (path.startsWith("/api/conversations/people")) return Promise.resolve(Response.json({ people }));
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Promise.resolve(Response.json({ people: [] }));
       if (path.endsWith("/messages")) return Promise.resolve(Response.json(threadBody()));
       return Promise.resolve(Response.json({ error: "not found" }, { status: 404 }));
@@ -763,13 +793,13 @@ describe("messages page states", () => {
     const capabilityBodies: Record<string, unknown>[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/capabilities/execute") {
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) {
         capabilityBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
         return Response.json({ pendingApproval: true, reason: "Manager review required." }, { status: 202 });
       }
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -794,13 +824,13 @@ describe("messages page states", () => {
   it("restores and locks an unresolved Go deletion after selector rollback", async () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
     const writes: string[] = [];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/capabilities/execute" || path.startsWith("/api/messages/")) writes.push(path);
-      if (path === "/api/capabilities/execute") return Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 });
+      if ((path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) || path.startsWith("/api/messages/")) writes.push(path);
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) return Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 });
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -822,13 +852,13 @@ describe("messages page states", () => {
   it("keeps a Go deletion 404 locked across selector rollback without calling legacy DELETE", async () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
     const paths: string[] = [];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       paths.push(path);
-      if (path === "/api/capabilities/execute") return Response.json({ error: "route unavailable" }, { status: 404 });
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) return Response.json({ error: "route unavailable" }, { status: 404 });
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -864,10 +894,10 @@ describe("messages page states", () => {
     const writes: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/capabilities/execute" || (path.startsWith("/api/messages/") && init?.method === "DELETE")) writes.push(path);
+      if ((path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) || (path.startsWith("/api/messages/") && init?.method === "DELETE")) writes.push(path);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ ok: true });
@@ -885,12 +915,12 @@ describe("messages page states", () => {
   it.each([true, false])("blocks message deletion until actor and organization scope resolve when Go selector is %s", async (goDeleteEnabled) => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", goDeleteEnabled);
     const writes: string[] = [];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/capabilities/execute" || path.startsWith("/api/messages/")) writes.push(path);
+      if ((path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) || path.startsWith("/api/messages/")) writes.push(path);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -910,12 +940,12 @@ describe("messages page states", () => {
     const finishRequests: Array<(response: Response) => void> = [];
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const path = String(input);
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         return new Promise((resolve) => { finishRequests.push(resolve); });
       }
       if (path === "/api/modules") return Promise.resolve(Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] }));
       if (path === "/api/conversations") return Promise.resolve(Response.json({ conversations: [conversation()], me }));
-      if (path.startsWith("/api/conversations/people")) return Promise.resolve(Response.json({ people }));
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Promise.resolve(Response.json({ people: [] }));
       if (path.endsWith("/messages")) return Promise.resolve(Response.json(threadBody()));
       return Promise.resolve(Response.json({ error: "not found" }, { status: 404 }));
@@ -949,13 +979,13 @@ describe("messages page states", () => {
     const capabilityBodies: Record<string, unknown>[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/capabilities/execute") {
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) {
         capabilityBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
         return Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 });
       }
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -974,13 +1004,13 @@ describe("messages page states", () => {
   it("does not send a restored Go deletion after its actor and organization become unresolved", async () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
     const deleteRequests: string[] = [];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/capabilities/execute" || path.startsWith("/api/messages/m1?intentId=")) deleteRequests.push(path);
-      if (path === "/api/capabilities/execute") return Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 });
+      if ((path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) || path.startsWith("/api/messages/m1?intentId=")) deleteRequests.push(path);
+      if (path === "/api/capabilities/execute" && !isGoPeopleLookup(path, init)) return Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 });
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
@@ -1054,7 +1084,7 @@ it("reports typing presence after the debounce and clears it on the mount heartb
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence") && init?.method === "POST") { typingBodies.push(String(init.body)); return Response.json({ ok: true }); }
       if (path.includes("/presence")) return Response.json({ people: [{ userId: other, name: "Grace", typing: true }] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
@@ -1080,8 +1110,8 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         if (body.capabilityId === "messaging.updateConversationPresence") {
           presenceWrites.push(body);
@@ -1108,11 +1138,11 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       let threadCalls = 0;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
         if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
         if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-        if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+        if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
         if (path.includes("/presence")) return Response.json({ people: [] });
         if (path.includes("/messages")) { threadCalls += 1; return Response.json(threadBody({ messages: [message({ id: `m${threadCalls}` })] })); }
         return Response.json({ error: "not found" }, { status: 404 });
@@ -1169,7 +1199,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages") && init?.method === "POST") { posts.push(JSON.parse(String(init.body)) as Record<string, unknown>); return Response.json({ ok: true, agentReply: null }); }
       if (path.endsWith("/messages")) return Response.json(threadBody());
@@ -1198,7 +1228,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       paths.push(path);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages") && init?.method === "POST") {
         posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
@@ -1216,7 +1246,10 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(posts).toHaveLength(1));
-    expect(paths).not.toContain("/api/capabilities/execute");
+    expect(fetchMock.mock.calls.some(([path, init]) =>
+      String(path) === "/api/capabilities/execute" &&
+      (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId === "messaging.sendMessage",
+    )).toBe(false);
     expect(posts[0]).toMatchObject({ body: "@Chaste", mentions: [{ type: "agent", id: "agent-1" }] });
   });
 
@@ -1227,10 +1260,10 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/attachments")) return Response.json({ attachmentId: "72b99920-8c21-463a-9c5b-479216017501", filename: "brief.pdf", mimeType: "application/pdf", sizeBytes: 10 });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         actionBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return Response.json({ ok: true, data: { messageId: "sent-message-id" } });
       }
@@ -1272,6 +1305,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (isGoPeopleLookup(path, init)) return peopleCapabilityResponse(people);
       const method = init?.method;
       let body: Record<string, unknown> | undefined;
       if (typeof init?.body === "string") body = JSON.parse(init.body) as Record<string, unknown>;
@@ -1307,6 +1341,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (isGoPeopleLookup(path, init)) return peopleCapabilityResponse(people);
       let body: Record<string, unknown> | undefined;
       if (typeof init?.body === "string") body = JSON.parse(init.body) as Record<string, unknown>;
       requests.push({ path, method: init?.method, body });
@@ -1343,6 +1378,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (isGoPeopleLookup(path, init)) return peopleCapabilityResponse(people);
       const method = init?.method;
       let body: Record<string, unknown> | undefined;
       if (typeof init?.body === "string") body = JSON.parse(init.body) as Record<string, unknown>;
@@ -1386,6 +1422,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (isGoPeopleLookup(path, init)) return peopleCapabilityResponse(people);
       const method = init?.method;
       let body: Record<string, unknown> | undefined;
       if (typeof init?.body === "string") body = JSON.parse(init.body) as Record<string, unknown>;
@@ -1425,9 +1462,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         intentIds.push((JSON.parse(String(init.body)) as { intentId: string }).intentId);
         return Response.json({ ok: false, pendingApproval: true, approvalId: "550e8400-e29b-41d4-a716-446655440000", reason: "Manager review required." }, { status: 202 });
       }
@@ -1456,9 +1493,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: false })], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         sent.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         if (sent.length === 1) throw new TypeError("connection reset");
         return Response.json({ ok: true, data: { messageId: "sent-message-id" } });
@@ -1490,7 +1527,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/attachments")) { uploads.push(init?.body instanceof FormData ? "form" : String(init?.body)); return Response.json({ attachmentId: "attach-1", filename: "brief.pdf", mimeType: "application/pdf", sizeBytes: 10 }); }
       if (path.endsWith("/messages") && init?.method === "POST") { posts.push(JSON.parse(String(init.body)) as Record<string, unknown>); return Response.json({ ok: true, agentReply: null }); }
@@ -1520,7 +1557,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
         patches.push(JSON.parse(String(init.body)) as Record<string, unknown>);
@@ -1554,9 +1591,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
         if (conversationReads > 1) return Response.json({ error: "refresh failed" }, { status: 503 });
         return Response.json({ conversations: [conversation()], me });
       }
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people: people.map((person) => person.id === other ? { ...person, id: addedUserId } : person) });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people.map((person) => person.id === other ? { ...person, id: addedUserId } : person)));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return Response.json({ ok: true, data: { added: true } });
       }
@@ -1569,6 +1606,11 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
 
     fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Find a colleague by name" }), { target: { value: "Grace" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) =>
+      String(path) === "/api/capabilities/execute" &&
+      (JSON.parse(String(init?.body)) as { capabilityId?: string; input?: { query?: string } }).capabilityId === "messaging.listPeople" &&
+      (JSON.parse(String(init?.body)) as { input?: { query?: string } }).input?.query === "Grace",
+    )).toBe(true));
     fireEvent.click(await screen.findByRole("button", { name: /Grace Hopper/ }));
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
@@ -1584,14 +1626,14 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     expect(fetchMock.mock.calls.some(([path]) => String(path) === `/api/conversations/${channelId}`)).toBe(false);
   });
 
-  it("uses the legacy member route when the Go selector is off and there is no saved request", async () => {
+  it("uses Go people search and the legacy member route when the add-member write selector is off", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", false);
     const legacy: Record<string, unknown>[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
         legacy.push(JSON.parse(String(init.body)) as Record<string, unknown>);
@@ -1605,12 +1647,27 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
 
     fireEvent.click(await screen.findByRole("button", { name: "Conversation settings" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Find a colleague by name" }), { target: { value: "Grace" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => {
+      if (String(path) !== "/api/capabilities/execute") return false;
+      const body = JSON.parse(String(init?.body)) as { capabilityId?: string; input?: { query?: string } };
+      return body.capabilityId === "messaging.listPeople" && body.input?.query === "Grace";
+    })).toBe(true));
     fireEvent.click(await screen.findByRole("button", { name: /Grace Hopper/ }));
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => expect(legacy).toHaveLength(1));
     expect(legacy[0]).toMatchObject({ action: "addMember", userId: other, intentId: expect.any(String) });
-    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/capabilities/execute")).toBe(false);
+    const peopleLookup = fetchMock.mock.calls.find(([path, init]) => {
+      if (String(path) !== "/api/capabilities/execute") return false;
+      const body = JSON.parse(String(init?.body)) as { capabilityId?: string; input?: { query?: string } };
+      return body.capabilityId === "messaging.listPeople" && body.input?.query === "Grace";
+    });
+    expect(peopleLookup).toBeDefined();
+    expect(JSON.parse(String(peopleLookup?.[1]?.body))).toMatchObject({ input: { query: "Grace", limit: 30 } });
+    expect(fetchMock.mock.calls.some(([path, init]) =>
+      String(path) === "/api/capabilities/execute" &&
+      (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId === "messaging.addMember",
+    )).toBe(false);
   });
 
   it("clears a terminal Go member rejection so a different member can be added", async () => {
@@ -1627,9 +1684,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people: candidates });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(candidates));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         if (requests.length === 1) return Response.json({ error: "You cannot add members to this channel." }, { status: 403 });
         return Response.json({ ok: true, data: { added: true } });
@@ -1672,9 +1729,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people: people.map((person) => person.id === other ? { ...person, id: addedUserId } : person) });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people.map((person) => person.id === other ? { ...person, id: addedUserId } : person)));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         if (requests.length === 1) return Response.json({ pendingApproval: true, hint: "Member addition is waiting for approval." }, { status: 202 });
         if (requests.length === 2) return Response.json({ error: "Temporary member-add failure." }, { status: 503 });
@@ -1742,9 +1799,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people: [{ type: "user", id: addedUserId, name: "Grace Hopper" }] });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse([{ type: "user", id: addedUserId, name: "Grace Hopper" }]));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         if (requests.length === 1) {
           if (status === null) throw new TypeError("Network unavailable");
@@ -1796,9 +1853,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
         const title = updates.length >= 2 ? "operations" : "general";
         return Response.json({ conversations: [conversation({ title })], me });
       }
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         updates.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         if (updates.length === 1) return new Promise<Response>((resolve) => { releaseFirst = resolve; });
         return Response.json({ ok: true, data: { conversationId: channelId } });
@@ -1858,9 +1915,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation({ archivedAt: archived ? "2026-10-10T08:00:00.000Z" : null })], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         if (requests.length === 1) return new Promise<Response>((resolve) => { releaseFirst = resolve; });
         if (requests.length === 2) return Response.json({ error: "Temporary archive failure." }, { status: 503 });
@@ -1934,9 +1991,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
         if (requests.length > 0) return Response.json({ conversations: [], me });
         return Response.json({ conversations: [conversation()], me });
       }
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         if (requests.length === 1) return Response.json({ pendingApproval: true, hint: "Deletion is waiting for approval." }, { status: 202 });
         if (requests.length === 2) return Response.json({ error: "Temporary delete failure." }, { status: 503 });
@@ -2012,7 +2069,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
         legacyPatches.push({ path, body: JSON.parse(String(init.body)) as unknown });
@@ -2049,9 +2106,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: left ? [] : [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         if (requests.length === 1) return new Promise<Response>((resolve) => { releaseFirst = resolve; });
         if (requests.length === 2) return new Promise<Response>((resolve) => { releaseRetry = resolve; });
@@ -2126,7 +2183,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path === `/api/conversations/${channelId}` && init?.method === "PATCH") {
         legacy.push(JSON.parse(String(init.body)) as Record<string, unknown>);
@@ -2165,9 +2222,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
         }
         return Response.json({ conversations: [conversation({ id: otherConversationId, title: "support" })], me });
       }
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return requests.length === 1
           ? Response.json({ ok: true, data: { left: true } })
@@ -2212,7 +2269,7 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.startsWith("/api/messages/m1") && init?.method === "DELETE") { deletes.push(path); return Response.json({ ok: true, data: {} }); }
       if (path.endsWith("/messages")) return Response.json(threadBody());
@@ -2236,10 +2293,10 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.startsWith("/api/messages/search")) return Response.json({ results: [{ id: "hit-1", conversationId: channelId, conversationTitle: "general", body: "the needle", createdAt: "2026-10-01T09:00:00.000Z", senderType: "human", senderUserId: other }] });
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         const request = JSON.parse(String(init.body)) as { capabilityId?: string; input?: Record<string, unknown> };
         if (request.capabilityId === "messaging.readMessages" && request.input) {
           threadInputs.push(request.input);
@@ -2263,11 +2320,11 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
   });
 
   it("scrolls to the top of the thread to prepend an older page without duplicating rows", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.includes("before=")) return Response.json(threadBody({ messages: [message({ id: "old", body: "from last week" }), message({ id: "m1" })], hasMore: false, nextCursor: null }));
       if (path.endsWith("/messages")) return Response.json(threadBody({ hasMore: true, nextCursor: "m1" }));
@@ -2292,9 +2349,9 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         const request = JSON.parse(String(init.body)) as { capabilityId?: string; input?: Record<string, unknown> };
         if (request.capabilityId !== "messaging.readMessages" || !request.input) return Response.json({ error: "unexpected capability" }, { status: 400 });
         capabilityInputs.push(request.input);

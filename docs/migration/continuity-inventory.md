@@ -120,6 +120,19 @@ production requests and writes. No production traffic has moved to Go.
   [`hr.ts`](../../apps/web-vite/src/api/hr.ts), and
   [`hr_employees.go#L216-L239`](../../apps/api/internal/capability/hr_employees.go#L216-L239),
   [`wave5_executor_integration_test.go#L195-L209`](../../apps/api/internal/capability/wave5_executor_integration_test.go#L195-L209).
+- Vite Messaging mention lists and add-member searches use the Go
+  `messaging.listPeople` capability unconditionally. The Go API enables it by
+  default; `GO_MESSAGING_PEOPLE_READS=0` disables the capability, and Vite
+  fails closed without retrying the still-legacy-owned Next
+  `GET /api/conversations/people` route. Go checks organization-scoped
+  `messaging.read`; its runtime database integration proof verifies filtered
+  results, workmate inclusion, and exclusion of a foreign-organization member
+  (`TestMessagingConversationLifecycleGovernsMembershipAndTenant`), while session
+  capability tests cover its permission and route gate. See
+  [`messaging.ts`](../../apps/web-vite/src/api/messaging.ts),
+  [`messaging.go`](../../apps/api/internal/capability/messaging.go),
+  [`messaging_integration_test.go`](../../apps/api/internal/capability/messaging_integration_test.go),
+  and [`session_capability_test.go`](../../apps/api/internal/httpapi/session_capability_test.go).
 - Vite Accounting Overview reads through Go's authenticated
   `accounting.overview` capability unconditionally. The client validates the
   strict response and fails closed on errors; there is no legacy retry or

@@ -1,7 +1,7 @@
 package httpapi
 
-// MessagingPeopleDisabledCapabilities keeps the direct people lookup closed
-// until the API rollout flag is explicitly enabled.
+// MessagingPeopleDisabledCapabilities disables the direct people lookup only
+// when the API rollout flag is explicitly turned off.
 func MessagingPeopleDisabledCapabilities(enabled bool) map[string]struct{} {
 	if enabled {
 		return map[string]struct{}{}

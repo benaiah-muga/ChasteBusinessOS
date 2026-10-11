@@ -283,7 +283,7 @@ func run(logger *slog.Logger) error {
 		for capabilityID := range httpapi.DocumentsEditorDisabledCapabilities(os.Getenv("GO_DOCUMENTS_EDITOR_READS") == "1") {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}
-		for capabilityID := range httpapi.MessagingPeopleDisabledCapabilities(os.Getenv("GO_MESSAGING_PEOPLE_READS") == "1") {
+		for capabilityID := range httpapi.MessagingPeopleDisabledCapabilities(os.Getenv("GO_MESSAGING_PEOPLE_READS") != "0") {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}
 		sessionCapabilityRoute = httpapi.NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, capabilityExecutor, logger, disabledCapabilities, trustedProxyCIDRs)

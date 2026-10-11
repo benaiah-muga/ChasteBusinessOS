@@ -1349,13 +1349,13 @@ describe("messaging API client", () => {
     expect(checkAttachmentLimits(0, [new File(["a"], "ok.txt")])).toBeNull();
   });
 
-  it("reads presence, people, and search through the legacy routes", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  it("reads presence and search through their current routes and people through Go", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path.startsWith(`/api/conversations/${conversationId}/presence`)) {
         return Response.json({ people: [{ userId: "user-2", name: "Grace", typing: true }] });
       }
-      if (path.startsWith("/api/conversations/people")) return Response.json({ people: [{ type: "agent", id: "agent-1", name: "Chaste" }] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { people: [{ type: "agent", id: "agent-1", name: "Chaste" }] } });
       return Response.json({ results: [{ id: messageId, conversationId, conversationTitle: "general", body: "Morning", createdAt: "2026-10-01T09:00:00.000Z", senderType: "human", senderUserId: "user-1" }] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1363,12 +1363,12 @@ describe("messaging API client", () => {
     await expect(fetchConversationPresence(conversationId)).resolves.toEqual([{ userId: "user-2", name: "Grace", typing: true }]);
     await expect(fetchConversationPeople("gr")).resolves.toEqual([{ type: "agent", id: "agent-1", name: "Chaste" }]);
     await expect(searchMessages("morning")).resolves.toHaveLength(1);
-    expect(lastUrl(fetchMock, 1)).toBe("/api/conversations/people?q=gr");
+    expect(lastUrl(fetchMock, 1)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock, 1)).toMatchObject({ capabilityId: "messaging.listPeople", input: { query: "gr", limit: 30 } });
     expect(lastUrl(fetchMock, 2)).toBe("/api/messages/search?q=morning");
   });
 
   it("uses Go people lookup with the preserved initial and add-member limits", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PEOPLE_READS__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string; input?: unknown };
       if (body.capabilityId !== "messaging.listPeople") return Response.json({ error: "unexpected route" }, { status: 404 });
@@ -1390,8 +1390,7 @@ describe("messaging API client", () => {
     expect(lastBody(fetchMock, 1)).toMatchObject({ capabilityId: "messaging.listPeople", input: { query: "Grace Hopper", limit: 30 }, intentId: expect.any(String) });
   });
 
-  it("fails closed on selected Go people errors or malformed output without legacy retry", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PEOPLE_READS__", true);
+  it("fails closed on Go people errors or malformed output without legacy retry", async () => {
     for (const response of [
       () => Response.json({ error: "disabled" }, { status: 503 }),
       () => Response.json({ ok: true, data: { people: [{ type: "user", id: "", name: "Invalid" }] } }),
@@ -1405,7 +1404,6 @@ describe("messaging API client", () => {
   });
 
   it("rejects a people type outside the Go capability contract", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PEOPLE_READS__", true);
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { people: [
       { type: "workmate", id: "workmate", name: "Chaste" },
     ] } }));
@@ -1417,7 +1415,6 @@ describe("messaging API client", () => {
   });
 
   it("rejects a Go people query longer than 80 characters before dispatch", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PEOPLE_READS__", true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 

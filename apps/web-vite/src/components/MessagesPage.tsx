@@ -10,7 +10,6 @@ import {
   deletePendingAttachment,
   editMessage,
   fetchConversationPeople,
-  messagingPeopleReadsGoSelected,
   fetchConversationPresence,
   fetchConversationThread,
   fetchConversations,
@@ -1188,9 +1187,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
       } catch (error) {
         if (!controller.signal.aborted) {
           setPeople([]);
-          if (messagingPeopleReadsGoSelected()) {
-            setNotice({ tone: "error", text: errorText(error, "Could not load people for mentions.") });
-          }
+          setNotice({ tone: "error", text: errorText(error, "Could not load people for mentions.") });
         }
       }
     })();
@@ -1330,9 +1327,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         .then((found) => setMemberResults(found.filter((person) => person.type === "user")))
         .catch((error: unknown) => {
           setMemberResults([]);
-          if (messagingPeopleReadsGoSelected()) {
-            setDialogNotice({ tone: "error", text: errorText(error, "Could not search team members.") });
-          }
+          setDialogNotice({ tone: "error", text: errorText(error, "Could not search team members.") });
         });
     }, MEMBER_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);

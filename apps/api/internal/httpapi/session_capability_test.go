@@ -457,7 +457,7 @@ func TestSessionCapabilityHandlerReturnsApprovalPendingEnvelope(t *testing.T) {
 
 func TestSessionCapabilityHandlerCanGateManufacturingDefineBom(t *testing.T) {
 	body := `{"capabilityId":"manufacturing.defineBom","input":{"assemblySku":"DESK-1","components":[{"sku":"LEG-1","quantityThousandths":4000,"scrapPctThousandths":20000}]},"intentId":"bom-intent"}`
-	t.Run("default off", func(t *testing.T) {
+	t.Run("explicitly disabled", func(t *testing.T) {
 		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
 		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"componentCount":1}`)}}
 		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, map[string]struct{}{"manufacturing.defineBom": {}})
@@ -467,7 +467,7 @@ func TestSessionCapabilityHandlerCanGateManufacturingDefineBom(t *testing.T) {
 			t.Fatalf("status=%d executor=%d body=%s", response.Code, executor.calls, response.Body.String())
 		}
 	})
-	t.Run("opted in", func(t *testing.T) {
+	t.Run("enabled", func(t *testing.T) {
 		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
 		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"componentCount":1}`)}}
 		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, map[string]struct{}{})
