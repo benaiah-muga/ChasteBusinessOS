@@ -69,6 +69,18 @@ describe("Vite home dashboard", () => {
     }));
   });
 
+  it("links workspace setup failures to Vite onboarding", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/dashboard"
+      ? Response.json({ error: "Finish setting up your workspace." }, { status: 428 })
+      : responseFor(String(input))));
+
+    render(<DashboardPage />);
+
+    const setupLink = await screen.findByRole("link", { name: /Finish workspace setup/ }) as HTMLAnchorElement;
+    expect(setupLink.getAttribute("href")).toBe("/onboarding");
+    expect(new URL(setupLink.href).origin).toBe(window.location.origin);
+  });
+
   it("keeps the dashboard usable when setup tips are forbidden or unavailable", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/setup"
       ? new Response(null, { status: 403 })

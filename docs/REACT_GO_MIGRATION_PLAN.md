@@ -3066,6 +3066,16 @@ new owners and the manifest shows zero legacy runtime paths.
      The authenticated Vite browser removed the installed state through Go and
      the refreshed row returned to Install; all Marketplace and module requests
      returned 200 and page errors were empty. Local Go SMTP captured the
-     verification email, and Go onboarding created a test workspace. Signing in
-     with no workspace still redirects to the legacy onboarding URL; a separate
-     Vite routing cutover remains open.
+     verification email, and Go onboarding created a test workspace.
+
+293. (Implemented; focused App and Dashboard tests, independent review, and
+     authenticated agent-browser proof passed) Keep new or
+     signed-in no-workspace entry on the Vite React app. The organization
+     selector now replaces the current history entry and routes an account
+     with no organizations to `/onboarding` without using the legacy redirect,
+     and the Dashboard "Finish workspace setup" action points to the same-origin
+     Vite route. Regression tests cover both entry paths. An authenticated
+     browser signup and email verification through the local SMTP sink landed
+     on Vite onboarding; Go onboarding POST/PATCH returned 200, and finishing
+     setup opened the workspace dashboard on Vite. No browser page errors were
+     reported.

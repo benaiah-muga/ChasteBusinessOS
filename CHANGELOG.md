@@ -13,6 +13,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite routes signed-in users without a workspace and the dashboard's
+  "Finish workspace setup" action to the Vite `/onboarding` page.
+
 - Vite Marketplace Verify now calls the authenticated Go `creator.verifyPlugin`
   capability with the manifest and publisher signature material. Valid and
   invalid signature results use Go's strict capability envelope; invalid

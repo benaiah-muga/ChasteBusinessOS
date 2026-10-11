@@ -38,10 +38,12 @@ const paymentRunFixture = {
 };
 
 let activeOrgId = firstOrgId;
+let emptyOrganizationList = false;
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
   activeOrgId = firstOrgId;
+  emptyOrganizationList = false;
   legacyMocks.redirectToLegacy.mockClear();
   legacyMocks.legacyUrl.mockClear();
   authMocks.getSession.mockResolvedValue({ data: { user: { id: "user-1", name: "Ada Lovelace", email: "ada@example.test" } } });
@@ -55,7 +57,10 @@ beforeEach(() => {
       activeOrgId = JSON.parse(String(init.body)).orgId as string;
       return Response.json({ ok: true });
     }
-    if (path === "/api/org") return Response.json({
+    if (path === "/api/org") return Response.json(emptyOrganizationList ? {
+      activeOrgId: null,
+      orgs: [],
+    } : {
       activeOrgId,
       orgs: [
         { id: firstOrgId, name: "First workspace", baseCurrency: "USD" },
@@ -440,6 +445,22 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Good to see you." })).not.toBeNull();
     expect(authMocks.signOut).toHaveBeenCalledOnce();
+  });
+
+  it("keeps signed-in users with no workspace on Vite onboarding", async () => {
+    emptyOrganizationList = true;
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const pushState = vi.spyOn(window.history, "pushState");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "How would you like to start?" })).not.toBeNull();
+    expect(window.location.pathname).toBe("/onboarding");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/onboarding");
+    expect(pushState).not.toHaveBeenCalled();
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+    expect(legacyMocks.legacyUrl).not.toHaveBeenCalledWith("/onboarding");
+    replaceState.mockRestore();
+    pushState.mockRestore();
   });
 
   it("opens the POS shift-summary preview within the authenticated shell", async () => {

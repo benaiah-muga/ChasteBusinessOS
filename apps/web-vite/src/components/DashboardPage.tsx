@@ -168,7 +168,7 @@ export function DashboardPage({ baseCurrency = null }: { baseCurrency?: string |
             <p>{state.message}</p>
           </div>
           {state.onboarding
-            ? <a className="text-link" href={legacyUrl("/onboarding")}>Finish workspace setup <span aria-hidden="true">↗</span></a>
+            ? <a className="text-link" href="/onboarding">Finish workspace setup <span aria-hidden="true">↗</span></a>
             : state.login
               ? <a className="text-link" href="/login">Sign in again</a>
               : <button className="quiet-button" type="button" onClick={() => void load()}>Try again</button>}

@@ -158,7 +158,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
     }
   }, []);
   const sendNewWorkspaceToSetup = useCallback(() => {
-    window.location.assign(legacyUrl("/onboarding"));
+    navigate("/onboarding", true);
   }, []);
 
   useEffect(() => {
