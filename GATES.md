@@ -530,3 +530,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests  53 passed|tsc --noEmit|git diff --check/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Focused onboarding API, page, and wizard tests passed 53 cases. Tests cover validated Go GET state, null/invalid responses, completed workspace redirect, unfinished import resume with active org and currency, product receipt restoration and undo on the resumed screen even after import steps are done, preservation of already-done import steps when continuing, and connect data/team step selection. Typecheck, changed-file ESLint, and diff check passed. Authenticated agent-browser reload proof confirmed unfinished setup resumed at Data, receipts remained available, and completed import steps stayed done after continuing to Team.
+
+- [x] G105: The Vite Manufacturing route renders through the authenticated Go overview capability and exposes its migrated work areas.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/manufacturing.test.ts src/components/ManufacturingPage.test.tsx && PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite typecheck && git diff --check
+  EXPECT: /Tests  77 passed|tsc --noEmit|git diff --check/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Focused Manufacturing API and page tests plus TypeScript checking passed. Authenticated agent-browser loaded `/manufacturing` with Go planning reads enabled. The `manufacturing.overviewReport` request returned HTTP 200; Overview, BOMs, Produce, Work orders, and Runs & lots rendered; no browser page errors were reported.

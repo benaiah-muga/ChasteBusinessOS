@@ -2816,11 +2816,16 @@ new owners and the manifest shows zero legacy runtime paths.
      Go derives identity and authorization from the verified session. Focused
      tests cover the opaque actor format and fail-closed invalid scopes.
 
-271. (Implemented and tested; authenticated browser proof remains open) Remove
+271. (Runtime verified) Remove
      the Vite Manufacturing page's link to the legacy workspace. The Vite page
      contains the overview, BOM, production, work order, and runs/lot sections.
      Keep `/manufacturing` ownership pending until the authenticated browser
-     proof verifies the Go-backed route and key interactions.
+     proof verifies the Go-backed route and key interactions. On 2026-10-11,
+     agent-browser opened `/manufacturing` in the authenticated Vite app with
+     Go manufacturing planning reads enabled. The overview report capability
+     returned HTTP 200, and the BOM, Produce, Work orders, and Runs & lots
+     sections rendered their empty-state forms. No browser page errors were
+     reported.
 
 272. (Implemented and database-tested) Expose the existing Go
      `documents.listDocuments` capability to routine agents as
