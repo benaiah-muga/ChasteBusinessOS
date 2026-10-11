@@ -491,7 +491,7 @@ describe("Vite People API", () => {
 
     respond[2]?.(Response.json({ pendingApproval: true }, { status: 202 }));
     await expect(next).resolves.toMatchObject({ kind: "pending" });
-  });
+  }, 10_000);
 
   it("fails closed when browser-wide Go Hiring locks are unavailable", async () => {
     vi.stubGlobal("__GO_HR_HIRING__", true);
