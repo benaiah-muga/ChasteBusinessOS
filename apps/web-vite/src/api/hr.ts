@@ -187,10 +187,6 @@ export function goHrLeaveUseGo(): boolean {
   return typeof __GO_HR_LEAVE__ !== "undefined" && __GO_HR_LEAVE__;
 }
 
-export function goHrTimeUseGo(): boolean {
-  return true;
-}
-
 export function goHrPayrollUseGo(): boolean {
   return typeof __GO_HR_PAYROLL__ !== "undefined" && __GO_HR_PAYROLL__;
 }

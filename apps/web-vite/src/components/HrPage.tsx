@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrEmployeeWritesUseGo, goHrHiringUseGo, goHrLeaveUseGo, goHrOverviewReportUseGo, goHrPayrollUseGo, goHrTimeUseGo, HrApiError, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeHireAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrEmployeeWritesUseGo, goHrHiringUseGo, goHrLeaveUseGo, goHrOverviewReportUseGo, goHrPayrollUseGo, HrApiError, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeHireAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
 import { legacyUrl } from "../legacy";
 import "./hr-page.css";
 
@@ -193,10 +193,6 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   }, [tab, actorId, organizationId]);
 
   useEffect(() => {
-    if (!goHrTimeUseGo()) {
-      setTimeRecoveryAction(null);
-      return;
-    }
     let active = true;
     void readPendingHrTimeAction({ actorId, organizationId }).then((action) => {
       if (!active) return;
@@ -371,10 +367,8 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         await refreshAll();
       }
     } catch (error) {
-      if (goHrTimeUseGo()) {
-        try { setTimeRecoveryAction(await readPendingHrTimeAction({ actorId, organizationId })); }
-        catch { setTimeRecoveryAction(action); }
-      }
+      try { setTimeRecoveryAction(await readPendingHrTimeAction({ actorId, organizationId })); }
+      catch { setTimeRecoveryAction(action); }
       setNotice({ tone: "error", text: error instanceof Error ? error.message : `${label} failed.` });
     } finally {
       setBusy(false);

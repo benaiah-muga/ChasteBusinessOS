@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrOverviewReportUseGo, goHrTimeUseGo, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrOverviewReportUseGo, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
 import type { HrApiError } from "./hr";
 
 const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
@@ -561,8 +561,6 @@ describe("Vite People API", () => {
   });
 
   it("loads the Go time report and approval queue through their read capabilities", async () => {
-    vi.stubGlobal("__GO_HR_TIME__", false);
-    expect(goHrTimeUseGo()).toBe(true);
     const pendingEntry = {
       id: "11111111-1111-4111-8111-111111111111",
       employeeId: "22222222-2222-4222-8222-222222222222",
@@ -591,7 +589,6 @@ describe("Vite People API", () => {
   });
 
   it("persists exact Go time actions through approval, 404, and reload recovery", async () => {
-    vi.stubGlobal("__GO_HR_TIME__", true);
     stubHrWriteLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
@@ -619,7 +616,6 @@ describe("Vite People API", () => {
   });
 
   it("maps Go time decisions and keeps malformed successful responses retryable", async () => {
-    vi.stubGlobal("__GO_HR_TIME__", true);
     stubHrWriteLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const intents: string[] = [];
@@ -641,7 +637,6 @@ describe("Vite People API", () => {
   });
 
   it("serializes cross-tab Go time reservations for one actor and organization", async () => {
-    vi.stubGlobal("__GO_HR_TIME__", true);
     stubHrWriteLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
@@ -662,7 +657,6 @@ describe("Vite People API", () => {
   });
 
   it("does not let a delayed success clear a newer Go time intent", async () => {
-    vi.stubGlobal("__GO_HR_TIME__", true);
     stubHrWriteLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
@@ -688,7 +682,6 @@ describe("Vite People API", () => {
   });
 
   it("fails closed when browser-wide Go time locks are unavailable", async () => {
-    vi.stubGlobal("__GO_HR_TIME__", true);
     vi.stubGlobal("navigator", {} as Navigator);
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
     const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75 };

@@ -72,7 +72,6 @@ import {
   goHrEmployeeWritesFromEnv,
   goHrLeaveFromEnv,
   goHrPayrollFromEnv,
-  goHrTimeFromEnv,
   goAccountingRecordPaymentFromEnv,
   goAccountingCreateInvoiceFromEnv,
   goAccountingCreditNoteFromEnv,
@@ -251,14 +250,6 @@ describe("HR Leave Go selector", () => {
     expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_LEAVE: "0" })).toBe(false);
     expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_LEAVE: "1" })).toBe(false);
-  });
-});
-
-describe("HR Time Go selector", () => {
-  it("requires the time selector and session capability route", () => {
-    expect(goHrTimeFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_TIME: "1" })).toBe(true);
-    expect(goHrTimeFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goHrTimeFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_TIME: "1" })).toBe(false);
   });
 });
 
