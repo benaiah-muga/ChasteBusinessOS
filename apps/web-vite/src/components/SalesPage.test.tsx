@@ -453,7 +453,9 @@ describe("Vite sales page", () => {
     const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
 
     const row = await screen.findByRole("row", { name: /#41/ });
-    fireEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+    const cancel = within(row).getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
+    await waitFor(() => expect(cancel.disabled).toBe(false));
+    fireEvent.click(cancel);
     expect(screen.getByRole("dialog").textContent).toContain("Order #41");
 
     activeOrganization = "org-2";
