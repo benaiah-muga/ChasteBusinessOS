@@ -258,4 +258,43 @@ describe("marketplace publish requests", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
+
+  it("installs through the Go capability using only the listing ID", async () => {
+    const listingId = "7de066f0-4bdb-4f46-9b6a-193064f5b235";
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: {
+      installed: true, slug: "acme-warehouse", version: "1.2.3",
+    } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketplaceAction({ action: "install", listingId })).resolves.toEqual({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    }));
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body).toEqual({
+      capabilityId: "creator.installListing",
+      input: { listingId },
+      intentId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
+  });
+
+  it("preserves Go install approval envelopes and does not fall back", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      ok: false,
+      pendingApproval: true,
+      reason: "An organization owner must approve this install.",
+      approvalId: "d81d8459-9a20-4c8e-a88c-27866dd552aa",
+    }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketplaceAction({ action: "install", listingId: "7de066f0-4bdb-4f46-9b6a-193064f5b235" })).resolves.toEqual({
+      kind: "pending", reason: "An organization owner must approve this install.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
 });

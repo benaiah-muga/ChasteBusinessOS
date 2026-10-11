@@ -912,6 +912,13 @@
       "when": 1791711058884,
       "tag": "0129_go_due_recurring_invoice_scheduler",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1791744080500,
+      "tag": "0130_go_marketplace_install_state",
+      "breakpoints": true
     }
   ]
 }

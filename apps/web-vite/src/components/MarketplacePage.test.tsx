@@ -66,14 +66,14 @@ describe("Vite marketplace page", () => {
     expect(screen.getByText("Capabilities: inventory.cycleCount, [object Object]")).not.toBeNull();
   });
 
-  it("loads full marketplace rows and installs a listing through the same-origin API", async () => {
+  it("loads full marketplace rows and installs through Go before refreshing installed state", async () => {
     let installed = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketplace" && init?.method === "POST") {
-        const payload = JSON.parse(String(init.body)) as { action?: string; listingId?: string; intentId?: string };
-        expect(payload).toMatchObject({ action: "install", listingId: listing.id });
+      if (isCapabilityRequest(input, init, "creator.installListing")) {
+        const payload = JSON.parse(String(init?.body)) as { input?: { listingId?: string }; intentId?: string };
+        expect(payload).toMatchObject({ input: { listingId: listing.id } });
         expect(payload.intentId).toEqual(expect.any(String));
         installed = true;
         return Response.json({ ok: true, data: { installed: true, slug: listing.slug, version: listing.version } });
@@ -91,7 +91,9 @@ describe("Vite marketplace page", () => {
 
     expect(await screen.findByText("Plugin installed after signature re-verification.")).not.toBeNull();
     await waitFor(() => expect(screen.getByText("installed")).not.toBeNull());
-    expect(fetchMock).toHaveBeenCalledWith("/api/marketplace", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock.mock.calls.some(([input, callInit]) => isCapabilityRequest(input, callInit, "creator.installListing"))).toBe(true);
+    expect(fetchMock.mock.calls.filter(([input, callInit]) => isCapabilityRequest(input, callInit, "creator.listMarketplace"))).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
   });
 
   it("publishes through Go, clears the form, and refreshes listing data", async () => {
@@ -205,7 +207,7 @@ describe("Vite marketplace page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketplace" && init?.method === "POST") {
+      if (isCapabilityRequest(input, init, "creator.installListing")) {
         return Response.json({ ok: true, data: { listingId: listing.id } });
       }
       if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([listing]);
@@ -219,13 +221,14 @@ describe("Vite marketplace page", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("The marketplace returned an unexpected action response.");
     expect(screen.queryByText("Plugin installed after signature re-verification.")).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
   });
 
   it("does not treat an incomplete approval response as a pending action", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketplace" && init?.method === "POST") {
+      if (isCapabilityRequest(input, init, "creator.installListing")) {
         return Response.json({ pendingApproval: true }, { status: 202 });
       }
       if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([listing]);
@@ -239,6 +242,7 @@ describe("Vite marketplace page", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("The marketplace returned an unexpected approval response.");
     expect(screen.queryByText("Plugin installed after signature re-verification.")).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
   });
 
   it("reports failed signature verification without publishing", async () => {

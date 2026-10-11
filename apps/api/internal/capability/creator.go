@@ -1287,13 +1287,19 @@ func creatorInstallListing(ctx context.Context, tx pgx.Tx, orgID string, input C
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 43))`, input.ListingID); err != nil {
 		return CreatorInstallListingOutput{}, err
 	}
+	var activeOrgID string
+	if err := tx.QueryRow(ctx, `SELECT current_setting('app.org_id', true)`).Scan(&activeOrgID); err != nil {
+		return CreatorInstallListingOutput{}, err
+	}
+	if activeOrgID != orgID {
+		return CreatorInstallListingOutput{}, errors.New("marketplace install organization scope mismatch")
+	}
 	var listingID, slug, version, status, signature, publisherKey string
 	var manifestJSON json.RawMessage
-	var installedJSON []byte
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, slug, version, status, manifest, signature, publisher_public_key, installed_by_org_ids
-		FROM marketplace_listings WHERE id=$1::uuid LIMIT 1`, input.ListingID).Scan(
-		&listingID, &slug, &version, &status, &manifestJSON, &signature, &publisherKey, &installedJSON)
+		SELECT id::text, slug, version, status, manifest, signature, publisher_public_key
+		FROM public.chaste_marketplace_lock_listing($1::uuid)`, input.ListingID).Scan(
+		&listingID, &slug, &version, &status, &manifestJSON, &signature, &publisherKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CreatorInstallListingOutput{}, errors.New("listing not found")
 	}
@@ -1307,27 +1313,15 @@ func creatorInstallListing(ctx context.Context, tx pgx.Tx, orgID string, input C
 	if !valid {
 		return CreatorInstallListingOutput{}, fmt.Errorf("signature no longer verifies: %s", reason)
 	}
-	var installed []string
-	_ = json.Unmarshal(installedJSON, &installed)
-	hasInstaller := false
-	for _, installer := range installed {
-		if installer == orgID {
-			hasInstaller = true
-			break
-		}
-	}
-	if !hasInstaller {
-		installed = append(installed, orgID)
-	}
-	encoded, err := json.Marshal(installed)
-	if err != nil {
+	var installed bool
+	if err := tx.QueryRow(ctx, `SELECT installed
+		FROM public.chaste_marketplace_install_listing($1::uuid)`, listingID).Scan(&installed); err != nil {
 		return CreatorInstallListingOutput{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE marketplace_listings SET installed_by_org_ids=$2::jsonb, updated_at=$3 WHERE id=$1::uuid`,
-		listingID, string(encoded), time.Now()); err != nil {
-		return CreatorInstallListingOutput{}, err
+	if !installed {
+		return CreatorInstallListingOutput{}, errors.New("marketplace install helper did not confirm installation")
 	}
-	return CreatorInstallListingOutput{Installed: true, Slug: slug, Version: version}, nil
+	return CreatorInstallListingOutput{Installed: installed, Slug: slug, Version: version}, nil
 }
 
 func creatorUninstallListing(ctx context.Context, tx pgx.Tx, orgID string, input CreatorUninstallListingInput) (CreatorUninstallListingOutput, error) {

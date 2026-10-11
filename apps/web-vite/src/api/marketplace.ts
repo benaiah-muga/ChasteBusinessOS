@@ -116,21 +116,23 @@ export async function submitMarketplaceAction(input: Record<string, unknown>, si
 } | { kind: "pending"; reason: string }> {
   const action = typeof input.action === "string" ? input.action : undefined;
   const isPublish = action === "publish";
-  const publishInput = {
+  const isInstall = action === "install";
+  const usesGoCapability = isPublish || isInstall;
+  const capabilityInput = isPublish ? {
     manifest: input.manifest,
     signatureBase64: input.signatureBase64,
     publisherPublicKeyBase64: input.publisherPublicKeyBase64,
-  };
+  } : { listingId: input.listingId };
   let response: Response;
   try {
-    response = await fetch(isPublish ? "/api/capabilities/execute" : "/api/marketplace", {
+    response = await fetch(usesGoCapability ? "/api/capabilities/execute" : "/api/marketplace", {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify(isPublish ? {
-        capabilityId: "creator.publishListing",
-        input: publishInput,
+      body: JSON.stringify(usesGoCapability ? {
+        capabilityId: isPublish ? "creator.publishListing" : "creator.installListing",
+        input: capabilityInput,
         intentId: crypto.randomUUID(),
       } : { ...input, intentId: crypto.randomUUID() }),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
@@ -141,7 +143,7 @@ export async function submitMarketplaceAction(input: Record<string, unknown>, si
   }
   const body: unknown = await readJson(response);
   if (response.status === 202) {
-    const parsed = (isPublish ? CapabilityPendingActionSchema : PendingActionSchema).safeParse(body);
+    const parsed = (usesGoCapability ? CapabilityPendingActionSchema : PendingActionSchema).safeParse(body);
     if (!parsed.success) throw new MarketplaceApiError(response.status, "The marketplace returned an unexpected approval response.");
     return { kind: "pending", reason: parsed.data.reason };
   }

@@ -3015,16 +3015,32 @@ new owners and the manifest shows zero legacy runtime paths.
      `signatureBase64`, and `publisherPublicKeyBase64` in the capability input,
      and strictly validate `{ok:true,data:{valid,reason?}}`. An invalid
      signature is a successful Go verdict with `valid:false`, not an HTTP 422
-     response. Preserve permission errors and keep publish, install, and
-     uninstall requests on their existing routes.
+     response. Preserve permission errors; publish and install also use their
+     Go capability cutovers, while uninstall remains on its existing route.
 
 290. (Implemented; focused Vite API/page tests and Go runtime-role DB proof
      passed; authenticated browser proof remains pending) Route Vite Marketplace
      publish through the session-authenticated Go `creator.publishListing`
      capability. Send only `manifest`, `signatureBase64`, and
      `publisherPublicKeyBase64`, strictly validate success and pending approval
-     envelopes, and keep install and uninstall on their current route. The Go
-     runtime-role proof verifies governed persistence, submitting-organization
-     ownership, and refusal to overwrite another publisher's slug. Vite tests
+     envelopes, and route install through Go while keeping uninstall on its
+     current route. The Go runtime-role proof verifies governed persistence,
+     submitting-organization ownership, and refusal to overwrite another
+     publisher's slug. Vite tests
      cover publish success and list refresh, pending approval, errors, strict
      envelope validation, and no legacy publish request.
+
+291. (Implemented; focused Vite API/page tests and a direct-human runtime-role
+     DB proof passed; authenticated browser proof remains pending) Route Vite
+     Marketplace install through the session-authenticated Go
+     `creator.installListing` capability, sending only the listing ID. Preserve
+     signature and verified-status checks, idempotency, the installed-list
+     projection, and other organizations' installed state. Use paired narrow
+     `SECURITY DEFINER` helpers: one locks and returns signature fields without
+     mutation, and the other derives the installer from transaction-local
+     `app.org_id` and updates only install state. Both pin search path and are
+     executable only by `chaste_app`. Keep uninstall on its existing route.
+     Vite tests cover the capability request, Go list refresh, pending approval,
+     errors, and no legacy install request; runtime-role coverage proves signed install,
+     idempotent repeat, invalid/unverified refusal, tenant preservation, and
+     publisher-field protection.

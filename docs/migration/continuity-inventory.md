@@ -159,6 +159,29 @@ production requests and writes. No production traffic has moved to Go.
   [`marketplace.ts`](../../apps/web-vite/src/api/marketplace.ts),
   [`MarketplacePage.tsx`](../../apps/web-vite/src/components/MarketplacePage.tsx),
   and [`creator_executor_test.go`](../../apps/api/internal/capability/creator_executor_test.go).
+- Vite Marketplace install now sends only the listing ID through the
+  session-authenticated Go `creator.installListing` capability. Go verifies
+  the current listing signature and verified status under the existing
+  advisory and row locks. Because the runtime role's table RLS deliberately
+  prevents locking another publisher's row for update, a pair of one-argument
+  `SECURITY DEFINER` helpers handles the cross-tenant lock and install write.
+  The read helper returns signed listing fields without mutation while holding
+  the row lock through transaction commit. The write helper derives the
+  installer from transaction-local `app.org_id`, pins `search_path`, checks
+  verified status, and updates only `installed_by_org_ids` and `updated_at`.
+  PUBLIC cannot execute either helper; only `chaste_app` can. Repeated
+  installs preserve the organization array without duplicates while retaining
+  the previous timestamp-refresh behavior.
+  Runtime-role proof covers direct human execution, valid signature, repeat
+  install, invalid signature and unverified refusal without mutation, foreign
+  install preservation, inability to claim another organization, and blocked
+  publisher-field updates. Vite API and page tests verify the capability
+  payload, Go listing refresh, installed state, and absence of the legacy
+  install POST. Uninstall remains on its previous route. Authenticated browser
+  proof remains pending. See [`marketplace.ts`](../../apps/web-vite/src/api/marketplace.ts),
+  [`creator.go`](../../apps/api/internal/capability/creator.go),
+  [`0130_go_marketplace_install_state.sql`](../../packages/db/drizzle/0130_go_marketplace_install_state.sql),
+  and [`creator_executor_test.go`](../../apps/api/internal/capability/creator_executor_test.go).
 - Vite Accounting Overview reads through Go's authenticated
   `accounting.overview` capability unconditionally. The client validates the
   strict response and fails closed on errors; there is no legacy retry or

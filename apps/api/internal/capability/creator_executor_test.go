@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestGoCreatorExecutorContractsAndInverseLinks(t *testing.T) {
@@ -183,6 +186,204 @@ func TestGoCreatorPublishListingUsesGovernedTenantScopedExecutor(t *testing.T) {
 	}
 	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2 AND kind='capability.executed' AND actor_type='system'`, fx.orgID, creatorPublishListingCapabilityID); got != 1 {
 		t.Fatalf("creator.publishListing audit rows=%d, want one successful governed publish", got)
+	}
+}
+
+func TestGoCreatorMarketplaceHumanInstallIsSignedIdempotentAndTenantScoped(t *testing.T) {
+	fx := newExecutorFixture(t)
+	fx.setModuleList(`["creator"]`)
+	grantWavePermission(t, fx, "platform.creator")
+	type listingFixture struct {
+		id        string
+		slug      string
+		status    string
+		manifest  string
+		signature string
+		publicKey string
+		updatedAt time.Time
+	}
+	seedListing := func(slug, status string, signatureValid bool) listingFixture {
+		t.Helper()
+		manifestRaw := strings.Replace(creatorTestManifest, "acme-warehouse", slug, 1)
+		manifest, err := creatorValidateManifest(json.RawMessage(manifestRaw))
+		if err != nil {
+			t.Fatalf("validate install manifest %s: %v", slug, err)
+		}
+		signature, publicKey := creatorTestPublisher(t, manifest)
+		if !signatureValid {
+			signature = "invalid-signature"
+		}
+		fixture := listingFixture{id: executorUUID(t), slug: slug, status: status, manifest: manifestRaw, signature: signature, publicKey: publicKey}
+		installed, err := json.Marshal([]string{fx.otherOrgID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fx.owner.Exec(fx.ctx, `
+			INSERT INTO marketplace_listings
+				(id, slug, name, version, summary, manifest, signature, publisher_public_key,
+				 capability_ids, status, submitted_by_org_id, installed_by_org_ids)
+			VALUES ($1::uuid, $2, 'Install proof listing', '1.2.3', 'Tenant install proof',
+				 $3::jsonb, $4, $5, '["acme.cycleCount"]'::jsonb, $6, $7::uuid, $8::jsonb)`,
+			fixture.id, fixture.slug, fixture.manifest, fixture.signature, fixture.publicKey, fixture.status, fx.otherOrgID, string(installed)); err != nil {
+			t.Fatalf("seed marketplace install listing %s: %v", slug, err)
+		}
+		if err := fx.owner.QueryRow(fx.ctx, `SELECT updated_at FROM marketplace_listings WHERE id=$1::uuid`, fixture.id).Scan(&fixture.updatedAt); err != nil {
+			t.Fatalf("read initial marketplace listing timestamp %s: %v", fixture.id, err)
+		}
+		return fixture
+	}
+	validListing := seedListing("install-valid-"+executorUUID(t)[:8], "verified", true)
+	invalidListing := seedListing("install-invalid-"+executorUUID(t)[:8], "verified", false)
+	unverifiedListing := seedListing("install-unverified-"+executorUUID(t)[:8], "submitted", true)
+	t.Cleanup(func() {
+		for _, listing := range []listingFixture{validListing, invalidListing, unverifiedListing} {
+			if _, err := fx.owner.Exec(context.Background(), `DELETE FROM marketplace_listings WHERE id=$1::uuid`, listing.id); err != nil {
+				t.Errorf("clean marketplace install fixture %s: %v", listing.id, err)
+			}
+		}
+	})
+	install := func(listingID, intent string) (Result, error) {
+		t.Helper()
+		input, err := json.Marshal(CreatorInstallListingInput{ListingID: listingID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims := waveModuleClaims(fx, creatorInstallListingCapabilityID, "platform.creator", input, "human", "", intent)
+		return fx.executor.Execute(fx.ctx, claims, creatorInstallListingCapabilityID, input)
+	}
+	missing, err := install(executorUUID(t), "marketplace-human-install-missing")
+	if err == nil || !strings.Contains(err.Error(), "listing not found") || missing.OK {
+		t.Fatalf("install missing listing result=%+v err=%v, want not-found error", missing, err)
+	}
+	first, err := install(validListing.id, "marketplace-human-install-first")
+	if err != nil || !first.OK || first.PendingApproval {
+		t.Fatalf("first direct-human install result=%+v err=%v, want completed governed install", first, err)
+	}
+	var firstOutput CreatorInstallListingOutput
+	if err := json.Unmarshal(first.Data, &firstOutput); err != nil || !firstOutput.Installed || firstOutput.Slug != validListing.slug || firstOutput.Version != "1.2.3" {
+		t.Fatalf("first install data=%s output=%+v err=%v", first.Data, firstOutput, err)
+	}
+	readUpdatedAt := func(id string) time.Time {
+		t.Helper()
+		var updatedAt time.Time
+		if err := fx.owner.QueryRow(fx.ctx, `SELECT updated_at FROM marketplace_listings WHERE id=$1::uuid`, id).Scan(&updatedAt); err != nil {
+			t.Fatalf("read marketplace listing timestamp %s: %v", id, err)
+		}
+		return updatedAt
+	}
+	firstUpdatedAt := readUpdatedAt(validListing.id)
+	if !firstUpdatedAt.After(validListing.updatedAt) {
+		t.Fatalf("first install updated_at=%s, want later than seeded value %s", firstUpdatedAt, validListing.updatedAt)
+	}
+	time.Sleep(2 * time.Millisecond)
+	second, err := install(validListing.id, "marketplace-human-install-repeat")
+	if err != nil || !second.OK || second.PendingApproval {
+		t.Fatalf("repeated direct-human install result=%+v err=%v, want idempotent success", second, err)
+	}
+	secondUpdatedAt := readUpdatedAt(validListing.id)
+	if !secondUpdatedAt.After(firstUpdatedAt) {
+		t.Fatalf("repeat install updated_at=%s, want later than first install value %s", secondUpdatedAt, firstUpdatedAt)
+	}
+	readInstalled := func(id string) []string {
+		t.Helper()
+		var raw []byte
+		if err := fx.owner.QueryRow(fx.ctx, `SELECT installed_by_org_ids FROM marketplace_listings WHERE id=$1::uuid`, id).Scan(&raw); err != nil {
+			t.Fatalf("read installed organizations for %s: %v", id, err)
+		}
+		var installed []string
+		if err := json.Unmarshal(raw, &installed); err != nil {
+			t.Fatalf("decode installed organizations %s: %v", raw, err)
+		}
+		return installed
+	}
+	wantInstalled := []string{fx.otherOrgID, fx.orgID}
+	if got := readInstalled(validListing.id); !reflect.DeepEqual(got, wantInstalled) {
+		t.Fatalf("install organizations after repeat=%v, want existing other-org install preserved and current org added once: %v", got, wantInstalled)
+	}
+	type installFunctionPrivileges struct {
+		role             string
+		canReadExecute   bool
+		canWriteExecute  bool
+		publicCanExecute bool
+		argumentCount    int
+		safeDefinerCount int
+	}
+	privileges, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (installFunctionPrivileges, error) {
+		var result installFunctionPrivileges
+		err := tx.QueryRow(fx.ctx, `
+			SELECT current_user,
+				pg_catalog.has_function_privilege(current_user, 'public.chaste_marketplace_lock_listing(uuid)', 'EXECUTE'),
+				pg_catalog.has_function_privilege(current_user, 'public.chaste_marketplace_install_listing(uuid)', 'EXECUTE'),
+				(SELECT EXISTS (
+					SELECT 1 FROM pg_catalog.pg_proc AS function
+					CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(function.proacl, pg_catalog.acldefault('f', function.proowner))) AS grant_row
+					WHERE function.oid IN (
+						'public.chaste_marketplace_lock_listing(uuid)'::regprocedure,
+						'public.chaste_marketplace_install_listing(uuid)'::regprocedure)
+						AND grant_row.grantee=0 AND grant_row.privilege_type='EXECUTE')),
+				(SELECT count(*)::int FROM pg_catalog.pg_proc AS function
+					WHERE function.oid IN (
+						'public.chaste_marketplace_lock_listing(uuid)'::regprocedure,
+						'public.chaste_marketplace_install_listing(uuid)'::regprocedure)
+						AND function.pronargs=1),
+				(SELECT count(*)::int FROM pg_catalog.pg_proc AS function
+					WHERE function.oid IN (
+						'public.chaste_marketplace_lock_listing(uuid)'::regprocedure,
+						'public.chaste_marketplace_install_listing(uuid)'::regprocedure)
+						AND function.pronargs=1 AND function.prosecdef
+						AND function.proconfig @> ARRAY['search_path=pg_catalog, pg_temp'])`).Scan(
+			&result.role, &result.canReadExecute, &result.canWriteExecute, &result.publicCanExecute, &result.argumentCount, &result.safeDefinerCount)
+		return result, err
+	})
+	if err != nil {
+		t.Fatalf("read install function privileges as runtime role: %v", err)
+	}
+	if privileges.role != "chaste_app" || !privileges.canReadExecute || !privileges.canWriteExecute || privileges.publicCanExecute || privileges.argumentCount != 2 || privileges.safeDefinerCount != 2 {
+		t.Fatalf("install function privileges=%+v, want app-only execution and two one-argument pinned SECURITY DEFINER functions", privileges)
+	}
+	_, scopeMismatchErr := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreatorInstallListingOutput, error) {
+		return creatorInstallListing(fx.ctx, tx, fx.otherOrgID, CreatorInstallListingInput{ListingID: validListing.id})
+	})
+	if scopeMismatchErr == nil || !strings.Contains(scopeMismatchErr.Error(), "organization scope mismatch") {
+		t.Fatalf("install with a claimed organization outside transaction scope returned %v, want scope mismatch", scopeMismatchErr)
+	}
+	updatedPublisherRows, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (int64, error) {
+		tag, err := tx.Exec(fx.ctx, `UPDATE marketplace_listings SET name='unauthorized publisher edit' WHERE id=$1::uuid`, validListing.id)
+		return tag.RowsAffected(), err
+	})
+	if err != nil {
+		t.Fatalf("attempt publisher-field update as runtime role: %v", err)
+	}
+	if updatedPublisherRows != 0 {
+		t.Fatalf("runtime role changed %d publisher-owned fields, want RLS to reject update", updatedPublisherRows)
+	}
+	var storedName, storedSignature, storedPublisherKey string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT name, signature, publisher_public_key FROM marketplace_listings WHERE id=$1::uuid`, validListing.id).Scan(&storedName, &storedSignature, &storedPublisherKey); err != nil {
+		t.Fatalf("read publisher fields after install: %v", err)
+	}
+	if storedName != "Install proof listing" || storedSignature != validListing.signature || storedPublisherKey != validListing.publicKey {
+		t.Fatalf("install changed publisher fields: name=%q signature preserved=%t key preserved=%t", storedName, storedSignature == validListing.signature, storedPublisherKey == validListing.publicKey)
+	}
+	for _, test := range []struct {
+		name    string
+		listing listingFixture
+		message string
+	}{
+		{name: "invalid signature", listing: invalidListing, message: "signature no longer verifies"},
+		{name: "unverified status", listing: unverifiedListing, message: "refusing install"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := install(test.listing.id, "marketplace-human-install-"+strings.ReplaceAll(test.name, " ", "-"))
+			if err == nil || result.OK || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("install result=%+v err=%v, want refusal %q", result, err, test.message)
+			}
+			if got := readInstalled(test.listing.id); !reflect.DeepEqual(got, []string{fx.otherOrgID}) {
+				t.Fatalf("refused install changed organizations to %v, want only existing other-org install", got)
+			}
+		})
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2 AND kind='capability.executed' AND actor_type='human'`, fx.orgID, creatorInstallListingCapabilityID); got != 2 {
+		t.Fatalf("creator.installListing audit rows=%d, want one governed record for each successful call", got)
 	}
 }
 
