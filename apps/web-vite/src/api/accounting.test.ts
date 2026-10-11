@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AccountingApiError,
   emailInvoice,
+  fetchAccountingBanking,
   fetchAccountingBudgetScenarios,
   fetchAccountingCashBasis,
   fetchAccountingEnabled,
@@ -595,6 +596,42 @@ describe("accounting API: capability reads", () => {
     minimumCashBufferMinor: 5_000,
     weeks: [{ weekStart: "2026-10-05T00:00:00.000Z", inflowMinor: 3_000, outflowMinor: 1_000, closeMinor: 12_000 }],
   };
+
+  it("keeps legacy banking detail rows and replaces only the summary with accounting.bankSummary", async () => {
+    const legacy = {
+      accounts: [{ id: "legacy-account", name: "Old projection", currencyCode: "USD", last4: null, balanceMinor: 1_000 }],
+      unmatched: [{ id: "line-1", bankAccountId: "legacy-account", currencyCode: "USD", postedAt: "2026-10-01T00:00:00.000Z", amountMinor: 100, description: "Coffee" }],
+      matched: [],
+      excluded: [],
+      payments: [{ id: "payment-1", invoiceNumber: 4, currencyCode: "USD", customerName: "Buyer", amountMinor: 100, receivedAt: "2026-10-01T00:00:00.000Z" }],
+      summary: { accounts: [], unmatchedCount: 0 },
+    };
+    const goSummary = {
+      accounts: [{ bankAccountId: "go-account", name: "Go projection", currencyCode: "USD", last4: "1234", balanceMinor: 2_000, count: 2, moneyInMinor: 2_000, moneyOutMinor: 0 }],
+      unmatchedCount: 2,
+    };
+    const mock = stubFetch((url) => url === "/api/banking"
+      ? Response.json(legacy)
+      : Response.json({ ok: true, data: goSummary }));
+
+    await expect(fetchAccountingBanking()).resolves.toEqual({ ...legacy, summary: goSummary });
+    expect(mock).toHaveBeenCalledTimes(2);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/banking");
+    expect(JSON.parse(String(mock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.bankSummary",
+      input: {},
+      intentId: expect.any(String),
+    });
+  });
+
+  it("fails closed when Go cannot provide the banking summary", async () => {
+    const mock = stubFetch((url) => url === "/api/banking"
+      ? Response.json({ accounts: [], unmatched: [], payments: [], summary: { accounts: [], unmatchedCount: 0 } })
+      : Response.json({ error: "missing" }, { status: 404 }));
+
+    await expect(fetchAccountingBanking()).rejects.toMatchObject({ name: "AccountingApiError", status: 404 });
+    expect(mock).toHaveBeenCalledTimes(2);
+  });
 
   it("passes the budget scenario only when one is chosen", async () => {
     const mock = stubFetch(() => Response.json({ ok: true, data: forecast }));

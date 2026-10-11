@@ -743,7 +743,15 @@ export async function fetchAccountingBanking(signal?: AbortSignal): Promise<Acco
   const { response, body } = await getJson("/api/banking", { method: "GET" }, signal);
   if (!response.ok) return null;
   const parsed = BankingSchema.safeParse(body);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) return null;
+  const summary = await readGoAccountingCapability(
+    "accounting.bankSummary",
+    {},
+    BankSummarySchema,
+    "load bank account summary",
+    signal,
+  );
+  return { ...parsed.data, summary };
 }
 
 export async function fetchAccountingTaxCodes(signal?: AbortSignal): Promise<AccountingTaxCode[]> {
@@ -765,7 +773,7 @@ export async function fetchAccountingBudgetScenarios(signal?: AbortSignal): Prom
 }
 
 async function readGoAccountingCapability<T>(
-  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.buildReminders" | "accounting.cashBasisReport" | "accounting.overview",
+  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.buildReminders" | "accounting.cashBasisReport" | "accounting.overview" | "accounting.bankSummary",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   context: string,

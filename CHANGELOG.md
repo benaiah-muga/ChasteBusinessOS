@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Accounting now gets the bank account totals and unmatched count from Go's
+  `accounting.bankSummary` capability. Bank transaction and payment detail rows
+  remain on the existing `/api/banking` response; the banking route remains
+  parity pending until authenticated browser and live legacy differential proof.
+
 - Vite Settings now sends exact `GET` and `POST /api/policy` requests to Go by
   default. Go resolves the signed session and active organization, reads policy
   through tenant-scoped RLS, and derives `canEdit` from resolved `iam.admin`

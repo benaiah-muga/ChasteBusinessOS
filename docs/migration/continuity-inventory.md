@@ -314,6 +314,13 @@ authenticated browser and live legacy differential proofs complete
 [`iam_org_settings.go#L173-L213`](../../apps/api/internal/capability/iam_org_settings.go#L173-L213),
 [`policy_session.go`](../../apps/api/internal/httpapi/policy_session.go)).
 
+Vite Accounting now combines the existing `/api/banking` detail response with
+the Go `accounting.bankSummary` capability result. Go supplies account totals,
+transaction counts, money in/out totals, and unmatched count; legacy still
+supplies transaction state/detail and payment rows used by reconciliation
+controls. `/api/banking` remains legacy-owned and parity pending until the
+authenticated browser flow and live legacy differential are proven.
+
 ## Required parity evidence before cutover
 
 1. A cloned-database comparison proves table shape and all existing rows remain
