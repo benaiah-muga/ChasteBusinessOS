@@ -1556,7 +1556,9 @@ new owners and the manifest shows zero legacy runtime paths.
      spend. Set `CHASTE_GO_POS_CUSTOMERS_SLICE=0` to restore the legacy lookup;
      only a missing Go route falls back automatically. Set
      `GO_POS_CUSTOMERS_ROUTE=0` to unmount the endpoint. CRM and Support callers
-     remain unchanged. Focused Go/Vite tests pass; browser proof remains open.
+     remain unchanged. The generated route ownership manifest records the
+     Go-only GET as `owner: go, parity: verified`. Focused Go/Vite and manifest
+     checks pass; browser proof remains open.
 157. (Implemented) Route Vite POS quick product creation and opening stock adjustment through
      the existing Go `inventory.createItem` and `inventory.adjustStock`
      capabilities when `CHASTE_GO_INVENTORY_ITEM_SLICE=1` and

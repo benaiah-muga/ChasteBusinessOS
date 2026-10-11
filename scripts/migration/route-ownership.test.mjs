@@ -24,3 +24,17 @@ test("pending auth ownership is limited to the Better Auth catch-all", () => {
   assert.equal(allowsPendingAuthOwner("api", "/api/analytics", "auth", "pending"), false);
   assert.equal(allowsPendingAuthOwner("page", "/api/auth/[...all]", "auth", "pending"), false);
 });
+
+test("Go-only POS customer lookup has exact generated ownership", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.path === "/api/pos/customers"),
+    [{
+      kind: "api",
+      path: "/api/pos/customers",
+      method: "GET",
+      source: "apps/api/internal/httpapi/pos_customers_session.go",
+      owner: "go",
+      parity: "verified",
+    }],
+  );
+});

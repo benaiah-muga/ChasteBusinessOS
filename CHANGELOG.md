@@ -13,6 +13,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- The route ownership manifest now includes Go-only endpoints declared with
+  their Go source, including verified `GET /api/pos/customers` ownership.
+
 - Go now owns the full inventory cycle-count job lifecycle, including recording
   counts, posting variances, and cancelling counts. The legacy worker leaves
   these jobs to Go.

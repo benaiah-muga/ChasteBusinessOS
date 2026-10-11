@@ -116,6 +116,22 @@ if (existsSync(overridePath)) {
     entry.owner = owner;
     entry.parity = parity;
   }
+
+  const goRoutes = overrideDocument.goRoutes ?? [];
+  if (!Array.isArray(goRoutes)) throw new Error("Go route declarations must be an array.");
+  for (const route of goRoutes) {
+    const { kind, path, method, owner, parity, source } = route;
+    if (kind !== "api" || !methods.has(method)) throw new Error(`Invalid Go route declaration: ${path ?? "(missing path)"}`);
+    if (typeof path !== "string" || !path.startsWith("/api/")) throw new Error("Go route path must start with /api/.");
+    if (owner !== "go" || parity !== "verified") throw new Error(`Go route ${path} must have verified Go ownership.`);
+    if (typeof source !== "string" || !source.startsWith("apps/api/") || !existsSync(join(root, source))) {
+      throw new Error(`Go route ${path} must name an existing apps/api source file.`);
+    }
+    const key = `${kind}:${path}:${method}`;
+    if (seenOverrides.has(key) || entriesByKey.has(key)) throw new Error(`Duplicate route ownership entry: ${key}`);
+    seenOverrides.add(key);
+    entries.push({ kind, path, method, source, owner, parity });
+  }
 }
 
 entries.sort((left, right) => {

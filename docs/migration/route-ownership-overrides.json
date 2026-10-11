@@ -381,5 +381,15 @@
       "owner": "go",
       "parity": "verified"
     }
+  ],
+  "goRoutes": [
+    {
+      "kind": "api",
+      "path": "/api/pos/customers",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/pos_customers_session.go",
+      "owner": "go",
+      "parity": "verified"
+    }
   ]
 }
