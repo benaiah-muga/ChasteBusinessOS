@@ -32,10 +32,17 @@ The full v1 changelog is preserved at the bottom of this file.
   handler. Setting the paired report route selectors to `0` restores the
   legacy report path during migration rollback.
 
-- Vite Marketing overview reads can now use Go's `marketing.overviewSnapshot`
-  capability. The response retains the strict segments, campaigns, provider
-  send counts, and recent delivery log contract, with all reads scoped to the
-  active organization.
+- Vite Marketing overview reads now use Go's `marketing.overviewSnapshot`
+  capability by default whenever the session capability route is enabled.
+  Setting `CHASTE_GO_MARKETING_OVERVIEW_READS=0` keeps the overview on the
+  legacy endpoint. The response retains the strict segments, campaigns,
+  provider send counts, and recent delivery log contract, with all reads
+  scoped to the active organization.
+
+- Vite can route the organization switcher GET and active-organization POST
+  through the existing Go `/api/org` handler with `CHASTE_GO_ORG_ROUTE=1`
+  paired with `GO_ORG_ROUTE=1`. The default keeps the route on the legacy
+  handler until the Go route is explicitly enabled.
 
 - Vite Marketing segment creation now reserves its exact intent in durable,
   actor- and organization-scoped storage. Browser-wide Web Locks prevent

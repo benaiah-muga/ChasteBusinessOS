@@ -174,10 +174,14 @@ to `/` after a successful response. Preserve membership denial and cookie
 flags; the client never reads or writes the active-org cookie
 ([`ActiveOrganization.tsx#L1-L112`](../../apps/web-vite/src/components/ActiveOrganization.tsx#L1-L112),
 [`organizations.ts#L1-L71`](../../apps/web-vite/src/api/organizations.ts#L1-L71)).
-In development, Vite proxies `/api/org` to the legacy server. Keep the browser
-hostname `localhost` on both ports so host-scoped session cookies are sent.
-The public route and production owner remain legacy while this Go path is
-opt-in and parity is verified.
+In development, set `GO_ORG_ROUTE=1` and `CHASTE_GO_ORG_ROUTE=1` to proxy the
+organization switcher's GET and active-organization POST to Go. The proxy
+preserves the session cookie, Origin, body, and response cookies, and fails
+closed when Go is selected. GET is Go-owned in the route manifest after
+focused handler and proxy tests and an authenticated Vite read. POST is still
+legacy-owned pending browser proof of an actual organization switch; PUT and
+PATCH remain legacy-owned. The authenticated Vite onboarding flow verified Go
+organization reads.
 
 ## Required parity evidence before cutover
 

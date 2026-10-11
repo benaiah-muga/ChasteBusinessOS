@@ -838,8 +838,8 @@
       "path": "/api/org",
       "method": "GET",
       "source": "apps/web/src/app/api/org/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1353,8 +1353,8 @@
       "kind": "page",
       "path": "/marketing",
       "source": "apps/web/src/app/(app)/marketing/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",

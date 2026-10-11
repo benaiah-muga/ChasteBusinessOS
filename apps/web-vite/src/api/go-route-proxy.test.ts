@@ -107,11 +107,11 @@ describe("Marketing campaign Go selector", () => {
 });
 
 describe("Marketing overview Go selector", () => {
-  it("requires the explicit overview read flag and session capability route", () => {
+  it("defaults to Go with the session route and allows an explicit legacy rollback", () => {
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_OVERVIEW_READS: "1" })).toBe(true);
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_OVERVIEW_READS: "0" })).toBe(false);
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MARKETING_OVERVIEW_READS: "1" })).toBe(false);
-    expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
   });
 });
 
@@ -833,6 +833,8 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_POS_READ_ROUTE", flag: "posRead", method: "GET", url: "/api/pos?status=open" },
   { env: "CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE", flag: "posShiftSummary", method: "POST", url: "/api/pos/shift-summary" },
   { env: "CHASTE_GO_ONBOARDING_ROUTE", flag: "onboarding", method: "POST", url: "/api/onboarding" },
+  { env: "CHASTE_GO_ORG_ROUTE", flag: "organization", method: "GET", url: "/api/org" },
+  { env: "CHASTE_GO_ORG_ROUTE", flag: "organization", method: "POST", url: "/api/org" },
 ];
 
 const supportedGoAuthRoutes: Array<{ method: string; url: string }> = [
@@ -1035,6 +1037,96 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(rollback, "GET", "/api/onboarding")).toBe(false);
     expect(isGoRouteRequest(rollback, "POST", "/api/onboarding")).toBe(false);
     expect(isGoRouteRequest(rollback, "PATCH", "/api/onboarding")).toBe(false);
+  });
+
+  it("routes the organization switcher GET and POST only when explicitly enabled", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(defaults.organization).toBe(false);
+    expect(isGoRouteRequest(defaults, "GET", "/api/org")).toBe(false);
+    expect(isGoRouteRequest(defaults, "POST", "/api/org")).toBe(false);
+
+    const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_ORG_ROUTE: "1" });
+    expect(isGoRouteRequest(enabled, "GET", "/api/org")).toBe(true);
+    expect(isGoRouteRequest(enabled, "GET", "/api/org?source=workspace")).toBe(true);
+    expect(isGoRouteRequest(enabled, "POST", "/api/org")).toBe(true);
+    expect(isGoRouteRequest(enabled, "PATCH", "/api/org")).toBe(false);
+    expect(isGoRouteRequest(enabled, "PUT", "/api/org")).toBe(false);
+    expect(isGoRouteRequest(enabled, "DELETE", "/api/org")).toBe(false);
+    expect(isGoRouteRequest(enabled, "GET", "/api/org/extra")).toBe(false);
+
+    const rollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_ORG_ROUTE: "0" });
+    expect(isGoRouteRequest(rollback, "GET", "/api/org")).toBe(false);
+    expect(isGoRouteRequest(rollback, "POST", "/api/org")).toBe(false);
+  });
+
+  it("preserves browser cookies and origin for Go-owned organization requests", async () => {
+    const go = requestRecorder("go");
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
+
+    const legacy = requestRecorder("legacy");
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
+
+    const vite = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_ORG_ROUTE: "1" }), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+      },
+    });
+    await vite.listen();
+    runningServers.push({ close: () => vite.close() });
+    const address = vite.httpServer?.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/org`, {
+      headers: {
+        cookie: "auth.session=authenticated-user; chaste.active-org=organization-id",
+        origin: "http://127.0.0.1:3000",
+      },
+    });
+    const payload = await response.json() as {
+      target: string;
+      method: string;
+      url: string;
+      cookie: string;
+      origin: string;
+    };
+    expect(payload).toMatchObject({
+      target: "go",
+      method: "GET",
+      url: "/api/org",
+      cookie: "auth.session=authenticated-user; chaste.active-org=organization-id",
+      origin: "http://127.0.0.1:3000",
+    });
+
+    const switched = await fetch(`http://127.0.0.1:${address.port}/api/org`, {
+      method: "POST",
+      headers: {
+        cookie: "auth.session=authenticated-user",
+        origin: "http://127.0.0.1:3000",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ orgId: "organization-id" }),
+    });
+    const switchedPayload = await switched.json() as {
+      target: string;
+      method: string;
+      cookie: string;
+      origin: string;
+      body: string;
+    };
+    expect(switchedPayload).toMatchObject({
+      target: "go",
+      method: "POST",
+      cookie: "auth.session=authenticated-user",
+      origin: "http://127.0.0.1:3000",
+      body: JSON.stringify({ orgId: "organization-id" }),
+    });
+    expect(switched.headers.get("set-cookie")).toContain("proxy-result=preserved");
   });
 
   it("allows the analytics read proxy to be disabled for rollback", () => {

@@ -2626,13 +2626,30 @@ new owners and the manifest shows zero legacy runtime paths.
      issues. (Go/Vite implementation complete; browser proof open)
 
 253. Route the Vite Marketing overview read through the new
-     `marketing.overviewSnapshot` Go capability behind the explicit
-     `CHASTE_GO_MARKETING_OVERVIEW_READS` selector. Preserve the strict
+     `marketing.overviewSnapshot` Go capability by default whenever the
+     session capability route is enabled; `CHASTE_GO_MARKETING_OVERVIEW_READS=0`
+     is the explicit legacy rollback. Preserve the strict
      segments, campaigns, provider-confirmed send counts, and recent delivery
      log response. All four reads and all joined records are constrained to
      the active organization inside `dbx.WithOrgTx`. The DB-backed test passed
      with runtime integration required and verifies authorization, exact
      report fields, provider state, and cross-organization isolation. The
      focused Vite marketing API and selector suite passed all 190 tests;
-     typecheck and lint passed. `graft build` completed. Browser proof remains
-     open.
+     typecheck and lint passed. `graft build` completed. Browser proof is
+     complete: an isolated authenticated Vite session rendered `/marketing`,
+     received `GET /api/modules` from Go with 200, and completed
+     `marketing.overviewSnapshot` through `POST /api/capabilities/execute` with
+     200. The visible Marketing overview rendered without browser errors. The
+     `/marketing` page is now Vite-owned in the generated route manifest.
+
+254. Proxy the organization switcher's `/api/org` GET and POST through the Go
+     handler when both `GO_ORG_ROUTE=1` and `CHASTE_GO_ORG_ROUTE=1` are set.
+     The proxy preserves cookies, Origin, request bodies, and response cookies,
+     and fails closed when Go is selected. Focused Vite tests cover method
+     selection and forwarding; Go handler tests cover GET and POST membership,
+     session, and cookie contracts. The authenticated onboarding journey
+     completed with Go `POST /api/onboarding` and observed Go `GET /api/org`
+     returning 200. GET moves to Go ownership after browser verification. POST
+     is still legacy-owned because the browser did not exercise an organization
+     switch; PUT and PATCH also remain legacy-owned. The temporary user,
+     organization, and dependent rows were removed after browser verification.
