@@ -351,6 +351,7 @@ func routineToolSet() ([]routineTool, map[string]string, error) {
 		{Name: "accounting_customerStatement", Capability: "accounting.customerStatement", Permission: "accounting.read", Description: "Read a customer's dated invoices, payments, credit notes, and running balances by currency.", Schema: routineObjectSchema(map[string]any{"customerId": map[string]any{"type": "string", "format": "uuid", "description": "UUID of the customer whose statement to read."}}, []string{"customerId"})},
 		{Name: "accounting_listBudgetScenarios", Capability: "accounting.listBudgetScenarios", Permission: "accounting.read", Description: "List budget scenarios and their versions, optionally limited to one fiscal year.", Schema: routineObjectSchema(map[string]any{"fiscalYear": map[string]any{"type": "integer", "minimum": 2000, "maximum": 2100, "description": "Only include scenarios for this fiscal year."}}, nil)},
 		{Name: "documents_listDocs", Capability: "documents.listDocs", Permission: "documents.read", Description: "List authored documents with their publish status and version count.", Schema: routineObjectSchema(map[string]any{}, nil)},
+		{Name: "documents_listDocuments", Capability: "documents.listDocuments", Permission: "documents.read", Description: "List this organization's ingested documents with their processing status and open suggestion count.", Schema: routineObjectSchema(map[string]any{}, nil)},
 		{Name: "documents_listDocVersions", Capability: "documents.listDocVersions", Permission: "documents.read", Description: "List an authored document's version history, oldest to newest.", Schema: routineObjectSchema(map[string]any{"documentId": map[string]any{"type": "string", "format": "uuid", "description": "UUID of the authored document."}}, []string{"documentId"})},
 		{Name: "documents_getDocVersion", Capability: "documents.getDocVersion", Permission: "documents.read", Description: "Read an archived authored document version with its content and HTML.", Schema: routineObjectSchema(map[string]any{
 			"documentId": map[string]any{"type": "string", "format": "uuid", "description": "UUID of the authored document."},
@@ -372,7 +373,7 @@ func routineToolSet() ([]routineTool, map[string]string, error) {
 	tools := make([]routineTool, 0, len(definitions))
 	byName := make(map[string]string, len(definitions))
 	for _, tool := range definitions {
-		if GoCapabilityPermissions[tool.Capability] != tool.Permission {
+		if routineToolPermission(tool.Capability) != tool.Permission {
 			return nil, nil, fmt.Errorf("routine tool %s is missing its expected Go worker permission", tool.Capability)
 		}
 		if previous, ok := byName[tool.Name]; ok {
@@ -382,6 +383,13 @@ func routineToolSet() ([]routineTool, map[string]string, error) {
 		tools = append(tools, tool)
 	}
 	return tools, byName, nil
+}
+
+func routineToolPermission(capabilityID string) string {
+	if capabilityID == "documents.listDocuments" {
+		return "documents.read"
+	}
+	return GoCapabilityPermissions[capabilityID]
 }
 
 func routineObjectSchema(properties map[string]any, required []string) map[string]any {
@@ -485,7 +493,7 @@ func validateRoutineListToolInput(raw json.RawMessage) error {
 
 func (a *routineAgent) executeRoutineTool(ctx context.Context, job *ClaimedJob, sessionID, orgID, capabilityID string, args json.RawMessage, intentID string) any {
 	capResult, err := executeSystemWithLeaseGate(ctx, a.executor, capability.SystemClaims{
-		OrganizationID: orgID, CapabilityID: capabilityID, Permission: GoCapabilityPermissions[capabilityID],
+		OrganizationID: orgID, CapabilityID: capabilityID, Permission: routineToolPermission(capabilityID),
 		IntentID: intentID, AgentSessionID: sessionID,
 		JobID: job.ID, LeaseOwner: job.WorkerID, FencingToken: job.FencingToken,
 		LeaseExtensionMillis: job.LeaseExtensionMillis,

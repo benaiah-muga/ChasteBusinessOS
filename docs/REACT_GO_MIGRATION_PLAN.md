@@ -2812,3 +2812,10 @@ new owners and the manifest shows zero legacy runtime paths.
      contains the overview, BOM, production, work order, and runs/lot sections.
      Keep `/manufacturing` ownership pending until the authenticated browser
      proof verifies the Go-backed route and key interactions.
+
+272. (Implemented and database-tested) Expose the existing Go
+     `documents.listDocuments` capability to routine agents as
+     `documents_listDocuments`, with a strict empty-object model schema and the
+     existing `documents.read` permission. The routine integration proof
+     verifies the local ingested document projection, excludes another
+     organization's document, and records a session-linked system audit event.

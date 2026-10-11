@@ -56,6 +56,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Go routine agents can now list ingested documents through the governed
+  `documents.listDocuments` capability. The tool keeps the existing
+  `documents.read` permission and organization scope.
+
 - Go jobs worker now exclusively owns `inventory.createCycleCount` jobs. The
   TypeScript claimant leaves cycle-count creation queued for Go, which records
   the open snapshot and governed action receipt.

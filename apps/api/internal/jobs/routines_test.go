@@ -424,6 +424,25 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if _, required := documents.Schema["required"]; required {
 		t.Fatalf("document list schema should not require input fields: %#v", documents.Schema)
 	}
+	var ingestedDocuments *routineTool
+	for index := range tools {
+		if tools[index].Capability == "documents.listDocuments" {
+			ingestedDocuments = &tools[index]
+			break
+		}
+	}
+	if ingestedDocuments == nil || ingestedDocuments.Name != "documents_listDocuments" || ingestedDocuments.Permission != "documents.read" || byName["documents_listDocuments"] != "documents.listDocuments" {
+		t.Fatalf("ingested document list tool=%+v dispatch=%q, want documents_listDocuments with documents.read", ingestedDocuments, byName["documents_listDocuments"])
+	}
+	if ingestedDocuments.Schema["type"] != "object" || ingestedDocuments.Schema["additionalProperties"] != false {
+		t.Fatalf("ingested document list schema must be a validated input-free object: %#v", ingestedDocuments.Schema)
+	}
+	if properties, ok := ingestedDocuments.Schema["properties"].(map[string]any); !ok || len(properties) != 0 {
+		t.Fatalf("ingested document list schema should have no properties: %#v", ingestedDocuments.Schema)
+	}
+	if _, required := ingestedDocuments.Schema["required"]; required {
+		t.Fatalf("ingested document list schema should not require input fields: %#v", ingestedDocuments.Schema)
+	}
 	var documentVersions *routineTool
 	for index := range tools {
 		if tools[index].Capability == "documents.listDocVersions" {

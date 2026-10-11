@@ -158,6 +158,19 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	}
 	localDocumentID := seedDocument(orgID, "Routine local proof")
 	foreignDocumentID := seedDocument(otherOrgID, "Routine foreign proof")
+	seedIngestedDocument := func(documentOrgID, title string) string {
+		t.Helper()
+		var id string
+		if err := owner.QueryRow(ctx, `
+			INSERT INTO documents (org_id, title, source_type, status, created_by_actor_type, created_at)
+			VALUES ($1::uuid, $2, 'text', 'parsed', 'human', $3)
+			RETURNING id::text`, documentOrgID, title, updatedAt).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	localIngestedDocumentID := seedIngestedDocument(orgID, "Routine local ingested proof")
+	foreignIngestedDocumentID := seedIngestedDocument(otherOrgID, "Routine foreign ingested proof")
 	firstVersionAt := time.Date(2026, 9, 30, 10, 11, 12, 345000000, time.UTC)
 	secondVersionAt := time.Date(2026, 9, 30, 10, 12, 13, 456000000, time.UTC)
 	if _, err := owner.Exec(ctx, `
@@ -463,6 +476,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-reservations", "type": "function", "function": map[string]any{"name": "inventory_listReservations", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-list", "type": "function", "function": map[string]any{"name": "routines_list", "arguments": `{"limit":100}`}},
 					map[string]any{"id": "call-routine-documents", "type": "function", "function": map[string]any{"name": "documents_listDocs", "arguments": "{}"}},
+					map[string]any{"id": "call-routine-ingested-documents", "type": "function", "function": map[string]any{"name": "documents_listDocuments", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(localVersionArgs)}},
 					map[string]any{"id": "call-routine-foreign-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(foreignVersionArgs)}},
 					map[string]any{"id": "call-routine-document-version-detail", "type": "function", "function": map[string]any{"name": "documents_getDocVersion", "arguments": string(localVersionDetailArgs)}},
@@ -512,6 +526,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundReservationsResult := false
 		foundRoutineListResult := false
 		foundLocalVersionResult := false
+		foundIngestedDocumentResult := false
 		foundForeignVersionResult := false
 		foundLocalVersionDetailResult := false
 		foundLocalNullNoteVersionDetailResult := false
@@ -761,6 +776,25 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					document.DocType == nil || *document.DocType != "invoice" || document.Linked == nil || *document.Linked != "customer" ||
 					document.Label == nil || *document.Label != "Acme" || document.UpdatedAt != "2026-09-30T10:11:12.345Z" {
 					t.Errorf("documents.listDocs document = %+v, want the seeded metadata and version count", document)
+				}
+			case "call-routine-ingested-documents":
+				foundIngestedDocumentResult = true
+				var result struct {
+					OK   bool                                   `json:"ok"`
+					Data capability.ListIngestedDocumentsOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode documents.listDocuments tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Documents) != 1 {
+					t.Errorf("documents.listDocuments result = %+v, want only this organization's ingested document", result)
+					continue
+				}
+				document := result.Data.Documents[0]
+				if document.ID != localIngestedDocumentID || document.Title != "Routine local ingested proof" || document.Status != "parsed" ||
+					document.SourceType != "text" || document.OpenSuggestions != 0 || document.CreatedAt != "2026-09-30T10:11:12.345Z" || document.ID == foreignIngestedDocumentID {
+					t.Errorf("documents.listDocuments document = %+v, want the local ingested document and no foreign tenant data", document)
 				}
 			case "call-routine-accounting-quotes":
 				foundQuoteResult = true
@@ -1096,6 +1130,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundDocumentResult {
 			t.Errorf("follow-up provider request omitted the documents.listDocs tool result")
 		}
+		if !foundIngestedDocumentResult {
+			t.Errorf("follow-up provider request omitted the documents.listDocuments tool result")
+		}
 		if !foundLocationResult {
 			t.Errorf("follow-up provider request omitted the inventory.listLocations tool result")
 		}
@@ -1246,6 +1283,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='documents.listDocs' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
 		t.Fatalf("session-linked document-list system capability audit events=%d", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='documents.listDocuments' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
+		t.Fatalf("session-linked ingested document-list system capability audit events=%d", got)
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='documents.listDocVersions' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 2 {
 		t.Fatalf("session-linked document-version system capability audit events=%d, want local and tenant-scoped empty reads", got)
