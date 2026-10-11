@@ -477,6 +477,9 @@ creation, confirmation, cancellation, and reversal into the signed Go
 capability bridge. Other inventory actions remain on their existing handlers.
 It requires `pnpm dev:api`; uncertain writes fail closed without a TypeScript
 retry. The flag defaults to `0`.
+The following inventory read flags apply to the legacy Next API handler only.
+Vite's `/api/inventory` GET route uses the direct Go reader described below and
+does not consult these flags.
 `GO_INVENTORY_ITEM_HISTORY_READS=1` opts `GET /api/inventory?sku=...` into
 the signed Go `inventory.itemHistory` read. It requires `pnpm dev:api`, keeps
 the `{ movements }` response and missing-item behavior, and fails closed if
