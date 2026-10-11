@@ -5,6 +5,7 @@ import { OnboardingPage } from "./OnboardingPage";
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   fetchOrganizations: vi.fn(),
+  readOnboardingState: vi.fn(),
   navigate: vi.fn(),
 }));
 
@@ -20,16 +21,31 @@ vi.mock("../api/organizations", () => ({
     }
   },
 }));
+vi.mock("../api/onboarding", () => ({
+  readOnboardingState: mocks.readOnboardingState,
+  OnboardingApiError: class OnboardingApiError extends Error {
+    constructor(readonly status: number, message: string) {
+      super(message);
+    }
+  },
+}));
 
 vi.mock("../navigation", () => ({ navigate: mocks.navigate }));
 vi.mock("./onboarding/Wizard", () => ({
-  OnboardingWizard: ({ email }: { email: string }) => <div>Wizard for {email}</div>,
+  OnboardingWizard: (props: {
+    email: string;
+    actorId: string;
+    organizationId?: string;
+    baseCurrency?: string;
+    resumeState?: { path: string; steps: Record<string, string> };
+  }) => <div data-testid="wizard">{JSON.stringify(props)}</div>,
 }));
 
 describe("Vite onboarding route", () => {
   beforeEach(() => {
     mocks.getSession.mockResolvedValue({ data: { user: { id: "user-id", email: "ada@example.test" } } });
     mocks.fetchOrganizations.mockResolvedValue({ orgs: [], activeOrgId: null });
+    mocks.readOnboardingState.mockResolvedValue(null);
     mocks.navigate.mockReset();
   });
 
@@ -49,7 +65,7 @@ describe("Vite onboarding route", () => {
   it("opens setup only when the signed-in user has no workspace", async () => {
     render(<OnboardingPage />);
 
-    expect(await screen.findByText("Wizard for ada@example.test")).toBeTruthy();
+    expect(await screen.findByTestId("wizard")).toBeTruthy();
     expect(mocks.fetchOrganizations).toHaveBeenCalledOnce();
   });
 
@@ -61,7 +77,33 @@ describe("Vite onboarding route", () => {
     render(<OnboardingPage />);
 
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("/", true));
-    expect(screen.queryByText("Wizard for ada@example.test")).toBeNull();
+    expect(screen.queryByTestId("wizard")).toBeNull();
+    expect(mocks.readOnboardingState).toHaveBeenCalledOnce();
+  });
+
+  it("resumes an unfinished setup with the active workspace context", async () => {
+    const state = {
+      path: "import",
+      steps: { business_profile: "done", import_customers: "done", import_products: "pending" },
+      startedAt: "2026-01-01T00:00:00Z",
+    };
+    mocks.fetchOrganizations.mockResolvedValue({
+      orgs: [{ id: "org-id", name: "Ada's workspace", baseCurrency: "UGX" }],
+      activeOrgId: "org-id",
+    });
+    mocks.readOnboardingState.mockResolvedValue(state);
+
+    render(<OnboardingPage />);
+
+    const wizard = await screen.findByTestId("wizard");
+    expect(JSON.parse(wizard.textContent ?? "{}")).toEqual({
+      email: "ada@example.test",
+      actorId: "user-id",
+      organizationId: "org-id",
+      baseCurrency: "UGX",
+      resumeState: state,
+    });
+    expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
   it("keeps the failure visible and retries the workspace check", async () => {
@@ -72,7 +114,7 @@ describe("Vite onboarding route", () => {
     expect(alert.textContent).toContain("We could not check whether you already have a workspace");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
-    expect(await screen.findByText("Wizard for ada@example.test")).toBeTruthy();
+    expect(await screen.findByTestId("wizard")).toBeTruthy();
     expect(mocks.fetchOrganizations).toHaveBeenCalledTimes(2);
   });
 });

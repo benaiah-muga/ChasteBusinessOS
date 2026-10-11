@@ -98,14 +98,20 @@ describe("products API", () => {
     vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(importProducts([{ rowNumber: 4, name: " Tea ", sku: " TEA-1 ", type: "goods", unit: " box ", salePrice: "3.25", barcode: "4000000000006", tags: [" Pantry "] }], undefined, retryScope)).resolves.toEqual({
+    await expect(importProducts([
+      { rowNumber: 4, name: " Tea ", sku: " TEA-1 ", type: "goods", unit: " box ", salePrice: "3.25", barcode: "4000000000006", tags: [" Pantry "] },
+      { rowNumber: 5, name: "Duplicate tea", sku: "TEA-2", type: "goods", salePrice: "1.00", tags: [] },
+    ], undefined, retryScope)).resolves.toEqual({
       inserted: 1, skippedDuplicates: 1, skippedDuplicateRows: [5], errors: [], createdIds: [createdID],
     });
     const [path, options] = fetchMock.mock.calls[0]!;
     expect(path).toBe("/api/capabilities/execute");
     expect(JSON.parse(String(options?.body))).toMatchObject({
       capabilityId: "inventory.importItems",
-      input: { rows: [{ rowNumber: 4, name: "Tea", sku: "TEA-1", kind: "goods", unitLabel: "box", salePriceMinor: 325, barcode: "4000000000006", tags: ["Pantry"] }] },
+      input: { rows: [
+        { rowNumber: 4, name: "Tea", sku: "TEA-1", kind: "goods", unitLabel: "box", salePriceMinor: 325, barcode: "4000000000006", tags: ["Pantry"] },
+        { rowNumber: 5, name: "Duplicate tea", sku: "TEA-2", kind: "goods", unitLabel: "unit", salePriceMinor: 100, barcode: null, tags: [] },
+      ] },
       intentId: expect.any(String),
     });
   });
@@ -113,7 +119,7 @@ describe("products API", () => {
   it("reuses a product import intent and generated service SKU after a network failure", async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("network lost"))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { createdIds: [], imported: 0, skippedDuplicateRows: [] } }));
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { createdIds: [], imported: 0, skippedDuplicateRows: [2] } }));
     vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
     vi.stubGlobal("fetch", fetchMock);
     const rows = [{ rowNumber: 2, name: "Install", type: "service" as const, salePrice: "12.00", tags: [] }];
@@ -191,11 +197,14 @@ describe("products API", () => {
     [{ createdIds: ["not-a-uuid"], imported: 1, skippedDuplicateRows: [] }],
     [{ createdIds: ["10000000-0000-4000-8000-000000000051"], imported: 2, skippedDuplicateRows: [] }],
     [{ createdIds: ["10000000-0000-4000-8000-000000000051", "10000000-0000-4000-8000-000000000051"], imported: 2, skippedDuplicateRows: [] }],
-  ])("keeps an import marker when Go returns an inconsistent or duplicated created ID set", async (data) => {
+    [{ createdIds: [], imported: 0, skippedDuplicateRows: [2, 2] }],
+    [{ createdIds: [], imported: 0, skippedDuplicateRows: [99] }],
+    [{ createdIds: [], imported: 0, skippedDuplicateRows: [] }],
+  ])("keeps an import marker when Go returns malformed IDs or duplicate-row results", async (data) => {
     const rows = [{ rowNumber: 2, name: "Tea", sku: "TEA-BAD-IMPORT", type: "goods" as const, salePrice: "3.25", tags: [] }];
     vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data })));
-    await expect(importProducts(rows, undefined, retryScope)).rejects.toThrow(/unexpected format|inconsistent or duplicate item IDs/);
+    await expect(importProducts(rows, undefined, retryScope)).rejects.toThrow(/unexpected format|inconsistent item or duplicate-row results/);
     await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ pendingRows: rows, recovery: null });
   });
 
@@ -302,6 +311,27 @@ describe("products API", () => {
     await importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", salePrice: "3.25", tags: [] }], undefined, retryScope);
     await expect(recoverProductImport(retryScope)).resolves.toMatchObject({ recovery: { activeIds: [createdID], archivedIds: [], result: { createdIds: [createdID] } } });
     await expect(recoverProductImport(otherRetryScope)).resolves.toMatchObject({ recovery: null, pendingRows: null });
+  });
+
+  it("retains independent undo receipts for split batches and can undo an older batch", async () => {
+    const firstID = "10000000-0000-4000-8000-000000000041";
+    const secondID = "10000000-0000-4000-8000-000000000042";
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { createdIds: [firstID], imported: 1, skippedDuplicateRows: [] } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { createdIds: [secondID], imported: 1, skippedDuplicateRows: [] } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { itemIds: [firstID], archived: 1 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const makeRow = (rowNumber: number, sku: string) => [{ rowNumber, name: "Item " + sku, sku, type: "goods" as const, salePrice: "3.25", tags: [] }];
+    await importProducts(makeRow(2, "BATCH-1"), undefined, retryScope);
+    await importProducts(makeRow(2, "BATCH-2"), undefined, retryScope);
+    await expect(recoverProductImport(retryScope)).resolves.toMatchObject({
+      recoveries: [{ activeIds: [firstID] }, { activeIds: [secondID] }],
+    });
+    await expect(undoProductImport([firstID], undefined, retryScope)).resolves.toMatchObject({ kind: "completed", itemIds: [firstID] });
+    await expect(recoverProductImport(retryScope)).resolves.toMatchObject({
+      recoveries: [{ activeIds: [], archivedIds: [firstID] }, { activeIds: [secondID] }],
+    });
   });
 
   it("routes restore through Go and retains the exact IDs returned by undo and restore", async () => {

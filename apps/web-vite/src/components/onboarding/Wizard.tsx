@@ -7,6 +7,7 @@ import {
   recoveryFor,
   type OnboardingFailure,
   type OnboardingPath,
+  type OnboardingState,
   type OnboardingStepKey,
   type OnboardingStepStatus,
 } from "../../api/onboarding";
@@ -136,6 +137,14 @@ export function screensForPath(path: OnboardingPath | null): Screen[] {
   return path === "fresh" ? ["path", "profile", "team", "done"] : ["path", "profile", "data", "team", "done"];
 }
 
+export function screenForResume(state: OnboardingState): Screen {
+  if (state.path === "fresh") return "team";
+  if (state.path === "import") return "data";
+  const pending = (key: OnboardingStepKey) => state.steps[key] !== "done";
+  if (state.path === "connect" && pending("connect_source")) return "data";
+  return "team";
+}
+
 /** The rail shows progress, so the terminal screen is not one of the steps. */
 export function railScreens(screens: Screen[]): Screen[] {
   return screens.filter((screen) => screen !== "done");
@@ -225,12 +234,25 @@ const PATH_BULLETS: Record<OnboardingPath, string[]> = {
   connect: ["Bank accounts and statements", "Keep records where they are", "CSV if a connector isn't ready"],
 };
 
-export function OnboardingWizard({ email }: { email: string }) {
-  const [screen, setScreen] = useState<Screen>("path");
-  const [path, setPath] = useState<OnboardingPath | null>(null);
+export function OnboardingWizard({
+  email,
+  actorId,
+  organizationId: resumedOrganizationId,
+  baseCurrency,
+  resumeState,
+}: {
+  email: string;
+  actorId: string;
+  organizationId?: string;
+  baseCurrency?: string;
+  resumeState?: OnboardingState;
+}) {
+  const [screen, setScreen] = useState<Screen>(() => resumeState ? screenForResume(resumeState) : "path");
+  const [path, setPath] = useState<OnboardingPath | null>(() => resumeState?.path ?? null);
 
   const [orgName, setOrgName] = useState("");
-  const [currency, setCurrency] = useState<string>("USD");
+  const [organizationId, setOrganizationId] = useState<string | null>(resumedOrganizationId ?? null);
+  const [currency, setCurrency] = useState<string>(baseCurrency ?? "USD");
   const [customCurrency, setCustomCurrency] = useState("");
   const [description, setDescription] = useState("");
 
@@ -238,7 +260,7 @@ export function OnboardingWizard({ email }: { email: string }) {
   const [progressStep, setProgressStep] = useState(0);
   const [failure, setFailure] = useState<OnboardingFailure | null>(null);
 
-  const [stepStatus, setStepStatus] = useState<Partial<Record<OnboardingStepKey, OnboardingStepStatus>>>({});
+  const [stepStatus, setStepStatus] = useState<Partial<Record<OnboardingStepKey, OnboardingStepStatus>>>(resumeState?.steps ?? {});
   const [imported, setImported] = useState<{ customers: number; products: number }>({ customers: 0, products: 0 });
 
   const [connectMode, setConnectMode] = useState<"choose" | "csv">("choose");
@@ -319,11 +341,17 @@ export function OnboardingWizard({ email }: { email: string }) {
     }
   }
 
+  function skipUnfinishedImportSteps() {
+    for (const key of ["import_customers", "import_products"] as const) {
+      if (stepStatus[key] !== "done") void markStep(key, "skipped");
+    }
+  }
+
   async function createWorkspaceNow() {
     setCreating(true);
     setFailure(null);
     try {
-      await createWorkspace({
+      const workspace = await createWorkspace({
         orgName: orgName.trim(),
         businessDescription: description.trim(),
         baseCurrency: resolvedCurrency,
@@ -331,6 +359,7 @@ export function OnboardingWizard({ email }: { email: string }) {
         deferredSteps: path ? PATH_META[path].steps : [],
         intentId: bootstrapIntentId(),
       });
+      setOrganizationId(workspace.orgId);
     } catch (error) {
       setFailure(failureOf(error));
       return;
@@ -442,7 +471,7 @@ export function OnboardingWizard({ email }: { email: string }) {
           ? {
               eyebrow: `Step 3 of ${screens.length - 1}`,
               title: "Your file stays yours",
-              body: "We read the file in your browser first and show you exactly what will land before anything is written. Duplicate customers are skipped, not duplicated.",
+              body: "We read the file in your browser first and show you exactly what will land before anything is written. Duplicates are skipped, not duplicated.",
               points: [
                 { icon: <IconCheck style={styles.pointChip} />, text: "One bad row never cancels the whole import." },
                 { icon: <IconFileText style={styles.pointChip} />, text: "Anything unmatched is listed by row number." },
@@ -685,13 +714,15 @@ export function OnboardingWizard({ email }: { email: string }) {
                       </p>
                     </div>
                     <CsvImportPanel
+                      actorId={actorId}
+                      organizationId={organizationId}
+                      currency={resolvedCurrency}
                       onImported={(outcome) => {
                         setImported((previous) => ({ ...previous, [outcome.entity]: previous[outcome.entity] + outcome.inserted }));
                         void markStep(outcome.entity === "customers" ? "import_customers" : "import_products", "done");
                       }}
                       onSkipped={() => {
-                        void markStep("import_customers", "skipped");
-                        void markStep("import_products", "skipped");
+                        skipUnfinishedImportSteps();
                         setScreen("team");
                       }}
                     />
@@ -701,8 +732,8 @@ export function OnboardingWizard({ email }: { email: string }) {
                         onClick={() => {
                           // Leaving without importing is a real choice, so it is
                           // recorded as one: the checklist will offer it again.
-                          if (imported.customers === 0) void markStep("import_customers", "skipped");
-                          if (imported.products === 0) void markStep("import_products", "skipped");
+                          if (imported.customers === 0 && stepStatus.import_customers !== "done") void markStep("import_customers", "skipped");
+                          if (imported.products === 0 && stepStatus.import_products !== "done") void markStep("import_products", "skipped");
                           setScreen("team");
                         }}
                         style={primaryButton}
@@ -725,6 +756,9 @@ export function OnboardingWizard({ email }: { email: string }) {
                       </p>
                     </div>
                     <CsvImportPanel
+                      actorId={actorId}
+                      organizationId={organizationId}
+                      currency={resolvedCurrency}
                       onImported={(outcome) => {
                         setImported((previous) => ({ ...previous, [outcome.entity]: previous[outcome.entity] + outcome.inserted }));
                         void markStep(outcome.entity === "customers" ? "import_customers" : "import_products", "done");

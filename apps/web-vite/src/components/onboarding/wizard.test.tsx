@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { OnboardingWizard } from "./Wizard";
-import { guessMapping, parseCsv } from "./CsvImport";
+import { OnboardingWizard, screenForResume } from "./Wizard";
+import { CsvImportPanel, guessMapping, parseCsv, parseCurrencyMinor } from "./CsvImport";
 
 // The wizard renders a large tree in development React, and this file shares a
 // loaded machine with the rest of the suite, so the default 5s per test is not
@@ -33,6 +33,7 @@ const STATE_BODY = { state: { path: "fresh", steps: {}, startedAt: "2026-01-01T0
 
 let calls: FetchCall[] = [];
 let respond: (call: FetchCall) => { status: number; body: Record<string, unknown> };
+let productImportSequence = 0;
 
 function jsonResponse(status: number, body: Record<string, unknown>) {
   return {
@@ -44,11 +45,33 @@ function jsonResponse(status: number, body: Record<string, unknown>) {
 
 beforeEach(() => {
   calls = [];
+  productImportSequence = 0;
   respond = (call) => {
     if (call.url === "/api/onboarding" && call.method === "POST") return { status: 200, body: CREATE_BODY };
     if (call.url === "/api/onboarding") return { status: 200, body: STATE_BODY };
     if (call.url === "/api/team" && call.method === "GET") return { status: 200, body: TEAM_BODY };
     if (call.url === "/api/team") return { status: 200, body: { ok: true, data: {} } };
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "crm.importCustomers") {
+      return { status: 200, body: { ok: true, data: {
+        createdIds: ["10000000-0000-4000-8000-000000000020"], imported: 1, skippedDuplicateRows: [], importIntentId: call.body.intentId,
+      } } };
+    }
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "crm.undoCustomerImport") {
+      const input = call.body.input as { customerIds: string[]; importIntentId: string };
+      return { status: 200, body: { ok: true, data: {
+        customerIds: input.customerIds, deactivated: input.customerIds.length, importIntentId: input.importIntentId, undoIntentId: call.body.intentId,
+      } } };
+    }
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "inventory.importItems") {
+      productImportSequence += 1;
+      return { status: 200, body: { ok: true, data: {
+        createdIds: [`10000000-0000-4000-8000-${String(20 + productImportSequence).padStart(12, "0")}`], imported: 1, skippedDuplicateRows: [],
+      } } };
+    }
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "inventory.undoItemImport") {
+      const input = call.body.input as { itemIds: string[] };
+      return { status: 200, body: { ok: true, data: { itemIds: input.itemIds, archived: input.itemIds.length } } };
+    }
     return { status: 200, body: {} };
   };
   vi.stubGlobal(
@@ -73,10 +96,12 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 function renderWizard() {
-  render(<OnboardingWizard email="owner@example.com" />);
+  render(<OnboardingWizard email="owner@example.com" actorId="10000000-0000-4000-8000-000000000010" />);
 }
 
 function buttonNamed(name: RegExp | string): HTMLButtonElement {
@@ -409,7 +434,258 @@ describe("OnboardingWizard - finishing", () => {
   });
 });
 
+describe("OnboardingWizard - resuming saved setup", () => {
+  it("reopens the data step for unfinished imports with the existing workspace context", async () => {
+    const actorId = "10000000-0000-4000-8000-000000000010";
+    const itemId = "10000000-0000-4000-8000-000000000021";
+    window.localStorage.setItem(
+      `chaste:onboarding:import-undo:v1:${encodeURIComponent(actorId)}:${CREATE_BODY.orgId}:products`,
+      JSON.stringify([{ entity: "products", inserted: 1, skippedDuplicates: 0, createdIds: [itemId], receiptId: itemId }]),
+    );
+    const resumeState = {
+      path: "import" as const,
+      steps: { business_profile: "done" as const, import_customers: "done" as const, import_products: "pending" as const },
+      startedAt: "2026-01-01T00:00:00Z",
+    };
+    expect(screenForResume(resumeState)).toBe("data");
+
+    render(
+      <OnboardingWizard
+        email="owner@example.com"
+        actorId={actorId}
+        organizationId={CREATE_BODY.orgId}
+        baseCurrency="UGX"
+        resumeState={resumeState}
+      />,
+    );
+
+    expect(await screen.findByText("Bring your records over")).toBeTruthy();
+    expect(screen.getByLabelText("Choose a CSV file")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /Products/i }));
+    await screen.findByText(/1 products imported/i);
+    fireEvent.click(buttonNamed(/Undo this import/i));
+    await screen.findByText(/Undid the import/);
+    const undoCall = calls.find((call) => call.body?.capabilityId === "inventory.undoItemImport");
+    expect(undoCall?.body?.input).toMatchObject({ itemIds: [itemId] });
+  });
+
+  it("keeps unfinished import setup on the data step after imports are marked done", () => {
+    expect(screenForResume({
+      path: "import",
+      steps: { business_profile: "done", import_customers: "done", import_products: "done" },
+      startedAt: "2026-01-01T00:00:00Z",
+    })).toBe("data");
+  });
+
+  it("does not change completed imports to skipped when continuing a resumed setup", async () => {
+    render(
+      <OnboardingWizard
+        email="owner@example.com"
+        actorId="10000000-0000-4000-8000-000000000010"
+        organizationId={CREATE_BODY.orgId}
+        baseCurrency="USD"
+        resumeState={{
+          path: "import",
+          steps: { business_profile: "done", import_customers: "done", import_products: "pending" },
+          startedAt: "2026-01-01T00:00:00Z",
+        }}
+      />,
+    );
+
+    await screen.findByText("Bring your records over");
+    fireEvent.click(buttonNamed(/Continue without importing/i));
+
+    await waitFor(() => expect(
+      calls.filter((call) => call.method === "PATCH" && call.body?.status === "skipped").map((call) => call.body?.step),
+    ).toEqual(["import_products"]));
+  });
+
+  it("returns to the team step when connection setup is complete", () => {
+    expect(screenForResume({
+      path: "connect",
+      steps: { business_profile: "done", connect_source: "done" },
+      startedAt: "2026-01-01T00:00:00Z",
+    })).toBe("team");
+  });
+});
+
 describe("OnboardingWizard - the CSV rules behind the import step", () => {
+  it("converts amounts using the selected currency's minor-unit scale", () => {
+    expect(parseCurrencyMinor("5000", "UGX")).toBe(5000);
+    expect(parseCurrencyMinor("1.234", "KWD")).toBe(1234);
+    expect(parseCurrencyMinor("1.2345", "KWD")).toBeNull();
+  });
+
+  it("imports only valid customer rows through Go and keeps the Go receipt for undo", async () => {
+    const panelProps = {
+      actorId: "10000000-0000-4000-8000-000000000010",
+      organizationId: CREATE_BODY.orgId,
+      currency: "KWD",
+      onImported: vi.fn(),
+      onSkipped: vi.fn(),
+    };
+    const view = render(<CsvImportPanel {...panelProps} />);
+    const file = new File([
+      "Name,Credit limit,Email,Payment terms\nGlow Works,1.234,owner@example.com,30\nBad Row,2.000,not-an-email,15\n",
+    ], "customers.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Choose a CSV file"), { target: { files: [file] } });
+    await screen.findByText("customers.csv");
+    fireEvent.click(buttonNamed(/Import 1 customers/i));
+    await screen.findByText(/1 customers imported/i);
+    const importCall = calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.capabilityId === "crm.importCustomers");
+    expect(importCall?.body).toMatchObject({
+      capabilityId: "crm.importCustomers",
+      input: { rows: [{ rowNumber: 2, creditLimitMinor: 1234, paymentTermDays: 30 }] },
+    });
+    expect(screen.getByText(/Row 3/)).toBeTruthy();
+    view.unmount();
+    render(<CsvImportPanel {...panelProps} />);
+    await screen.findByText(/1 customers imported/i);
+    fireEvent.click(buttonNamed(/Undo this import/i));
+    await screen.findByText(/Undid the import/);
+    const undoCall = calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.capabilityId === "crm.undoCustomerImport");
+    expect(undoCall?.body?.input).toMatchObject({ customerIds: ["10000000-0000-4000-8000-000000000020"] });
+    expect(undoCall?.body?.input).toHaveProperty("importIntentId", importCall?.body?.intentId);
+    expect(calls.some((call) => call.url === "/api/import")).toBe(false);
+  });
+
+  it("maps minor-unit credit limit headers without currency scaling", async () => {
+    const panelProps = {
+      actorId: "10000000-0000-4000-8000-000000000010",
+      organizationId: CREATE_BODY.orgId,
+      currency: "USD",
+      onImported: vi.fn(),
+      onSkipped: vi.fn(),
+    };
+    render(<CsvImportPanel {...panelProps} />);
+    const file = new File(["Name,Credit limit minor\nGlow Works,500000\n"], "customers-minor.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Choose a CSV file"), { target: { files: [file] } });
+    await screen.findByText("customers-minor.csv");
+    expect(guessMapping("customers", ["Name", "Credit limit minor"])).toMatchObject({
+      name: "Name",
+      creditLimit: null,
+      creditLimitMinor: "Credit limit minor",
+    });
+    fireEvent.click(buttonNamed(/Import 1 customers/i));
+    await screen.findByText(/1 customers imported/i);
+    const importCall = calls.find((call) => call.body?.capabilityId === "crm.importCustomers");
+    expect(importCall?.body?.input).toMatchObject({ rows: [{ rowNumber: 2, creditLimitMinor: 500000 }] });
+  });
+
+  it("rejects rows with both major-unit and minor-unit credit limit columns", async () => {
+    const panelProps = {
+      actorId: "10000000-0000-4000-8000-000000000010",
+      organizationId: CREATE_BODY.orgId,
+      currency: "USD",
+      onImported: vi.fn(),
+      onSkipped: vi.fn(),
+    };
+    render(<CsvImportPanel {...panelProps} />);
+    const file = new File(["Name,Credit limit,Credit limit minor\nGlow Works,5000,500000\n"], "customers-conflict.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Choose a CSV file"), { target: { files: [file] } });
+    await screen.findByText("customers-conflict.csv");
+    fireEvent.click(buttonNamed("Review row errors"));
+    expect(await screen.findByText(/Use either a major-unit credit limit or a minor-unit credit limit, not both/i)).toBeTruthy();
+    expect(calls.some((call) => call.body?.capabilityId === "crm.importCustomers")).toBe(false);
+  });
+
+  it("imports and undoes product rows through Go with currency minor units", async () => {
+    const panelProps = {
+      initialEntity: "products" as const,
+      actorId: "10000000-0000-4000-8000-000000000010",
+      organizationId: CREATE_BODY.orgId,
+      currency: "KWD",
+      onImported: vi.fn(),
+      onSkipped: vi.fn(),
+    };
+    const view = render(<CsvImportPanel {...panelProps} />);
+    const file = new File(["Name,SKU,Price\nGlow Lamp,GLOW-1,1.234\n"], "products.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Choose a CSV file"), { target: { files: [file] } });
+    await screen.findByText("products.csv");
+    fireEvent.click(buttonNamed(/Import 1 products/i));
+    await screen.findByText(/1 products imported/i);
+    const importCall = calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.capabilityId === "inventory.importItems");
+    expect(importCall?.body).toMatchObject({
+      capabilityId: "inventory.importItems",
+      input: { rows: [{ rowNumber: 2, sku: "GLOW-1", salePriceMinor: 1234 }] },
+    });
+    view.unmount();
+    render(<CsvImportPanel {...panelProps} />);
+    await screen.findByText(/1 products imported/i);
+    fireEvent.click(buttonNamed(/Undo this import/i));
+    await screen.findByText(/Undid the import/);
+    expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.capabilityId === "inventory.undoItemImport")).toBe(true);
+    expect(calls.some((call) => call.url === "/api/import")).toBe(false);
+  });
+
+  it("keeps generated service SKUs and capability intents stable when reuploading after a lost response", async () => {
+    let importAttempts = 0;
+    const requestBodies: Record<string, unknown>[] = [];
+    const defaultRespond = respond;
+    respond = (call) => {
+      if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "inventory.importItems") {
+        importAttempts += 1;
+        requestBodies.push(call.body);
+        if (importAttempts === 1) throw new TypeError("connection reset");
+        return { status: 200, body: { ok: true, data: {
+          createdIds: ["10000000-0000-4000-8000-000000000023"], imported: 1, skippedDuplicateRows: [],
+        } } };
+      }
+      return defaultRespond(call);
+    };
+    const panelProps = {
+      initialEntity: "products" as const,
+      actorId: "10000000-0000-4000-8000-000000000010",
+      organizationId: CREATE_BODY.orgId,
+      currency: "USD",
+      onImported: vi.fn(),
+      onSkipped: vi.fn(),
+    };
+    render(<CsvImportPanel {...panelProps} />);
+    const csv = "Name,Type,Price\nConsultation,service,12.34\n";
+    fireEvent.change(screen.getByLabelText("Choose a CSV file"), { target: { files: [new File([csv], "services.csv", { type: "text/csv" })] } });
+    await screen.findByText("services.csv");
+    fireEvent.click(buttonNamed(/Import 1 products/i));
+    await screen.findByText(/The import could not be completed/i);
+    fireEvent.click(buttonNamed("Use a different file"));
+    fireEvent.change(screen.getByLabelText("Choose a CSV file"), { target: { files: [new File([csv], "services.csv", { type: "text/csv" })] } });
+    await screen.findByText("services.csv");
+    fireEvent.click(buttonNamed(/Import 1 products/i));
+    await screen.findByText(/1 products imported/i);
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[1]).toEqual(requestBodies[0]);
+  });
+
+  it("keeps split product batch undo receipts visible and lets the user undo an older batch", async () => {
+    const panelProps = {
+      initialEntity: "products" as const,
+      actorId: "10000000-0000-4000-8000-000000000010",
+      organizationId: CREATE_BODY.orgId,
+      currency: "USD",
+      onImported: vi.fn(),
+      onSkipped: vi.fn(),
+    };
+    render(<CsvImportPanel {...panelProps} />);
+    let expectedBatchCount = 0;
+    for (const [filename, csv] of ([
+      ["part-1.csv", "Name,SKU,Price\nPart One,PART-1,1.00\n"],
+      ["part-2.csv", "Name,SKU,Price\nPart Two,PART-2,2.00\n"],
+    ] satisfies [string, string][])) {
+      if (filename !== "part-1.csv") fireEvent.click(buttonNamed("Use a different file"));
+      fireEvent.change(screen.getByLabelText("Choose a CSV file"), { target: { files: [new File([csv], filename, { type: "text/csv" })] } });
+      await screen.findByText(filename);
+      fireEvent.click(buttonNamed(/Import 1 products/i));
+      expectedBatchCount += 1;
+      await waitFor(() => expect(calls.filter((call) => call.body?.capabilityId === "inventory.importItems")).toHaveLength(expectedBatchCount));
+      await waitFor(() => expect(screen.getAllByText(/1 products imported/i)).toHaveLength(expectedBatchCount));
+    }
+    expect(screen.getAllByRole("button", { name: /Undo this import/i })).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: /Undo this import/i })[0]!);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Undo this import/i })).toHaveLength(1));
+    const undoCall = calls.find((call) => call.body?.capabilityId === "inventory.undoItemImport");
+    expect(undoCall?.body?.input).toMatchObject({ itemIds: ["10000000-0000-4000-8000-000000000021"] });
+  });
+
   it("reads quoted fields, drops a UTF-8 BOM and trims every cell", () => {
     const table = parseCsv("\uFEFFName,Note\r\n\"Glow, Works\",\"He said \"\"yes\"\"\"\r\nPantry Co,\r\n");
     expect(table.headers).toEqual(["Name", "Note"]);

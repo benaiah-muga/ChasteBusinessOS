@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { CrmApiError, importCrmCustomers, readCrmCustomerImportUndo, undoCrmImport, type CrmCustomerImportRow, type CrmTaskRetryScope } from "./crm";
+import { importProducts, ProductsApiError, undoProductImport, type ProductImportRetryScope, type ProductImportRow } from "./products";
 
 /**
  * The setup wizard's API seam: bootstrap a workspace, record which setup steps
@@ -38,12 +40,20 @@ export interface OnboardingFailure {
 export type OnboardingRecovery = "signin" | "dashboard" | "retry" | "none";
 
 export type OnboardingImportRow = Record<string, string>;
+export type OnboardingImportScope = { actorId: string; organizationId: string };
+export type OnboardingImportIssue = { row: number; field?: string; message: string };
+export type OnboardingImportRequest = {
+  rows: OnboardingImportRow[];
+  rowNumbers: number[];
+  currency: string;
+  scope: OnboardingImportScope | null;
+  errors?: OnboardingImportIssue[];
+};
 export type OnboardingImportResult = z.infer<typeof ImportResultSchema>;
 export type OnboardingUndoResult = { undone: number; remaining: number };
 
 const StepStatusSchema = z.enum(["done", "pending", "skipped"]);
 const PathSchema = z.enum(["fresh", "import", "connect"]);
-const ImportEntitySchema = z.enum(["customers", "products"]);
 
 const CreateWorkspaceSchema = z.object({
   orgName: z.string().trim().min(2).max(80),
@@ -61,31 +71,26 @@ const StepUpdateSchema = z.object({
 
 const CompleteUpdateSchema = z.object({ complete: z.literal(true) }).strict();
 
-const ImportSchema = z.object({
-  entity: ImportEntitySchema,
-  rows: z.array(z.record(z.string(), z.string())).min(1).max(5000),
-  intentId: z.string().min(8).max(100),
-}).strict();
-
-const UndoSchema = z.object({
-  entity: ImportEntitySchema,
-  action: z.literal("undo"),
-  importIds: z.array(z.string().uuid()).min(1).max(5000),
-  intentId: z.string().min(8).max(100),
-}).strict();
-
 const OnboardingStateSchema = z.object({
   path: PathSchema,
   steps: z.record(z.string(), StepStatusSchema),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
 }).passthrough();
+export type OnboardingState = z.infer<typeof OnboardingStateSchema>;
 
 const CreateWorkspaceResponseSchema = z.object({
   orgId: z.string().uuid(),
   replayed: z.boolean().optional(),
 }).strict();
 const StateResponseSchema = z.object({ state: OnboardingStateSchema }).strict();
+const OnboardingChecklistResponseSchema = z.object({
+  state: OnboardingStateSchema.nullable(),
+  steps: z.array(z.object({
+    key: z.string(),
+    status: StepStatusSchema,
+  }).strict()),
+}).strict();
 const ImportRowErrorSchema = z.object({
   row: z.number().int(),
   field: z.string().optional(),
@@ -95,8 +100,9 @@ const ImportResultSchema = z.object({
   inserted: z.number().int().nonnegative(),
   skippedDuplicates: z.number().int().nonnegative(),
   skippedDuplicateRows: z.array(z.number().int()).optional(),
-  errors: z.array(ImportRowErrorSchema),
+  errors: z.array(ImportRowErrorSchema).default([]),
   createdIds: z.array(z.string().uuid()).optional(),
+  importIntentId: z.string().uuid().optional(),
 }).passthrough();
 const UndoResultSchema = z.object({
   undone: z.number().int().nonnegative(),
@@ -111,6 +117,7 @@ const ErrorBodySchema = z.object({
 }).passthrough();
 
 const WRITE_TIMEOUT_MS = 20_000;
+const GO_CAPABILITY_BODY_LIMIT = 64 * 1024;
 /** Creating a workspace seeds accounts, a chart and embeddings, so it waits longer. */
 const CREATE_TIMEOUT_MS = 90_000;
 
@@ -250,6 +257,36 @@ function approved(wire: WireResponse, method: "POST" | "PATCH", url: string): Wi
 
 export type CreateWorkspaceInput = z.infer<typeof CreateWorkspaceSchema>;
 
+export async function readOnboardingState(): Promise<OnboardingState | null> {
+  const url = "/api/onboarding";
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { accept: "application/json" },
+      signal: requestSignal(WRITE_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new OnboardingApiError(0, networkFailure(error));
+  }
+
+  const body = await readJson(response);
+  if (!response.ok) {
+    throw new OnboardingApiError(response.status, failureFromResponse(response.status, body, "GET", url));
+  }
+  const parsed = OnboardingChecklistResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new OnboardingApiError(response.status, {
+      code: "invalid_response",
+      title: "Setup could not be resumed",
+      hint: "The setup service replied in a format we did not recognize. Try again in a moment.",
+      detail: JSON.stringify(body),
+    });
+  }
+  return parsed.data.state;
+}
+
 /**
  * One bootstrap intent per setup attempt (B01/T08): the caller creates the id
  * once and persists it, so a retry after a lost response replays the server's
@@ -312,58 +349,184 @@ export async function completeOnboardingSetup(): Promise<void> {
  * rows come back in `errors` with their row number, duplicates are skipped
  * rather than duplicated, and `createdIds` is what makes an undo possible.
  */
+function importScope(scope: OnboardingImportScope | null): {
+  crm: CrmTaskRetryScope;
+  products: ProductImportRetryScope;
+} {
+  if (!scope || !scope.actorId.trim() || !z.string().uuid().safeParse(scope.organizationId).success) {
+    throw new OnboardingApiError(0, {
+      code: "workspace_loading",
+      title: "Your workspace is still opening",
+      hint: "Wait for your new workspace to finish opening, then try the import again.",
+    });
+  }
+  return { crm: scope, products: scope };
+}
+
+function importFailure(error: unknown): OnboardingApiError {
+  if (error instanceof OnboardingApiError) return error;
+  const status = error instanceof CrmApiError || error instanceof ProductsApiError ? error.status : 0;
+  const message = error instanceof Error ? error.message : "The import could not be completed.";
+  const code = status === 202 ? "pending_approval" : status === 401 ? "unauthorized" : status === 403 ? "forbidden" : status === 404 ? "not_found" : status === 413 ? "payload_too_large" : status === 422 ? "invalid_input" : status === 429 ? "rate_limited" : String(status || "import_error");
+  const title = code === "pending_approval" ? "Waiting for approval" : code === "forbidden" ? "You don't have permission for this" : code === "unauthorized" ? "Your session ended" : code === "rate_limited" ? "Too many attempts" : code === "invalid_input" ? "Check the import rows" : code === "payload_too_large" ? "This file is too large for one import" : "The import could not be completed";
+  return new OnboardingApiError(status, {
+    code,
+    title,
+    hint: message,
+    detail: `${error instanceof Error ? error.name : "Error"}: ${message}`,
+  });
+}
+
+function creditLimitMinor(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  if (!/^\d+$/.test(value)) throw new Error("Credit limits must be converted to non-negative currency minor units.");
+  const minor = Number(value);
+  if (!Number.isSafeInteger(minor)) throw new Error("That credit limit is too large to import safely.");
+  return minor;
+}
+
+function paymentTermDays(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const cleaned = value.replace(/[\s,]/g, "");
+  if (!/^\d+$/.test(cleaned)) throw new Error("Payment terms must be a non-negative whole number of days.");
+  const days = Number(cleaned);
+  if (!Number.isSafeInteger(days)) throw new Error("That payment term is too large to import safely.");
+  return days;
+}
+
+function assertCapabilityImportFits(capabilityId: string, input: unknown): void {
+  const bytes = new TextEncoder().encode(JSON.stringify({
+    capabilityId,
+    input,
+    intentId: "00000000-0000-4000-8000-000000000000",
+  })).byteLength;
+  if (bytes > GO_CAPABILITY_BODY_LIMIT) {
+    throw new OnboardingApiError(413, {
+      code: "payload_too_large",
+      title: "This file is too large for one import",
+      hint: "Split the CSV into smaller files. No rows were sent or changed.",
+    });
+  }
+}
+
+function textValue(value: string | undefined): string {
+  return value ?? "";
+}
+
 export async function importOnboardingRows(
   entity: OnboardingImportEntity,
-  rows: OnboardingImportRow[],
-  intentId: string = crypto.randomUUID(),
+  request: OnboardingImportRequest,
 ): Promise<OnboardingImportResult> {
-  const parsed = ImportSchema.safeParse({ entity, rows, intentId });
-  if (!parsed.success) {
+  const { rows, rowNumbers } = request;
+  if (rows.length < 1 || rows.length > 5000 || rows.length !== rowNumbers.length || new Set(rowNumbers).size !== rowNumbers.length || rowNumbers.some((number) => !Number.isSafeInteger(number) || number < 1) || !/^[A-Z]{3}$/.test(request.currency)) {
     throw new OnboardingApiError(0, {
       code: "invalid",
       title: "That file isn't ready to import",
       hint: "Check the preview: every row needs the fields the importer asked for.",
     });
   }
-  const url = "/api/import";
-  const wire = approved(await send(url, "POST", parsed.data, WRITE_TIMEOUT_MS), "POST", url);
-  const result = ImportResultSchema.safeParse(wire.body);
-  if (!result.success) {
-    throw new OnboardingApiError(wire.status, {
-      code: "invalid_response",
-      title: "The import returned something unexpected",
-      hint: "Nothing was confirmed as imported. Check the records before importing again.",
-      detail: JSON.stringify(wire.body),
+  const retryScope = importScope(request.scope);
+  const errors = request.errors ?? [];
+  try {
+    if (entity === "products") {
+      const productRows: ProductImportRow[] = rows.map((row, index) => ({
+        rowNumber: rowNumbers[index]!,
+        name: textValue(row.name),
+        sku: textValue(row.sku) || undefined,
+        type: ["service", "services"].includes((row.type ?? "product").trim().toLowerCase()) ? "service" : "goods",
+        unit: row.unitLabel,
+        salePrice: textValue(row.salePrice),
+        ...(row.salePriceMinor !== undefined ? { salePriceMinor: Number(row.salePriceMinor) } : {}),
+        barcode: textValue(row.barcode) || undefined,
+        tags: [],
+      }));
+      if (productRows.length === 0) {
+        throw new OnboardingApiError(0, { code: "invalid_rows", title: "No rows are ready to import", hint: "Fix the row errors in your file and try again." });
+      }
+      assertCapabilityImportFits("inventory.importItems", { rows: productRows.map((row) => ({
+        rowNumber: row.rowNumber, name: row.name, sku: row.sku, kind: row.type === "service" ? "service" : "goods",
+        unitLabel: row.unit, salePriceMinor: row.salePriceMinor, reorderPointThousandths: 0,
+        barcode: row.barcode ?? null, tags: [],
+      })) });
+      const result = await importProducts(productRows, undefined, retryScope.products, true);
+      return ImportResultSchema.parse({
+        inserted: result.inserted,
+        skippedDuplicates: result.skippedDuplicates,
+        skippedDuplicateRows: result.skippedDuplicateRows,
+        errors: [
+          ...errors,
+          ...result.errors,
+          ...(result.skippedDuplicateRows ?? []).map((row) => ({ row, message: "A matching product already exists, so this row was skipped." })),
+        ],
+        createdIds: result.createdIds ?? [],
+      });
+    }
+
+    const customerRows: CrmCustomerImportRow[] = rows.map((row, index) => ({
+      rowNumber: rowNumbers[index]!,
+      name: textValue(row.name),
+      ...(textValue(row.email) ? { email: textValue(row.email) } : {}),
+      ...(textValue(row.phone) ? { phone: textValue(row.phone) } : {}),
+      ...(row.creditLimitMinor !== undefined ? { creditLimitMinor: creditLimitMinor(row.creditLimitMinor) } : {}),
+      ...(row.paymentTermDays !== undefined ? { paymentTermDays: paymentTermDays(row.paymentTermDays) } : {}),
+      allowDuplicate: false,
+    }));
+    if (customerRows.length === 0) {
+      return ImportResultSchema.parse({ inserted: 0, skippedDuplicates: 0, errors, createdIds: [] });
+    }
+    assertCapabilityImportFits("crm.importCustomers", { rows: customerRows });
+    const outcome = await importCrmCustomers(customerRows, undefined, true, retryScope.crm);
+    if (outcome.kind === "pending") throw new OnboardingApiError(202, { code: "pending_approval", title: "Waiting for approval", hint: outcome.reason });
+    const undoState = await readCrmCustomerImportUndo(retryScope.crm);
+    if (!undoState || undoState.imported !== outcome.data.inserted || undoState.createdIds.length !== outcome.data.createdIds.length || !undoState.createdIds.every((id, index) => id === outcome.data.createdIds[index])) {
+      throw new OnboardingApiError(200, {
+        code: "invalid_response",
+        title: "The import returned something unexpected",
+        hint: "Nothing was confirmed as imported. Check the records before importing again.",
+      });
+    }
+    return ImportResultSchema.parse({
+      inserted: outcome.data.inserted,
+      skippedDuplicates: outcome.data.skippedDuplicates,
+      skippedDuplicateRows: outcome.data.skippedDuplicateRows,
+      errors: [
+        ...errors,
+        ...(outcome.data.skippedDuplicateRows ?? []).map((row) => ({ row, message: "A matching customer already exists, so this row was skipped." })),
+      ],
+      createdIds: outcome.data.createdIds,
+      importIntentId: undoState.importIntentId,
     });
+  } catch (error) {
+    throw importFailure(error);
   }
-  return result.data;
 }
 
 export async function undoOnboardingImport(
   entity: OnboardingImportEntity,
   importIds: string[],
-  intentId: string = crypto.randomUUID(),
+  scope: OnboardingImportScope | null,
+  importIntentId?: string,
 ): Promise<OnboardingUndoResult> {
-  const parsed = UndoSchema.safeParse({ entity, action: "undo", importIds, intentId });
-  if (!parsed.success) {
+  if (importIds.length < 1 || importIds.length > 5000 || new Set(importIds).size !== importIds.length || importIds.some((id) => !z.string().uuid().safeParse(id).success)) {
     throw new OnboardingApiError(0, {
       code: "invalid",
       title: "This import cannot be undone",
       hint: "There is no recent import to reverse here. Review the imported records instead.",
     });
   }
-  const url = "/api/import";
-  const wire = approved(await send(url, "POST", parsed.data, WRITE_TIMEOUT_MS), "POST", url);
-  const result = UndoResultSchema.safeParse(wire.body);
-  if (!result.success) {
-    throw new OnboardingApiError(wire.status, {
-      code: "invalid_response",
-      title: "The undo returned something unexpected",
-      hint: "The imported records are unchanged. Check them before trying again.",
-      detail: JSON.stringify(wire.body),
-    });
+  const retryScope = importScope(scope);
+  try {
+    if (entity === "products") {
+      const result = await undoProductImport(importIds, undefined, retryScope.products, true);
+      if (result.kind === "pending") throw new OnboardingApiError(202, { code: "pending_approval", title: "Waiting for approval", hint: result.reason });
+      return UndoResultSchema.parse({ undone: result.undone, remaining: result.remaining });
+    }
+    const result = await undoCrmImport(importIds, undefined, true, retryScope.crm, importIntentId);
+    if (result.kind === "pending") throw new OnboardingApiError(202, { code: "pending_approval", title: "Waiting for approval", hint: result.reason });
+    return UndoResultSchema.parse(result.data);
+  } catch (error) {
+    throw importFailure(error);
   }
-  return result.data;
 }
 
 /** Normalises anything thrown by this module into one renderable failure. */

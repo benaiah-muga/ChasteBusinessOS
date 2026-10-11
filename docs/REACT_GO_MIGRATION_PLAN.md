@@ -3079,3 +3079,35 @@ new owners and the manifest shows zero legacy runtime paths.
      on Vite onboarding; Go onboarding POST/PATCH returned 200, and finishing
      setup opened the workspace dashboard on Vite. No browser page errors were
      reported.
+
+294. (Implemented and verified: focused tests, Go runtime tests, authenticated browser proof)
+     Route Vite onboarding customer and product
+     CSV imports and undo exclusively through Go `crm.importCustomers`,
+     `crm.undoCustomerImport`, `inventory.importItems`, and
+     `inventory.undoItemImport`. Keep invalid CSV rows at the client boundary
+     so valid rows can import, preserve source row numbers, duplicate counts,
+     created IDs, and the customer Go import receipt for undo. Convert decimal
+     major-unit values using the workspace currency's minor-unit scale and
+     pass explicit minor-unit headers through without rescaling. Reject rows
+     that supply both forms with a row-level error, and reject a
+     request above Go's 64 KiB capability body limit before sending it. Enable
+     the required Go import gates in `.env.example`. Keep per-batch undo
+     receipts across split imports and reloads, retain CRM source intent IDs,
+     and derive generated service SKUs deterministically so an exact retry
+     keeps its payload. Focused Vite and Go runtime tests passed. Authenticated
+     agent-browser proof with local SMTP verified customer and product imports,
+     duplicate and invalid row handling, reload-safe undo, unchanged minor-unit
+     credit limits, successful Go capability responses, and no legacy import
+     requests or browser errors.
+
+295. (Implemented and verified: focused onboarding tests and authenticated browser proof)
+     When a signed-in account has a workspace but Go onboarding GET
+     returns an unfinished state, keep the user on Vite onboarding with the
+     active workspace ID and currency. Always reopen Data for the import path
+     so saved per-batch undo receipts remain visible even after both import
+     steps are marked done. Resume connect setup at Data while its step remains
+     incomplete, otherwise return to Team. Redirect to the dashboard when
+     onboarding state is absent or finished. Focused onboarding tests passed.
+     Authenticated browser reload proof confirmed setup resumed at Data, undo
+     receipts remained available, and completed import steps stayed done when
+     continuing to Team.

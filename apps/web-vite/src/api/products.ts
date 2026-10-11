@@ -86,7 +86,7 @@ function returnedIDsMatchRequest(returnedIDs: string[], requestIDs: string[], co
 export type Product = z.infer<typeof ProductSchema>;
 export type ProductAction = z.infer<typeof ActionSchema>;
 export type ProductActionResult = { kind: "completed" } | { kind: "pending"; reason: string };
-export type ProductImportRow = { rowNumber: number; name: string; sku?: string; type: "goods" | "service"; unit?: string; salePrice: string; barcode?: string; tags: string[] };
+export type ProductImportRow = { rowNumber: number; name: string; sku?: string; type: "goods" | "service"; unit?: string; salePrice: string; salePriceMinor?: number; barcode?: string; tags: string[] };
 export type ProductImportResult = z.infer<typeof ImportResultSchema>;
 export type ProductImportRetryScope = { actorId: string | null; organizationId: string | null };
 export type ProductImportRecovery = {
@@ -144,7 +144,8 @@ function prepareProductImportRows(rows: ProductImportRow[], intentId: string): {
     }
     const cleanedPrice = row.salePrice.replace(/[\s,]/g, "");
     const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(cleanedPrice);
-    const salePriceMinor = match ? Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0")) : -1;
+    const parsedSalePriceMinor = match ? Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0")) : -1;
+    const salePriceMinor = row.salePriceMinor ?? parsedSalePriceMinor;
     if (!Number.isSafeInteger(salePriceMinor) || salePriceMinor < 0) {
       errors.push({ row: rowNumber, field: "salePrice", message: "Enter a non-negative amount with at most two decimals." });
       return;
@@ -183,7 +184,7 @@ function prepareProductImportRows(rows: ProductImportRow[], intentId: string): {
   return { rows: prepared, errors, goCompatible, unsupportedReason };
 }
 
-export function productImportRequest(rows: ProductImportRow[], intentId: string, useGo: boolean): { url: string; body: Record<string, unknown>; errors: z.infer<typeof ImportRowSchema>[]; preparedCount: number; unsupportedReason: string | null } {
+export function productImportRequest(rows: ProductImportRow[], intentId: string, useGo: boolean): { url: string; body: Record<string, unknown>; errors: z.infer<typeof ImportRowSchema>[]; preparedCount: number; submittedRowNumbers: number[]; unsupportedReason: string | null } {
   const prepared = prepareProductImportRows(rows, intentId);
   const capabilityBody = { capabilityId: "inventory.importItems", input: { rows: prepared.rows }, intentId };
   const bodyBytes = new TextEncoder().encode(JSON.stringify(capabilityBody)).byteLength;
@@ -191,9 +192,9 @@ export function productImportRequest(rows: ProductImportRow[], intentId: string,
     prepared.unsupportedReason ??= "This import exceeds the 64 KiB Go capability request limit. Split the CSV into smaller files.";
   }
   if (useGo) {
-    return { url: "/api/capabilities/execute", body: capabilityBody, errors: prepared.errors, preparedCount: prepared.rows.length, unsupportedReason: prepared.unsupportedReason };
+    return { url: "/api/capabilities/execute", body: capabilityBody, errors: prepared.errors, preparedCount: prepared.rows.length, submittedRowNumbers: prepared.rows.map((row) => row.rowNumber), unsupportedReason: prepared.unsupportedReason };
   }
-  return { url: "/api/import", body: { entity: "products", rows }, errors: [], preparedCount: prepared.rows.length, unsupportedReason: null };
+  return { url: "/api/import", body: { entity: "products", rows }, errors: [], preparedCount: prepared.rows.length, submittedRowNumbers: prepared.rows.map((row) => row.rowNumber), unsupportedReason: null };
 }
 
 export function productUndoImportRequest(importIds: string[], intentId: string, useGo: boolean): { url: string; body: Record<string, unknown> } {
@@ -255,6 +256,7 @@ const ProductImportRecoverySchema = z.object({
   activeIds: z.array(z.string().uuid()),
   archivedIds: z.array(z.string().uuid()),
 }).strict();
+const ProductImportRecoveriesSchema = z.array(ProductImportRecoverySchema).max(5000);
 
 async function productScopeKeys(scope?: ProductImportRetryScope): Promise<{ scopeKey: string; operationKey: (operation: "import" | "undo" | "restore") => string; recoveryKey: string }> {
   const actorId = normalizeRetryActorId(scope?.actorId) ?? "";
@@ -341,29 +343,32 @@ function clearGoProductIntent(keys: Awaited<ReturnType<typeof productScopeKeys>>
   }
 }
 
-function readProductImportRecovery(keys: Awaited<ReturnType<typeof productScopeKeys>>): ProductImportRecovery | null {
+function readProductImportRecoveries(keys: Awaited<ReturnType<typeof productScopeKeys>>): ProductImportRecovery[] {
   try {
     const raw = sessionStorage.getItem(keys.recoveryKey);
-    if (!raw) return null;
-    const parsed = ProductImportRecoverySchema.safeParse(JSON.parse(raw));
+    if (!raw) return [];
+    const decoded: unknown = JSON.parse(raw);
+    const parsed = Array.isArray(decoded)
+      ? ProductImportRecoveriesSchema.safeParse(decoded)
+      : ProductImportRecoverySchema.safeParse(decoded);
     if (!parsed.success) throw new ProductsApiError(0, "Saved product import recovery data is malformed. Verify the catalog before changing it.");
-    return parsed.data;
+    return Array.isArray(parsed.data) ? parsed.data : [parsed.data];
   } catch (error) {
     if (error instanceof ProductsApiError) throw error;
     throw new ProductsApiError(0, "Saved product import recovery data is unavailable. Verify the catalog before changing it.");
   }
 }
 
-function writeProductImportRecovery(keys: Awaited<ReturnType<typeof productScopeKeys>>, recovery: ProductImportRecovery | null): void {
+function writeProductImportRecoveries(keys: Awaited<ReturnType<typeof productScopeKeys>>, recoveries: ProductImportRecovery[]): void {
   try {
-    if (!recovery) sessionStorage.removeItem(keys.recoveryKey);
-    else sessionStorage.setItem(keys.recoveryKey, JSON.stringify(recovery));
+    if (recoveries.length === 0) sessionStorage.removeItem(keys.recoveryKey);
+    else sessionStorage.setItem(keys.recoveryKey, JSON.stringify(recoveries));
   } catch {
     throw new ProductsApiError(0, "Product import recovery could not be saved. Keep this page open and verify the catalog before retrying.");
   }
 }
 
-export async function recoverProductImport(scope: ProductImportRetryScope): Promise<{ pendingRows: ProductImportRow[] | null; pendingUndoIds: string[] | null; pendingRestoreIds: string[] | null; recovery: ProductImportRecovery | null }> {
+export async function recoverProductImport(scope: ProductImportRetryScope): Promise<{ pendingRows: ProductImportRow[] | null; pendingUndoIds: string[] | null; pendingRestoreIds: string[] | null; recovery: ProductImportRecovery | null; recoveries: ProductImportRecovery[] }> {
   const keys = await productScopeKeys(scope);
   let pendingRows: ProductImportRow[] | null = null;
   let pendingUndoIds: string[] | null = null;
@@ -390,10 +395,11 @@ export async function recoverProductImport(scope: ProductImportRetryScope): Prom
     if (error instanceof ProductsApiError) throw error;
     throw new ProductsApiError(0, "A saved product import retry marker is unavailable. Verify the catalog before retrying.");
   }
-  return { pendingRows, pendingUndoIds, pendingRestoreIds, recovery: readProductImportRecovery(keys) };
+  const recoveries = readProductImportRecoveries(keys);
+  return { pendingRows, pendingUndoIds, pendingRestoreIds, recovery: recoveries.at(-1) ?? null, recoveries };
 }
 
-const ProductImportRowSchema = z.object({ rowNumber: z.number().int().positive(), name: z.string(), sku: z.string().optional(), type: z.enum(["goods", "service"]), unit: z.string().optional(), salePrice: z.string(), barcode: z.string().optional(), tags: z.array(z.string()) }).strict();
+const ProductImportRowSchema = z.object({ rowNumber: z.number().int().positive(), name: z.string(), sku: z.string().optional(), type: z.enum(["goods", "service"]), unit: z.string().optional(), salePrice: z.string(), salePriceMinor: z.number().int().nonnegative().optional(), barcode: z.string().optional(), tags: z.array(z.string()) }).strict();
 
 async function assertNoUnresolvedGoProductIntent(scope?: ProductImportRetryScope): Promise<void> {
   const keys = await productScopeKeys(scope);
@@ -533,8 +539,8 @@ export async function submitProductAction(action: ProductAction, signal?: AbortS
   return { kind: "completed" };
 }
 
-export async function importProducts(rows: ProductImportRow[], signal?: AbortSignal, retryScope?: ProductImportRetryScope): Promise<ProductImportResult> {
-  const useGo = goProductImportEnabled();
+export async function importProducts(rows: ProductImportRow[], signal?: AbortSignal, retryScope?: ProductImportRetryScope, useGoOverride?: boolean): Promise<ProductImportResult> {
+  const useGo = useGoOverride ?? goProductImportEnabled();
   const preview = productImportRequest(rows, "00000000-0000-4000-8000-000000000000", useGo);
   if (useGo && preview.unsupportedReason) throw new ProductsApiError(413, preview.unsupportedReason);
   if (useGo && preview.preparedCount === 0) {
@@ -570,8 +576,12 @@ export async function importProducts(rows: ProductImportRow[], signal?: AbortSig
     const envelope = z.object({ ok: z.literal(true), data: GoImportOutputSchema }).strict().safeParse(body);
     if (!envelope.success) throw new ProductsApiError(response.status, "The product import returned data in an unexpected format.");
     const data = envelope.data.data;
-    if (data.imported !== data.createdIds.length || new Set(data.createdIds).size !== data.createdIds.length) {
-      throw new ProductsApiError(response.status, "The product import returned inconsistent or duplicate item IDs. Verify the catalog before retrying.");
+    const submittedRows = new Set(request.submittedRowNumbers);
+    const skippedRowsAreValid = new Set(data.skippedDuplicateRows).size === data.skippedDuplicateRows.length
+      && data.skippedDuplicateRows.every((rowNumber) => submittedRows.has(rowNumber));
+    if (data.imported !== data.createdIds.length || new Set(data.createdIds).size !== data.createdIds.length
+      || !skippedRowsAreValid || data.imported + data.skippedDuplicateRows.length !== request.preparedCount) {
+      throw new ProductsApiError(response.status, "The product import returned inconsistent item or duplicate-row results. Verify the catalog before retrying.");
     }
     const result = {
       inserted: data.imported,
@@ -581,7 +591,8 @@ export async function importProducts(rows: ProductImportRow[], signal?: AbortSig
       createdIds: data.createdIds,
     };
     if (!attempt.keys) throw new ProductsApiError(0, "Product import recovery scope was lost. Verify the catalog before retrying.");
-    writeProductImportRecovery(attempt.keys, { result, activeIds: data.createdIds, archivedIds: [] });
+    const recoveries = readProductImportRecoveries(attempt.keys);
+    writeProductImportRecoveries(attempt.keys, [...recoveries, { result, activeIds: data.createdIds, archivedIds: [] }]);
     clearGoProductIntent(attempt.keys, "import", attempt.id);
     return result;
   }
@@ -591,8 +602,8 @@ export async function importProducts(rows: ProductImportRow[], signal?: AbortSig
   return parsed.data;
 }
 
-export async function undoProductImport(importIds: string[], signal?: AbortSignal, retryScope?: ProductImportRetryScope): Promise<{ kind: "completed"; undone: number; remaining: number; itemIds: string[] } | { kind: "pending"; reason: string }> {
-  const useGo = goProductImportEnabled();
+export async function undoProductImport(importIds: string[], signal?: AbortSignal, retryScope?: ProductImportRetryScope, useGoOverride?: boolean): Promise<{ kind: "completed"; undone: number; remaining: number; itemIds: string[] } | { kind: "pending"; reason: string }> {
+  const useGo = useGoOverride ?? goProductImportEnabled();
   if (useGo && (importIds.length === 0 || importIds.length > 5000 || importIds.some((id) => !z.string().uuid().safeParse(id).success) || new Set(importIds).size !== importIds.length)) {
     throw new ProductsApiError(422, "Undo requires between 1 and 5,000 valid imported item IDs.");
   }
@@ -630,16 +641,21 @@ export async function undoProductImport(importIds: string[], signal?: AbortSigna
     const { archived: undone, itemIds } = envelope.data.data;
     if (!returnedIDsMatchRequest(itemIds, importIds, undone)) throw new ProductsApiError(response.status, "The import undo returned invalid or inconsistent item IDs. Verify the catalog before retrying.");
     if (!attempt.keys) throw new ProductsApiError(0, "Product import recovery scope was lost. Verify the catalog before retrying.");
-    const recovery = readProductImportRecovery(attempt.keys);
-    if (recovery) {
-      const archived = new Set([...recovery.archivedIds, ...itemIds]);
-      writeProductImportRecovery(attempt.keys, {
-        ...recovery,
-        result: { ...recovery.result, inserted: Math.max(0, recovery.result.inserted - itemIds.length) },
-        activeIds: recovery.activeIds.filter((id) => !archived.has(id)),
-        archivedIds: [...archived],
-      });
-    }
+    const recoveries = readProductImportRecoveries(attempt.keys).map((recovery) => {
+      const batchIds = new Set(recovery.activeIds);
+      if (itemIds.some((id) => batchIds.has(id))) {
+        const archived = new Set([...recovery.archivedIds, ...itemIds.filter((id) => batchIds.has(id))]);
+        const newlyArchived = itemIds.filter((id) => batchIds.has(id) && !recovery.archivedIds.includes(id)).length;
+        return {
+          ...recovery,
+          result: { ...recovery.result, inserted: Math.max(0, recovery.result.inserted - newlyArchived) },
+          activeIds: recovery.activeIds.filter((id) => !archived.has(id)),
+          archivedIds: [...archived],
+        };
+      }
+      return recovery;
+    });
+    writeProductImportRecoveries(attempt.keys, recoveries);
     clearGoProductIntent(attempt.keys, "undo", attempt.id);
     return { kind: "completed", undone, remaining: Math.max(0, importIds.length - undone), itemIds };
   }
@@ -680,16 +696,20 @@ export async function restoreProductImport(importIds: string[], signal?: AbortSi
   if (!envelope.success) throw new ProductsApiError(response.status, "The import restore returned data in an unexpected format.");
   const { restored, itemIds } = envelope.data.data;
   if (!returnedIDsMatchRequest(itemIds, importIds, restored)) throw new ProductsApiError(response.status, "The import restore returned invalid or inconsistent item IDs. Verify the catalog before retrying.");
-  const recovery = readProductImportRecovery(attempt.keys);
-  if (recovery) {
-    const active = new Set([...recovery.activeIds, ...itemIds]);
-    writeProductImportRecovery(attempt.keys, {
+  const restoredIDs = new Set(itemIds);
+  const recoveries = readProductImportRecoveries(attempt.keys).map((recovery) => {
+    const batchIds = new Set(recovery.archivedIds);
+    if (!itemIds.some((id) => batchIds.has(id))) return recovery;
+    const newlyRestored = itemIds.filter((id) => batchIds.has(id) && !recovery.activeIds.includes(id)).length;
+    const active = new Set([...recovery.activeIds, ...itemIds.filter((id) => batchIds.has(id))]);
+    return {
       ...recovery,
-      result: { ...recovery.result, inserted: recovery.result.inserted + itemIds.length },
+      result: { ...recovery.result, inserted: recovery.result.inserted + newlyRestored },
       activeIds: [...active],
-      archivedIds: recovery.archivedIds.filter((id) => !active.has(id)),
-    });
-  }
+      archivedIds: recovery.archivedIds.filter((id) => !restoredIDs.has(id)),
+    };
+  });
+  writeProductImportRecoveries(attempt.keys, recoveries);
   clearGoProductIntent(attempt.keys, "restore", attempt.id);
   return { kind: "completed", restored, itemIds };
 }

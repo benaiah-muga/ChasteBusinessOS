@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { z } from "zod";
 import { authClient } from "../api/auth";
 import { fetchOrganizations, OrganizationApiError } from "../api/organizations";
+import { OnboardingApiError, readOnboardingState, type OnboardingState } from "../api/onboarding";
 import { navigate } from "../navigation";
 import { OnboardingWizard } from "./onboarding/Wizard";
 import "./OnboardingPage.css";
@@ -15,9 +16,10 @@ const SessionUserSchema = z.object({
 }).passthrough();
 
 type SessionUser = z.infer<typeof SessionUserSchema>;
+type ResumeSetup = { organizationId: string; baseCurrency: string; state: OnboardingState };
 type GateState =
   | { status: "loading" }
-  | { status: "ready"; user: SessionUser }
+  | { status: "ready"; user: SessionUser; resume?: ResumeSetup }
   | { status: "failed"; message: string };
 
 /**
@@ -26,8 +28,8 @@ type GateState =
  * itself: are they signed in, do they already have a workspace, and who are we
  * talking to. The legacy route resolved all three server-side; here the session
  * comes from the existing auth client and the workspace check from the
- * organization list. Landing here with a workspace already open is always a
- * mistake, and it is cheaper to redirect than to explain why the wizard refuses.
+ * organization list. An unfinished setup is the exception: the import receipt
+ * recovery controls live in the wizard, so that workspace resumes in place.
  */
 export function OnboardingPage() {
   const [gate, setGate] = useState<GateState>({ status: "loading" });
@@ -48,9 +50,9 @@ export function OnboardingPage() {
       return;
     }
 
-    let memberships: { id: string }[];
+    let organizations: Awaited<ReturnType<typeof fetchOrganizations>>;
     try {
-      memberships = (await fetchOrganizations()).orgs;
+      organizations = await fetchOrganizations();
     } catch (error) {
       if (error instanceof OrganizationApiError && error.status === 401) {
         navigate("/login", true);
@@ -60,7 +62,36 @@ export function OnboardingPage() {
       return;
     }
 
-    if (memberships.length > 0) {
+    if (organizations.orgs.length > 0) {
+      const activeOrganization = organizations.orgs.find((org) => org.id === organizations.activeOrgId)
+        ?? (organizations.orgs.length === 1 ? organizations.orgs[0] : undefined);
+      if (!activeOrganization) {
+        setGate({ status: "failed", message: "Choose an active workspace before checking setup progress." });
+        return;
+      }
+      let onboardingState: OnboardingState | null;
+      try {
+        onboardingState = await readOnboardingState();
+      } catch (error) {
+        if (error instanceof OnboardingApiError && error.status === 401) {
+          navigate("/login", true);
+          return;
+        }
+        setGate({ status: "failed", message: "We could not check your setup progress. Try again." });
+        return;
+      }
+      if (onboardingState && !onboardingState.finishedAt) {
+        setGate({
+          status: "ready",
+          user,
+          resume: {
+            organizationId: activeOrganization.id,
+            baseCurrency: activeOrganization.baseCurrency ?? "USD",
+            state: onboardingState,
+          },
+        });
+        return;
+      }
       navigate("/", true);
       return;
     }
@@ -75,7 +106,13 @@ export function OnboardingPage() {
     return (
       <>
         <title>Set up your workspace | Chaste BusinessOS</title>
-        <OnboardingWizard email={gate.user.email} />
+        <OnboardingWizard
+          email={gate.user.email}
+          actorId={gate.user.id}
+          organizationId={gate.resume?.organizationId}
+          baseCurrency={gate.resume?.baseCurrency}
+          resumeState={gate.resume?.state}
+        />
       </>
     );
   }

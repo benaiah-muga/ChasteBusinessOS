@@ -312,7 +312,15 @@ export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
 type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string };
 export type CrmDealCreateInput = Omit<CrmDealCreateMutation, "action">;
 type CrmCustomerDeactivateMutation = { action: "deactivateCustomer"; customerId: string };
-type CrmCustomerImportRow = { rowNumber: number; name: string; email?: string; phone?: string; allowDuplicate: boolean };
+export type CrmCustomerImportRow = {
+  rowNumber: number;
+  name: string;
+  email?: string;
+  phone?: string;
+  creditLimitMinor?: number | null;
+  paymentTermDays?: number | null;
+  allowDuplicate: boolean;
+};
 type CrmCustomerImportMutation = { action: "importCustomers"; rows: CrmCustomerImportRow[] };
 type CrmCustomerImportUndoMutation = { action: "undoCustomerImport"; customerIds: string[]; importIntentId: string };
 export type CrmCustomerImportUndoState = { imported: number; skippedDuplicates: number; createdIds: string[]; importIntentId: string };
@@ -373,6 +381,8 @@ const CrmCustomerImportRowSchema = z.object({
   name: z.string().min(1).max(120),
   email: z.string().email().optional(),
   phone: z.string().max(40).optional(),
+  creditLimitMinor: z.number().int().nonnegative().safe().nullable().optional(),
+  paymentTermDays: z.number().int().nonnegative().safe().nullable().optional(),
   allowDuplicate: z.boolean(),
 }).strict();
 const CrmCustomerImportMutationSchema = z.object({
@@ -390,6 +400,7 @@ const CrmCustomerImportUndoStateSchema = z.object({
   createdIds: z.array(uuid),
   importIntentId: uuid,
 }).strict();
+const CrmCustomerImportUndoStatesSchema = z.array(CrmCustomerImportUndoStateSchema).max(5000);
 
 const CrmTaskMutationSchema = z.discriminatedUnion("action", [
   z.object({
@@ -403,7 +414,7 @@ const CrmTaskMutationSchema = z.discriminatedUnion("action", [
   }).strict().refine((action) => action.dueAt !== undefined || action.assigneeUserId !== undefined),
 ]);
 
-type CrmTaskRetryScope = { actorId: string | null; organizationId: string | null };
+export type CrmTaskRetryScope = { actorId: string | null; organizationId: string | null };
 
 export async function readPendingCrmTaskCreate(scope: CrmTaskRetryScope): Promise<Extract<CrmTaskMutation, { action: "createTask" }> | null> {
   const { scopeHash } = await crmTaskScope(scope);
@@ -1211,6 +1222,7 @@ function parseCrmActionOutcome<T extends Record<string, unknown>>(
 const ImportResponseSchema = z.object({
   inserted: z.number().int().nonnegative(),
   skippedDuplicates: z.number().int().nonnegative(),
+  skippedDuplicateRows: z.array(z.number().int().positive()).optional(),
   createdIds: z.array(uuid),
   errors: z.array(z.object({ row: z.number().int(), message: z.string() })).optional(),
 });
@@ -1247,18 +1259,25 @@ export async function readPendingCrmCustomerImportUndo(scope: CrmTaskRetryScope)
 }
 
 export async function readCrmCustomerImportUndo(scope: CrmTaskRetryScope): Promise<CrmCustomerImportUndoState | null> {
+  const states = await readCrmCustomerImportUndos(scope);
+  return states.at(-1) ?? null;
+}
+
+export async function readCrmCustomerImportUndos(scope: CrmTaskRetryScope): Promise<CrmCustomerImportUndoState[]> {
   const { scopeHash } = await crmTaskScope(scope);
   const storageKey = `${CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX}${scopeHash}:undo`;
   let raw: string | null;
   try { raw = window.localStorage.getItem(storageKey); }
   catch { throw new CrmApiError(0, "Enable browser storage to restore the saved customer import undo."); }
-  if (raw === null) return null;
+  if (raw === null) return [];
   let decoded: unknown;
   try { decoded = JSON.parse(raw); }
   catch { throw new CrmApiError(0, "The saved customer import undo is malformed. Contact an administrator before retrying."); }
-  const parsed = CrmCustomerImportUndoStateSchema.safeParse(decoded);
+  const parsed = Array.isArray(decoded)
+    ? CrmCustomerImportUndoStatesSchema.safeParse(decoded)
+    : CrmCustomerImportUndoStateSchema.safeParse(decoded);
   if (!parsed.success) throw new CrmApiError(0, "The saved customer import undo could not be verified. Contact an administrator before retrying.");
-  return parsed.data;
+  return Array.isArray(parsed.data) ? parsed.data : [parsed.data];
 }
 
 async function persistCrmCustomerImportUndo(scope: { scopeHash: string }, result: CrmImportResult, importIntentId: string): Promise<void> {
@@ -1269,8 +1288,12 @@ async function persistCrmCustomerImportUndo(scope: { scopeHash: string }, result
     createdIds: result.createdIds,
     importIntentId,
   };
-  const serialized = JSON.stringify(state);
   try {
+    const raw = window.localStorage.getItem(storageKey);
+    const previous = raw ? JSON.parse(raw) as unknown : [];
+    const states = Array.isArray(previous) ? CrmCustomerImportUndoStatesSchema.parse(previous) : [CrmCustomerImportUndoStateSchema.parse(previous)];
+    const next = [...states.filter((item) => item.importIntentId !== importIntentId), state];
+    const serialized = JSON.stringify(next);
     window.localStorage.setItem(storageKey, serialized);
     if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("customer import undo state did not persist");
   } catch {
@@ -1278,8 +1301,24 @@ async function persistCrmCustomerImportUndo(scope: { scopeHash: string }, result
   }
 }
 
-async function clearCrmCustomerImportUndo(scope: { scopeHash: string }): Promise<void> {
-  try { window.localStorage.removeItem(`${CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX}${scope.scopeHash}:undo`); }
+async function clearCrmCustomerImportUndo(scope: { scopeHash: string }, importIntentId?: string): Promise<void> {
+  const key = `${CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX}${scope.scopeHash}:undo`;
+  try {
+    if (!importIntentId) {
+      window.localStorage.removeItem(key);
+      return;
+    }
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return;
+    const decoded: unknown = JSON.parse(raw);
+    const parsed = Array.isArray(decoded)
+      ? CrmCustomerImportUndoStatesSchema.parse(decoded)
+      : [CrmCustomerImportUndoStateSchema.parse(decoded)];
+    const states = parsed;
+    const next = states.filter((item) => item.importIntentId !== importIntentId);
+    if (next.length) window.localStorage.setItem(key, JSON.stringify(next));
+    else window.localStorage.removeItem(key);
+  }
   catch { throw new CrmApiError(0, "The import undo completed, but its saved IDs could not be cleared. Reload CRM before retrying.", true); }
 }
 
@@ -1338,6 +1377,7 @@ export async function importCrmCustomers(
     const result: CrmImportResult = {
       inserted: parsed.data.imported,
       skippedDuplicates: parsed.data.skippedDuplicateRows.length,
+      skippedDuplicateRows: parsed.data.skippedDuplicateRows,
       createdIds: parsed.data.createdIds,
     };
     await persistCrmCustomerImportUndo(scope, result, parsed.data.importIntentId);
@@ -1403,7 +1443,7 @@ export async function undoCrmImport(
     if (!parsed.success || parsed.data.importIntentId !== importIntentId || parsed.data.undoIntentId !== attempt.intentId || parsed.data.deactivated !== parsedIds.data.length || !returnedIdsMatchRequest || new Set(parsed.data.customerIds).size !== parsed.data.customerIds.length) {
       throw new CrmApiError(response.status, "The CRM service returned an unexpected import undo result.", true);
     }
-    await clearCrmCustomerImportUndo(scope);
+    await clearCrmCustomerImportUndo(scope, importIntentId);
     await clearCrmTaskAttempt(attempt.storageKey);
     return { kind: "completed", data: { undone: parsed.data.deactivated, remaining: parsedIds.data.length - parsed.data.deactivated } };
   } catch (error) {

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchProducts } from "../../api/products";
+import { z } from "zod";
+import { fetchProducts, recoverProductImport } from "../../api/products";
+import { readCrmCustomerImportUndos } from "../../api/crm";
 import {
   failureOf,
   importOnboardingRows,
@@ -123,7 +125,9 @@ export const FIELD_SYNONYMS: Record<OnboardingImportEntity, Record<string, strin
   customers: {
     name: ["name", "customer", "customer name", "company", "contact", "display name"],
     email: ["email", "e-mail", "email address", "mail"],
-    creditLimit: ["credit limit", "credit", "credit limit minor", "ar limit"],
+    phone: ["phone", "telephone", "mobile", "phone number"],
+    creditLimit: ["credit limit", "credit", "ar limit"],
+    creditLimitMinor: ["credit limit minor", "credit limit in minor units", "credit limit (minor units)"],
     paymentTermDays: ["payment terms", "terms", "net days", "payment term days", "terms (days)"],
   },
   products: {
@@ -144,7 +148,9 @@ export const REQUIRED_FIELDS: Record<OnboardingImportEntity, string[]> = {
 const FIELD_LABELS: Record<string, string> = {
   name: "Name",
   email: "Email",
+  phone: "Phone",
   creditLimit: "Credit limit",
+  creditLimitMinor: "Credit limit (minor units)",
   paymentTermDays: "Payment terms (days)",
   sku: "SKU",
   unitLabel: "Unit",
@@ -155,6 +161,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 const FIELD_NOTES: Record<string, string> = {
   creditLimit: "Plain amount, e.g. 5000, not 500000 cents.",
+  creditLimitMinor: "Whole non-negative integer already in the workspace currency's minor units. It is not rescaled.",
   salePrice: "Plain amount, e.g. 24.99.",
   paymentTermDays: "Whole days, e.g. 30.",
   unitLabel: "e.g. unit, box, kg.",
@@ -178,7 +185,25 @@ interface RowError {
 
 interface PreparedRows {
   payload: OnboardingImportRow[];
+  rowNumbers: number[];
   problems: RowError[];
+}
+
+export function currencyFractionDigits(currency: string): number {
+  try {
+    return new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 2;
+  } catch {
+    return 2;
+  }
+}
+
+export function parseCurrencyMinor(value: string, currency: string): number | null {
+  const digits = currencyFractionDigits(currency);
+  const fraction = digits === 0 ? "" : `(?:\\.(\\d{1,${digits}}))?`;
+  const match = new RegExp(`^(\\d+)${fraction}$`).exec(value.replace(/[\s,]/g, ""));
+  if (!match) return null;
+  const minor = Number(match[1]) * (10 ** digits) + Number((match[2] ?? "").padEnd(digits, "0"));
+  return Number.isSafeInteger(minor) ? minor : null;
 }
 
 const normalizeHeader = (value: string) =>
@@ -253,8 +278,85 @@ export interface ImportOutcome {
 }
 
 interface ImportPanelState extends OnboardingImportResult {
+  entity: OnboardingImportEntity;
+  receiptId?: string;
   undone?: boolean;
   undoMessage?: string;
+}
+
+const SavedImportReceiptSchema = z.object({
+  entity: z.enum(["customers", "products"]),
+  receiptId: z.string().uuid().optional(),
+  inserted: z.number().int().nonnegative(),
+  skippedDuplicates: z.number().int().nonnegative(),
+  skippedDuplicateRows: z.array(z.number().int()).optional(),
+  createdIds: z.array(z.string().uuid()),
+  importIntentId: z.string().uuid().optional(),
+}).strict();
+
+function savedImportReceiptKey(entity: OnboardingImportEntity, actorId: string, organizationId: string): string {
+  return `chaste:onboarding:import-undo:v1:${encodeURIComponent(actorId)}:${organizationId}:${entity}`;
+}
+
+function readSavedImportReceipts(entity: OnboardingImportEntity, actorId: string, organizationId: string): ImportPanelState[] {
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(savedImportReceiptKey(entity, actorId, organizationId));
+  } catch {
+    throw new Error("Enable browser storage to restore this import's undo receipt.");
+  }
+  if (raw === null) return [];
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new Error("The saved onboarding import receipt is malformed. Verify the imported records before continuing."); }
+  const values = Array.isArray(decoded)
+    ? decoded
+    : decoded && typeof decoded === "object" && "receipts" in decoded && Array.isArray(decoded.receipts)
+      ? decoded.receipts
+      : [decoded];
+  const receipts = z.array(SavedImportReceiptSchema).max(5000).safeParse(values);
+  if (!receipts.success || receipts.data.some((receipt) => receipt.entity !== entity)) {
+    throw new Error("The saved onboarding import receipt could not be verified. Verify the imported records before continuing.");
+  }
+  return receipts.data.map((receipt) => ({ ...receipt, receiptId: receipt.receiptId ?? receipt.importIntentId ?? receipt.createdIds[0], errors: [], entity }));
+}
+
+function writeSavedImportReceipt(receipt: ImportPanelState, actorId: string, organizationId: string): ImportPanelState[] {
+  const key = savedImportReceiptKey(receipt.entity, actorId, organizationId);
+  try {
+    const existing = readSavedImportReceipts(receipt.entity, actorId, organizationId);
+    const receiptId = receipt.receiptId ?? receipt.importIntentId ?? receipt.createdIds?.[0] ?? crypto.randomUUID();
+    const updated = { ...receipt, receiptId };
+    const index = existing.findIndex((item) => item.receiptId === receiptId);
+    const next = index < 0 ? [...existing, updated] : existing.map((item, itemIndex) => itemIndex === index ? updated : item);
+    const serialized = JSON.stringify({
+      receipts: next.map((item) => ({
+        entity: item.entity,
+        receiptId: item.receiptId,
+        inserted: item.inserted,
+        skippedDuplicates: item.skippedDuplicates,
+        ...(item.skippedDuplicateRows ? { skippedDuplicateRows: item.skippedDuplicateRows } : {}),
+        createdIds: item.createdIds ?? [],
+        ...(item.importIntentId ? { importIntentId: item.importIntentId } : {}),
+      })),
+    });
+    window.localStorage.setItem(key, serialized);
+    if (window.localStorage.getItem(key) !== serialized) throw new Error("receipt did not persist");
+    return next;
+  } catch {
+    throw new Error("The import completed, but its undo receipt could not be saved. Keep this page open and verify the records before starting another import.");
+  }
+}
+
+function clearSavedImportReceipt(receipt: ImportPanelState, actorId: string, organizationId: string): ImportPanelState[] {
+  const key = savedImportReceiptKey(receipt.entity, actorId, organizationId);
+  try {
+    const remaining = readSavedImportReceipts(receipt.entity, actorId, organizationId).filter((item) => item.receiptId !== receipt.receiptId);
+    if (remaining.length) window.localStorage.setItem(key, JSON.stringify({ receipts: remaining.map(({ errors: _errors, ...item }) => item) }));
+    else window.localStorage.removeItem(key);
+    return remaining;
+  }
+  catch { throw new Error("The import undo completed, but its saved receipt could not be cleared. Reload before importing again."); }
 }
 
 export function CsvImportPanel({
@@ -262,11 +364,17 @@ export function CsvImportPanel({
   onSkipped,
   initialEntity,
   onChanged,
+  actorId,
+  organizationId,
+  currency = "USD",
 }: {
   onImported: (outcome: ImportOutcome) => void;
   onSkipped: () => void;
   initialEntity?: OnboardingImportEntity;
   onChanged?: () => void;
+  actorId: string;
+  organizationId: string | null;
+  currency?: string;
 }) {
   const [entity, setEntity] = useState<OnboardingImportEntity>(initialEntity ?? "customers");
   const [headers, setHeaders] = useState<string[]>([]);
@@ -276,6 +384,7 @@ export function CsvImportPanel({
   const [parseError, setParseError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportPanelState | null>(null);
+  const [receipts, setReceipts] = useState<ImportPanelState[]>([]);
   const [failure, setFailure] = useState<OnboardingFailure | null>(null);
   const [dragging, setDragging] = useState(false);
   const [existingProducts, setExistingProducts] = useState<{ sku: string; barcode: string | null }[]>([]);
@@ -294,12 +403,55 @@ export function CsvImportPanel({
     return () => controller.abort();
   }, [entity]);
 
+  useEffect(() => {
+    if (!organizationId || !actorId.trim()) return;
+    let current = true;
+    void (async () => {
+      try {
+        let savedReceipts = readSavedImportReceipts(entity, actorId, organizationId);
+        if (savedReceipts.length === 0 && entity === "customers") {
+          const saved = await readCrmCustomerImportUndos({ actorId, organizationId });
+          if (saved.length) savedReceipts = saved.map((item) => ({
+            entity,
+            receiptId: item.importIntentId,
+            inserted: item.imported,
+            skippedDuplicates: item.skippedDuplicates,
+            createdIds: item.createdIds,
+            importIntentId: item.importIntentId,
+            errors: [],
+          }));
+        }
+        if (savedReceipts.length === 0 && entity === "products") {
+          const recovered = await recoverProductImport({ actorId, organizationId });
+          savedReceipts = recovered.recoveries.filter((item) => item.activeIds.length > 0).map((item) => ({
+              ...item.result,
+              createdIds: item.activeIds,
+              receiptId: item.activeIds[0],
+              entity,
+            }));
+        }
+        if (current) {
+          setReceipts(savedReceipts);
+          setResult(savedReceipts.at(-1) ?? null);
+        }
+      } catch (error) {
+        if (current) setFailure({
+          code: "import_recovery",
+          title: "An earlier import needs attention",
+          hint: error instanceof Error ? error.message : "Verify the imported records before starting another import.",
+        });
+      }
+    })();
+    return () => { current = false; };
+  }, [entity, actorId, organizationId]);
+
   const fields = useMemo(() => Object.keys(FIELD_SYNONYMS[entity]), [entity]);
   const required = REQUIRED_FIELDS[entity];
 
   /** Rows rebuilt through the current mapping, with client-side checks first. */
   const prepared = useMemo<PreparedRows>(() => {
     const payload: OnboardingImportRow[] = [];
+    const rowNumbers: number[] = [];
     const problems: RowError[] = [];
     rows.forEach((row, index) => {
       const line = index + 2;
@@ -334,11 +486,40 @@ export function CsvImportPanel({
         problems.push({ row: line, field: "email", message: `"${out.email}" is not a valid email.` });
         return;
       }
-      if (out.salePrice && !/^\d+(?:\.\d{1,2})?$/.test(out.salePrice.replace(/[,\s]/g, ""))) {
+      if (entity === "customers" && out.phone && out.phone.length > 40) {
+        problems.push({ row: line, field: "phone", message: "Phone numbers must be 40 characters or fewer." });
+        return;
+      }
+      if (entity === "customers" && (out.name ?? "").length > 120) {
+        problems.push({ row: line, field: "name", message: "Names must be 120 characters or fewer." });
+        return;
+      }
+      if (entity === "customers" && out.creditLimit && out.creditLimitMinor) {
+        problems.push({ row: line, field: "creditLimitMinor", message: "Use either a major-unit credit limit or a minor-unit credit limit, not both." });
+        return;
+      }
+      if (entity === "customers" && out.creditLimit && parseCurrencyMinor(out.creditLimit, currency) === null) {
+        const digits = currencyFractionDigits(currency);
+        problems.push({ row: line, field: "creditLimit", message: "Credit limits need at most " + digits + " decimal places for " + currency + "." });
+        return;
+      }
+      if (entity === "customers" && out.paymentTermDays && (!/^\d+$/.test(out.paymentTermDays.replace(/[ ,\s]/g, "")) || !Number.isSafeInteger(Number(out.paymentTermDays.replace(/[ ,\s]/g, ""))))) {
+        problems.push({ row: line, field: "paymentTermDays", message: "Payment terms must be a non-negative whole number of days." });
+        return;
+      }
+      if (entity === "customers" && out.creditLimitMinor) {
+        const minor = out.creditLimitMinor.replace(/[ ,\s]/g, "");
+        if (!/^\d+$/.test(minor) || !Number.isSafeInteger(Number(minor))) {
+          problems.push({ row: line, field: "creditLimitMinor", message: "Minor-unit credit limits must be a non-negative whole number within the safe integer range." });
+          return;
+        }
+        out.creditLimitMinor = String(Number(minor));
+      }
+      if (entity === "products" && out.salePrice && parseCurrencyMinor(out.salePrice, currency) === null) {
         problems.push({
           row: line,
           field: "salePrice",
-          message: `"${out.salePrice}" must be a non-negative amount with at most two decimals.`,
+          message: `"${out.salePrice}" must be a non-negative amount with at most ${currencyFractionDigits(currency)} decimal places for ${currency}.`,
         });
         return;
       }
@@ -354,10 +535,13 @@ export function CsvImportPanel({
         problems.push({ row: line, field: "barcode", message: "Barcode must be between 3 and 64 characters." });
         return;
       }
+      if (entity === "products") out.salePriceMinor = String(parseCurrencyMinor(out.salePrice ?? "0", currency) ?? 0);
+      if (entity === "customers" && out.creditLimit) out.creditLimitMinor = String(parseCurrencyMinor(out.creditLimit, currency)!);
       payload.push(out);
+      rowNumbers.push(line);
     });
-    return { payload, problems };
-  }, [rows, mapping, fields, required, entity, serviceCodePrefix]);
+    return { payload, rowNumbers, problems };
+  }, [rows, mapping, fields, required, entity, serviceCodePrefix, currency]);
 
   const duplicateProductCount = useMemo(() => {
     if (entity !== "products") return 0;
@@ -385,6 +569,7 @@ export function CsvImportPanel({
     setFileName(null);
     setParseError(null);
     setResult(null);
+    setReceipts([]);
     setFailure(null);
     setServiceCodePrefix("");
   }
@@ -402,7 +587,8 @@ export function CsvImportPanel({
       );
       return;
     }
-    const table = parseCsv(await file.text());
+    const text = await file.text();
+    const table = parseCsv(text);
     if (table.headers.length === 0 || table.rows.length === 0) {
       setParseError("That file looks empty. Export it again making sure the first row holds your column headings.");
       return;
@@ -413,20 +599,73 @@ export function CsvImportPanel({
       );
       return;
     }
+    const prefixInput = new TextEncoder().encode(`${organizationId ?? ""}\u0000${text}`);
+    let suffix = "IMPORT";
+    try {
+      const digest = await crypto.subtle.digest("SHA-256", prefixInput);
+      suffix = Array.from(new Uint8Array(digest).slice(0, 5), (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
+    } catch {
+      let hash = 2166136261;
+      for (const byte of prefixInput) hash = Math.imul(hash ^ byte, 16777619);
+      suffix = (hash >>> 0).toString(16).padStart(8, "0").toUpperCase();
+    }
+    setServiceCodePrefix(`SVC-${suffix}`);
     setFileName(file.name);
-    setServiceCodePrefix(`SVC-${crypto.randomUUID().slice(0, 6).toUpperCase()}`);
     setHeaders(table.headers);
     setRows(table.rows);
     setMapping(guessMapping(entity, table.headers));
   }
 
   async function runImport() {
+    if (!organizationId || !actorId.trim()) {
+      setFailure({ code: "workspace_loading", title: "Your workspace is still opening", hint: "Wait for your new workspace to finish opening, then try the import again." });
+      return;
+    }
     setBusy(true);
     setFailure(null);
-    setResult(null);
+    setResult(result?.createdIds?.length ? result : null);
     try {
-      const imported = await importOnboardingRows(entity, prepared.payload);
-      setResult(imported);
+      if (entity === "customers") {
+        const savedCustomerReceipts = await readCrmCustomerImportUndos({ actorId, organizationId });
+        let restoredReceipts = receipts;
+        for (const item of savedCustomerReceipts) {
+          if (restoredReceipts.some((receipt) => receipt.receiptId === item.importIntentId)) continue;
+          restoredReceipts = writeSavedImportReceipt({
+            entity, receiptId: item.importIntentId, inserted: item.imported,
+            skippedDuplicates: item.skippedDuplicates, createdIds: item.createdIds,
+            importIntentId: item.importIntentId, errors: [],
+          }, actorId, organizationId);
+        }
+        setReceipts(restoredReceipts);
+      }
+      if (entity === "products") {
+        const recovery = await recoverProductImport({ actorId, organizationId });
+        if (recovery.recoveries.some((item) => item.activeIds.length)) {
+          for (const item of recovery.recoveries.filter((candidate) => candidate.activeIds.length)) {
+            const recoveredReceipt: ImportPanelState = {
+              ...item.result, createdIds: item.activeIds, entity, receiptId: item.activeIds[0],
+            };
+            writeSavedImportReceipt(recoveredReceipt, actorId, organizationId);
+          }
+        }
+      }
+      if (prepared.payload.length === 0) {
+        setResult({ entity, inserted: 0, skippedDuplicates: 0, errors: prepared.problems, createdIds: [] });
+        return;
+      }
+      const imported = await importOnboardingRows(entity, {
+        rows: prepared.payload,
+        rowNumbers: prepared.rowNumbers,
+        currency,
+        scope: { actorId, organizationId },
+        errors: prepared.problems,
+      });
+      const completed: ImportPanelState = { ...imported, entity };
+      if (completed.createdIds?.length) {
+        const nextReceipts = writeSavedImportReceipt(completed, actorId, organizationId);
+        setReceipts(nextReceipts);
+        setResult(nextReceipts.at(-1) ?? completed);
+      } else setResult(completed);
       onChanged?.();
       if (imported.inserted > 0) onImported({ entity, inserted: imported.inserted });
     } catch (error) {
@@ -436,15 +675,15 @@ export function CsvImportPanel({
     }
   }
 
-  async function undoImport() {
-    const currentResult = result;
+  async function undoImport(currentResult: ImportPanelState) {
     const ids = currentResult?.createdIds;
     if (!currentResult || !ids?.length) return;
     setBusy(true);
     setFailure(null);
     try {
-      const undone = await undoOnboardingImport(entity, ids);
-      setResult({
+      if (!organizationId || !actorId.trim()) throw new Error("Your workspace is still opening.");
+      const undone = await undoOnboardingImport(currentResult.entity, ids, { actorId, organizationId }, currentResult.importIntentId);
+      const updated: ImportPanelState = {
         ...currentResult,
         inserted: Math.max(0, currentResult.inserted - undone.undone),
         createdIds: undone.remaining > 0 ? ids : [],
@@ -453,7 +692,12 @@ export function CsvImportPanel({
           undone.remaining > 0
             ? `${undone.undone} archived. ${undone.remaining} record${undone.remaining === 1 ? " was" : "s were"} changed after import and remain active.`
             : `Undid the import. ${undone.undone} record${undone.undone === 1 ? " was" : "s were"} safely archived.`,
-      });
+      };
+      setResult(updated);
+      const nextReceipts = undone.remaining === 0
+        ? clearSavedImportReceipt(currentResult, actorId, organizationId)
+        : writeSavedImportReceipt(updated, actorId, organizationId);
+      setReceipts(nextReceipts);
       onChanged?.();
     } catch (error) {
       setFailure(failureOf(error));
@@ -555,6 +799,21 @@ export function CsvImportPanel({
           </span>
         </div>
 
+        {[...receipts, ...(result && !receipts.some((receipt) => receipt.receiptId === result.receiptId) ? [result] : [])].map((receipt) => (
+          <div key={receipt.receiptId ?? receipt.importIntentId ?? "latest"} style={{ border: `1px solid ${hairline}`, borderRadius: 12, padding: 16, background: "#faf9f4" }}>
+            <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: 13.5, fontWeight: 650 }}>
+              <IconCheck style={{ width: 15, height: 15, color: gold }} />
+              {receipt.undone ? "This import was undone" : `${receipt.inserted.toLocaleString()} ${entity === "customers" ? "customers" : "products"} imported`}
+            </p>
+            {receipt.undoMessage ? <p style={{ ...styles.note, marginTop: 9 }}>{receipt.undoMessage}</p> : null}
+            {!receipt.undone && receipt.createdIds?.length ? (
+              <button type="button" disabled={busy} onClick={() => void undoImport(receipt)} style={withStyle(ghostButton, { marginTop: 10 })}>
+                {busy ? <Spinner /> : null} Undo this import
+              </button>
+            ) : null}
+          </div>
+        ))}
+
         {parseError && (
           <RecoverBlock
             title="We couldn't read that file"
@@ -604,6 +863,9 @@ export function CsvImportPanel({
   const labelFor = (field: string) => FIELD_LABELS[field] ?? field;
   const preview = prepared.payload.slice(0, 5);
   const previewColumns = [...required, ...fields.filter((field) => !required.includes(field))];
+
+  const visibleResults = [...receipts];
+  if (result && !visibleResults.some((receipt) => receipt.receiptId === result.receiptId)) visibleResults.push(result);
 
   return (
     <div style={styles.stack}>
@@ -735,14 +997,14 @@ export function CsvImportPanel({
         </RecoverBlock>
       )}
 
-      {result && (
-        <div style={{ border: `1px solid ${hairline}`, borderRadius: 12, padding: 16, background: "#faf9f4" }}>
+      {visibleResults.map((result) => (
+        <div key={result.receiptId ?? result.importIntentId ?? "latest"} style={{ border: `1px solid ${hairline}`, borderRadius: 12, padding: 16, background: "#faf9f4" }}>
           <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: 13.5, fontWeight: 650 }}>
             <IconCheck style={{ width: 15, height: 15, color: gold }} />
             {result.undone
               ? "This import was undone"
               : result.inserted > 0
-                ? `${result.inserted.toLocaleString()} ${entity === "customers" ? "customers" : "products"} imported`
+                ? `${result.inserted.toLocaleString()} ${result.entity === "customers" ? "customers" : "products"} imported`
                 : "Nothing new was imported"}
           </p>
           <ul style={{ ...styles.list, marginTop: 9 }}>
@@ -761,7 +1023,7 @@ export function CsvImportPanel({
           {result.undoMessage ? <p style={{ ...styles.note, marginTop: 9 }}>{result.undoMessage}</p> : null}
 
           {!result.undone && result.createdIds?.length ? (
-            <button type="button" disabled={busy} onClick={() => void undoImport()} style={withStyle(ghostButton, { marginTop: 10 })}>
+            <button type="button" disabled={busy} onClick={() => void undoImport(result)} style={withStyle(ghostButton, { marginTop: 10 })}>
               {busy ? <Spinner /> : null} Undo this import
             </button>
           ) : null}
@@ -784,19 +1046,21 @@ export function CsvImportPanel({
             </div>
           )}
         </div>
-      )}
+      ))}
 
       <div style={styles.row}>
         <button
           type="button"
           onClick={() => void runImport()}
-          disabled={busy || prepared.payload.length === 0}
-          style={withStyle(primaryButton, busy || prepared.payload.length === 0 ? disabledButton : undefined)}
+          disabled={busy || (prepared.payload.length === 0 && prepared.problems.length === 0)}
+          style={withStyle(primaryButton, busy || (prepared.payload.length === 0 && prepared.problems.length === 0) ? disabledButton : undefined)}
         >
           {busy ? <Spinner /> : null}
           {busy
             ? "Importing…"
-            : `Import ${prepared.payload.length.toLocaleString()} ${entity === "customers" ? "customers" : "products"}`}
+            : prepared.payload.length === 0
+              ? "Review row errors"
+              : `Import ${prepared.payload.length.toLocaleString()} ${entity === "customers" ? "customers" : "products"}`}
         </button>
         <button type="button" onClick={onSkipped} disabled={busy} style={withStyle(ghostButton, busy ? disabledButton : undefined)}>
           Skip for now

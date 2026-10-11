@@ -13,6 +13,20 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite onboarding customer and product CSV imports and undo now use the Go
+  `crm.importCustomers`, `crm.undoCustomerImport`, `inventory.importItems`,
+  and `inventory.undoItemImport` capabilities. Currency-aware minor units,
+  row-level validation, duplicate counts, created IDs, and the customer Go
+  import receipt are preserved. Major-unit credit limits use the workspace
+  currency scale; explicitly labeled minor-unit values pass through unchanged,
+  and conflicting columns are set aside with a row error. Invalid rows stay out of the Go batch, and
+  files above the Go capability body limit can be imported in split batches.
+  Undo receipts persist per batch across reloads, older batches can be undone
+  independently, and service SKUs remain stable when the same CSV is retried.
+- Vite onboarding now resumes unfinished setup for existing workspaces. Import
+  receipts stay available at the saved setup step; completed or absent setup
+  state still sends the user to the dashboard.
+
 - Vite routes signed-in users without a workspace and the dashboard's
   "Finish workspace setup" action to the Vite `/onboarding` page.
 

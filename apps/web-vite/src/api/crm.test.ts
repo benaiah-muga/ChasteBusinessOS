@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -723,6 +723,35 @@ describe("CRM API client", () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/import", "/api/import"]);
   });
 
+  it("retains independent Go customer import receipts and clears only the undone batch", async () => {
+    const scope = { actorId: dealId, organizationId: customerId };
+    const firstID = "10000000-0000-4000-8000-000000000061";
+    const secondID = "10000000-0000-4000-8000-000000000062";
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input: { customerIds?: string[]; importIntentId?: string } };
+      if (body.capabilityId === "crm.importCustomers") {
+        const rows = (JSON.parse(String(init?.body)) as { input: { rows: Array<{ name: string }> } }).input.rows;
+        const id = rows[0]?.name === "First batch" ? firstID : secondID;
+        return Response.json({ ok: true, data: { createdIds: [id], imported: 1, skippedDuplicateRows: [], importIntentId: body.intentId } });
+      }
+      return Response.json({ ok: true, data: {
+        customerIds: body.input.customerIds,
+        deactivated: body.input.customerIds?.length ?? 0,
+        importIntentId: body.input.importIntentId,
+        undoIntentId: body.intentId,
+      } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const first = await importCrmCustomers([{ rowNumber: 2, name: "First batch", allowDuplicate: false }], undefined, true, scope);
+    const second = await importCrmCustomers([{ rowNumber: 2, name: "Second batch", allowDuplicate: false }], undefined, true, scope);
+    expect(first.kind).toBe("completed");
+    expect(second.kind).toBe("completed");
+    const receipts = await readCrmCustomerImportUndos(scope);
+    expect(receipts.map((receipt) => receipt.createdIds)).toEqual([[firstID], [secondID]]);
+    await expect(undoCrmImport([firstID], undefined, true, scope, receipts[0]?.importIntentId)).resolves.toMatchObject({ kind: "completed" });
+    await expect(readCrmCustomerImportUndos(scope)).resolves.toEqual([receipts[1]]);
+  });
+
   it("validates approval responses for customer import and undo", async () => {
     const scope = { actorId: dealId, organizationId: customerId };
     vi.stubGlobal("fetch", vi.fn()
@@ -877,7 +906,7 @@ describe("CRM API client", () => {
     await expect(importCrmCustomers(rows, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     await expect(importCrmCustomers(rows, undefined, true, scope)).resolves.toEqual({
       kind: "completed",
-      data: { inserted: 1, skippedDuplicates: 1, createdIds: [dealId] },
+      data: { inserted: 1, skippedDuplicates: 1, skippedDuplicateRows: [3], createdIds: [dealId] },
     });
     const importBodies = importRetry.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
     expect(importBodies).toHaveLength(2);

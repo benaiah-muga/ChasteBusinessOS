@@ -6,6 +6,7 @@ import {
   importOnboardingRows,
   markOnboardingStep,
   OnboardingApiError,
+  readOnboardingState,
   recoveryFor,
   undoOnboardingImport,
 } from "./onboarding";
@@ -31,6 +32,22 @@ function stubFetch(...responses: Response[]) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("onboarding API", () => {
+  it("reads and validates resumable setup state from Go", async () => {
+    const state = { path: "import", steps: { import_products: "pending" }, startedAt: "2026-01-01T00:00:00.000Z" };
+    const fetchMock = stubFetch(Response.json({ state, steps: [{ key: "import_products", status: "pending" }] }));
+    await expect(readOnboardingState()).resolves.toEqual(state);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/onboarding");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBeUndefined();
+  });
+
+  it("accepts a null state for a user without a workspace and rejects malformed state", async () => {
+    stubFetch(Response.json({ state: null, steps: [] }));
+    await expect(readOnboardingState()).resolves.toBeNull();
+
+    stubFetch(Response.json({ state: { path: "unknown", steps: {}, startedAt: "now" }, steps: [] }));
+    await expect(readOnboardingState()).rejects.toMatchObject({ status: 200, failure: { code: "invalid_response" } });
+  });
+
   it("creates the workspace with the caller's bootstrap intent and validates the reply", async () => {
     const fetchMock = stubFetch(Response.json({ orgId: "3f1c9a52-0d2b-4c8f-9a51-5f2f7c2a1b30", replayed: true }));
     await expect(createWorkspace(workspace)).resolves.toEqual({
@@ -94,48 +111,84 @@ describe("onboarding API", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ complete: true });
   });
 
-  it("refuses a malformed import payload before it reaches the server", async () => {
+  it("sends product imports through Go with source rows, minor units, duplicate IDs, and no legacy fallback", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+      return Response.json({ ok: true, data: { createdIds: ["10000000-0000-4000-8000-000000000001"], imported: 1, skippedDuplicateRows: [4] } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const imported = await importOnboardingRows("products", {
+      rows: [{ name: "Glow Lamp", sku: "GLOW-1", salePrice: "24.99", salePriceMinor: "2499", type: "product" }, { name: "Duplicate Lamp", sku: "GLOW-1", salePrice: "9", salePriceMinor: "900", type: "product" }],
+      rowNumbers: [3, 4], currency: "USD", scope: { actorId: "owner-user", organizationId: "3f1c9a52-0d2b-4c8f-9a51-5f2f7c2a1b30" },
+      errors: [{ row: 2, field: "name", message: "Needs a name." }],
+    });
+    expect(imported).toMatchObject({ inserted: 1, skippedDuplicates: 1, errors: [{ row: 2 }, { row: 4, message: expect.stringContaining("product") }], createdIds: ["10000000-0000-4000-8000-000000000001"] });
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(init?.body))).toMatchObject({ capabilityId: "inventory.importItems", input: { rows: [{ rowNumber: 3, salePriceMinor: 2499 }, { rowNumber: 4, salePriceMinor: 900 }] } });
+    expect(fetchMock.mock.calls.some(([callUrl]) => callUrl === "/api/import")).toBe(false);
+  });
+
+  it("sends customer credit in currency minor units and retains the Go receipt for undo", async () => {
+    const customerId = "10000000-0000-4000-8000-000000000002";
+    let importIntentId = "";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input?: { rows?: unknown[]; customerIds?: string[]; importIntentId?: string } };
+      if (body.capabilityId === "crm.importCustomers") {
+        importIntentId = body.intentId;
+        return Response.json({ ok: true, data: { createdIds: [customerId], imported: 1, skippedDuplicateRows: [4], importIntentId } });
+      }
+      return Response.json({ ok: true, data: { customerIds: [customerId], deactivated: 1, importIntentId, undoIntentId: body.intentId } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const scope = { actorId: "owner-user", organizationId: "3f1c9a52-0d2b-4c8f-9a51-5f2f7c2a1b30" };
+    const imported = await importOnboardingRows("customers", {
+      rows: [{ name: "Glow Works", email: "owner@example.com", creditLimitMinor: "500000", paymentTermDays: "30" }, { name: "Duplicate" }],
+      rowNumbers: [3, 4], currency: "UGX", scope,
+    });
+    expect(imported).toMatchObject({ inserted: 1, skippedDuplicates: 1, errors: [{ row: 4 }], createdIds: [customerId] });
+    expect(imported.importIntentId).toBeTruthy();
+    const importBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(importBody).toMatchObject({ capabilityId: "crm.importCustomers", input: { rows: [{ rowNumber: 3, creditLimitMinor: 500000, paymentTermDays: 30 }, { rowNumber: 4, name: "Duplicate" }] } });
+    await expect(undoOnboardingImport("customers", [customerId], scope, imported.importIntentId)).resolves.toEqual({ undone: 1, remaining: 0 });
+    const undoBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(undoBody).toMatchObject({ capabilityId: "crm.undoCustomerImport", input: { customerIds: [customerId], importIntentId } });
+    expect(undoBody.input.importIntentId).toBe(importBody.intentId);
+    expect(fetchMock.mock.calls.some(([callUrl]) => callUrl === "/api/import")).toBe(false);
+  });
+
+  it("rejects non-minor-unit customer amounts and safely preflights large batches", async () => {
     const fetchMock = stubFetch();
-    await expect(importOnboardingRows("customers", [])).rejects.toBeInstanceOf(OnboardingApiError);
+    const scope = { actorId: "owner-user", organizationId: "3f1c9a52-0d2b-4c8f-9a51-5f2f7c2a1b30" };
+    await expect(importOnboardingRows("customers", {
+      rows: [{ name: "Invalid", creditLimitMinor: "1.2345" }], rowNumbers: [2], currency: "KWD", scope,
+    })).rejects.toBeInstanceOf(OnboardingApiError);
+    await expect(importOnboardingRows("customers", {
+      rows: Array.from({ length: 1000 }, (_, index) => ({ name: "A".repeat(120), email: `person${index}@example.com` })),
+      rowNumbers: Array.from({ length: 1000 }, (_, index) => index + 2), currency: "USD", scope,
+    })).rejects.toMatchObject({ status: 413 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("imports rows with an intent identity and reports duplicates, row errors and undo handles", async () => {
-    const createdIds = ["10000000-0000-4000-8000-000000000001"];
+  it("keeps approval-pending imports and undo out of the success path without legacy fallback", async () => {
     const fetchMock = stubFetch(
-      Response.json({ inserted: 2, skippedDuplicates: 1, errors: [{ row: 4, field: "email", message: "not an email" }], createdIds }),
-      Response.json({ undone: 2, remaining: 0 }),
+      Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }),
+      Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }),
     );
-    const imported = await importOnboardingRows("customers", [{ name: "Glow Works" }, { name: "Pantry Co" }], "fixed-intent");
-    expect(imported).toMatchObject({ inserted: 2, skippedDuplicates: 1, errors: [{ row: 4 }] });
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      entity: "customers",
-      rows: [{ name: "Glow Works" }, { name: "Pantry Co" }],
-      intentId: "fixed-intent",
-    });
-    await expect(undoOnboardingImport("customers", createdIds)).resolves.toEqual({ undone: 2, remaining: 0 });
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ action: "undo", importIds: createdIds });
+    const scope = { actorId: "owner-user", organizationId: "3f1c9a52-0d2b-4c8f-9a51-5f2f7c2a1b30" };
+    const request = { rows: [{ name: "Mug", sku: "MUG-1", salePrice: "1", salePriceMinor: "100" }], rowNumbers: [2], currency: "USD", scope };
+    expect(failureOf(await importOnboardingRows("products", request).catch((thrown: unknown) => thrown)).code).toBe("pending_approval");
+    expect(failureOf(await undoOnboardingImport("products", ["10000000-0000-4000-8000-000000000001"], { actorId: "another-user", organizationId: scope.organizationId }).catch((thrown: unknown) => thrown)).code).toBe("pending_approval");
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
-  it("keeps an approval-pending import and an approval-pending undo out of the success path", async () => {
-    stubFetch(Response.json({ error: "Import is awaiting approval.", pendingApproval: true }, { status: 202 }));
-    const failure = failureOf(await importOnboardingRows("products", [{ name: "Mug" }]).catch((thrown: unknown) => thrown));
-    expect(failure.code).toBe("pending_approval");
-    expect(failure.hint).toContain("awaiting approval");
-
-    stubFetch(Response.json({ error: "Undo is awaiting approval.", pendingApproval: true }, { status: 202 }));
-    const undo = failureOf(
-      await undoOnboardingImport("products", ["10000000-0000-4000-8000-000000000001"]).catch((thrown: unknown) => thrown),
-    );
-    expect(undo.code).toBe("pending_approval");
-  });
-
-  it("rejects a success reply it cannot trust", async () => {
-    stubFetch(Response.json({ inserted: 1, skippedDuplicates: 0 }));
-    await expect(importOnboardingRows("products", [{ name: "Mug" }])).rejects.toBeInstanceOf(OnboardingApiError);
-
-    stubFetch(Response.json({ state: "done" }));
-    await expect(markOnboardingStep("invite_team", "done")).rejects.toBeInstanceOf(OnboardingApiError);
+  it("requires loaded organization scope and a valid capability result", async () => {
+    const fetchMock = stubFetch();
+    await expect(importOnboardingRows("products", { rows: [], rowNumbers: [], currency: "USD", scope: null })).rejects.toBeInstanceOf(OnboardingApiError);
+    await expect(importOnboardingRows("products", {
+      rows: [{ name: "Mug", sku: "MUG-1", salePrice: "1", salePriceMinor: "100" }], rowNumbers: [2], currency: "USD",
+      scope: { actorId: "owner-user", organizationId: "3f1c9a52-0d2b-4c8f-9a51-5f2f7c2a1b30" },
+    })).rejects.toBeInstanceOf(OnboardingApiError);
+    expect(fetchMock.mock.calls.every(([url]) => url !== "/api/import")).toBe(true);
   });
 
   it("turns an unreachable or stalled service into copy the wizard can show", async () => {
