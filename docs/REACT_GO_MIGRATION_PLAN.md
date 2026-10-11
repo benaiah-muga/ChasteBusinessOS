@@ -1467,7 +1467,10 @@ new owners and the manifest shows zero legacy runtime paths.
      per-user read receipts are served through `POST /api/notifications` at
      `GO_NOTIFICATIONS_WRITE_ROUTE=1`, paired with its Vite selector. Handler,
      selector, component, and database coverage are in place. Browser proof
-     remains open.
+     passed on 2026-10-11 with the installed `agent-browser`: the authenticated
+     Vite shell loaded the feed and rendered the unread notification, then
+     opening it submitted a read receipt. Both Go-backed requests returned 200,
+     the unread badge cleared, and the browser reported no console errors.
 147. (Implemented; Vite sends use Go by default) Promote eligible conversation
      sends through the existing session-authenticated `/api/capabilities/execute`
      route to `messaging.sendMessage`. Go rechecks conversation membership and
