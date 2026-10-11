@@ -421,6 +421,20 @@ worker enables recurring invoice scheduling by default; set
 concurrent enqueue, Go claim and execution, exact occurrence linking, invoice
 posting, schedule advancement, governed receipt, and system audit event.
 
+## Purchasing order and receiving jobs
+
+The Go jobs worker is the sole queue owner for `purchasing.createPurchaseOrder`,
+`purchasing.receiveGoods`, and `purchasing.returnGoods`. It executes each job
+through the governed system capability path under `purchasing.write`, using the
+queued organization and stable job ID receipt. The TypeScript claimant excludes
+all three job types. `TestPurchasingReturnGoodsWorkerClaimAndExecution` proves
+the Go worker creates an order, receives its stock line, returns part of the
+receipt, finalizes each job once, stores one action receipt per job, and writes
+one system audit event per action.
+The TypeScript ownership test proves the legacy claimant leaves each queued
+type pending without incrementing attempts. Keep the Go jobs worker running
+when this ownership is enabled, or these jobs will remain pending.
+
 ## Event and data boundaries
 
 - **Business data versus action audit:** Capabilities own domain writes.

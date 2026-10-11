@@ -2819,3 +2819,11 @@ new owners and the manifest shows zero legacy runtime paths.
      existing `documents.read` permission. The routine integration proof
      verifies the local ingested document projection, excludes another
      organization's document, and records a session-linked system audit event.
+
+273. (Implemented and database-tested) Make Go the only claimant for
+     `purchasing.createPurchaseOrder`, `purchasing.receiveGoods`, and
+     `purchasing.returnGoods`. Go processes all three through the existing
+     governed system capability worker; TypeScript ownership tests verify that
+     those queued jobs stay pending with zero attempts. The Go DB proof covers
+     the full create, receive, and partial-return sequence, stock effect, one
+     action receipt per job, and one audit event per action.

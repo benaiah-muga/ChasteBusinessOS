@@ -145,6 +145,9 @@ describe("capability job queue", () => {
     "inventory.postCycleCount",
     "inventory.cancelCycleCount",
     "accounting.generateDueInvoices",
+    "purchasing.createPurchaseOrder",
+    "purchasing.receiveGoods",
+    "purchasing.returnGoods",
   ] as const)(
     "leaves %s jobs for the Go worker",
     async (type) => {

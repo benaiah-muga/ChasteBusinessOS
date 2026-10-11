@@ -56,6 +56,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Go now exclusively claims purchasing purchase-order creation, goods receipt,
+  and goods-return jobs. The legacy claimant leaves these job types pending
+  for Go, which executes them through the governed capability worker with one
+  durable action receipt per job.
+
 - Go routine agents can now list ingested documents through the governed
   `documents.listDocuments` capability. The tool keeps the existing
   `documents.read` permission and organization scope.

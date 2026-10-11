@@ -131,7 +131,10 @@ export async function claimJob(
         'inventory.recordCycleCounts',
         'inventory.postCycleCount',
         'inventory.cancelCycleCount',
-        'accounting.generateDueInvoices'
+        'accounting.generateDueInvoices',
+        'purchasing.createPurchaseOrder',
+        'purchasing.receiveGoods',
+        'purchasing.returnGoods'
       )
       ORDER BY available_at, created_at
       LIMIT 1

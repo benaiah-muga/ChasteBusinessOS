@@ -1633,6 +1633,9 @@ func TestPurchasingReturnGoodsWorkerClaimAndExecution(t *testing.T) {
 		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.createPurchaseOrder'`, orgID); got != 1 {
 		t.Fatalf("system purchase order audit events=%d, want one", got)
 	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+poJobID, "purchasing.createPurchaseOrder"); got != 1 {
+		t.Fatalf("purchase order job action receipts=%d, want one", got)
+	}
 	receiptPayload := json.RawMessage(`{"poNumber":1,"lines":[{"lineNumber":1,"quantity":2000}]}`)
 	receiptJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.receiveGoods", receiptPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
 	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
@@ -1651,6 +1654,9 @@ func TestPurchasingReturnGoodsWorkerClaimAndExecution(t *testing.T) {
 		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
 		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.receiveGoods'`, orgID); got != 1 {
 		t.Fatalf("system receipt audit events=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+receiptJobID, "purchasing.receiveGoods"); got != 1 {
+		t.Fatalf("goods receipt job action receipts=%d, want one", got)
 	}
 	returnPayload := json.RawMessage(`{"poNumber":1,"lines":[{"lineNumber":1,"quantity":500,"reason":"worker return"}]}`)
 	returnJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.returnGoods", returnPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
@@ -1671,6 +1677,9 @@ func TestPurchasingReturnGoodsWorkerClaimAndExecution(t *testing.T) {
 		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
 		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.returnGoods'`, orgID); got != 1 {
 		t.Fatalf("system return audit events=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+returnJobID, "purchasing.returnGoods"); got != 1 {
+		t.Fatalf("goods return job action receipts=%d, want one", got)
 	}
 }
 
