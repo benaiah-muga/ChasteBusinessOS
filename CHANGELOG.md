@@ -38,8 +38,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 - Vite Analytics dataset discovery, previews, and report generation now route
   to Go by default through the existing authenticated Analytics session
-  handler. Setting the paired report route selectors to `0` restores the
-  legacy report path during migration rollback.
+  handler. The route ownership manifest now assigns exact `POST /api/analytics`
+  to Go. Setting the paired report route selectors to `0` restores the legacy
+  report path during migration rollback; unsupported methods and paths retain
+  legacy ownership.
 
 - Vite Marketing overview reads now use Go's `marketing.overviewSnapshot`
   capability by default whenever the session capability route is enabled.
