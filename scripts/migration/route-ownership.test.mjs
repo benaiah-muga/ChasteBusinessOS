@@ -52,3 +52,16 @@ test("Go-only POS shift summary has exact generated ownership", () => {
     }],
   );
 });
+
+test("POS page has verified Vite ownership after the authenticated browser flow", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.kind === "page" && entry.path === "/pos"),
+    [{
+      kind: "page",
+      path: "/pos",
+      source: "apps/web/src/app/(app)/pos/page.tsx",
+      owner: "vite",
+      parity: "verified",
+    }],
+  );
+});

@@ -24,6 +24,10 @@ The full v1 changelog is preserved at the bottom of this file.
 - The route ownership manifest now records verified Go ownership for POS shift
   summary submission.
 
+- The migration ownership manifest now records `/pos` as Vite-owned after the
+  authenticated browser proof exercised its Go-backed register, manual cash
+  sale and return flow. Stock-tracked item effects were not part of that proof.
+
 - Go now owns the full inventory cycle-count job lifecycle, including recording
   counts, posting variances, and cancelling counts. The legacy worker leaves
   these jobs to Go.

@@ -2733,3 +2733,9 @@ new owners and the manifest shows zero legacy runtime paths.
 262. (Implemented and verified) Record `POST /api/pos/shift-summary` as a
      Go-only route in the generated ownership manifest. Its exact Go mount and
      Vite proxy are covered by route ownership, handler, router, and proxy tests.
+
+263. (Implemented and verified) Mark `/pos` as Vite-owned after an authenticated
+     browser proof covered register open, a manually entered cash sale and
+     return, register close, shift summary, customer lookup, and the Go-backed
+     empty inventory catalog. Each API used by the proof returned successfully
+     from Go. The browser proof did not cover stock-tracked item effects.
