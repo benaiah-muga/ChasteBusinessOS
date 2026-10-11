@@ -133,6 +133,20 @@ production requests and writes. No production traffic has moved to Go.
   [`messaging.go`](../../apps/api/internal/capability/messaging.go),
   [`messaging_integration_test.go`](../../apps/api/internal/capability/messaging_integration_test.go),
   and [`session_capability_test.go`](../../apps/api/internal/httpapi/session_capability_test.go).
+- Vite Marketplace Verify sends only the manifest and publisher signature
+  fields through the session-authenticated Go `creator.verifyPlugin`
+  capability, and strictly validates the `{ok:true,data:{valid,reason?}}`
+  response. A bad signature is a successful `valid:false` verdict, not an
+  HTTP 422 response; capability permission errors remain visible. Publish,
+  install, and uninstall retain their current request route. Existing Go tests
+  cover a plugin-kit valid signature, invalid verdicts, and governed execution;
+  focused Vite tests assert valid and invalid behavior with no legacy
+  verification call. Authenticated browser proof remains pending. See
+  [`marketplace.ts`](../../apps/web-vite/src/api/marketplace.ts),
+  [`MarketplacePage.tsx`](../../apps/web-vite/src/components/MarketplacePage.tsx),
+  [`creator.go#L365-L425`](../../apps/api/internal/capability/creator.go#L365-L425),
+  [`creator_test.go#L190-L247`](../../apps/api/internal/capability/creator_test.go#L190-L247),
+  and [`creator_executor_test.go#L92-L106`](../../apps/api/internal/capability/creator_executor_test.go#L92-L106).
 - Vite Accounting Overview reads through Go's authenticated
   `accounting.overview` capability unconditionally. The client validates the
   strict response and fails closed on errors; there is no legacy retry or

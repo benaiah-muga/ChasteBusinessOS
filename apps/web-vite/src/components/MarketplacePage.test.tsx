@@ -23,6 +23,19 @@ function modules(enabled = true) {
   });
 }
 
+function isCapabilityRequest(input: RequestInfo | URL, init: RequestInit | undefined, capabilityId: string): boolean {
+  if (String(input) !== "/api/capabilities/execute" || init?.method !== "POST") return false;
+  try {
+    return (JSON.parse(String(init.body ?? "{}")) as { capabilityId?: string }).capabilityId === capabilityId;
+  } catch {
+    return false;
+  }
+}
+
+function marketplaceListings(listings: unknown[]) {
+  return Response.json({ ok: true, data: { listings } });
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -35,9 +48,9 @@ describe("Vite marketplace page", () => {
       capabilityIds: ["inventory.cycleCount", { legacy: true }],
       installedByOrgIds: { unexpected: true },
     };
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return modules();
-      if (String(input) === "/api/marketplace") return Response.json({ listings: [legacyListing] });
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([legacyListing]);
       return new Response(null, { status: 404 });
     }));
 
@@ -59,7 +72,7 @@ describe("Vite marketplace page", () => {
         installed = true;
         return Response.json({ ok: true, data: { installed: true, slug: listing.slug, version: listing.version } });
       }
-      if (path === "/api/marketplace") return Response.json({ listings: [{ ...listing, installedHere: installed }] });
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([{ ...listing, installedHere: installed }]);
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -82,7 +95,7 @@ describe("Vite marketplace page", () => {
       if (path === "/api/marketplace" && init?.method === "POST") {
         return Response.json({ ok: true, data: { listingId: listing.id } });
       }
-      if (path === "/api/marketplace") return Response.json({ listings: [listing] });
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([listing]);
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -102,7 +115,7 @@ describe("Vite marketplace page", () => {
       if (path === "/api/marketplace" && init?.method === "POST") {
         return Response.json({ pendingApproval: true }, { status: 202 });
       }
-      if (path === "/api/marketplace") return Response.json({ listings: [listing] });
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([listing]);
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -119,10 +132,10 @@ describe("Vite marketplace page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketplace" && init?.method === "POST") {
-        return Response.json({ valid: false, reason: "signature does not match manifest digest" }, { status: 422 });
+      if (isCapabilityRequest(input, init, "creator.verifyPlugin")) {
+        return Response.json({ ok: true, data: { valid: false, reason: "signature does not match manifest digest" } });
       }
-      if (path === "/api/marketplace") return Response.json({ listings: [] });
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([]);
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -136,16 +149,45 @@ describe("Vite marketplace page", () => {
 
     expect(await screen.findByText("Invalid: signature does not match manifest digest")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    const verifyCall = fetchMock.mock.calls.find(([input, init]) => isCapabilityRequest(input, init, "creator.verifyPlugin"));
+    expect(verifyCall).toBeDefined();
+    expect(JSON.parse(String(verifyCall?.[1]?.body))).toMatchObject({
+      capabilityId: "creator.verifyPlugin",
+      input: { manifest: { formatVersion: 1 }, signatureBase64: "signature", publisherPublicKeyBase64: "public-key" },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
+  });
+
+  it("reports a valid Go verification verdict without calling the legacy route", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return modules();
+      if (isCapabilityRequest(input, init, "creator.verifyPlugin")) return Response.json({ ok: true, data: { valid: true } });
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([]);
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MarketplacePage />);
+    await screen.findByRole("heading", { name: "Publish a plugin" });
+    fireEvent.change(screen.getByLabelText("Plugin manifest (JSON)"), { target: { value: '{"formatVersion":1}' } });
+    fireEvent.change(screen.getByLabelText("Signature (base64)"), { target: { value: "signature" } });
+    fireEvent.change(screen.getByLabelText("Publisher public key (base64)"), { target: { value: "public-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify signature" }));
+
+    expect(await screen.findByText("Signature valid")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([input, init]) => isCapabilityRequest(input, init, "creator.verifyPlugin"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
   });
 
   it("surfaces marketplace verification permission errors without hiding them as malformed responses", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketplace" && init?.method === "POST") {
+      if (isCapabilityRequest(input, init, "creator.verifyPlugin")) {
         return Response.json({ ok: false, error: "missing capability permission platform.creator" }, { status: 403 });
       }
-      if (path === "/api/marketplace") return Response.json({ listings: [] });
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([]);
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -158,6 +200,7 @@ describe("Vite marketplace page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Verify signature" }));
 
     expect(await screen.findByText("Invalid: missing capability permission platform.creator")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
   });
 
   it("does not load listing data while Creator Mode is disabled", async () => {

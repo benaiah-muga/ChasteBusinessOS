@@ -18,6 +18,10 @@ const MarketplaceListingsCapabilityResponseSchema = z.object({
   ok: z.literal(true),
   data: ListingResponseSchema,
 }).strict();
+const VerifyPluginCapabilityResponseSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ valid: z.boolean(), reason: z.string().optional() }).strict(),
+}).strict();
 const PendingActionSchema = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
@@ -144,14 +148,23 @@ export async function verifyMarketplaceListing(input: Record<string, unknown>, s
   valid: boolean;
   reason?: string;
 }> {
+  const verifyInput = {
+    manifest: input.manifest,
+    signatureBase64: input.signatureBase64,
+    publisherPublicKeyBase64: input.publisherPublicKeyBase64,
+  };
   let response: Response;
   try {
-    response = await fetch("/api/marketplace", {
+    response = await fetch("/api/capabilities/execute", {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        capabilityId: "creator.verifyPlugin",
+        input: verifyInput,
+        intentId: crypto.randomUUID(),
+      }),
       signal: requestSignal(signal),
     });
   } catch (error) {
@@ -159,17 +172,16 @@ export async function verifyMarketplaceListing(input: Record<string, unknown>, s
     throw new MarketplaceApiError(0, "Could not reach the marketplace service.");
   }
   const body: unknown = await readJson(response);
-  if (!response.ok && response.status !== 422) {
-    const failure = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+  if (!response.ok) {
+    const failure = z.object({ ok: z.literal(false), error: z.string() }).strict().safeParse(body);
     throw new MarketplaceApiError(response.status, failure.success ? failure.data.error : "The marketplace could not verify this listing.");
   }
-  const parsed = z.object({ valid: z.boolean(), reason: z.string().optional(), problems: z.array(z.string()).optional() }).safeParse(body);
-  if (!parsed.success || ![200, 422].includes(response.status)) {
+  const parsed = VerifyPluginCapabilityResponseSchema.safeParse(body);
+  if (!parsed.success || response.status !== 200) {
     throw new MarketplaceApiError(response.status, "The marketplace returned an unexpected verification response.");
   }
   return {
-    valid: parsed.data.valid,
-    ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
-    ...(parsed.data.problems?.length ? { reason: parsed.data.problems.join("; ") } : {}),
+    valid: parsed.data.data.valid,
+    ...(parsed.data.data.reason ? { reason: parsed.data.data.reason } : {}),
   };
 }

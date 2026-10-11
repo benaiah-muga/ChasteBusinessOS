@@ -2856,10 +2856,11 @@ new owners and the manifest shows zero legacy runtime paths.
 276. (Implemented; focused client tests added, verification pending) Route the
      Vite marketplace listing read through Go's session-authenticated
      `creator.listMarketplace` capability. Preserve the legacy listing schema,
-     and keep marketplace writes and signature verification on their existing
-     routes. Go DB capability tests prove legacy listing parity; Vite client
-     tests cover the capability request, response validation, and fail-closed
-     behavior without legacy fallback.
+     and keep marketplace writes on their existing routes. Marketplace
+     signature verification later moved to Go in item 289. Go DB capability
+     tests prove legacy listing parity; Vite client tests cover the capability
+     request, response validation, and fail-closed behavior without legacy
+     fallback.
 
 277. (Implemented and verified) Route exact Vite `GET /api/portal/invoice/{token}`
      requests to Go by default, with no Vite rollback selector. Mount the Go
@@ -3006,3 +3007,13 @@ new owners and the manifest shows zero legacy runtime paths.
      respectively, and preserve existing time writes. A direct load of
      `/hr?tab=time` must render the employee picker using Go, request all three
      capabilities, and never call legacy `GET /api/hr`.
+
+289. (Implemented; focused Vite API/page tests and existing Go verification
+     tests passed; authenticated browser proof remains pending) Route Vite
+     Marketplace Verify through the session-authenticated
+     `creator.verifyPlugin` capability. Send only `manifest`,
+     `signatureBase64`, and `publisherPublicKeyBase64` in the capability input,
+     and strictly validate `{ok:true,data:{valid,reason?}}`. An invalid
+     signature is a successful Go verdict with `valid:false`, not an HTTP 422
+     response. Preserve permission errors and keep publish, install, and
+     uninstall requests on their existing routes.

@@ -74,7 +74,7 @@ export function MarketplacePage() {
     }
     setVerifying(true);
     try {
-      setVerdict(await verifyMarketplaceListing({ action: "verify", ...payload }));
+      setVerdict(await verifyMarketplaceListing(payload));
     } catch (error) {
       setVerdict({ valid: false, reason: messageFor(error) });
     } finally {

@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Marketplace Verify now calls the authenticated Go `creator.verifyPlugin`
+  capability with the manifest and publisher signature material. Valid and
+  invalid signature results use Go's strict capability envelope; invalid
+  signatures are returned as a normal verdict and do not use the legacy HTTP
+  422 response. Marketplace publish, install, and uninstall requests retain
+  their existing routes.
+
 - Vite Purchasing now loads vendors, recent purchase orders and bills, accounts
   payable aging, requests and RFQs, price history, and supplier performance
   from the authenticated Go `purchasing.listWorkspace` capability. Go enforces
@@ -109,8 +116,8 @@ The full v1 changelog is preserved at the bottom of this file.
   report routes.
 
 - Vite marketplace listing reads now execute `creator.listMarketplace` through
-  the Go session capability API. Marketplace writes and signature verification
-  keep their current routes.
+  the Go session capability API. Marketplace writes keep their current routes;
+  Verify now uses `creator.verifyPlugin` through the same capability API.
 
 - Go-backed Vite write recovery now accepts Better Auth's opaque user IDs when
   scoping local retry intents across CRM, products, accounting, HR, expenses,

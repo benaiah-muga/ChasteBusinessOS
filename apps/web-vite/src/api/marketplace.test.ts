@@ -96,8 +96,12 @@ describe("marketplace read requests", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const request = verifyMarketplaceListing({ action: "verify", manifest: {} });
-    expect(fetchMock).toHaveBeenCalledWith("/api/marketplace", expect.objectContaining({
+    const request = verifyMarketplaceListing({
+      manifest: {},
+      signatureBase64: "sig",
+      publisherPublicKeyBase64: "key",
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
       signal: expect.any(AbortSignal),
     }));
@@ -107,5 +111,60 @@ describe("marketplace read requests", () => {
       status: 0,
       message: expect.stringContaining("marketplace service"),
     });
+  });
+
+  it("verifies a valid plugin through the Go capability contract", async () => {
+    const verifyInput = {
+      manifest: { formatVersion: 1, name: "Acme Plugin" },
+      signatureBase64: "c2lnbmF0dXJl",
+      publisherPublicKeyBase64: "cHVibGljLWtleQ==",
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { valid: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyMarketplaceListing(verifyInput)).resolves.toEqual({ valid: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    }));
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body).toEqual({
+      capabilityId: "creator.verifyPlugin",
+      input: verifyInput,
+      intentId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+    });
+  });
+
+  it("returns an invalid signature as a successful Go verification verdict", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      ok: true,
+      data: { valid: false, reason: "signature does not match manifest digest" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyMarketplaceListing({
+      manifest: {},
+      signatureBase64: "invalid-signature",
+      publisherPublicKeyBase64: "invalid-public-key",
+    })).resolves.toEqual({ valid: false, reason: "signature does not match manifest digest" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
+  });
+
+  it("rejects malformed Go verification envelopes", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { valid: false, problems: ["bad signature"] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyMarketplaceListing({ manifest: {}, signatureBase64: "sig", publisherPublicKeyBase64: "key" }))
+      .rejects.toMatchObject({
+        name: "MarketplaceApiError",
+        status: 200,
+        message: "The marketplace returned an unexpected verification response.",
+      });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 });
