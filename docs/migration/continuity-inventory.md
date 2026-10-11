@@ -147,6 +147,18 @@ production requests and writes. No production traffic has moved to Go.
   [`creator.go#L365-L425`](../../apps/api/internal/capability/creator.go#L365-L425),
   [`creator_test.go#L190-L247`](../../apps/api/internal/capability/creator_test.go#L190-L247),
   and [`creator_executor_test.go#L92-L106`](../../apps/api/internal/capability/creator_executor_test.go#L92-L106).
+- Vite Marketplace publish sends the manifest and publisher signature material
+  through the session-authenticated Go `creator.publishListing` capability.
+  Strict Go success and pending approval envelopes are validated; successful
+  publication refreshes listing data, while approval and errors preserve the
+  draft. Install and uninstall retain their existing route. The Go runtime-role
+  database proof checks governed persistence, organization ownership, and
+  refusal to claim a foreign publisher's slug; focused Vite tests cover success,
+  refresh, pending approval, errors, strict envelopes, and no legacy publish
+  request. Authenticated browser proof remains pending. See
+  [`marketplace.ts`](../../apps/web-vite/src/api/marketplace.ts),
+  [`MarketplacePage.tsx`](../../apps/web-vite/src/components/MarketplacePage.tsx),
+  and [`creator_executor_test.go`](../../apps/api/internal/capability/creator_executor_test.go).
 - Vite Accounting Overview reads through Go's authenticated
   `accounting.overview` capability unconditionally. The client validates the
   strict response and fails closed on errors; there is no legacy retry or

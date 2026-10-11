@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchMarketplaceListings, MarketplaceApiError, verifyMarketplaceListing } from "./marketplace";
+import { fetchMarketplaceListings, MarketplaceApiError, submitMarketplaceAction, verifyMarketplaceListing } from "./marketplace";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -164,6 +164,97 @@ describe("marketplace read requests", () => {
         status: 200,
         message: "The marketplace returned an unexpected verification response.",
       });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+});
+
+describe("marketplace publish requests", () => {
+  const publishInput = {
+    action: "publish",
+    manifest: { formatVersion: 1, slug: "acme-warehouse", version: "1.2.3" },
+    signatureBase64: "c2lnbmF0dXJl",
+    publisherPublicKeyBase64: "cHVibGljLWtleQ==",
+  };
+
+  it("publishes through the Go capability with a strict success response", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: {
+      listingId: "7de066f0-4bdb-4f46-9b6a-193064f5b235",
+      slug: "acme-warehouse",
+      status: "verified",
+    } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketplaceAction(publishInput)).resolves.toEqual({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    }));
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body).toEqual({
+      capabilityId: "creator.publishListing",
+      input: {
+        manifest: publishInput.manifest,
+        signatureBase64: publishInput.signatureBase64,
+        publisherPublicKeyBase64: publishInput.publisherPublicKeyBase64,
+      },
+      intentId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
+  });
+
+  it("preserves Go publish approval responses", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      ok: false,
+      pendingApproval: true,
+      reason: "A second publisher must review this listing.",
+      approvalId: "d81d8459-9a20-4c8e-a88c-27866dd552aa",
+    }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketplaceAction(publishInput)).resolves.toEqual({
+      kind: "pending",
+      reason: "A second publisher must review this listing.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("rejects malformed Go publish approval and success envelopes without legacy fallback", async () => {
+    const pendingFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: false, pendingApproval: true, reason: "review required", extra: true }, { status: 202 }));
+    vi.stubGlobal("fetch", pendingFetch);
+    await expect(submitMarketplaceAction(publishInput)).rejects.toMatchObject({
+      name: "MarketplaceApiError",
+      status: 202,
+      message: "The marketplace returned an unexpected approval response.",
+    });
+    expect(pendingFetch).toHaveBeenCalledTimes(1);
+    expect(pendingFetch.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+
+    const successFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: {
+      listingId: "not-a-uuid", slug: "acme-warehouse", status: "verified", extra: true,
+    } }));
+    vi.stubGlobal("fetch", successFetch);
+    await expect(submitMarketplaceAction(publishInput)).rejects.toMatchObject({
+      name: "MarketplaceApiError",
+      status: 200,
+      message: "The marketplace returned an unexpected action response.",
+    });
+    expect(successFetch).toHaveBeenCalledTimes(1);
+    expect(successFetch.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("surfaces Go publish errors without trying the legacy route", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: false, error: "slug is owned by another publisher" }, { status: 422 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketplaceAction(publishInput)).rejects.toMatchObject({
+      name: "MarketplaceApiError",
+      status: 422,
+      message: "slug is owned by another publisher",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });

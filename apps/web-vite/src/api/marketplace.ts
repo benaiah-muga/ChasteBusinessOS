@@ -27,6 +27,12 @@ const PendingActionSchema = z.object({
   pendingApproval: z.literal(true),
   reason: z.string(),
 }).strict();
+const CapabilityPendingActionSchema = z.object({
+  ok: z.literal(false),
+  pendingApproval: z.literal(true),
+  reason: z.string(),
+  approvalId: z.string().uuid(),
+}).strict();
 const ActionSuccessSchemas = {
   publish: z.object({ listingId: z.string().uuid(), slug: z.string(), status: z.literal("verified") }).strict(),
   install: z.object({ installed: z.literal(true), slug: z.string(), version: z.string() }).strict(),
@@ -108,14 +114,25 @@ export async function fetchMarketplaceListings(signal?: AbortSignal): Promise<Ma
 export async function submitMarketplaceAction(input: Record<string, unknown>, signal?: AbortSignal): Promise<{
   kind: "completed";
 } | { kind: "pending"; reason: string }> {
+  const action = typeof input.action === "string" ? input.action : undefined;
+  const isPublish = action === "publish";
+  const publishInput = {
+    manifest: input.manifest,
+    signatureBase64: input.signatureBase64,
+    publisherPublicKeyBase64: input.publisherPublicKeyBase64,
+  };
   let response: Response;
   try {
-    response = await fetch("/api/marketplace", {
+    response = await fetch(isPublish ? "/api/capabilities/execute" : "/api/marketplace", {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({ ...input, intentId: crypto.randomUUID() }),
+      body: JSON.stringify(isPublish ? {
+        capabilityId: "creator.publishListing",
+        input: publishInput,
+        intentId: crypto.randomUUID(),
+      } : { ...input, intentId: crypto.randomUUID() }),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
     });
   } catch (error) {
@@ -124,7 +141,7 @@ export async function submitMarketplaceAction(input: Record<string, unknown>, si
   }
   const body: unknown = await readJson(response);
   if (response.status === 202) {
-    const parsed = PendingActionSchema.safeParse(body);
+    const parsed = (isPublish ? CapabilityPendingActionSchema : PendingActionSchema).safeParse(body);
     if (!parsed.success) throw new MarketplaceApiError(response.status, "The marketplace returned an unexpected approval response.");
     return { kind: "pending", reason: parsed.data.reason };
   }
@@ -134,7 +151,6 @@ export async function submitMarketplaceAction(input: Record<string, unknown>, si
       : "The marketplace could not complete that action.";
     throw new MarketplaceApiError(response.status, message);
   }
-  const action = typeof input.action === "string" ? input.action : undefined;
   if (response.status !== 200 || !action || !Object.hasOwn(ActionSuccessSchemas, action)) {
     throw new MarketplaceApiError(response.status, "The marketplace returned an unexpected action response.");
   }

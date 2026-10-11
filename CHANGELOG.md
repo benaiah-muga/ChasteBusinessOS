@@ -17,8 +17,12 @@ The full v1 changelog is preserved at the bottom of this file.
   capability with the manifest and publisher signature material. Valid and
   invalid signature results use Go's strict capability envelope; invalid
   signatures are returned as a normal verdict and do not use the legacy HTTP
-  422 response. Marketplace publish, install, and uninstall requests retain
-  their existing routes.
+  422 response.
+
+- Vite Marketplace publish now uses the authenticated Go `creator.publishListing`
+  capability, with strict success and pending approval validation. Successful
+  publishes refresh the Go listing read, and errors do not retry through the
+  legacy route. Install and uninstall keep their existing route.
 
 - Vite Purchasing now loads vendors, recent purchase orders and bills, accounts
   payable aging, requests and RFQs, price history, and supplier performance

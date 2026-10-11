@@ -106,6 +106,86 @@ func TestGoCreatorPluginVerificationUsesGovernedExecutor(t *testing.T) {
 	}
 }
 
+func TestGoCreatorPublishListingUsesGovernedTenantScopedExecutor(t *testing.T) {
+	fx := newExecutorFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		UPDATE organizations SET enabled_modules='["creator"]'::jsonb
+		WHERE id IN ($1::uuid, $2::uuid)`, fx.orgID, fx.otherOrgID); err != nil {
+		t.Fatal(err)
+	}
+	slug := "go-publish-" + executorUUID(t)[:8]
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(context.Background(), `DELETE FROM marketplace_listings WHERE slug=$1`, slug); err != nil {
+			t.Errorf("clean published marketplace fixture %s: %v", slug, err)
+		}
+	})
+	manifestRaw := strings.Replace(creatorTestManifest, "acme-warehouse", slug, 1)
+	manifest, err := creatorValidateManifest(json.RawMessage(manifestRaw))
+	if err != nil {
+		t.Fatalf("validate publish manifest: %v", err)
+	}
+	signature, publisherKey := creatorTestPublisher(t, manifest)
+	input, err := json.Marshal(CreatorPublishListingInput{
+		Manifest:                 json.RawMessage(manifestRaw),
+		SignatureBase64:          signature,
+		PublisherPublicKeyBase64: publisherKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimsForOrg := func(orgID, intentID string) SystemClaims {
+		t.Helper()
+		var jobID string
+		if err := fx.owner.QueryRow(fx.ctx, `
+			INSERT INTO jobs (org_id, type, payload, max_attempts)
+			VALUES ($1::uuid, $2, '{}'::jsonb, 3) RETURNING id::text`, orgID, creatorPublishListingCapabilityID).Scan(&jobID); err != nil {
+			t.Fatalf("seed system publish job: %v", err)
+		}
+		if _, err := fx.owner.Exec(fx.ctx, `
+			UPDATE jobs SET status='processing', lease_owner='creator-publish-test-owner', fencing_token=1,
+				lease_expires_at=clock_timestamp() + interval '1 hour' WHERE id=$1::uuid`, jobID); err != nil {
+			t.Fatalf("claim system publish job: %v", err)
+		}
+		return SystemClaims{
+			OrganizationID: orgID, CapabilityID: creatorPublishListingCapabilityID, Permission: "platform.creator",
+			IntentID: intentID, JobID: jobID, LeaseOwner: "creator-publish-test-owner",
+			FencingToken: 1, LeaseExtensionMillis: 180_000,
+		}
+	}
+	result, err := fx.executor.ExecuteSystem(fx.ctx, claimsForOrg(fx.orgID, executorUUID(t)), input)
+	if err != nil || !result.OK || result.PendingApproval {
+		t.Fatalf("creator.publishListing execution=%+v err=%v, want a completed governed write", result, err)
+	}
+	var output CreatorPublishListingOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatalf("decode publish result %s: %v", result.Data, err)
+	}
+	if output.Slug != slug || output.Status != "verified" || !isUUID(output.ListingID) {
+		t.Fatalf("publish output=%+v, want verified listing %q", output, slug)
+	}
+	var ownerOrgID string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT submitted_by_org_id::text FROM marketplace_listings WHERE id=$1::uuid`, output.ListingID).Scan(&ownerOrgID); err != nil {
+		t.Fatalf("read published listing owner: %v", err)
+	}
+	if ownerOrgID != fx.orgID {
+		t.Fatalf("published listing owner=%s, want executing org %s", ownerOrgID, fx.orgID)
+	}
+
+	otherOrgResult, err := fx.executor.ExecuteSystem(fx.ctx, claimsForOrg(fx.otherOrgID, executorUUID(t)), input)
+	if err == nil || otherOrgResult.OK || !strings.Contains(err.Error(), "owned by another publisher") {
+		t.Fatalf("foreign org publish result=%+v err=%v, want slug ownership refusal", otherOrgResult, err)
+	}
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT submitted_by_org_id::text FROM marketplace_listings WHERE id=$1::uuid`, output.ListingID).Scan(&ownerOrgID); err != nil {
+		t.Fatalf("re-read listing after foreign publish refusal: %v", err)
+	}
+	if ownerOrgID != fx.orgID {
+		t.Fatalf("foreign publish changed listing owner=%s, want original org %s", ownerOrgID, fx.orgID)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2 AND kind='capability.executed' AND actor_type='system'`, fx.orgID, creatorPublishListingCapabilityID); got != 1 {
+		t.Fatalf("creator.publishListing audit rows=%d, want one successful governed publish", got)
+	}
+}
+
 func TestGoCreatorMarketplaceReadMatchesLegacyRowsAndWireFields(t *testing.T) {
 	fx := newExecutorFixture(t)
 	baseTime := time.Date(2099, time.September, 1, 12, 30, 45, 987654321, time.UTC)

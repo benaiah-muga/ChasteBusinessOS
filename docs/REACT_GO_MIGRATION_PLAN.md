@@ -2856,11 +2856,11 @@ new owners and the manifest shows zero legacy runtime paths.
 276. (Implemented; focused client tests added, verification pending) Route the
      Vite marketplace listing read through Go's session-authenticated
      `creator.listMarketplace` capability. Preserve the legacy listing schema,
-     and keep marketplace writes on their existing routes. Marketplace
-     signature verification later moved to Go in item 289. Go DB capability
-     tests prove legacy listing parity; Vite client tests cover the capability
-     request, response validation, and fail-closed behavior without legacy
-     fallback.
+     and keep marketplace writes on their existing routes at this milestone.
+     Marketplace signature verification later moved to Go in item 289 and
+     publish moved in item 290. Go DB capability tests prove legacy listing
+     parity; Vite client tests cover the capability request, response
+     validation, and fail-closed behavior without legacy fallback.
 
 277. (Implemented and verified) Route exact Vite `GET /api/portal/invoice/{token}`
      requests to Go by default, with no Vite rollback selector. Mount the Go
@@ -3017,3 +3017,14 @@ new owners and the manifest shows zero legacy runtime paths.
      signature is a successful Go verdict with `valid:false`, not an HTTP 422
      response. Preserve permission errors and keep publish, install, and
      uninstall requests on their existing routes.
+
+290. (Implemented; focused Vite API/page tests and Go runtime-role DB proof
+     passed; authenticated browser proof remains pending) Route Vite Marketplace
+     publish through the session-authenticated Go `creator.publishListing`
+     capability. Send only `manifest`, `signatureBase64`, and
+     `publisherPublicKeyBase64`, strictly validate success and pending approval
+     envelopes, and keep install and uninstall on their current route. The Go
+     runtime-role proof verifies governed persistence, submitting-organization
+     ownership, and refusal to overwrite another publisher's slug. Vite tests
+     cover publish success and list refresh, pending approval, errors, strict
+     envelope validation, and no legacy publish request.

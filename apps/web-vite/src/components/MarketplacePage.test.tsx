@@ -36,6 +36,12 @@ function marketplaceListings(listings: unknown[]) {
   return Response.json({ ok: true, data: { listings } });
 }
 
+function fillPublishForm() {
+  fireEvent.change(screen.getByLabelText("Plugin manifest (JSON)"), { target: { value: '{"formatVersion":1,"slug":"acme-warehouse"}' } });
+  fireEvent.change(screen.getByLabelText("Signature (base64)"), { target: { value: "signature" } });
+  fireEvent.change(screen.getByLabelText("Publisher public key (base64)"), { target: { value: "public-key" } });
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -85,6 +91,113 @@ describe("Vite marketplace page", () => {
 
     expect(await screen.findByText("Plugin installed after signature re-verification.")).not.toBeNull();
     await waitFor(() => expect(screen.getByText("installed")).not.toBeNull());
+    expect(fetchMock).toHaveBeenCalledWith("/api/marketplace", expect.objectContaining({ credentials: "same-origin" }));
+  });
+
+  it("publishes through Go, clears the form, and refreshes listing data", async () => {
+    let published = false;
+    const publishedListing = { ...listing, name: "Published from Go", slug: "acme-warehouse" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return modules();
+      if (isCapabilityRequest(input, init, "creator.publishListing")) {
+        const body = JSON.parse(String(init?.body)) as { input?: Record<string, unknown> };
+        expect(body.input).toEqual({
+          manifest: { formatVersion: 1, slug: "acme-warehouse" },
+          signatureBase64: "signature",
+          publisherPublicKeyBase64: "public-key",
+        });
+        published = true;
+        return Response.json({ ok: true, data: {
+          listingId: listing.id,
+          slug: "acme-warehouse",
+          status: "verified",
+        } });
+      }
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings(published ? [publishedListing] : []);
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MarketplacePage />);
+    await screen.findByRole("heading", { name: "Publish a plugin" });
+    fillPublishForm();
+    fireEvent.click(screen.getByRole("button", { name: "Publish listing" }));
+
+    expect(await screen.findByText("Listing published and verified.")).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: publishedListing.name })).not.toBeNull();
+    expect((screen.getByLabelText("Plugin manifest (JSON)") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText("Signature (base64)") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Publisher public key (base64)") as HTMLInputElement).value).toBe("");
+    expect(fetchMock.mock.calls.some(([input, init]) => isCapabilityRequest(input, init, "creator.publishListing"))).toBe(true);
+    expect(fetchMock.mock.calls.filter(([input, init]) => isCapabilityRequest(input, init, "creator.listMarketplace"))).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
+  });
+
+  it("shows a Go publish approval notice and retains the draft for review", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return modules();
+      if (isCapabilityRequest(input, init, "creator.publishListing")) {
+        return Response.json({
+          ok: false,
+          pendingApproval: true,
+          reason: "A second publisher must review this listing.",
+          approvalId: "d81d8459-9a20-4c8e-a88c-27866dd552aa",
+        }, { status: 202 });
+      }
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([]);
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MarketplacePage />);
+    await screen.findByRole("heading", { name: "Publish a plugin" });
+    fillPublishForm();
+    fireEvent.click(screen.getByRole("button", { name: "Publish listing" }));
+
+    expect(await screen.findByText("A second publisher must review this listing.")).not.toBeNull();
+    expect((screen.getByLabelText("Plugin manifest (JSON)") as HTMLTextAreaElement).value).toContain("acme-warehouse");
+    expect(fetchMock.mock.calls.filter(([input, init]) => isCapabilityRequest(input, init, "creator.listMarketplace"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
+  });
+
+  it("shows Go publish errors without clearing the draft or calling the legacy route", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return modules();
+      if (isCapabilityRequest(input, init, "creator.publishListing")) {
+        return Response.json({ ok: false, error: "slug is owned by another publisher" }, { status: 422 });
+      }
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([]);
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MarketplacePage />);
+    await screen.findByRole("heading", { name: "Publish a plugin" });
+    fillPublishForm();
+    fireEvent.click(screen.getByRole("button", { name: "Publish listing" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("slug is owned by another publisher");
+    expect((screen.getByLabelText("Plugin manifest (JSON)") as HTMLTextAreaElement).value).toContain("acme-warehouse");
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
+  });
+
+  it("keeps uninstall on its existing same-origin route", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return modules();
+      if (String(input) === "/api/marketplace" && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toMatchObject({ action: "uninstall", listingId: listing.id });
+        return Response.json({ ok: true, data: { uninstalled: true } });
+      }
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([{ ...listing, installedHere: true }]);
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MarketplacePage />);
+    expect(await screen.findByRole("heading", { name: listing.name })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+
+    expect(await screen.findByText("Plugin uninstalled.")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/marketplace", expect.objectContaining({ credentials: "same-origin" }));
   });
 
