@@ -476,3 +476,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: Focused Vite tests pass; existing Go report runtime proof passes with the provisioned app role.
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: The focused HR API and page suite passed all 54 tests. The People-tab test asserts a single `hr.report` capability request and no GET `/api/hr`; the existing runtime-role `hr.report` integration test passed and verified its seeded employee in the report. Vite typecheck and lint, route manifest check, and continuity inventory check passed. The Go employee reader source preserves newest-hired-first ordering and the 200-row limit; the cited runtime proof does not independently verify those conditions or cross-organization isolation. Authenticated HR browser proof remains open.
+
+- [x] G94: Vite HR Time loads employees, time totals, and pending approvals from Go without legacy `GET /api/hr`.
+  CHECK: `pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/hr.test.ts src/components/HrPage.test.tsx`; `GO_RUNTIME_INTEGRATION_REQUIRED=1 DATABASE_URL=postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2 CHASTE_APP_DB_PASSWORD=chaste_app_dev_only go -C apps/api test ./internal/capability -run '^TestGoWave5PayrollApplicantsGovernedExecutorPath$' -count=1 -v`; `pnpm --filter @chaste/web-vite typecheck`; changed-file ESLint; `git diff --check`
+  EXPECT: Focused HR tests pass; existing Go report runtime proof passes with the provisioned app role.
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: The focused HR API and page suite passed 54 tests. The direct Time-tab test renders the employee picker, asserts `hr.report`, `hr.timeReport`, and `hr.pendingTimeEntries`, and rejects a legacy GET `/api/hr`. The existing runtime-role `hr.report` integration proof and Vite typecheck/lint passed. Authenticated HR browser proof remains open.

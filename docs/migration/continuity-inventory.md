@@ -380,6 +380,14 @@ errors. Authenticated Support browser proof remains pending
 [`support_customers_session.go#L86-L132`](../../apps/api/internal/httpapi/support_customers_session.go#L86-L132),
 [`support_customers_session_integration_test.go`](../../apps/api/internal/httpapi/support_customers_session_integration_test.go)).
 
+The Vite HR Time tab loads the employee projection through the same
+session-authenticated Go `hr.report` capability used by Overview and People.
+Time totals and pending approval rows continue to come from Go's
+`hr.timeReport` and `hr.pendingTimeEntries` capabilities. A direct Time-tab
+test verifies the employee picker, all three Go reads, and the absence of
+legacy `GET /api/hr`; the existing runtime-role `hr.report` proof remains the
+Go projection check. Authenticated browser proof remains pending.
+
 ## Required parity evidence before cutover
 
 1. A cloned-database comparison proves table shape and all existing rows remain

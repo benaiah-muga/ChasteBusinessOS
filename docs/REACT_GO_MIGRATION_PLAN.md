@@ -2998,3 +2998,12 @@ new owners and the manifest shows zero legacy runtime paths.
      existing ordering and limits, and validate the full response in Vite.
      Keep reconciliation writes on their current route and do not change the
      legacy Next route owner.
+
+288. (Implemented; focused HR API/page tests and the existing Go runtime-role
+     `hr.report` proof passed; authenticated browser proof remains pending)
+     Route the Vite HR Time tab's employee-picker report through the existing
+     session-authenticated `hr.report` capability. Keep time totals and
+     pending-entry approvals on `hr.timeReport` and `hr.pendingTimeEntries`,
+     respectively, and preserve existing time writes. A direct load of
+     `/hr?tab=time` must render the employee picker using Go, request all three
+     capabilities, and never call legacy `GET /api/hr`.

@@ -94,7 +94,7 @@ function hrFetchWithPendingActions(paths: string[]) {
 
 type HrFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-function stubFetchWithGoTimeReads(fetchMock: HrFetch): void {
+function stubFetchWithGoTimeReads(fetchMock: HrFetch) {
   const wrapped = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input) === "/api/capabilities/execute" && init?.method === "POST") {
       const body = JSON.parse(String(init.body)) as { capabilityId?: string };
@@ -108,6 +108,7 @@ function stubFetchWithGoTimeReads(fetchMock: HrFetch): void {
     return fetchMock(input, init);
   });
   vi.stubGlobal("fetch", wrapped);
+  return wrapped;
 }
 
 afterEach(() => {
@@ -418,9 +419,9 @@ describe("Vite People page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
-      if (path === "/api/hr") return Response.json(report);
       if (path === "/api/capabilities/execute") {
         const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: report });
         if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [{ employeeId: entry.employeeId, approvedMinutes: 0, pendingMinutes: 75 }] } });
         if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [entry] } });
         expect(body).toMatchObject({ capabilityId: "hr.decideTimeEntry", input: { entryId: entry.id, decision: "approved" } });
@@ -435,7 +436,13 @@ describe("Vite People page", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const first = render(<HrPage actorId={actorId} organizationId={organizationId} />);
+    expect(await screen.findByRole("option", { name: "Amina Wanjiru" })).not.toBeNull();
     expect(await screen.findByText(/Client visit/)).not.toBeNull();
+    const capabilityIds = fetchMock.mock.calls
+      .filter(([path, init]) => path === "/api/capabilities/execute" && init?.method === "POST")
+      .map(([, init]) => (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId);
+    expect(capabilityIds).toEqual(expect.arrayContaining(["hr.report", "hr.timeReport", "hr.pendingTimeEntries"]));
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method !== "POST")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(await screen.findByRole("button", { name: "Retry exact time action" })).not.toBeNull();
     expect((screen.getByLabelText("Hours") as HTMLInputElement).disabled).toBe(true);
@@ -786,9 +793,16 @@ describe("Vite People page", () => {
     window.history.replaceState(null, "", "/hr?tab=time");
     stubHrWriteLocks();
     const fetchMock = hrFetchWithPendingActions(["/api/capabilities/execute"]);
-    stubFetchWithGoTimeReads(fetchMock);
+    const goFetch = stubFetchWithGoTimeReads(fetchMock);
     render(<HrPage baseCurrency="UGX" actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
-    await screen.findByLabelText("Employee");
+    await screen.findByRole("option", { name: "Amina Wanjiru" });
+    await waitFor(() => {
+      const capabilityIds = goFetch.mock.calls
+        .filter(([path, init]) => path === "/api/capabilities/execute" && init?.method === "POST")
+        .map(([, init]) => (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId);
+      expect(capabilityIds).toEqual(expect.arrayContaining(["hr.report", "hr.timeReport", "hr.pendingTimeEntries"]));
+    });
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method !== "POST")).toBe(false);
     fireEvent.change(screen.getByLabelText("Employee"), { target: { value: employee.id } });
     fireEvent.change(screen.getByLabelText("Hours"), { target: { value: "2.5" } });
     fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Month end review" } });
@@ -797,6 +811,7 @@ describe("Vite People page", () => {
     expect(await screen.findByText("Time entry needs approval or result recovery. Retry the exact action after approval is complete.")).not.toBeNull();
     expect((screen.getByLabelText("Hours") as HTMLInputElement).value).toBe("2.5");
     expect((screen.getByLabelText("Note") as HTMLInputElement).value).toBe("Month end review");
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method !== "POST")).toBe(false);
   });
 
   it("clearly reports when the HR module is disabled", async () => {
