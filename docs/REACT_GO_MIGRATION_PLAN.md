@@ -2834,3 +2834,11 @@ new owners and the manifest shows zero legacy runtime paths.
      action to its approval. The Go DB proof must exercise the four selected
      jobs through the governed worker, verify tenant-scoped listing and final
      draft state, and count the matching job receipt and system audit per job.
+275. (Implemented; worker DB proof passed; independent review clean) Make Go
+     the only claimant for approved `purchasing.instructPaymentRun` and
+     `purchasing.reversePaymentRun` jobs. The worker DB proof must bind each
+     job to an approval with matching organization, capability, and exact
+     payload, verify the posting and reversal state transitions, and count the
+     receipt and system audit for each action. A mismatched approval must be
+     denied without financial effects, including wrong-payload,
+     wrong-organization, and wrong-capability approval links.

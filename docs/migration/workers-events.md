@@ -442,9 +442,13 @@ The Go jobs worker owns `purchasing.createPaymentRun`,
 `purchasing.listPaymentRuns`. Each job runs through the governed system
 capability path with the permission declared for that capability, its queued
 organization, and the job ID as the stable receipt intent. The TypeScript
-claimant excludes these four types. Instruction and reversal remain on their
-current queue owner until a Go worker proof validates approval linkage for
-posted financial actions.
+claimant excludes these four types. The Go worker also owns
+`purchasing.instructPaymentRun` and `purchasing.reversePaymentRun`. These posted
+financial actions require an approval linked to the same organization,
+capability, and exact input payload; after successful execution, Go marks the
+approval executed. `TestPurchasingPaymentRunApprovalJobsClaimAndExecute`
+proves the binding, instruction and reversal effects, payload, organization,
+and capability mismatch denials, stable receipts, and system audit events.
 
 ## Event and data boundaries
 

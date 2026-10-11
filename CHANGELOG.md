@@ -32,6 +32,13 @@ The full v1 changelog is preserved at the bottom of this file.
   `accounting.generateDueInvoices` to Go, which posts the invoice and advances
   that exact schedule occurrence in one governed transaction.
 
+- Go now claims approved `purchasing.instructPaymentRun` and
+  `purchasing.reversePaymentRun` jobs. The worker verifies each approval's
+  organization, capability, and exact input payload before posting, then marks
+  the approval executed after the governed action succeeds. The DB proof
+  rejects payload, organization, and capability mismatches without financial
+  effects.
+
 - The route ownership manifest now includes Go-only endpoints declared with
   their Go source, including verified `GET /api/pos/customers` ownership.
 

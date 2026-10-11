@@ -152,6 +152,8 @@ describe("capability job queue", () => {
     "purchasing.cancelPaymentRunDraft",
     "purchasing.restorePaymentRunDraft",
     "purchasing.listPaymentRuns",
+    "purchasing.instructPaymentRun",
+    "purchasing.reversePaymentRun",
   ] as const)(
     "leaves %s jobs for the Go worker",
     async (type) => {

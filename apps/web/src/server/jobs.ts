@@ -138,7 +138,9 @@ export async function claimJob(
         'purchasing.createPaymentRun',
         'purchasing.cancelPaymentRunDraft',
         'purchasing.restorePaymentRunDraft',
-        'purchasing.listPaymentRuns'
+        'purchasing.listPaymentRuns',
+        'purchasing.instructPaymentRun',
+        'purchasing.reversePaymentRun'
       )
       ORDER BY available_at, created_at
       LIMIT 1
