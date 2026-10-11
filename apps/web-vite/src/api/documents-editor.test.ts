@@ -93,23 +93,9 @@ describe("editor route matching", () => {
 });
 
 describe("authored document reads", () => {
-  it("loads the document and its version history with the signed-in same-origin session", async () => {
-    const { calls } = recorder(() => Response.json({ document: authoredDocument, versions: versionRows }));
-
-    await expect(fetchEditorDocument("doc-1")).resolves.toEqual({ document: authoredDocument, versions: versionRows });
-    expect(calls[0]?.url).toBe("/api/docs/doc-1");
-    expect(calls[0]?.init).toMatchObject({
-      method: "GET",
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: { accept: "application/json" },
-      signal: expect.any(AbortSignal),
-    });
-  });
-
-  it("loads editor detail and version rows from Go when the paired editor selectors are active", async () => {
-    vi.stubGlobal("__GO_DOCUMENTS_EDITOR_READS__", true);
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+  it("loads document content and version history through Go regardless of old selectors", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_EDITOR_READS__", false);
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", false);
     const { calls } = recorder((call) => {
       const body = bodyOf(call);
       if (body.capabilityId === "documents.getDoc") return Response.json({ ok: true, data: { document: goAuthoredDocument } });
@@ -123,9 +109,21 @@ describe("authored document reads", () => {
     expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.listDocVersions", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
   });
 
-  it("does not fall back to legacy detail after selected Go getDoc failure or malformed output", async () => {
-    vi.stubGlobal("__GO_DOCUMENTS_EDITOR_READS__", true);
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+  it("loads editor detail and version rows from Go", async () => {
+    const { calls } = recorder((call) => {
+      const body = bodyOf(call);
+      if (body.capabilityId === "documents.getDoc") return Response.json({ ok: true, data: { document: goAuthoredDocument } });
+      if (body.capabilityId === "documents.listDocVersions") return Response.json({ ok: true, data: { versions: versionRows } });
+      return Response.json({ error: "unexpected" }, { status: 404 });
+    });
+
+    await expect(fetchEditorDocument(goAuthoredDocument.id)).resolves.toEqual({ document: goAuthoredDocument, versions: versionRows });
+    expect(calls.map((call) => call.url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(bodyOf(calls[0]!)).toMatchObject({ capabilityId: "documents.getDoc", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
+    expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.listDocVersions", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
+  });
+
+  it("does not fall back to a legacy route after Go getDoc failure or malformed output", async () => {
     const documentId = goAuthoredDocument.id;
     for (const response of [
       () => Response.json({ error: "not found" }, { status: 404 }),
@@ -138,29 +136,45 @@ describe("authored document reads", () => {
     }
   });
 
-  it("keeps permission and shape failures understandable", async () => {
-    recorder(() => Response.json({ error: "unauthorized" }, { status: 401 }));
-    await expect(fetchEditorDocument("doc-1")).rejects.toEqual(new DocumentsEditorApiError(401, "Sign in again to edit this document."));
+  it("rejects malformed document IDs before making the Go request", async () => {
+    const { calls } = recorder(() => Response.json({ ok: true, data: {} }));
 
-    recorder(() => Response.json({ error: "document not found" }, { status: 404 }));
-    await expect(fetchEditorDocument("doc-1")).rejects.toThrow("That document no longer exists.");
-
-    recorder(() => Response.json({ document: { ...authoredDocument, status: 7 }, versions: [] }));
-    await expect(fetchEditorDocument("doc-1")).rejects.toThrow("The document service returned data in an unexpected format.");
-
-    recorder(() => Response.json("nope", { status: 500 }));
-    await expect(fetchEditorDocument("doc-1")).rejects.toThrow("The document service is unavailable. Try again in a moment.");
+    await expect(fetchEditorDocument("doc-1")).rejects.toMatchObject({ status: 400 });
+    expect(calls).toHaveLength(0);
   });
 
-  it("reads one archived version for the compare panes", async () => {
-    const { calls } = recorder(() => Response.json({ version: 2, html: "<p>Newer</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" }));
+  it("keeps permission and shape failures understandable", async () => {
+    const documentId = goAuthoredDocument.id;
+    recorder(() => Response.json({ error: "unauthorized" }, { status: 401 }));
+    await expect(fetchEditorDocument(documentId)).rejects.toEqual(new DocumentsEditorApiError(401, "Sign in again to edit this document."));
 
-    await expect(fetchArchivedVersion("doc-1", 2)).resolves.toEqual({ version: 2, html: "<p>Newer</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" });
-    expect(calls[0]?.url).toBe("/api/docs/doc-1?version=2");
+    recorder(() => Response.json({ error: "document not found" }, { status: 404 }));
+    await expect(fetchEditorDocument(documentId)).rejects.toThrow("That document no longer exists.");
+
+    recorder(() => Response.json({ ok: true, data: { document: { ...goAuthoredDocument, status: 7 } } }));
+    await expect(fetchEditorDocument(documentId)).rejects.toThrow("The document service returned data in an unexpected format.");
+
+    recorder(() => Response.json("nope", { status: 500 }));
+    await expect(fetchEditorDocument(documentId)).rejects.toThrow("The document service is unavailable. Try again in a moment.");
+  });
+
+  it("reads archived versions through Go even when old selectors are false", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", false);
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    const { calls } = recorder(() => Response.json({ ok: true, data: {
+      version: 2,
+      content: { type: "doc", content: [] },
+      html: "<p>Newer</p>",
+      note: null,
+      createdAt: "2026-09-28T09:30:00.000Z",
+    } }));
+
+    await expect(fetchArchivedVersion(documentId, 2)).resolves.toEqual({ version: 2, html: "<p>Newer</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" });
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[0]!)).toMatchObject({ capabilityId: "documents.getDocVersion", input: { documentId, version: 2 }, intentId: expect.any(String) });
   });
 
   it("lists authored versions through Go with the full strict summary shape", async () => {
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
     const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
     const { calls } = recorder(() => Response.json({ ok: true, data: { versions: versionRows } }));
 
@@ -176,7 +190,6 @@ describe("authored document reads", () => {
   });
 
   it("uses Go for archived previews, validates full content, and returns only the legacy preview projection", async () => {
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
     const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
     const { calls } = recorder(() => Response.json({ ok: true, data: {
       version: 2,
@@ -199,7 +212,6 @@ describe("authored document reads", () => {
   });
 
   it("rejects invalid Go version inputs before dispatch", async () => {
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
     const { calls } = recorder(() => Response.json({ ok: true, data: {} }));
 
     await expect(fetchDocumentVersionHistoryFromGo("doc-1")).rejects.toMatchObject({ status: 400 });
@@ -212,7 +224,6 @@ describe("authored document reads", () => {
     { label: "malformed archived content", response: () => Response.json({ ok: true, data: { version: 2, content: "not-json-object", html: "<p>Bad</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" } }) },
     { label: "mismatched archived version", response: () => Response.json({ ok: true, data: { version: 3, content: { type: "doc" }, html: "<p>Wrong</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" } }) },
   ])("fails closed on $label Go version responses without legacy retry", async ({ response }) => {
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
     const { calls } = recorder(() => response());
 
     await expect(fetchArchivedVersion("6f1b2c3d-0000-4000-8000-000000000001", 2)).rejects.toBeInstanceOf(DocumentsEditorApiError);
@@ -221,7 +232,6 @@ describe("authored document reads", () => {
   });
 
   it("fails closed on unavailable or malformed Go history without legacy retry", async () => {
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
     const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
     for (const response of [
       () => Response.json({ error: "not found" }, { status: 404 }),
@@ -234,13 +244,6 @@ describe("authored document reads", () => {
     }
   });
 
-  it("defaults absent page settings instead of failing the whole document", async () => {
-    const { pageSettings: _omitted, ...withoutSettings } = authoredDocument;
-    recorder(() => Response.json({ document: withoutSettings, versions: [] }));
-
-    const payload = await fetchEditorDocument("doc-1");
-    expect(payload.document?.pageSettings).toEqual(DEFAULT_PAGE_SETTINGS);
-  });
 });
 
 describe("draft workspace ticks", () => {

@@ -208,14 +208,6 @@ async function request(url: string, init: RequestInit, signal?: AbortSignal): Pr
   return { status: response.status, body: await readJson(response) };
 }
 
-async function get<T>(url: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
-  const { status, body } = await request(url, { method: "GET", cache: "no-store" }, signal);
-  if (status < 200 || status >= 300) throw new DocumentsEditorApiError(status, messageFor(status, body));
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) throw new DocumentsEditorApiError(status, "The document service returned data in an unexpected format.");
-  return parsed.data;
-}
-
 /**
  * Client action identity (B02): a governed write carries an intentId so a
  * retried intent reconciles to the same server-side receipt instead of
@@ -252,14 +244,6 @@ function governed<T>(url: string, body: Record<string, unknown>, schema: z.ZodTy
 
 const documentPath = (id: string): string => `/api/docs/${encodeURIComponent(id)}`;
 
-export function documentsVersionReadsGoSelected(): boolean {
-  return typeof __GO_DOCUMENTS_VERSION_READS__ !== "undefined" && __GO_DOCUMENTS_VERSION_READS__;
-}
-
-export function documentsEditorReadsGoSelected(): boolean {
-  return typeof __GO_DOCUMENTS_EDITOR_READS__ !== "undefined" && __GO_DOCUMENTS_EDITOR_READS__;
-}
-
 function validateDocumentVersionInput(id: string, version?: number): void {
   if (!documentUUID.safeParse(id).success || (version !== undefined && (!Number.isSafeInteger(version) || version < 1))) {
     throw new DocumentsEditorApiError(400, "The document version request is invalid. Reopen the document and try again.");
@@ -287,12 +271,6 @@ export async function fetchDocumentVersionHistoryFromGo(id: string, signal?: Abo
 }
 
 export async function fetchEditorDocument(id: string, signal?: AbortSignal): Promise<DocumentPayload> {
-  if (!documentsEditorReadsGoSelected()) {
-    const legacyPayload = await get(documentPath(id), DocumentPayloadSchema, signal);
-    if (!documentsVersionReadsGoSelected()) return legacyPayload;
-    const versions = await fetchDocumentVersionHistoryFromGo(id, signal);
-    return { ...legacyPayload, versions };
-  }
   if (!documentUUID.safeParse(id).success) {
     throw new DocumentsEditorApiError(400, "The document request is invalid. Reopen the document and try again.");
   }
@@ -307,16 +285,13 @@ export async function fetchEditorDocument(id: string, signal?: AbortSignal): Pro
 }
 
 export async function fetchArchivedVersion(id: string, version: number, signal?: AbortSignal): Promise<ArchivedVersion> {
-  if (documentsVersionReadsGoSelected()) {
-    validateDocumentVersionInput(id, version);
-    const output = await postDocumentVersionCapability("documents.getDocVersion", { documentId: id, version }, GoArchivedDocumentVersionSchema, signal);
-    if (output.version !== version) throw new DocumentsEditorApiError(200, "The document service returned data in an unexpected format.");
-    const projected = { version: output.version, html: output.html, note: output.note, createdAt: output.createdAt };
-    const parsed = ArchivedVersionSchema.safeParse(projected);
-    if (!parsed.success) throw new DocumentsEditorApiError(200, "The document service returned data in an unexpected format.");
-    return parsed.data;
-  }
-  return get(`${documentPath(id)}?version=${version}`, ArchivedVersionSchema, signal);
+  validateDocumentVersionInput(id, version);
+  const output = await postDocumentVersionCapability("documents.getDocVersion", { documentId: id, version }, GoArchivedDocumentVersionSchema, signal);
+  if (output.version !== version) throw new DocumentsEditorApiError(200, "The document service returned data in an unexpected format.");
+  const projected = { version: output.version, html: output.html, note: output.note, createdAt: output.createdAt };
+  const parsed = ArchivedVersionSchema.safeParse(projected);
+  if (!parsed.success) throw new DocumentsEditorApiError(200, "The document service returned data in an unexpected format.");
+  return parsed.data;
 }
 
 /**

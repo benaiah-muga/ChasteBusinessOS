@@ -2,8 +2,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumentsEditorPage } from "./DocumentsEditorPage";
 
+const DOCUMENT_ID = "6f1b2c3d-0000-4000-8000-000000000001";
+
 const authoredDocument = {
-  id: "doc-1",
+  id: DOCUMENT_ID,
   title: "Service quote",
   status: "published",
   content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Hello" }] }] },
@@ -43,16 +45,27 @@ function editorFetch(override?: (call: RecordedCall) => Response | null) {
     const overrideResponse = override?.(call);
     if (overrideResponse) return overrideResponse;
     if (method === "DELETE") return new Response(null, { status: 200 });
-    if (call.url === "/api/docs/doc-1/workspace") return Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] });
-    if (call.url.startsWith("/api/docs/doc-1?version=")) {
-      const version = Number(call.url.split("version=")[1]);
-      return Response.json({ version, html: `<p>Body of version ${version}</p>`, note: null, createdAt: "2026-09-28T09:30:00.000Z" });
+    if (call.url === `/api/docs/${DOCUMENT_ID}/workspace`) return Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] });
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.getDoc") {
+      return Response.json({ ok: true, data: { document: authoredDocument } });
     }
-    if (call.url === "/api/docs/doc-1" && method === "GET") return Response.json({ document: authoredDocument, versions: versionRows });
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.listDocVersions") {
+      return Response.json({ ok: true, data: { versions: versionRows } });
+    }
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.getDocVersion") {
+      const input = call.body.input as { version: number };
+      return Response.json({ ok: true, data: {
+        version: input.version,
+        content: { type: "doc", content: [] },
+        html: `<p>Body of version ${input.version}</p>`,
+        note: null,
+        createdAt: "2026-09-28T09:30:00.000Z",
+      } });
+    }
     if (call.body?.action === "updateMetadata") {
-      return Response.json({ documentId: "doc-1", previous: { title: "Service quote", folder: "Sales", linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: "Deal: Ada" } });
+      return Response.json({ documentId: DOCUMENT_ID, previous: { title: "Service quote", folder: "Sales", linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: "Deal: Ada" } });
     }
-    if (call.url === "/api/docs/doc-1") return Response.json({ version: 3 });
+    if (call.url === `/api/docs/${DOCUMENT_ID}`) return Response.json({ version: 3 });
     if (call.url === "/api/docs/assist") return Response.json({ ok: true, text: "Tighter copy." });
     if (call.url === "/api/docs") return Response.json({ templateId: "tpl-1", placeholders: ["customer.name"] });
     return Response.json({ error: "unexpected" }, { status: 500 });
@@ -72,7 +85,7 @@ function typeIntoSurface(html: string): void {
 }
 
 function workspaceSaves(calls: RecordedCall[]): RecordedCall[] {
-  return calls.filter((call) => call.url === "/api/docs/doc-1/workspace" && call.method === "POST" && call.body?.content !== undefined);
+  return calls.filter((call) => call.url === `/api/docs/${DOCUMENT_ID}/workspace` && call.method === "POST" && call.body?.content !== undefined);
 }
 
 // The editor mounts a paper preview, a print surface and a content-editable
@@ -83,7 +96,7 @@ const TIMEOUT = 30_000;
 const BOOT = { timeout: 15_000 };
 
 beforeEach(() => {
-  window.history.replaceState(null, "", "/documents/editor/doc-1");
+  window.history.replaceState(null, "", `/documents/editor/${DOCUMENT_ID}`);
 });
 
 afterEach(() => {
@@ -104,26 +117,27 @@ describe("authored document editor", () => {
     expect(within(screen.getByLabelText("Live document preview")).getByText("Hello")).not.toBeNull();
     expect(screen.getByText("Sales")).not.toBeNull();
     expect(screen.getByText("Source: Deal: Ada")).not.toBeNull();
-    expect(calls.map((call) => call.url)).toEqual(["/api/docs/doc-1", "/api/docs/doc-1/workspace"]);
-    expect(calls[1]?.body).toMatchObject({});
-    expect(calls[1]?.body?.intentId).toEqual(expect.any(String));
+    expect(calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => call.body?.capabilityId)).toEqual([
+      "documents.getDoc", "documents.listDocVersions",
+    ]);
+    expect(calls.find((call) => call.url === `/api/docs/${DOCUMENT_ID}/workspace`)?.body?.intentId).toEqual(expect.any(String));
   }, TIMEOUT);
 
   it("never renders stored markup as active content in the surface or the preview", async () => {
     editorFetch((call) => {
-      if (call.url === "/api/docs/doc-1" && call.method === "GET") {
+      if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.getDoc") {
         return Response.json({
-          document: {
+          ok: true,
+          data: { document: {
             ...authoredDocument,
             content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Terms" }] }] },
             html: '<p>Terms</p><script>window.__pwned = true</script><img src="/api/documents/doc-9/content">',
-          },
-          versions: [],
+          } },
         });
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
 
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
     const preview = screen.getByLabelText("Live document preview");
@@ -135,12 +149,12 @@ describe("authored document editor", () => {
 
   it("autosaves a keystroke burst once, then reports the saved revision", async () => {
     const { calls } = editorFetch((call) => {
-      if (call.url === "/api/docs/doc-1/workspace" && call.body?.content !== undefined) {
+      if (call.url === `/api/docs/${DOCUMENT_ID}/workspace` && call.body?.content !== undefined) {
         return Response.json({ lock: { heldBy: "Ada", mine: true }, savedRev: 7, others: [] });
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
 
     // Opening the document parks the loaded content as a draft, as it always did.
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
@@ -180,7 +194,7 @@ describe("authored document editor", () => {
 
   it("keeps a stale draft visible as a conflict instead of overwriting it", async () => {
     editorFetch((call) => {
-      if (call.url === "/api/docs/doc-1/workspace" && call.body?.content !== undefined) {
+      if (call.url === `/api/docs/${DOCUMENT_ID}/workspace` && call.body?.content !== undefined) {
         return Response.json({
           conflict: true,
           draft: { content: authoredDocument.content, rev: 9 },
@@ -190,7 +204,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     typeIntoSurface("<p>Conflicting edit</p>");
@@ -199,10 +213,10 @@ describe("authored document editor", () => {
 
   it("reports a soft lock held by someone else and stops the surface from editing", async () => {
     editorFetch((call) => {
-      if (call.url === "/api/docs/doc-1/workspace") return Response.json({ lock: { heldBy: "Grace", mine: false }, others: [{ userId: "u-2", name: "Grace" }] });
+      if (call.url === `/api/docs/${DOCUMENT_ID}/workspace`) return Response.json({ lock: { heldBy: "Grace", mine: false }, others: [{ userId: "u-2", name: "Grace" }] });
       return null;
     });
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     expect(screen.getByRole("status").textContent).toContain("Grace is editing right now");
@@ -213,12 +227,12 @@ describe("authored document editor", () => {
 
   it("publishes through the governed route, keeps a pending approval visible, and refreshes history", async () => {
     const { calls } = editorFetch((call) => {
-      if (call.url === "/api/docs/doc-1" && call.method === "POST" && call.body?.action === "publish") {
+      if (call.url === `/api/docs/${DOCUMENT_ID}` && call.method === "POST" && call.body?.action === "publish") {
         return Response.json({ pendingApproval: true, hint: "This change waits for approval in the Approvals inbox." }, { status: 202 });
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
@@ -248,7 +262,7 @@ describe("authored document editor", () => {
 
   it("renames through the governed metadata route and shows the new title", async () => {
     const { calls } = editorFetch();
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
     const input = await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.change(input, { target: { value: "Service quote 2026" } });
@@ -261,19 +275,19 @@ describe("authored document editor", () => {
   it("lists versions, compares two of them side by side and restores one into the editor", async () => {
     let published = false;
     const { calls } = editorFetch((call) => {
-      if (call.url === "/api/docs/doc-1" && call.method === "GET" && published) {
-        return Response.json({
-          document: { ...authoredDocument, content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Restored body" }] }] } },
-          versions: [...versionRows, { version: 3, note: "Restored", createdBy: null, createdAt: "2026-09-29T08:00:00.000Z" }],
-        });
+      if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.getDoc" && published) {
+        return Response.json({ ok: true, data: { document: { ...authoredDocument, content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Restored body" }] }] } } } });
       }
-      if (call.url === "/api/docs/doc-1" && call.method === "POST" && call.body?.action === "restore") {
+      if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.listDocVersions" && published) {
+        return Response.json({ ok: true, data: { versions: [...versionRows, { version: 3, note: "Restored", createdBy: null, createdAt: "2026-09-29T08:00:00.000Z" }] } });
+      }
+      if (call.url === `/api/docs/${DOCUMENT_ID}` && call.method === "POST" && call.body?.action === "restore") {
         published = true;
         return Response.json({ version: 3 });
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.click(screen.getByRole("button", { name: /Versions/ }));
@@ -364,7 +378,7 @@ describe("authored document editor", () => {
 
   it("keeps the print surface on the chosen paper geometry", async () => {
     editorFetch();
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.change(screen.getByLabelText("Page size"), { target: { value: "Letter" } });
@@ -384,7 +398,7 @@ describe("authored document editor", () => {
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
 
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
     fireEvent.click(screen.getByRole("button", { name: ".docx" }));
 
@@ -396,7 +410,7 @@ describe("authored document editor", () => {
 
   it("asks the writing assistant and only applies the suggestion on request", async () => {
     const { calls } = editorFetch();
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.click(screen.getByRole("button", { name: "Assist" }));
@@ -423,15 +437,15 @@ describe("authored document editor", () => {
   it("explains a document it cannot open and offers a retry", async () => {
     let attempts = 0;
     editorFetch((call) => {
-      if (call.url === "/api/docs/doc-1" && call.method === "GET") {
+      if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.getDoc") {
         attempts += 1;
         return attempts === 1
           ? Response.json({ error: "document not found" }, { status: 404 })
-          : Response.json({ document: authoredDocument, versions: versionRows });
+          : Response.json({ ok: true, data: { document: authoredDocument } });
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId="doc-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
 
     expect(await screen.findByRole("alert", undefined, BOOT)).not.toBeNull();
     expect(screen.getByText("Could not open this document")).not.toBeNull();
