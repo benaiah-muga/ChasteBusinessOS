@@ -2792,3 +2792,9 @@ new owners and the manifest shows zero legacy runtime paths.
      to derive authority from the authenticated session. API and CRM page tests
      cover opaque IDs and overlong-ID rejection. Browser verification of the
      newly enabled CRM write controls remains open.
+
+269. (Runtime verified) Mark `/crm` as Vite-owned after the authenticated
+     browser proof loaded the CRM workspace, customer list, and customer
+     timeline. The CRM deals, customers, tasks, saved views, and timeline reads
+     returned 200 through Go, and the Vite component tests cover the page's
+     write controls with Better Auth's opaque user ID format.

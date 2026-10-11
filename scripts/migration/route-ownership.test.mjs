@@ -126,3 +126,16 @@ test("CRM reads have verified Go ownership after the authenticated Vite browser 
     ],
   );
 });
+
+test("CRM page has verified Vite ownership after the authenticated runtime proof", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.kind === "page" && entry.path === "/crm"),
+    [{
+      kind: "page",
+      path: "/crm",
+      source: "apps/web/src/app/(app)/crm/page.tsx",
+      owner: "vite",
+      parity: "verified",
+    }],
+  );
+});

@@ -36,6 +36,12 @@
       "parity": "verified"
     },
     {
+      "kind": "page",
+      "path": "/crm",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
       "kind": "api",
       "path": "/api/crm",
       "method": "GET",
