@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Go now owns the full inventory cycle-count job lifecycle, including recording
+  counts, posting variances, and cancelling counts. The legacy worker leaves
+  these jobs to Go.
+
 - Vite now routes only `GET /api/pos` to Go by default. The Go handler preserves
   the session and sale response contract and enforces the `pos.read` permission
   with organization-scoped database access; POST actions remain unchanged.

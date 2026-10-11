@@ -141,6 +141,9 @@ describe("capability job queue", () => {
     "crm.moveDealStage",
     "crm.convertLead",
     "inventory.createCycleCount",
+    "inventory.recordCycleCounts",
+    "inventory.postCycleCount",
+    "inventory.cancelCycleCount",
   ] as const)(
     "leaves %s jobs for the Go worker",
     async (type) => {

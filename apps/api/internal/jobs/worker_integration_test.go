@@ -1220,8 +1220,9 @@ func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
 	}
 	tag := fmt.Sprintf("inventory-cycle-count-jobs-%d", time.Now().UnixNano())
 	orgID := insertJobsTestOrg(t, ctx, owner, tag)
-	defer cleanupJobsTestOrgs(t, owner, orgID)
-	if _, err := owner.Exec(ctx, `INSERT INTO items (org_id, sku, name, kind) VALUES ($1::uuid, 'CYCLE-WORKER', 'Cycle count worker item', 'goods')`, orgID); err != nil {
+	otherOrgID := insertJobsTestOrg(t, ctx, owner, tag+"-other")
+	defer cleanupJobsTestOrgs(t, owner, orgID, otherOrgID)
+	if _, err := owner.Exec(ctx, `INSERT INTO items (org_id, sku, name, kind) VALUES ($1::uuid, 'CYCLE-WORKER', 'Cycle count worker item', 'goods'), ($2::uuid, 'CYCLE-WORKER', 'Other organization cycle count worker item', 'goods')`, orgID, otherOrgID); err != nil {
 		t.Fatalf("insert cycle-count item: %v", err)
 	}
 	executor := capability.NewExecutor(appPool, "", "", "")
@@ -1243,6 +1244,79 @@ func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.createCycleCount'`, orgID, orgID+":"+jobID); got != 1 {
 		t.Fatalf("worker cycle-count action receipts=%d, want one", got)
+	}
+	var postedCountID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM cycle_counts WHERE org_id=$1::uuid AND status='open'`, orgID).Scan(&postedCountID); err != nil {
+		t.Fatalf("load count created by worker: %v", err)
+	}
+	otherCreateJobID := insertJobsTestJob(t, ctx, owner, otherOrgID, "inventory.createCycleCount", json.RawMessage(`{"skus":["CYCLE-WORKER"]}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("other organization cycle-count fixture worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, otherCreateJobID, "done", 1)
+	var otherCountID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM cycle_counts WHERE org_id=$1::uuid AND status='open'`, otherOrgID).Scan(&otherCountID); err != nil {
+		t.Fatalf("load other organization count: %v", err)
+	}
+	crossTenantRecordJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.recordCycleCounts", json.RawMessage(fmt.Sprintf(`{"countId":%q,"counts":[{"sku":"CYCLE-WORKER","countedThousandths":9000}]}`, otherCountID)), 1, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cross-tenant record job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, crossTenantRecordJobID, "failed", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_count_lines WHERE org_id=$1::uuid AND count_id=$2::uuid AND counted_thousandths IS NULL`, otherOrgID, otherCountID); got != 1 {
+		t.Fatalf("cross-tenant cycle-count lines left unrecorded=%d, want one", got)
+	}
+	recordJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.recordCycleCounts", json.RawMessage(fmt.Sprintf(`{"countId":%q,"counts":[{"sku":"CYCLE-WORKER","countedThousandths":5000}]}`, postedCountID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("record cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, recordJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_count_lines WHERE org_id=$1::uuid AND count_id=$2::uuid AND counted_thousandths=5000`, orgID, postedCountID); got != 1 {
+		t.Fatalf("worker recorded cycle-count lines=%d, want one", got)
+	}
+	postJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.postCycleCount", json.RawMessage(fmt.Sprintf(`{"countId":%q}`, postedCountID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("post cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, postJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_counts WHERE org_id=$1::uuid AND id=$2::uuid AND status='posted'`, orgID, postedCountID); got != 1 {
+		t.Fatalf("worker posted cycle-count rows=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM stock_movements WHERE org_id=$1::uuid AND ref_type='cycle_count' AND ref_id=$2::uuid`, orgID, postedCountID); got != 1 {
+		t.Fatalf("worker posted cycle-count movements=%d, want one variance movement", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+recordJobID, "inventory.recordCycleCounts"); got != 1 {
+		t.Fatalf("worker record cycle-count receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+postJobID, "inventory.postCycleCount"); got != 1 {
+		t.Fatalf("worker post cycle-count receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id IN ('inventory.recordCycleCounts','inventory.postCycleCount')`, orgID); got != 2 {
+		t.Fatalf("worker cycle-count lifecycle audit events=%d, want two", got)
+	}
+
+	cancelCreateJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.createCycleCount", json.RawMessage(`{"skus":["CYCLE-WORKER"]}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cancel fixture cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, cancelCreateJobID, "done", 1)
+	var cancelCountID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM cycle_counts WHERE org_id=$1::uuid AND status='open' ORDER BY created_at DESC LIMIT 1`, orgID).Scan(&cancelCountID); err != nil {
+		t.Fatalf("load cancel fixture count: %v", err)
+	}
+	cancelJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.cancelCycleCount", json.RawMessage(fmt.Sprintf(`{"countId":%q}`, cancelCountID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cancel cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, cancelJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_counts WHERE org_id=$1::uuid AND id=$2::uuid AND status='cancelled'`, orgID, cancelCountID); got != 1 {
+		t.Fatalf("worker cancelled cycle-count rows=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM stock_movements WHERE org_id=$1::uuid AND ref_type='cycle_count' AND ref_id=$2::uuid`, orgID, cancelCountID); got != 0 {
+		t.Fatalf("worker cancellation posted %d stock movements, want none", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.cancelCycleCount'`, orgID, orgID+":"+cancelJobID); got != 1 {
+		t.Fatalf("worker cancel cycle-count receipts=%d, want one", got)
 	}
 }
 
