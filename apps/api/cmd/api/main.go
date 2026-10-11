@@ -112,6 +112,10 @@ func goOnboardingRouteEnabledFromEnv(value string) bool {
 	return value == "1"
 }
 
+func goPortalInvoiceRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("GO_DATABASE_URL")
 	if databaseURL == "" {
@@ -170,7 +174,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go organization route mounted", "path", "/api/org")
 	}
 	var portalInvoiceRoute http.Handler
-	if os.Getenv("GO_PORTAL_INVOICE_ROUTE") == "1" {
+	if goPortalInvoiceRouteEnabledFromEnv(os.Getenv("GO_PORTAL_INVOICE_ROUTE")) {
 		portalInvoiceRoute, err = httpapi.NewPortalInvoiceHandler(pool, trustedProxyCIDRs, logger)
 		if err != nil {
 			return err

@@ -793,7 +793,6 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_SCIM_READ_ROUTE", flag: "scimRead", method: "GET", url: "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001" },
   { env: "CHASTE_GO_SCIM_WRITE_ROUTE", flag: "scimWrite", method: "POST", url: "/api/scim/v2/Users" },
   { env: "CHASTE_GO_SCIM_WRITE_ROUTE", flag: "scimWrite", method: "DELETE", url: "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001" },
-  { env: "CHASTE_GO_PORTAL_INVOICE_ROUTE", flag: "portalInvoice", method: "GET", url: "/api/portal/invoice/token?view=1" },
   { env: "CHASTE_GO_SALES_ORDERS_ROUTE", flag: "salesOrders", method: "GET", url: "/api/sales?status=draft" },
   { env: "CHASTE_GO_SALES_INVOICE_ROUTE", flag: "salesInvoice", method: "GET", url: "/api/sales/order-id" },
   { env: "CHASTE_GO_MODULES_ROUTE", flag: "modulesRead", method: "GET", url: "/api/modules" },
@@ -1613,7 +1612,6 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE: "1",
       CHASTE_GO_SCIM_READ_ROUTE: "1",
       CHASTE_GO_SCIM_WRITE_ROUTE: "1",
-      CHASTE_GO_PORTAL_INVOICE_ROUTE: "1",
       CHASTE_GO_SALES_INVOICE_ROUTE: "1",
       CHASTE_GO_MODULES_ROUTE: "1",
       CHASTE_GO_MODULES_WRITE_ROUTE: "1",
@@ -1878,11 +1876,14 @@ describe("Vite Go route proxy selection", () => {
     });
     expect((await scimTokenDelete.json())).toMatchObject({ target: "go", method: "DELETE", url: "/api/scim/tokens?id=token-id", idempotencyKey: "77777777-7777-4777-8777-777777777777" });
 
+    const portalInvoice = await fetch(`${origin}/api/portal/invoice/token`);
+    expect((await portalInvoice.json())).toMatchObject({ target: "go", method: "GET", url: "/api/portal/invoice/token" });
+
+    const portalInvoiceWithQuery = await fetch(`${origin}/api/portal/invoice/token?download=1`);
+    expect((await portalInvoiceWithQuery.json())).toMatchObject({ target: "go", method: "GET", url: "/api/portal/invoice/token?download=1" });
+
     const unsupportedMethod = await fetch(`${origin}/api/portal/invoice/token`, { method: "POST" });
     expect((await unsupportedMethod.json()).target).toBe("legacy");
-
-    const enabledMethod = await fetch(`${origin}/api/portal/invoice/token?download=1`);
-    expect((await enabledMethod.json()).target).toBe("go");
 
     const portalSuffixFallback = await fetch(`${origin}/api/portal/invoice/token/extra`);
     expect((await portalSuffixFallback.json()).target).toBe("legacy");

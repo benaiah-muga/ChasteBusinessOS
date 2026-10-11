@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite now sends exact `GET /api/portal/invoice/{token}` requests to Go by
+  default. The Go handler is mounted by default and can be unmounted with
+  `GO_PORTAL_INVOICE_ROUTE=0`; other methods and suffix paths keep their current
+  owner.
+
 - Vite marketplace listing reads now execute `creator.listMarketplace` through
   the Go session capability API. Marketplace writes and signature verification
   keep their current routes.

@@ -2851,3 +2851,12 @@ new owners and the manifest shows zero legacy runtime paths.
      routes. Go DB capability tests prove legacy listing parity; Vite client
      tests cover the capability request, response validation, and fail-closed
      behavior without legacy fallback.
+
+277. (Implemented and verified) Route exact Vite `GET /api/portal/invoice/{token}`
+     requests to Go by default, with no Vite rollback selector. Mount the Go
+     handler by default; `GO_PORTAL_INVOICE_ROUTE=0` unmounts it. Preserve
+     current ownership for other methods and suffix paths. Existing client and
+     Go handler contract tests cover the token response, privacy headers,
+     unknown or revoked links, and rate limiting. `agent-browser` confirms the
+     public Vite route renders the safe not-found state for an invalid share
+     token and the exact GET returns 404 without browser console errors.
