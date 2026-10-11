@@ -154,14 +154,27 @@ describe("Vite People page", () => {
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
   });
 
-  it("keeps other HR tabs on their existing report routes", async () => {
+  it("loads the People directory through Go hr.report without calling legacy /api/hr", async () => {
     window.history.replaceState(null, "", "/hr?tab=people");
-    const fetchMock = hrFetch();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/capabilities/execute") {
+        expect(init?.method).toBe("POST");
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        expect(body).toMatchObject({ capabilityId: "hr.report", input: {}, intentId: expect.any(String) });
+        return Response.json({ ok: true, data: report });
+      }
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
+      return Response.json({ error: "Unexpected route" }, { status: 404 });
+    });
     stubFetchWithGoTimeReads(fetchMock);
     render(<HrPage />);
 
     expect(await screen.findByText("amina@example.com")).not.toBeNull();
-    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(true);
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities/execute")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
   });
 
   it("retries an employee hire with the same intent after reload and clears the form", async () => {
@@ -175,11 +188,11 @@ describe("Vite People page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
-      if (path === "/api/hr") return Response.json(report);
       if (path === "/api/time?pending=1") return Response.json({ entries: [] });
       if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
       if (path === "/api/capabilities/execute") {
         const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: report });
         expect(body.capabilityId).toBe("hr.hireEmployee");
         intents.push(body.intentId);
         hireInputs.push(body.input);

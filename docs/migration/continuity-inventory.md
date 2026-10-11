@@ -105,15 +105,21 @@ production requests and writes. No production traffic has moved to Go.
   [`inventory_read_session.go`](../../apps/api/internal/httpapi/inventory_read_session.go),
   [`inventory_read_executor_integration_test.go`](../../apps/api/internal/capability/inventory_read_executor_integration_test.go),
   and [`go-route-proxy.test.ts`](../../apps/web-vite/src/api/go-route-proxy.test.ts).
-- Vite HR Overview reads its report through the authenticated Go `hr.report`
-  capability unconditionally. Go errors fail closed without retrying legacy
-  `/api/hr`; other HR tabs keep their current route selections. The Go
-  capability checks `hr.read` and runs through the tenant-scoped runtime
-  database role. `TestGoWave5PayrollApplicantsGovernedExecutorPath` exercises
-  the report with the runtime role and verifies seeded tenant data. See
+- Vite HR Overview and People directory tabs read their report through the
+  authenticated Go `hr.report` capability unconditionally. Go errors fail
+  closed without retrying legacy `/api/hr`; Leave, Payroll, and Hiring retain
+  their existing Go selectors. The capability checks `hr.read`, derives the
+  active organization from the signed session, and runs through the tenant-
+  scoped runtime database role. The employee reader keeps its
+  newest-hired-first query and 200-row limit, and Vite consumes the shared
+  `HrReport` response shape. The existing
+  `TestGoWave5PayrollApplicantsGovernedExecutorPath` runtime-role proof checks
+  the report includes its seeded employee; it does not independently assert
+  employee ordering, the 200-row boundary, or cross-organization isolation. See
   [`HrPage.tsx`](../../apps/web-vite/src/components/HrPage.tsx),
   [`hr.ts`](../../apps/web-vite/src/api/hr.ts), and
-  [`wave5_executor_integration_test.go`](../../apps/api/internal/capability/wave5_executor_integration_test.go).
+  [`hr_employees.go#L216-L239`](../../apps/api/internal/capability/hr_employees.go#L216-L239),
+  [`wave5_executor_integration_test.go#L195-L209`](../../apps/api/internal/capability/wave5_executor_integration_test.go#L195-L209).
 - Vite Accounting Overview reads through Go's authenticated
   `accounting.overview` capability unconditionally. The client validates the
   strict response and fails closed on errors; there is no legacy retry or

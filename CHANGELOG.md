@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite HR People directory now uses the existing Go `hr.report` capability,
+  matching Overview's session, permission, active-organization, and response
+  path. The report keeps the newest-hired-first employee list and 200-row
+  limit; People no longer requests legacy `GET /api/hr`.
+
 - The Vite Support customer picker now reads from Go's session-authenticated
   customer projection. Go enforces organization membership and `crm.read` or
   `pos.sell`, preserving deactivated customers for CRM readers and active-only

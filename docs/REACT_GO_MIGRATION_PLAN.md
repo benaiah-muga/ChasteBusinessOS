@@ -2965,3 +2965,13 @@ new owners and the manifest shows zero legacy runtime paths.
      `dbx.WithOrgTx` and returns the picker `id`, `name`, and `email` fields in
      name order with the existing 500-row limit. The generated manifest adds
      only the new exact Go GET route.
+
+285. (Implemented; focused Vite HR page proof and existing runtime-role Go
+     `hr.report` integration proof passed) Route the Vite HR People directory
+     through the existing Go `hr.report` capability, matching Overview and
+     retaining existing selected-Go behavior for Leave, Payroll, and Hiring.
+     Preserve active organization resolution through the signed capability
+     session, the shared `HrReport` response shape, and the employee list's
+     newest-hired-first ordering with a 200-row limit. The People tab must not
+     request legacy `GET /api/hr`; Go errors fail closed as they do for
+     Overview. No route ownership changes are required.
