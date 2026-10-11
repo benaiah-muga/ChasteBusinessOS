@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- The Go jobs worker now discovers due recurring invoice templates and enqueues
+  one linked occurrence job. The TypeScript worker leaves
+  `accounting.generateDueInvoices` to Go, which posts the invoice and advances
+  that exact schedule occurrence in one governed transaction.
+
 - The route ownership manifest now includes Go-only endpoints declared with
   their Go source, including verified `GET /api/pos/customers` ownership.
 

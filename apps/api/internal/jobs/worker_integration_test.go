@@ -1398,36 +1398,118 @@ func TestAccountingDueInvoiceJobClaimAndExecute(t *testing.T) {
 		($1::uuid, '4000', 'Sales Revenue', 'income')`, orgID); err != nil {
 		t.Fatalf("seed recurring invoice accounts: %v", err)
 	}
-	var customerID, templateID string
+	var customerID, templateID, secondTemplateID string
 	if err := owner.QueryRow(ctx, `
 		INSERT INTO customers (org_id, name, payment_term_days)
 		VALUES ($1::uuid, 'Go worker recurring invoice customer', NULL)
 		RETURNING id::text`, orgID).Scan(&customerID); err != nil {
 		t.Fatalf("seed recurring invoice customer: %v", err)
 	}
-	scheduledFor := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	scheduledFor := time.Date(1900, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if err := owner.QueryRow(ctx, `
 		INSERT INTO recurring_invoices (org_id, customer_id, frequency, lines, memo, active, next_run_at, created_by_actor_type)
 		VALUES ($1::uuid, $2::uuid, 'monthly', '[{"description":"Managed hosting","quantity":1000,"unitPriceMinor":500000,"taxMinor":50000}]'::jsonb, 'Go worker recurring invoice', true, $3, 'system')
 		RETURNING id::text`, orgID, customerID, scheduledFor).Scan(&templateID); err != nil {
 		t.Fatalf("seed recurring invoice template: %v", err)
 	}
+	secondScheduledFor := time.Date(1901, time.January, 1, 0, 0, 0, 0, time.UTC)
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO recurring_invoices (org_id, customer_id, frequency, lines, memo, active, next_run_at, created_by_actor_type)
+		VALUES ($1::uuid, $2::uuid, 'monthly', '[{"description":"Managed hosting","quantity":1000,"unitPriceMinor":500000,"taxMinor":50000}]'::jsonb, 'Go worker recurring invoice contention', true, $3, 'system')
+		RETURNING id::text`, orgID, customerID, secondScheduledFor).Scan(&secondTemplateID); err != nil {
+		t.Fatalf("seed second recurring invoice template: %v", err)
+	}
 
-	jobID := insertJobsTestJob(t, ctx, owner, orgID, "accounting.generateDueInvoices", json.RawMessage(`{}`), 3, time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC))
 	executor := capability.NewExecutor(appPool, "", "", "")
 	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
-		WorkerID:      "accounting-due-invoice-integration-worker",
-		LeaseDuration: time.Second,
-		PollInterval:  10 * time.Millisecond,
+		WorkerID:                  "accounting-due-invoice-integration-worker",
+		LeaseDuration:             time.Second,
+		PollInterval:              10 * time.Millisecond,
+		RecurringInvoiceScheduler: true,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var encodedCandidates []byte
+	if err := workerPool.QueryRow(ctx, `
+		SELECT COALESCE(jsonb_agg(jsonb_build_object(
+			'recurringInvoiceId', recurring_invoice_id,
+			'orgId', org_id,
+			'scheduledFor', scheduled_for
+		) ORDER BY scheduled_for, recurring_invoice_id), '[]'::jsonb)
+		FROM jobs_worker.list_due_recurring_invoice_candidates(100, $1::uuid)`, orgID).Scan(&encodedCandidates); err != nil {
+		t.Fatalf("discover due recurring invoice candidate: %v", err)
+	}
+	var candidates []dueRecurringInvoiceCandidate
+	if err := json.Unmarshal(encodedCandidates, &candidates); err != nil {
+		t.Fatalf("decode due recurring invoice candidates: %v", err)
+	}
+	discoveredTemplates := make(map[string]bool, 2)
+	for i := range candidates {
+		if candidates[i].OrgID == orgID {
+			discoveredTemplates[candidates[i].RecurringInvoiceID] = true
+		}
+	}
+	if !discoveredTemplates[templateID] || !discoveredTemplates[secondTemplateID] {
+		t.Fatalf("due invoice discovery omitted seeded templates: first=%t second=%t", discoveredTemplates[templateID], discoveredTemplates[secondTemplateID])
+	}
+	worker.recurringInvoiceSchedulerOrgID = orgID
+	var scheduleWG sync.WaitGroup
+	var scheduleMu sync.Mutex
+	var scheduledCount int
+	var scheduleErr error
+	startSchedulers := make(chan struct{})
+	for range 2 {
+		scheduleWG.Add(1)
+		go func() {
+			defer scheduleWG.Done()
+			<-startSchedulers
+			count, err := worker.scheduleDueRecurringInvoices(ctx, time.Now().UTC())
+			scheduleMu.Lock()
+			defer scheduleMu.Unlock()
+			scheduledCount += count
+			if err != nil {
+				scheduleErr = errors.Join(scheduleErr, err)
+			}
+		}()
+	}
+	close(startSchedulers)
+	scheduleWG.Wait()
+	if scheduleErr != nil {
+		t.Fatalf("concurrent due invoice scheduling: %v", scheduleErr)
+	}
+	if scheduledCount != 2 {
+		t.Fatalf("concurrent schedulers enqueued %d jobs for two due occurrences, want exactly two", scheduledCount)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM recurring_invoice_runs WHERE org_id=$1::uuid AND recurring_invoice_id IN ($2::uuid, $3::uuid) AND status='queued' AND job_id IS NOT NULL AND scheduled_for IN ($4, $5)`, orgID, templateID, secondTemplateID, scheduledFor, secondScheduledFor); got != 2 {
+		t.Fatalf("queued recurring occurrence count=%d, want one linked occurrence per template", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(DISTINCT recurring_invoice_id) FROM recurring_invoice_runs WHERE org_id=$1::uuid AND recurring_invoice_id IN ($2::uuid, $3::uuid) AND status='queued' AND job_id IS NOT NULL`, orgID, templateID, secondTemplateID); got != 2 {
+		t.Fatalf("queued recurring templates=%d, want both templates represented exactly once", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM jobs job JOIN recurring_invoice_runs run ON run.job_id=job.id AND job.payload->>'occurrenceId'=run.id::text WHERE job.org_id=$1::uuid AND job.type='accounting.generateDueInvoices' AND run.recurring_invoice_id IN ($2::uuid, $3::uuid)`, orgID, templateID, secondTemplateID); got != 2 {
+		t.Fatalf("scheduled due invoice job count=%d, want one job per seeded occurrence", got)
+	}
+	var jobID string
+	if err := owner.QueryRow(ctx, `
+		SELECT job.id::text
+		FROM jobs AS job
+		JOIN recurring_invoice_runs AS run ON run.job_id = job.id
+		WHERE job.org_id = $1::uuid AND job.type = 'accounting.generateDueInvoices'
+		  AND run.recurring_invoice_id = $2::uuid`, orgID, templateID).Scan(&jobID); err != nil {
+		t.Fatalf("read scheduled due invoice job: %v", err)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE jobs SET available_at=to_timestamp(0) WHERE id=$1::uuid`, jobID); err != nil {
+		t.Fatalf("prioritize scheduled due invoice job in test queue: %v", err)
 	}
 	worked, err := worker.ProcessOne(ctx)
 	if err != nil || !worked {
 		t.Fatalf("due invoice job worked=%v err=%v", worked, err)
 	}
 	assertJobsTestState(t, ctx, owner, jobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM recurring_invoice_runs WHERE org_id=$1::uuid AND recurring_invoice_id=$2::uuid`, orgID, templateID); got != 1 {
+		t.Fatalf("recurring invoice occurrence count after claim=%d, want one", got)
+	}
 
 	var invoiceID, memo, status string
 	var invoiceNumber, totalMinor, taxMinor int64

@@ -61,11 +61,13 @@ func run(logger *slog.Logger) error {
 		}
 	}
 	executor := capability.NewExecutor(appPool, os.Getenv("NOTIFICATION_WEBHOOK_URL"), os.Getenv("SMTP_HOST"), os.Getenv("SMTP_TO"))
+	recurringInvoiceScheduler := os.Getenv("GO_RECURRING_INVOICE_SCHEDULER") != "0"
 	worker, err := jobs.NewWorker(workerPool, workerPool, appPool, executor, jobs.Options{
-		WorkerID:           workerID,
-		Logger:             logger,
-		RoutineScheduler:   os.Getenv("GO_ROUTINE_SCHEDULER") == "1",
-		RoutineAgentRunner: os.Getenv("GO_ROUTINE_AGENT_RUNNER") == "1",
+		WorkerID:                  workerID,
+		Logger:                    logger,
+		RoutineScheduler:          os.Getenv("GO_ROUTINE_SCHEDULER") == "1",
+		RoutineAgentRunner:        os.Getenv("GO_ROUTINE_AGENT_RUNNER") == "1",
+		RecurringInvoiceScheduler: recurringInvoiceScheduler,
 	})
 	if err != nil {
 		return err
@@ -74,6 +76,7 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	logger.Info("Go capability jobs worker started", "worker_id", workerID,
 		"routine_scheduler_enabled", os.Getenv("GO_ROUTINE_SCHEDULER") == "1",
+		"recurring_invoice_scheduler_enabled", recurringInvoiceScheduler,
 		"routine_agent_runner_enabled", os.Getenv("GO_ROUTINE_AGENT_RUNNER") == "1")
 	var embeddingErr chan error
 	if os.Getenv("GO_SUPPORT_EMBEDDING_WORKER") == "1" {

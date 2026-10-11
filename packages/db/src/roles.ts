@@ -630,6 +630,12 @@ export async function ensureJobsWorkerRole(
         `REVOKE ALL PRIVILEGES ON TABLE public.support_kb_article_embedding_jobs FROM ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
       );
       await tx.unsafe(
+        `REVOKE ALL PRIVILEGES ON TABLE public.recurring_invoices FROM ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
+      );
+      await tx.unsafe(
+        `REVOKE ALL PRIVILEGES ON TABLE public.recurring_invoice_runs FROM ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
+      );
+      await tx.unsafe(
         `GRANT SELECT (id) ON TABLE public.organizations TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
       );
       await tx.unsafe(
@@ -637,6 +643,12 @@ export async function ensureJobsWorkerRole(
       );
       await tx.unsafe(
         `GRANT SELECT (org_id, article_id, queued_at, available_at) ON TABLE public.support_kb_article_embedding_jobs TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
+      );
+      await tx.unsafe(
+        `GRANT SELECT (id, org_id, active, next_run_at) ON TABLE public.recurring_invoices TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
+      );
+      await tx.unsafe(
+        `GRANT SELECT (org_id, recurring_invoice_id, scheduled_for, status) ON TABLE public.recurring_invoice_runs TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
       );
       await tx.unsafe(
         `GRANT USAGE, CREATE ON SCHEMA jobs_worker TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
@@ -692,6 +704,9 @@ export async function ensureJobsWorkerRole(
         `ALTER FUNCTION jobs_worker.list_due_routine_candidates(integer) OWNER TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
       );
       await tx.unsafe(
+        `ALTER FUNCTION jobs_worker.list_due_recurring_invoice_candidates(integer, uuid) OWNER TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
+      );
+      await tx.unsafe(
         `ALTER FUNCTION jobs_worker.list_public_support_embedding_orgs(integer, uuid) OWNER TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
       );
       await tx.unsafe(
@@ -705,6 +720,12 @@ export async function ensureJobsWorkerRole(
       );
       await tx.unsafe(
         `REVOKE ALL ON FUNCTION jobs_worker.list_due_routine_candidates(integer) FROM ${APP_ROLE_NAME}`,
+      );
+      await tx.unsafe(
+        `REVOKE ALL ON FUNCTION jobs_worker.list_due_recurring_invoice_candidates(integer, uuid) FROM PUBLIC`,
+      );
+      await tx.unsafe(
+        `REVOKE ALL ON FUNCTION jobs_worker.list_due_recurring_invoice_candidates(integer, uuid) FROM ${APP_ROLE_NAME}`,
       );
       await tx.unsafe(
         `REVOKE ALL ON FUNCTION jobs_worker.list_public_support_embedding_orgs(integer, uuid) FROM PUBLIC`,
@@ -723,6 +744,9 @@ export async function ensureJobsWorkerRole(
       );
       await tx.unsafe(
         `GRANT EXECUTE ON FUNCTION jobs_worker.list_due_routine_candidates(integer) TO ${JOBS_WORKER_ROLE_NAME}`,
+      );
+      await tx.unsafe(
+        `GRANT EXECUTE ON FUNCTION jobs_worker.list_due_recurring_invoice_candidates(integer, uuid) TO ${JOBS_WORKER_ROLE_NAME}`,
       );
       await tx.unsafe(
         `GRANT EXECUTE ON FUNCTION jobs_worker.list_public_support_embedding_orgs(integer, uuid) TO ${JOBS_WORKER_ROLE_NAME}`,

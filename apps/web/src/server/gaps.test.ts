@@ -26,14 +26,13 @@ import {
 } from "@chaste/db";
 import type { KernelExecutor, ActionContext } from "@chaste/kernel";
 import { createDb, purgeTenantFinancials } from "@chaste/db";
-import { logger } from "@chaste/kernel";
-import { enqueueCapabilityJob, processOneJob } from "./jobs";
+import { claimJob, enqueueCapabilityJob } from "./jobs";
 
 /**
  * Functional gap batch, end to end against real Postgres:
  * multi-currency settlement math on the immutable ledger, quote conversion
- * through the single posting path, recurring expansion by the durable
- * worker, timesheet approval flow, expense reimbursement with policy
+ * through the single posting path, Go-owned recurring invoice scheduling,
+ * timesheet approval flow, expense reimbursement with policy
  * gating, portal share tokens, and the in-app notification feed.
  */
 
@@ -228,8 +227,8 @@ describe("quotes convert through the single posting path", () => {
   });
 });
 
-describe("recurring invoices expand through the worker", () => {
-  it("generates due invoices and reschedules without double-billing", async () => {
+describe("Go-owned recurring invoice jobs", () => {
+  it("leaves due invoice generation, posting, and rescheduling to the Go worker", async () => {
     const tpl = await executor.execute("accounting.createRecurringTemplate", ctxWith("human", ["accounting.write"]), {
       customerId,
       frequency: "monthly",
@@ -239,34 +238,34 @@ describe("recurring invoices expand through the worker", () => {
     });
     expect(tpl.ok).toBe(true);
     const templateId = (tpl.data as { templateId: string }).templateId;
+    const [templateBefore] = await db.select().from(recurringInvoices).where(eq(recurringInvoices.id, templateId));
 
     const before = (
       await db.select().from(invoices).where(and(eq(invoices.orgId, orgId), eq(invoices.customerId, customerId)))
     ).length;
 
-    const _jobId = await enqueueCapabilityJob(db, {
+    const jobId = await enqueueCapabilityJob(db, {
       orgId,
       type: "accounting.generateDueInvoices",
       payload: {},
     });
-    // Sibling suites share this fixture database and can claim the job ahead
-    // of us in queue order; drain until this job settles.
-    for (let i = 0; i < 10; i += 1) {
-      await processOneJob(db, logger);
-      const [current] = await db.select().from(jobs).where(eq(jobs.id, _jobId));
-      if (current!.status !== "pending") break;
-    }
+    await pg.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM jobs WHERE id <> ${jobId}::uuid FOR UPDATE`);
+      const claim = await claimJob(db, "legacy-worker-recurring-invoice-ownership-test", 30_000, new Date());
+      expect(claim).toBeNull();
+    });
 
-
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(job!.status).toBe("pending");
+    expect(job!.attempts).toBe(0);
 
     const after = (
       await db.select().from(invoices).where(and(eq(invoices.orgId, orgId), eq(invoices.customerId, customerId)))
     ).length;
-    expect(after).toBe(before + 1);
+    expect(after).toBe(before);
 
-    const [template] = await db.select().from(recurringInvoices).where(eq(recurringInvoices.id, templateId));
-    expect(template!.nextRunAt.getTime()).toBeGreaterThan(Date.now());
-    expect(template!.lastRunAt).toBeTruthy();
-    expect(await booksBalanced()).toBe(true);
+    const [templateAfter] = await db.select().from(recurringInvoices).where(eq(recurringInvoices.id, templateId));
+    expect(templateAfter!.nextRunAt).toEqual(templateBefore!.nextRunAt);
+    expect(templateAfter!.lastRunAt).toEqual(templateBefore!.lastRunAt);
   });
 });

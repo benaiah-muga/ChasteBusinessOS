@@ -47,7 +47,9 @@ type ShareInvoiceOutput struct {
 	Revoked *bool   `json:"revoked,omitempty"`
 }
 
-type GenerateDueInvoicesInput struct{}
+type GenerateDueInvoicesInput struct {
+	OccurrenceID *string `json:"occurrenceId,omitempty"`
+}
 
 type GenerateDueInvoicesOutput struct {
 	Generated int `json:"generated"`
@@ -136,10 +138,18 @@ func invoiceOpsOptionalBool(fields map[string]json.RawMessage, key string) (bool
 }
 
 func ParseGenerateDueInvoicesInput(raw json.RawMessage) (GenerateDueInvoicesInput, error) {
-	if _, err := decodeJSONObject(raw); err != nil {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
 		return GenerateDueInvoicesInput{}, err
 	}
-	return GenerateDueInvoicesInput{}, nil
+	var input GenerateDueInvoicesInput
+	if input.OccurrenceID, err = optionalString(fields, "occurrenceId"); err != nil {
+		return GenerateDueInvoicesInput{}, err
+	}
+	if input.OccurrenceID != nil && !isZodUUID(*input.OccurrenceID) {
+		return GenerateDueInvoicesInput{}, errors.New("occurrenceId must be a UUID")
+	}
+	return input, nil
 }
 
 func ParseReverseEntryInput(raw json.RawMessage) (ReverseEntryInput, error) {
@@ -302,6 +312,7 @@ func executeShareInvoice(ctx context.Context, tx pgx.Tx, claims authbridge.Capab
 
 type invoiceOpsDueTemplate struct {
 	id         string
+	runID      string
 	customerID string
 	memo       *string
 	frequency  string
@@ -311,43 +322,75 @@ type invoiceOpsDueTemplate struct {
 
 func executeGenerateDueInvoices(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input GenerateDueInvoicesInput, now time.Time) (GenerateDueInvoicesOutput, error) {
 	orgID := claims.OrganizationID
-	rows, err := tx.Query(ctx, `
+	var due []invoiceOpsDueTemplate
+	if input.OccurrenceID != nil {
+		var template invoiceOpsDueTemplate
+		var active bool
+		var nextRunAt time.Time
+		err := tx.QueryRow(ctx, `
+			SELECT template.id::text, template.customer_id::text, template.memo, template.frequency,
+			       template.lines, run.scheduled_for, run.id::text, template.active, template.next_run_at
+			FROM recurring_invoice_runs AS run
+			JOIN recurring_invoices AS template
+			  ON template.id = run.recurring_invoice_id AND template.org_id = run.org_id
+			WHERE run.org_id = $1::uuid AND run.id = $2::uuid AND run.status = 'queued'
+			FOR UPDATE OF run, template`, orgID, *input.OccurrenceID).
+			Scan(&template.id, &template.customerID, &template.memo, &template.frequency, &template.lines,
+				&template.scheduled, &template.runID, &active, &nextRunAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return GenerateDueInvoicesOutput{}, nil
+		}
+		if err != nil {
+			return GenerateDueInvoicesOutput{}, err
+		}
+		if !active || !nextRunAt.Equal(template.scheduled) {
+			if _, err := tx.Exec(ctx, `UPDATE recurring_invoice_runs SET status = 'cancelled' WHERE id = $1::uuid AND org_id = $2::uuid`, template.runID, orgID); err != nil {
+				return GenerateDueInvoicesOutput{}, err
+			}
+			return GenerateDueInvoicesOutput{}, nil
+		}
+		due = append(due, template)
+	} else {
+		rows, err := tx.Query(ctx, `
 		SELECT id::text, customer_id::text, memo, frequency, lines, next_run_at
 		FROM recurring_invoices
 		WHERE org_id = $1::uuid AND active = true AND next_run_at <= $2
 		ORDER BY next_run_at, id
 		FOR UPDATE SKIP LOCKED`, orgID, now)
-	if err != nil {
-		return GenerateDueInvoicesOutput{}, err
-	}
-	due := make([]invoiceOpsDueTemplate, 0)
-	for rows.Next() {
-		var template invoiceOpsDueTemplate
-		if err := rows.Scan(&template.id, &template.customerID, &template.memo, &template.frequency, &template.lines, &template.scheduled); err != nil {
+		if err != nil {
+			return GenerateDueInvoicesOutput{}, err
+		}
+		due = make([]invoiceOpsDueTemplate, 0)
+		for rows.Next() {
+			var template invoiceOpsDueTemplate
+			if err := rows.Scan(&template.id, &template.customerID, &template.memo, &template.frequency, &template.lines, &template.scheduled); err != nil {
+				rows.Close()
+				return GenerateDueInvoicesOutput{}, err
+			}
+			due = append(due, template)
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
 			return GenerateDueInvoicesOutput{}, err
 		}
-		due = append(due, template)
-	}
-	if err := rows.Err(); err != nil {
 		rows.Close()
-		return GenerateDueInvoicesOutput{}, err
 	}
-	rows.Close()
 
 	generated := 0
 	for _, template := range due {
-		var runID string
-		err := tx.QueryRow(ctx, `
-			INSERT INTO recurring_invoice_runs (org_id, recurring_invoice_id, scheduled_for)
-			VALUES ($1::uuid, $2::uuid, $3)
-			ON CONFLICT DO NOTHING
-			RETURNING id::text`, orgID, template.id, template.scheduled).Scan(&runID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return GenerateDueInvoicesOutput{}, err
+		runID := template.runID
+		if runID == "" {
+			err := tx.QueryRow(ctx, `
+				INSERT INTO recurring_invoice_runs (org_id, recurring_invoice_id, scheduled_for, status)
+				VALUES ($1::uuid, $2::uuid, $3, 'queued')
+				ON CONFLICT DO NOTHING
+				RETURNING id::text`, orgID, template.id, template.scheduled).Scan(&runID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return GenerateDueInvoicesOutput{}, err
+			}
 		}
 		var lines []CreateInvoiceLine
 		if err := json.Unmarshal(template.lines, &lines); err != nil {

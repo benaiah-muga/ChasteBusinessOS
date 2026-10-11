@@ -272,7 +272,9 @@ describe("capability jobs worker role provisioning", () => {
                     'public.jobs'::regclass,
                     'public.organizations'::regclass,
                     'public.routines'::regclass,
-                    'public.support_kb_article_embedding_jobs'::regclass
+                    'public.support_kb_article_embedding_jobs'::regclass,
+                    'public.recurring_invoices'::regclass,
+                    'public.recurring_invoice_runs'::regclass
                   )
               ) AS claim_other_table_access
        FROM pg_proc procedure
@@ -340,6 +342,49 @@ describe("capability jobs worker role provisioning", () => {
       owner_routine_id_select: true,
       owner_routine_prompt_select: false,
       owner_org_id_select: true,
+    });
+  });
+
+  it("limits recurring invoice discovery to occurrence metadata", async () => {
+    const result = await admin.unsafe<{
+      owner: string;
+      security_definer: boolean;
+      worker_execute: boolean;
+      public_execute: boolean;
+      worker_template_select: boolean;
+      worker_organization_select: boolean;
+      owner_template_id_select: boolean;
+      owner_template_lines_select: boolean;
+      owner_occurrence_status_select: boolean;
+    }[]>(
+      `SELECT owner.rolname AS owner,
+              procedure.prosecdef AS security_definer,
+              has_function_privilege('${JOBS_WORKER_ROLE_NAME}', procedure.oid, 'EXECUTE') AS worker_execute,
+              EXISTS (
+                SELECT 1 FROM aclexplode(COALESCE(procedure.proacl, acldefault('f', procedure.proowner))) acl
+                WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+              ) AS public_execute,
+              has_table_privilege('${JOBS_WORKER_ROLE_NAME}', 'public.recurring_invoices', 'SELECT') AS worker_template_select,
+              has_table_privilege('${JOBS_WORKER_ROLE_NAME}', 'public.organizations', 'SELECT') AS worker_organization_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.recurring_invoices', 'id', 'SELECT') AS owner_template_id_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.recurring_invoices', 'lines', 'SELECT') AS owner_template_lines_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.recurring_invoice_runs', 'status', 'SELECT') AS owner_occurrence_status_select
+       FROM pg_proc procedure
+       JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
+       JOIN pg_roles owner ON owner.oid = procedure.proowner
+       WHERE namespace.nspname = 'jobs_worker' AND procedure.proname = 'list_due_recurring_invoice_candidates'`,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      owner: JOBS_CLAIM_OWNER_ROLE_NAME,
+      security_definer: true,
+      worker_execute: true,
+      public_execute: false,
+      worker_template_select: false,
+      worker_organization_select: false,
+      owner_template_id_select: true,
+      owner_template_lines_select: false,
+      owner_occurrence_status_select: true,
     });
   });
 

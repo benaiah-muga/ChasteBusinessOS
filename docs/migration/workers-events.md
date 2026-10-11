@@ -401,25 +401,25 @@ action receipt, and writes system audit events. TypeScript ownership checks
 prove the legacy claimant leaves each of these jobs pending without
 incrementing its attempts.
 
-## Other scheduled capability candidate
+## Recurring invoice scheduling
 
-`accounting.generateDueInvoices` is described as a durable-job worker entry
-point. It locks due recurring invoice templates with `SKIP LOCKED`, inserts a
-unique `recurring_invoice_runs` occurrence, posts the invoice through the
-shared accounting path, advances the schedule, and links the occurrence to
-the invoice in one transaction (`modules/accounting/src/index.ts:2338-2417`).
-Its occurrence key is `(orgId, recurringInvoiceId, scheduledFor)` and is
-covered by `modules/accounting/src/recurring.test.ts:64-82`. The inspected
-production worker loop does not schedule it; the only enqueue of this
-capability ID found is the test at
-`apps/web/src/server/gaps.test.ts:247-260`. Treat its production trigger as an
-open question. `TestAccountingDueInvoiceJobClaimAndExecute` now proves that the
-Go worker can execute an explicitly queued job through `ProcessOne` and
-`ClaimOne`, including the generated invoice, unique occurrence, governed
-receipt, and system audit event. This does not establish a production
-enqueue path or move ownership. If it is activated in the target,
-preserve the posting capability, unique occurrence, and atomic schedule
-advancement; do not silently fold it into the routine scheduler.
+The Go jobs worker discovers due recurring templates through the restricted
+`jobs_worker.list_due_recurring_invoice_candidates` function, then uses
+`dbx.WithOrgTx` to lock each tenant's due templates and atomically create a
+queued `recurring_invoice_runs` occurrence, linked job, and job reference. The
+function exposes only template id, organization id, and scheduled time to the
+jobs-worker role. The Go capability receives that occurrence id, posts the
+invoice through the shared accounting path, advances the template, and marks
+the occurrence complete in one governed transaction. The unique occurrence
+key remains `(orgId, recurringInvoiceId, scheduledFor)`. Concurrent scheduler
+calls therefore cannot create duplicate jobs for a schedule tick. The Go jobs
+worker enables recurring invoice scheduling by default; set
+`GO_RECURRING_INVOICE_SCHEDULER=0` to disable it. The TypeScript claimant skips
+`accounting.generateDueInvoices`, leaving one queue owner.
+
+`TestAccountingDueInvoiceJobClaimAndExecute` exercises due discovery,
+concurrent enqueue, Go claim and execution, exact occurrence linking, invoice
+posting, schedule advancement, governed receipt, and system audit event.
 
 ## Event and data boundaries
 

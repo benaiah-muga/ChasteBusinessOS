@@ -2514,6 +2514,7 @@ export const recurringInvoiceRuns = pgTable(
     recurringInvoiceId: uuid("recurring_invoice_id")
       .notNull()
       .references(() => recurringInvoices.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
     invoiceId: uuid("invoice_id").references(() => invoices.id, { onDelete: "restrict" }),
     status: text("status").notNull().default("completed"),
@@ -2523,6 +2524,7 @@ export const recurringInvoiceRuns = pgTable(
   (t) => [
     uniqueIndex("recurring_invoice_run_occurrence_idx").on(t.orgId, t.recurringInvoiceId, t.scheduledFor),
     index("recurring_invoice_run_org_idx").on(t.orgId, t.createdAt),
+    index("recurring_invoice_run_job_idx").on(t.jobId),
   ],
 );
 

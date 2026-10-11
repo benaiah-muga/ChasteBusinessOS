@@ -2720,3 +2720,12 @@ new owners and the manifest shows zero legacy runtime paths.
      cover exact GET path/method selection and rollback. `POST /api/pos` and
      `/pos` page ownership remain unchanged; authenticated browser proof for
      the complete POS page flow remains open.
+
+261. (Implemented and verified) Make the Go jobs worker discover due recurring
+     invoice templates, create one linked occurrence and job per scheduled
+     tick under tenant RLS, and execute that exact occurrence through
+     `accounting.generateDueInvoices`. The TypeScript claimant leaves this
+     capability to Go. The DB-backed worker proof passed with concurrent
+     scheduler retries, one linked job, invoice posting, schedule advancement,
+     governed receipt, and system audit. The TypeScript claimant test passed
+     all 19 cases, and the jobs-role metadata-boundary test passed all 10.

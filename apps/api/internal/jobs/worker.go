@@ -56,29 +56,32 @@ type ClaimedJob struct {
 }
 
 type Options struct {
-	WorkerID           string
-	LeaseDuration      time.Duration
-	PollInterval       time.Duration
-	Now                func() time.Time
-	Logger             *slog.Logger
-	RoutineRunner      RoutineJobRunner
-	RoutineAgentRunner bool
-	RoutineScheduler   bool
+	WorkerID                  string
+	LeaseDuration             time.Duration
+	PollInterval              time.Duration
+	Now                       func() time.Time
+	Logger                    *slog.Logger
+	RoutineRunner             RoutineJobRunner
+	RoutineAgentRunner        bool
+	RoutineScheduler          bool
+	RecurringInvoiceScheduler bool
 }
 
 type Worker struct {
-	queueDB            dbx.Beginner
-	claimDB            QueryRower
-	effectDB           dbx.Beginner
-	executor           SystemCapabilityExecutor
-	workerID           string
-	lease              time.Duration
-	poll               time.Duration
-	now                func() time.Time
-	logger             *slog.Logger
-	routines           RoutineJobRunner
-	routineAgentRunner bool
-	routineScheduler   bool
+	queueDB                        dbx.Beginner
+	claimDB                        QueryRower
+	effectDB                       dbx.Beginner
+	executor                       SystemCapabilityExecutor
+	workerID                       string
+	lease                          time.Duration
+	poll                           time.Duration
+	now                            func() time.Time
+	logger                         *slog.Logger
+	routines                       RoutineJobRunner
+	routineAgentRunner             bool
+	routineScheduler               bool
+	recurringInvoiceScheduler      bool
+	recurringInvoiceSchedulerOrgID string
 }
 
 // GoCapabilityPermissions is the explicit bridge between SQL claim ownership
@@ -371,7 +374,7 @@ func NewWorker(queueDB dbx.Beginner, claimDB QueryRower, effectDB dbx.Beginner, 
 		queueDB: queueDB, claimDB: claimDB, effectDB: effectDB, executor: executor,
 		workerID: workerID, lease: lease, poll: poll, now: now, logger: logger,
 		routines: routineRunner, routineAgentRunner: options.RoutineAgentRunner,
-		routineScheduler: options.RoutineScheduler,
+		routineScheduler: options.RoutineScheduler, recurringInvoiceScheduler: options.RecurringInvoiceScheduler,
 	}, nil
 }
 
@@ -537,6 +540,9 @@ func (w *Worker) setRoutineRunnerGate(ctx context.Context, tx pgx.Tx, job *Claim
 
 func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 	if _, err := w.scheduleDueRoutines(ctx, w.now()); err != nil {
+		return false, err
+	}
+	if _, err := w.scheduleDueRecurringInvoices(ctx, w.now()); err != nil {
 		return false, err
 	}
 	job, err := w.ClaimOne(ctx)
