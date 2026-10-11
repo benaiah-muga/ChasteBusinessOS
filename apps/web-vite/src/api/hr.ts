@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const ModuleSwitchboardSchema = z.object({
   catalog: z.array(z.object({ id: z.string().min(1) })),
@@ -466,9 +467,9 @@ function hrEmployeeHireCapabilityInput(action: HrEmployeeHireAction): Omit<HrEmp
 }
 
 async function hrEmployeeScope(scope: HrRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+  if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
     throw new HrApiError(0, "Employee hires need your account and organization details before they can be submitted.");
   }
   try {
@@ -564,9 +565,9 @@ function goHrHiringCapabilityInput(action: HrHiringAction): { capabilityId: stri
 }
 
 async function hrHiringScope(scope: HrRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+  if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
     throw new HrApiError(0, "Hiring actions need your account and organization details before they can be submitted.");
   }
   try {
@@ -645,9 +646,9 @@ async function clearGoHrHiringAttempt(storageKey: string, intentId: string): Pro
 }
 
 async function hrPayrollScope(scope: HrRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+  if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
     throw new HrApiError(0, "Payroll drafts need your account and organization details before they can be submitted.");
   }
   try {
@@ -728,9 +729,9 @@ async function clearGoHrPayrollAttempt(storageKey: string, intentId: string): Pr
 }
 
 async function hrLeaveScope(scope: HrRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+  if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
     throw new HrApiError(0, "Leave actions are waiting for your account and organization details. Wait for your organization to finish loading, then try again.");
   }
   try {
@@ -904,9 +905,9 @@ async function parseCapabilityData(response: Response): Promise<unknown> {
 }
 
 async function hrTimeScope(scope: HrRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+  if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
     throw new HrApiError(0, "Time actions are waiting for your account and organization details. Wait for your organization to finish loading, then try again.");
   }
   try {

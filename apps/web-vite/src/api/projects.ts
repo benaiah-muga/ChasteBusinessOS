@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const ProjectSchema = z.object({
   id: z.string().min(1),
@@ -135,9 +136,9 @@ async function projectDigest(value: string): Promise<string> {
 }
 
 async function projectScope(scope: ProjectsRetryScope): Promise<{ actorId: string; organizationId: string; hash: string }> {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+  if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
     throw new ProjectsApiError(0, "Wait for your account and organization to finish loading before changing projects.");
   }
   try {

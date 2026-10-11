@@ -228,6 +228,39 @@ describe("projects API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 
+  it("accepts opaque Better Auth actor IDs for Go actions while requiring a UUID organization", async () => {
+    localStorage.clear();
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { archived: true, projectId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const opaqueScope = { actorId: "user_2K9mR7pX4vQ8nB3cL6sT1w", organizationId: retryScope.organizationId };
+
+    await expect(submitProjectAction({ action: "archiveProject", projectId }, opaqueScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+
+    fetchMock.mockClear();
+    await expect(submitProjectAction(
+      { action: "archiveProject", projectId },
+      { ...opaqueScope, organizationId: "organization_external_123" },
+    )).rejects.toMatchObject({ status: 0, message: expect.stringContaining("account and organization") });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for missing or oversized actor IDs on Go writes", async () => {
+    localStorage.clear();
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const actorId of [null, `user_${"x".repeat(256)}`]) {
+      await expect(submitProjectAction({ action: "archiveProject", projectId }, { actorId, organizationId: retryScope.organizationId }))
+        .rejects.toMatchObject({ status: 0, message: expect.stringContaining("account and organization") });
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
+  });
+
   it("serializes matching Go intent reservations across tabs", async () => {
     localStorage.clear();
     vi.stubGlobal("__GO_PROJECTS_WRITES__", true);

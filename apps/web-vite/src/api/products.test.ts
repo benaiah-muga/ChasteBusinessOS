@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchProductDefaults, fetchProducts, fetchProductsEnabled, importProducts, productActionRequest, productImportRequest, productUndoImportRequest, ProductsApiError, recoverProductImport, restoreProductImport, submitProductAction, undoProductImport, type ProductAction } from "./products";
 
-const retryScope = { actorId: "10000000-0000-4000-8000-000000000010", organizationId: "10000000-0000-4000-8000-000000000011" };
+const retryScope = { actorId: "a5zVJvRUGPkJNBQMEuSH_CkoB7ubSjXd", organizationId: "10000000-0000-4000-8000-000000000011" };
 const otherRetryScope = { actorId: "10000000-0000-4000-8000-000000000012", organizationId: "10000000-0000-4000-8000-000000000013" };
 
 afterEach(() => {

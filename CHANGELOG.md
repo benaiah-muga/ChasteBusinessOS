@@ -13,8 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
-- CRM's Go-backed write recovery now accepts Better Auth's opaque user IDs when
-  scoping durable local retry intents. Organization IDs remain UUID-validated.
+- Go-backed Vite write recovery now accepts Better Auth's opaque user IDs when
+  scoping local retry intents across CRM, products, accounting, HR, expenses,
+  marketing, support, projects, and purchasing payment runs. Organization IDs
+  remain UUID-validated.
 
 - Vite now sends `GET` and `POST /api/approvals` to Go by default. Go resolves
   the verified session and active organization for each request, and decisions

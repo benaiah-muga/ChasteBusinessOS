@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const uuid = z.string().uuid();
 const ClaimSchema = z.object({
@@ -196,9 +197,9 @@ export async function submitExpenseAction(
 }
 
 async function expenseScope(scope?: ExpenseRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
-  const actorId = scope?.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope?.actorId);
   const organizationId = scope?.organizationId?.trim() ?? "";
-  if (!uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
+  if (!actorId || !uuid.safeParse(organizationId).success) {
     throw new ExpensesApiError(0, "Expenses are waiting for your account and organization details. Wait for your organization to finish loading, then try again.");
   }
   try {

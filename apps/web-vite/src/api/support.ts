@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const uuid = z.string().uuid();
 
@@ -152,9 +153,9 @@ const CannedResponseRetryRecordSchema = z.object({
 const CANNED_RESPONSE_RETRY_PREFIX = "chaste.support.canned-response-intent.v1:";
 
 function cannedResponseRetryStorageKey(scope: SupportCannedResponseRetryScope): string {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
+  if (!actorId || !uuid.safeParse(organizationId).success) {
     throw new SupportApiError(0, "Wait for your account and organization to finish loading before saving a canned response.");
   }
   return `${CANNED_RESPONSE_RETRY_PREFIX}${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}`;
@@ -535,9 +536,9 @@ export function supportPendingWriteUsesGo(pending: PendingSupportConversationWri
 }
 
 function supportConversationRetryStorageKey(scope: SupportConversationWriteRetryScope): string {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
+  if (!actorId || !uuid.safeParse(organizationId).success) {
     throw new SupportApiError(0, "Wait for your account and organization to finish loading before changing a conversation.");
   }
   return `${SUPPORT_CONVERSATION_RETRY_KEY}:${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}`;
@@ -667,9 +668,9 @@ export async function submitSupportConversationAction<Action extends SupportWrit
   if (!useGo) {
     const selectorName = capabilityId === "support.updateTicket" ? "Go ticket writes" : "Go conversation writes";
     try {
-      const actorId = scope.actorId?.trim() ?? "";
+      const actorId = normalizeRetryActorId(scope.actorId);
       const organizationId = scope.organizationId?.trim() ?? "";
-      if (uuid.safeParse(actorId).success && uuid.safeParse(organizationId).success) {
+      if (actorId && uuid.safeParse(organizationId).success) {
         if (readSupportConversationRetryRecord(supportConversationRetryStorageKey(scope))) {
           throw new SupportApiError(0, `A Go support action is unresolved. Restore ${selectorName} and retry those exact details before using the legacy route.`);
         }
@@ -723,9 +724,9 @@ export async function submitSupportCannedResponse(
   const useGo = goSupportCannedResponseWriteUseGo();
   if (!useGo) {
     try {
-      const actorId = scope.actorId?.trim() ?? "";
+      const actorId = normalizeRetryActorId(scope.actorId);
       const organizationId = scope.organizationId?.trim() ?? "";
-      if (uuid.safeParse(actorId).success && uuid.safeParse(organizationId).success) {
+      if (actorId && uuid.safeParse(organizationId).success) {
         if (readCannedResponseRetryRecord(cannedResponseRetryStorageKey(scope))) {
           throw new SupportApiError(0, "A Go canned-response save is unresolved. Restore Go canned-response writes and retry those exact details before using the legacy route.");
         }

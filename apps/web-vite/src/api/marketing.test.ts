@@ -259,6 +259,23 @@ const retryScope = { actorId: "5c3f7c5c-9a2a-4d3e-8c0b-1f2a3b4c5d6e", organizati
 const createCampaignAction = { action: "createCampaign" as const, segmentId, name: "Spring renewal", subject: "Renewal", body: "A note" };
 
 describe("marketing campaign Go routing", () => {
+  it("accepts Better Auth opaque user IDs for campaign and segment retry scopes", async () => {
+    const opaqueScope = { ...retryScope, actorId: "user-auth0|opaque-id" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { campaignId: "7ed25b56-02d4-4f5b-b858-9681920abdd0" } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { segmentId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
+
+    await expect(submitMarketingAction(createCampaignAction, undefined, opaqueScope)).resolves.toMatchObject({ kind: "completed" });
+    await expect(submitMarketingAction({ action: "createSegment", name: "All", minSpendMinor: 0 }, undefined, opaqueScope))
+      .resolves.toEqual({ kind: "completed", data: { segmentId } });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+  });
+
   it("routes createCampaign through Go with a durable scoped intent and strict output", async () => {
     vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { campaignId: "7ed25b56-02d4-4f5b-b858-9681920abdd0" } }));
@@ -462,6 +479,15 @@ describe("marketing campaign Go routing", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(submitMarketingAction(createCampaignAction, undefined, { actorId: null, organizationId: retryScope.organizationId })).rejects.toThrow(/active user and organization/);
     expect(fetchMock).not.toHaveBeenCalled();
+
+    await expect(submitMarketingAction(createCampaignAction, undefined, { actorId: "u".repeat(256), organizationId: retryScope.organizationId })).rejects.toThrow(/active user and organization/);
+    await expect(submitMarketingAction(createCampaignAction, undefined, { actorId: retryScope.actorId, organizationId: "organization_external_123" })).rejects.toThrow(/active user and organization/);
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", false);
+    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
+    await expect(submitMarketingAction({ action: "createSegment", name: "All", minSpendMinor: 0 }, undefined, { actorId: null, organizationId: retryScope.organizationId })).rejects.toThrow(/active user and organization/);
+    await expect(submitMarketingAction({ action: "createSegment", name: "All", minSpendMinor: 0 }, undefined, { actorId: "u".repeat(256), organizationId: retryScope.organizationId })).rejects.toThrow(/active user and organization/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
 
     const scopeHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(retryScope)));
     const scopeHex = Array.from(new Uint8Array(scopeHash), (byte) => byte.toString(16).padStart(2, "0")).join("");

@@ -149,6 +149,38 @@ describe("Purchasing payment run Go API", () => {
     ]);
   });
 
+  it("accepts opaque Better Auth actor IDs for Go actions while requiring a UUID organization", async () => {
+    vi.stubGlobal("__GO_PURCHASING_PAYMENT_RUNS__", true);
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { paymentRunId: run.id } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const opaqueScope = { actorId: "user_2K9mR7pX4vQ8nB3cL6sT1w", organizationId: scope.organizationId };
+
+    await expect(submitPurchasingPaymentRunAction({ action: "cancel", paymentRunId: run.id }, opaqueScope)).resolves.toMatchObject({ kind: "success" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+
+    fetchMock.mockClear();
+    await expect(submitPurchasingPaymentRunAction(
+      { action: "cancel", paymentRunId: run.id },
+      { ...opaqueScope, organizationId: "organization_external_123" },
+    )).rejects.toMatchObject({ status: 0, message: expect.stringContaining("account and organization details") });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for missing or oversized Go retry actor IDs", async () => {
+    vi.stubGlobal("__GO_PURCHASING_PAYMENT_RUNS__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "cancel" as const, paymentRunId: run.id };
+
+    for (const actorId of [null, `user_${"x".repeat(256)}`]) {
+      await expect(submitPurchasingPaymentRunAction(action, { actorId, organizationId: scope.organizationId }))
+        .rejects.toMatchObject({ status: 0, message: expect.stringContaining("account and organization details") });
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
   it("serializes cross-tab payment run reservations for one actor and organization", async () => {
     vi.stubGlobal("__GO_PURCHASING_PAYMENT_RUNS__", true);
     const action = { action: "create" as const, memo: "September payables", lines: [{ billId: bill.id, amountMinor: 900 }] };

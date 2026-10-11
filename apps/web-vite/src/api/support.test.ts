@@ -381,6 +381,32 @@ describe("Go canned-response write", () => {
     expect(readPendingSupportCannedResponse(scope)).toBeNull();
   });
 
+  it("accepts an opaque Better Auth user ID while keeping organization IDs UUID scoped", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
+    const opaqueScope = { ...scope, actorId: "user-auth0|opaque-id" };
+    const fetchMock = vi.fn(async () => jsonResponse({ error: "temporarily unavailable" }, 503));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportCannedResponse(action, opaqueScope)).rejects.toMatchObject({ status: 503 });
+    expect(readPendingSupportCannedResponse(opaqueScope)).toEqual({ shortcut: action.shortcut, title: action.title, body: action.body });
+    expect(window.localStorage.getItem(`chaste.support.canned-response-intent.v1:${encodeURIComponent(opaqueScope.actorId)}:${scope.organizationId}`)).not.toBeNull();
+
+    await expect(submitSupportCannedResponse(action, { ...opaqueScope, organizationId: "not-a-uuid" })).rejects.toThrow(/account and organization/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { actorId: null, label: "missing" },
+    { actorId: "u".repeat(256), label: "oversized" },
+  ])("fails closed for a $label actor ID", async ({ actorId }) => {
+    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportCannedResponse(action, { ...scope, actorId })).rejects.toThrow(/account and organization/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps exact retry details after an uncertain result and blocks changed or rolled-back writes", async () => {
     vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
     const fetchMock = vi.fn(async () => jsonResponse({ error: "temporarily unavailable" }, 503));
@@ -450,6 +476,34 @@ describe("Go support conversation writes", () => {
     expect(payload.intentId).toEqual(expect.any(String));
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
     expect(window.localStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it("accepts an opaque Better Auth user ID for conversation retry state", async () => {
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    const opaqueScope = { ...scope, actorId: "user-auth0|opaque-id" };
+    const opaqueStorageKey = `chaste.support.conversation-write-intent.v1:pending:${encodeURIComponent(opaqueScope.actorId)}:${scope.organizationId}`;
+    const fetchMock = vi.fn(async () => jsonResponse({ error: "temporarily unavailable" }, 503));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "message" as const, conversationId, body: "Please check the invoice.", from: "staff" as const };
+
+    await expect(submitSupportConversationAction(action, opaqueScope)).rejects.toMatchObject({ status: 503 });
+    expect(readPendingSupportConversationWrite(opaqueScope)).toEqual({ capabilityId: "support.postMessage", input: { conversationId, body: action.body, from: "staff" } });
+    expect(window.localStorage.getItem(opaqueStorageKey)).not.toBeNull();
+
+    await expect(submitSupportConversationAction(action, { ...opaqueScope, organizationId: "not-a-uuid" })).rejects.toThrow(/account and organization/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { actorId: null, label: "missing" },
+    { actorId: "u".repeat(256), label: "oversized" },
+  ])("fails closed for a $label actor ID", async ({ actorId }) => {
+    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportConversationAction({ action: "resolve", conversationId }, { ...scope, actorId })).rejects.toThrow(/account and organization/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("reuses exact message payload and intent after uncertain response or reload", async () => {

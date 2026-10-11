@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const uuid = z.string().uuid();
 const instant = z.string().datetime();
@@ -315,9 +316,9 @@ export async function submitMarketingAction<Action extends MarketingAction>(
 type MarketingAttempt = { storageKey: string; fingerprint: string; intentId: string };
 
 async function marketingAttemptStorageKey(action: Extract<MarketingAction, { action: "createCampaign" | "sendCampaign" }>, scope?: MarketingRetryScope): Promise<{ storageKey: string; fingerprint: string }> {
-  const actorId = scope?.actorId?.trim();
+  const actorId = normalizeRetryActorId(scope?.actorId);
   const organizationId = scope?.organizationId?.trim();
-  if (!actorId || !organizationId || !uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
+  if (!actorId || !organizationId || !uuid.safeParse(organizationId).success) {
     throw new MarketingApiError(0, "Wait for the active user and organization to load before changing campaigns.");
   }
   let scopeHash: string;
@@ -340,9 +341,9 @@ async function marketingAttemptStorageKey(action: Extract<MarketingAction, { act
 }
 
 async function marketingSegmentScopeStorageKey(scope?: MarketingRetryScope): Promise<string> {
-  const actorId = scope?.actorId?.trim();
+  const actorId = normalizeRetryActorId(scope?.actorId);
   const organizationId = scope?.organizationId?.trim();
-  if (!actorId || !organizationId || !uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
+  if (!actorId || !organizationId || !uuid.safeParse(organizationId).success) {
     throw new MarketingApiError(0, "Wait for the active user and organization to load before creating a segment.");
   }
   try {
@@ -406,10 +407,10 @@ async function getMarketingSegmentAttempt(action: Extract<MarketingAction, { act
 }
 
 async function assertNoUnresolvedGoMarketingSegmentAttempt(scope?: MarketingRetryScope): Promise<void> {
-  const actorId = scope?.actorId?.trim();
+  const actorId = normalizeRetryActorId(scope?.actorId);
   const organizationId = scope?.organizationId?.trim();
   try {
-    if (actorId && organizationId && uuid.safeParse(actorId).success && uuid.safeParse(organizationId).success) {
+    if (actorId && organizationId && uuid.safeParse(organizationId).success) {
       const storageKey = await marketingSegmentScopeStorageKey(scope);
       if (window.localStorage.getItem(storageKey) !== null) {
         throw new MarketingApiError(0, "A Go segment action is still unresolved. Restore Go segment writes and retry that exact action before using the legacy route.");
@@ -463,9 +464,9 @@ async function assertNoUnresolvedGoMarketingAttempt(
 ): Promise<void> {
   const actionTarget = action.action === "createCampaign" ? "create" : `send:${action.campaignId}`;
   try {
-    const actorId = scope?.actorId?.trim();
+    const actorId = normalizeRetryActorId(scope?.actorId);
     const organizationId = scope?.organizationId?.trim();
-    if (actorId && organizationId && uuid.safeParse(actorId).success && uuid.safeParse(organizationId).success) {
+    if (actorId && organizationId && uuid.safeParse(organizationId).success) {
       const { storageKey } = await marketingAttemptStorageKey(action, scope);
       if (window.localStorage.getItem(storageKey) !== null) {
         throw new MarketingApiError(0, "A Go campaign action is still unresolved. Restore Go campaign writes and retry that exact action before using the legacy route.");

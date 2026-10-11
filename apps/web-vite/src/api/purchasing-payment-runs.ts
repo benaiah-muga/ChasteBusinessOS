@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const SafeMinorSchema = z.number().int().safe().nonnegative();
 const TimestampSchema = z.string().datetime({ offset: true });
@@ -227,9 +228,9 @@ export async function submitPurchasingPaymentRunAction(
 }
 
 async function paymentRunScope(scope: PaymentRunRetryScope): Promise<{ scopeHash: string }> {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+  if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
     throw new PurchasingPaymentRunsApiError(0, "Payment run actions need your account and organization details before they can be submitted.");
   }
   try {

@@ -68,6 +68,27 @@ describe("Vite People API", () => {
     expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
   });
 
+  it("supports opaque Better Auth actors for Go HR writes and fails closed for invalid retry scopes", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const organizationId = "33333333-3333-4333-8333-333333333333";
+    const action = { action: "hireEmployee" as const, name: "Mira Patel", monthlySalaryMinor: 125_000 };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeHireAction(action, { actorId: " user_01J8Y8KQ4G4P8W6T2Z9M3N5R7A ", organizationId }))
+      .resolves.toMatchObject({ kind: "success" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    for (const actorId of [null, "u".repeat(256)]) {
+      await expect(submitHrEmployeeHireAction(action, { actorId, organizationId }))
+        .rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    }
+    await expect(submitHrEmployeeHireAction(action, { actorId: "user_01J8Y8KQ4G4P8W6T2Z9M3N5R7A", organizationId: "not-a-uuid" }))
+      .rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("blocks legacy rollback after a pending or uncertain Go employee hire", async () => {
     stubHrWriteLocks();
     vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);

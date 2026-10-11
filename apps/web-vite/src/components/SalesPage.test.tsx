@@ -636,7 +636,9 @@ describe("Vite sales page", () => {
     render(<SalesPage baseCurrency="USD" actorId="actor-1" organizationId="org-1" />);
 
     const orderRow = await screen.findByRole("row", { name: /#41/ });
-    fireEvent.click(within(orderRow).getByRole("button", { name: "Deliver #41" }));
+    const deliverButton = within(orderRow).getByRole("button", { name: "Deliver #41" }) as HTMLButtonElement;
+    await waitFor(() => expect(deliverButton.disabled).toBe(false));
+    fireEvent.click(deliverButton);
     expect(screen.getByRole("dialog").textContent).toContain("Order #41");
     fireEvent.click(screen.getByRole("button", { name: "Deliver all and invoice" }));
     expect(await screen.findByText("Delivery approval required")).not.toBeNull();

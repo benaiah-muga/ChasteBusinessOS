@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const ProductSchema = z.object({
   sku: z.string().min(1),
@@ -256,9 +257,9 @@ const ProductImportRecoverySchema = z.object({
 }).strict();
 
 async function productScopeKeys(scope?: ProductImportRetryScope): Promise<{ scopeKey: string; operationKey: (operation: "import" | "undo" | "restore") => string; recoveryKey: string }> {
-  const actorId = scope?.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope?.actorId) ?? "";
   const organizationId = scope?.organizationId?.trim() ?? "";
-  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+  if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
     throw new ProductsApiError(0, "Product imports are paused until your account and organization finish loading.");
   }
   let scopeHash: string;

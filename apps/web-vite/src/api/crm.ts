@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const uuid = z.string().uuid();
 const stage = z.enum(["lead", "qualified", "proposal", "negotiation", "won", "lost"]);
@@ -126,11 +127,6 @@ function messageFor(status: number, body: unknown): string {
   return "The CRM service is unavailable. Try again.";
 }
 
-function normalizedCrmActorId(value: string | null | undefined): string | null {
-  const actorId = value?.trim();
-  return actorId && actorId.length <= 255 ? actorId : null;
-}
-
 async function request(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
   let response: Response;
   try {
@@ -221,7 +217,7 @@ export async function submitCrmDealStageMove(
   if (!parsedInput.success) throw new CrmApiError(0, "Check the deal and stage details before submitting.");
   const action = { action: "move", ...parsedInput.data };
   if (!useGo) return submitCrmAction("/api/deals", action, signal);
-  const actorId = normalizedCrmActorId(retryScope?.actorId);
+  const actorId = normalizeRetryActorId(retryScope?.actorId);
   const organizationIdInput = retryScope?.organizationId?.trim();
   const parsedOrganizationId = uuid.safeParse(organizationIdInput);
   const organizationId = parsedOrganizationId.success ? parsedOrganizationId.data.toLowerCase() : null;
@@ -539,7 +535,7 @@ export async function submitCrmTaskMutation(
 }
 
 async function crmTaskScope(scope?: CrmTaskRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
-  const actorId = normalizedCrmActorId(scope?.actorId);
+  const actorId = normalizeRetryActorId(scope?.actorId);
   const organizationId = scope?.organizationId?.trim();
   if (!actorId || !organizationId || !uuid.safeParse(organizationId).success) {
     throw new CrmApiError(0, "CRM is waiting for your account and organization details. Wait for your organization to finish loading, then try again.");

@@ -112,6 +112,26 @@ describe("Expenses API", () => {
     expect(requests.every((body) => typeof body.intentId === "string" && body.intentId.length > 30)).toBe(true);
   });
 
+  it("supports opaque Better Auth actors and fails closed for invalid retry scopes", async () => {
+    vi.stubGlobal("__GO_HR_EXPENSES__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { set: true, category: "travel", limitMinor: 25000 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action: ExpenseAction = { action: "setPolicy", category: "travel", limitMinor: 25000 };
+    const organizationId = scope.organizationId;
+
+    await expect(submitExpenseAction(action, undefined, { actorId: " user_01J8Y8KQ4G4P8W6T2Z9M3N5R7A ", organizationId }))
+      .resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    for (const actorId of [null, "u".repeat(256)]) {
+      await expect(submitExpenseAction(action, undefined, { actorId, organizationId }))
+        .rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    }
+    await expect(submitExpenseAction(action, undefined, { actorId: "user_01J8Y8KQ4G4P8W6T2Z9M3N5R7A", organizationId: "not-a-uuid" }))
+      .rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("matches Go memo and policy category length boundaries before sending a write", async () => {
     vi.stubGlobal("__GO_HR_EXPENSES__", true);
     const fetchMock = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {

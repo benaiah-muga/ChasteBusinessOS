@@ -2798,3 +2798,11 @@ new owners and the manifest shows zero legacy runtime paths.
      timeline. The CRM deals, customers, tasks, saved views, and timeline reads
      returned 200 through Go, and the Vite component tests cover the page's
      write controls with Better Auth's opaque user ID format.
+
+270. (Implemented and tested; authenticated write browser proof remains open)
+     Accept Better Auth's bounded opaque user IDs in local retry scopes for all
+     Vite Go-backed writes. This covers CRM, products, accounting, HR, expenses,
+     marketing, support, projects, and purchasing payment runs. Organization
+     IDs remain UUID-validated, and the actor ID is only a local recovery key;
+     Go derives identity and authorization from the verified session. Focused
+     tests cover the opaque actor format and fail-closed invalid scopes.

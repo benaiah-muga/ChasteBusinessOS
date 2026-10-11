@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const minor = z.number().int().safe();
 // The journal row spreads a SQL sum over a bigint column, and Postgres hands
@@ -1150,9 +1151,9 @@ function recordPaymentCapabilityInput(action: AccountingRecordPaymentAction): Re
 }
 
 async function accountingPaymentScope(scope: AccountingPaymentRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
-  const actorId = scope.actorId?.trim() ?? "";
+  const actorId = normalizeRetryActorId(scope.actorId) ?? "";
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+  if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
     throw new AccountingApiError(0, "Accounting writes are waiting for your account and organization details. Wait for your organization to finish loading, then try again.");
   }
   try {
