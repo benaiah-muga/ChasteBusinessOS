@@ -83,13 +83,14 @@ type Worker struct {
 
 // GoCapabilityPermissions is the explicit bridge between SQL claim ownership
 // and capabilities with an established Go executor implementation. Keep the
-// migration's claim list in sync with these IDs. Document processing remains
-// with the legacy worker; routine agent jobs use RoutineJobRunner because they
-// contain a model/tool loop and are not single-capability executions.
+// migration's claim list in sync with these IDs. Routine agent jobs use
+// RoutineJobRunner because they contain a model/tool loop and are not
+// single-capability executions.
 var GoCapabilityPermissions = map[string]string{
 	"documents.listDocs":                       "documents.read",
 	"documents.listDocVersions":                "documents.read",
 	"documents.getDocVersion":                  "documents.read",
+	"documents.parseDocument":                  "documents.write",
 	"crm.createCustomer":                       "crm.write",
 	"crm.deactivateCustomer":                   "crm.write",
 	"crm.mergeCustomers":                       "crm.write",

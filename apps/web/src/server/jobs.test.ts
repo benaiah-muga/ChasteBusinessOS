@@ -45,15 +45,15 @@ afterEach(async () => {
 });
 
 describe("capability job queue", () => {
-  it("executes a queued capability and marks the job done", async () => {
+  it("retries a failed capability and exhausts it after the attempt limit", async () => {
     const jobId = await enqueueCapabilityJob(db, {
       orgId,
-      type: "documents.parseDocument",
-      payload: { documentId: "00000000-0000-4000-8000-000000000000" },
+      type: "crm.createCustomer",
+      payload: {},
     });
 
-    // The referenced document does not exist, so the governed execution must
-    // fail honestly; with attempts=1 of 3 the job returns to pending.
+    // The payload is invalid, so the governed execution fails honestly; with
+    // attempts=1 of 3 the job returns to pending.
     // Sibling suites share this fixture database and can claim a different
     // job first, so drain until this job has been attempted.
     for (let i = 0; i < 10; i += 1) {
@@ -64,7 +64,7 @@ describe("capability job queue", () => {
     let [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(row!.status).toBe("pending");
     expect(row!.attempts).toBe(1);
-    expect(row!.lastError).toContain("no document");
+    expect(row!.lastError).toBeTruthy();
     expect(row!.availableAt.getTime()).toBeGreaterThan(Date.now());
 
     // Exhaust retries; the queue must land on failed, not loop forever.
@@ -77,6 +77,24 @@ describe("capability job queue", () => {
     [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(row!.status).toBe("failed");
     expect(row!.attempts).toBe(row!.maxAttempts);
+  });
+
+  it("leaves async document parsing for the Go worker", async () => {
+    const jobId = await enqueueCapabilityJob(db, {
+      orgId,
+      type: "documents.parseDocument",
+      payload: { documentId: crypto.randomUUID() },
+    });
+
+    await pg.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM jobs WHERE id <> ${jobId}::uuid FOR UPDATE`);
+      const claim = await claimJob(db, "legacy-worker-document-ownership-test", 30_000, new Date());
+      expect(claim).toBeNull();
+    });
+
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(row!.status).toBe("pending");
+    expect(row!.attempts).toBe(0);
   });
 
   it("returns false when the queue is empty", async () => {

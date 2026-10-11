@@ -651,7 +651,7 @@ func TestGoCapabilityJobWorkerMatchesLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	unsupportedID := insertJobsTestJob(t, ctx, owner, orgA, "documents.parseDocument", json.RawMessage(`{"documentId":"00000000-0000-4000-8000-000000000000"}`), 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	unsupportedID := insertJobsTestJob(t, ctx, owner, orgA, "documents.suggestCoding", json.RawMessage(`{"documentId":"00000000-0000-4000-8000-000000000000"}`), 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
 	routineID := insertJobsTestJob(t, ctx, owner, orgA, "routines.executeRoutine", json.RawMessage(`{"routineId":"00000000-0000-4000-8000-000000000000","trigger":"schedule"}`), 3, time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC))
 	foreignID := insertJobsTestJob(t, ctx, owner, orgB, "crm.createCustomer", json.RawMessage(`{"name":"Foreign tenant customer"}`), 3, time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC))
 
@@ -671,11 +671,11 @@ func TestGoCapabilityJobWorkerMatchesLegacy(t *testing.T) {
 		return struct{}{}, tx.QueryRow(ctx, `SELECT payload FROM public.jobs WHERE id = $1::uuid`, unsupportedID).Scan(&unscopedPayload)
 	})
 	if !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatalf("jobs worker read a TypeScript-owned capability payload: err=%v", err)
+		t.Fatalf("jobs worker read an unsupported capability payload: err=%v", err)
 	}
 
 	// Two concurrent claimers must receive different rows. The claim function
-	// returns metadata only, and its SQL allowlist skips both unported jobs.
+	// returns metadata only, and its SQL allowlist skips unsupported jobs.
 	claimAID := insertJobsTestJob(t, ctx, owner, orgA, "crm.listTasks", json.RawMessage(`{}`), 3, time.Date(1901, 1, 1, 0, 0, 0, 0, time.UTC))
 	claimBID := insertJobsTestJob(t, ctx, owner, orgA, "crm.listTasks", json.RawMessage(`{}`), 3, time.Date(1901, 1, 1, 0, 0, 0, 0, time.UTC))
 	workerB, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "go-jobs-integration-worker-b", LeaseDuration: time.Second})
@@ -870,6 +870,42 @@ func TestGoCapabilityJobWorkerMatchesLegacy(t *testing.T) {
 	assertJobsTestState(t, ctx, owner, invalidID, "failed", 3)
 	assertJobsTestState(t, ctx, owner, unsupportedID, "pending", 0)
 	assertJobsTestState(t, ctx, owner, routineID, "pending", 0)
+
+	// The Go worker owns asynchronous document parsing, including the
+	// capability receipt and derived memory write for pasted text.
+	const parsedText = "Quarterly supply review: 18 units are due for replenishment."
+	var documentID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO documents (org_id, title, source_type, raw_text, status, created_by_actor_type)
+		VALUES ($1::uuid, 'Go worker parse proof', 'text', $2, 'received', 'human')
+		RETURNING id::text`, orgA, parsedText).Scan(&documentID); err != nil {
+		t.Fatal(err)
+	}
+	parsePayload, err := json.Marshal(map[string]string{"documentId": documentID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parseJobID := insertJobsTestJob(t, ctx, owner, orgA, "documents.parseDocument", parsePayload, 3, time.Date(1907, 1, 1, 0, 0, 0, 0, time.UTC))
+	worked, err = worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("document parse job process worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, parseJobID, "done", 1)
+	var documentStatus, parsedMarkdown string
+	var parseError *string
+	if err := owner.QueryRow(ctx, `SELECT status, parsed_markdown, parse_error FROM documents WHERE org_id=$1::uuid AND id=$2::uuid`, orgA, documentID).
+		Scan(&documentStatus, &parsedMarkdown, &parseError); err != nil {
+		t.Fatal(err)
+	}
+	if documentStatus != "parsed" || parsedMarkdown != parsedText || parseError != nil {
+		t.Fatalf("document parse state status=%q markdown=%q error=%v", documentStatus, parsedMarkdown, parseError)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM memories WHERE org_id=$1::uuid AND source=$2 AND content=$3`, orgA, "document:"+documentID, parsedText); got != 1 {
+		t.Fatalf("document parse wrote %d derived memory chunks, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgA, orgA+":"+parseJobID); got != 1 {
+		t.Fatalf("document parse wrote %d action receipts, want one", got)
+	}
 
 }
 

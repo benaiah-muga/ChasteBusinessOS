@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Go jobs worker now owns asynchronous document parsing. The TypeScript worker
+  leaves `documents.parseDocument` queued for Go, which records the governed
+  action receipt and derived memory update.
+
 - Vite dashboard reads now use the Go session handler by default, preserving
   the existing tenant-scoped calculations and permission-based financial
   fields. Setting both route selectors to `0` restores the compatibility
@@ -145,10 +149,6 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
-- Go email verification now creates a signed, persistent session cookie on the
-  first successful verification, matching Better Auth's automatic sign-in
-  behavior. Reusing a valid token for an already verified account does not
-  create another session.
 - Vite Accounting now preserves Go FX exposure permission errors and rejects
   incomplete exchange-rate result tuples instead of treating rejected reads as
   missing report data.

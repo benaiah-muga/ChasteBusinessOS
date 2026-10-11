@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { jobsWorkerKeys, selectedEnvironment } from "./worker-go-env.mjs";
 
 const workerNames = ["jobs-worker", "outbox-worker"];
 const directory = mkdtempSync(join(tmpdir(), "chaste-workers-"));
@@ -13,35 +14,11 @@ const workerPromises = [];
 let stopping = false;
 let failed = false;
 
-const commonKeys = [
-  "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TZ",
-  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR",
-  "SystemRoot", "WINDIR", "PATHEXT",
-];
 const buildKeys = [
   "PATH", "HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP", "GOCACHE", "GOMODCACHE",
   "GOPATH", "GOROOT", "GOENV", "GOTOOLCHAIN", "GOOS", "GOARCH", "CGO_ENABLED",
   "GOPROXY", "GOSUMDB", "GONOSUMDB", "GOPRIVATE", "GOWORK",
 ];
-const jobsKeys = [
-  "JOBS_WORKER_DATABASE_URL", "JOBS_WORKER_ID", "GO_DATABASE_URL",
-  "GO_ROUTINE_SCHEDULER", "GO_ROUTINE_AGENT_RUNNER", "GO_SUPPORT_EMBEDDING_WORKER",
-  "GO_SUPPORT_EMBEDDING_MODEL", "MODEL_PROVIDER", "MODEL_PRIMARY", "MODEL_FAST",
-  "MODEL_REASONING", "MODEL_EMBEDDINGS", "MODEL_BASE_URL", "NIM_BASE_URL", "ZAI_BASE_URL",
-  "EMBEDDING_DIMENSIONS", "NVIDIA_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY",
-  "MISTRAL_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY", "NOTIFICATION_WEBHOOK_URL",
-  "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "SMTP_SECURE", "SMTP_TO",
-];
-
-function selectedEnvironment(keys) {
-  const result = {};
-  for (const key of new Set([...commonKeys, ...keys])) {
-    const value = process.env[key];
-    if (value !== undefined) result[key] = value;
-  }
-  return result;
-}
-
 function buildEnvironment() {
   const result = {};
   for (const key of buildKeys) {
@@ -119,7 +96,7 @@ try {
   }
   if (!stopping) {
     run("jobs-worker", {
-      ...selectedEnvironment(jobsKeys),
+      ...selectedEnvironment(jobsWorkerKeys),
       GO_ROUTINE_SCHEDULER: process.env.GO_ROUTINE_SCHEDULER ?? "1",
       GO_ROUTINE_AGENT_RUNNER: process.env.GO_ROUTINE_AGENT_RUNNER ?? "1",
     });

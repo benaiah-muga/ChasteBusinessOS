@@ -40,7 +40,7 @@ func TestCommerceWorkerPermissionsAreLeastPrivilege(t *testing.T) {
 	if got := len(GoCapabilityPermissions); got < len(want) {
 		t.Fatalf("worker allowlist has %d capabilities, expected at least %d", got, len(want))
 	}
-	for _, id := range []string{"accounting.submitExpenseClaim", "documents.parseDocument", "routines.executeRoutine"} {
+	for _, id := range []string{"accounting.submitExpenseClaim", "routines.executeRoutine"} {
 		if _, ok := GoCapabilityPermissions[id]; ok {
 			t.Errorf("unsupported system capability %s leaked into Go worker allowlist", id)
 		}

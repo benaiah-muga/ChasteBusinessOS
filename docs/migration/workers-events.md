@@ -317,13 +317,22 @@ webhook adapter `apps/web/src/app/api/routines/webhook/[token]/route.ts:6-26`.
   `modules/documents/src/m12.test.ts:40-65` covers metadata and append-only
   document versions, not queue processing. `scripts/demo-m12.ts:114-142`
   covers document metadata/versions/signals by direct capability calls and
-  does not enqueue parsing. A successful async OCR worker proof was not found.
+  does not enqueue parsing. A successful async uploaded-file OCR worker proof
+  was not found.
 - **Go parity:** Keep existing document rows and files/text, queued/failed/
   parsed status transitions, OCR provider choice/input/output, deterministic
   chunk replacement and embeddings, org filter, `documents.write` permission,
   error text surfaced to the queue, and job receipt semantics. Define provider
   timeout/cancellation and whether job enqueue plus `queued` status become one
   atomic transaction.
+- **Go worker ownership:** Migration `0128_go_document_parse_jobs.sql` adds
+  `documents.parseDocument` to the Go worker policy and claim allowlist. The
+  Go worker executes it through `Executor.ExecuteSystem` with
+  `documents.write`; the TypeScript queue claimant skips this capability.
+  `TestGoCapabilityJobWorkerMatchesLegacy` proves successful asynchronous
+  parsing of pasted text through the Go queue, including the parsed document,
+  replacement memory chunk, and action receipt. Uploaded-file OCR remains
+  outside that integration proof.
 
 ## Other scheduled capability candidate
 

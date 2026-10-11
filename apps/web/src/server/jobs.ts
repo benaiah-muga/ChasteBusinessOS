@@ -115,10 +115,9 @@ export async function claimJob(
     WHERE id = (
       SELECT id FROM jobs
       WHERE (
-        status = 'pending' AND attempts < max_attempts AND available_at <= ${now.toISOString()}::timestamptz
-      ) OR (
-        status = 'processing' AND lease_expires_at <= ${now.toISOString()}::timestamptz AND attempts < max_attempts
-      )
+        (status = 'pending' AND attempts < max_attempts AND available_at <= ${now.toISOString()}::timestamptz)
+        OR (status = 'processing' AND lease_expires_at <= ${now.toISOString()}::timestamptz AND attempts < max_attempts)
+      ) AND type <> 'documents.parseDocument'
       ORDER BY available_at, created_at
       LIMIT 1
       FOR UPDATE SKIP LOCKED
