@@ -1837,12 +1837,14 @@ new owners and the manifest shows zero legacy runtime paths.
      membership rows while capturing and applying snapshots so undo cannot
      overwrite an intervening profile edit. Authenticated browser proof remains
      open because the in-app browser is unavailable in this environment.
-175. (Implemented) When the Vite Go auth proxy is enabled, route every method
+175. (Complete; focused route tests and authenticated browser proof passed) When the Vite Go auth proxy is enabled, route every method
      and path under `/api/auth`, including the exact root, to Go. Unsupported
      Better Auth compatibility paths fail closed in Go instead of falling
      through to the legacy service; the explicit
      `CHASTE_GO_AUTH_ROUTE=0` compatibility opt-out is retained. Other API
-     namespaces and their route selectors are unchanged.
+     namespaces and their route selectors are unchanged. Authenticated signup,
+     email verification, sign-in, and Vite workspace access are recorded in
+     item 316.
 176. (Implemented) Persist the exact Vite Sales create action alongside its
      actor/org scoped intent. Restore and lock unresolved drafts after remount,
      retry with the original payload and intent, and unlock on definitive 4xx
@@ -3474,3 +3476,13 @@ new owners and the manifest shows zero legacy runtime paths.
      The existing database-backed
      `TestSalesOrdersConfirmReservesGuardsAndBackorder` Go test passed against
      the configured database. This completes item 136.
+
+316. (Runtime verified) On 2026-10-12, Vite routed account signup, verification,
+     session lookup, and sign-in through Go's `/api/auth` routes. Signup and
+     verification email requests returned HTTP 200; local TLS Mailpit captured
+     the Go auth outbox email, and opening its verification link returned HTTP
+     200. Sign-in and session lookup returned HTTP 200. The user completed Go
+     onboarding to create a synthetic workspace; onboarding writes, team read,
+     organization read, notifications, dashboard, setup, and My Work then each
+     returned HTTP 200 from the authenticated Vite session. The browser error
+     log was empty. This completes item 175.
