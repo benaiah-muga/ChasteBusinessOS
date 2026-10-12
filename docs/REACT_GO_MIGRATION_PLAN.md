@@ -2737,7 +2737,7 @@ new owners and the manifest shows zero legacy runtime paths.
      the empty-state page through `accounting.listInvoices`; with the Go read
      gate enabled, the capability returned HTTP 200. No legacy `/api/accounting`
      request occurred, and the browser error log was empty. See proof 332.
-243. (Vite implementation complete; browser proof pending) Route Vite
+243. (Complete) Route Vite
      Accounting payment-reminder drafts through the session-
      authenticated `accounting.buildReminders` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the Go envelope
@@ -2745,7 +2745,12 @@ new owners and the manifest shows zero legacy runtime paths.
      explicit legacy rollback, and fail closed on selected Go errors. Add
      focused Vite API, selector, and Accounting page coverage. Go's binary
      customer-name tie ordering can differ from browser locale ordering for
-     some names; reminder contents and grouping are unchanged.
+     some names; reminder contents and grouping are unchanged. On 2026-10-12,
+     authenticated Vite Accounting requested payment reminder drafts through
+     `accounting.buildReminders`; the exact empty-input capability request
+     returned HTTP 200 with no overdue balances, and the page showed that no
+     customers needed chasing. No legacy accounting API request occurred, and
+     the browser error log was empty. See proof 333.
 244. (Vite implementation complete; browser proof pending) Route Vite
      cash-basis summary reads through the session-authenticated
      `accounting.cashBasisReport` capability when
@@ -3688,3 +3693,10 @@ new owners and the manifest shows zero legacy runtime paths.
      HTTP 200. `GO_ACCOUNTING_INVOICE_READS=1` was enabled locally, no legacy
      `/api/accounting` request occurred, and the browser error log was empty.
      This completes item 242.
+
+333. (Runtime verified) On 2026-10-12, authenticated Vite Accounting's Cash &
+     collections section requested payment reminder drafts through Go's
+     `accounting.buildReminders` capability with empty input. Go returned HTTP
+     200 with no overdue balances, and the page showed the no-customer-chasing
+     empty state. No legacy `/api/accounting` request occurred, and the browser
+     error log was empty. This completes item 243.
