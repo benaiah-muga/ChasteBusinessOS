@@ -2492,7 +2492,7 @@ new owners and the manifest shows zero legacy runtime paths.
      the Go capability route. The comparison showed the expected archived
      contents, workspace POST and DELETE returned HTTP 200, and browser errors
      were empty with Next stopped.
-219. (Implemented) Route Vite mention-people and add-member lookups through
+219. (Complete) Route Vite mention-people and add-member lookups through
      `messaging.listPeople` unconditionally; the Vite people selector and
      legacy `GET /api/conversations/people` dependency are removed. The Go API
      enables the capability by default and `GO_MESSAGING_PEOPLE_READS=0`
@@ -2500,8 +2500,12 @@ new owners and the manifest shows zero legacy runtime paths.
      `messaging.read`; Vite fails closed on Go errors. Preserve the initial
      limit of 100, searched limit of 30, trimmed 80-character query bound, and
      the Vite person/agent alias shape. Keep conversation, thread, presence,
-     and message-search reads and all writes unchanged. Browser proof remains
-     open.
+     and message-search reads and all writes unchanged. On 2026-10-12,
+     authenticated Vite `/messages` loaded mention people with
+     `messaging.listPeople` at limit 100 and searched the add-member picker
+     with query `Proof` at limit 30; both returned HTTP 200. The displayed
+     `SMTP Proof User` alias appeared in the mention and add-member
+     suggestions, and the browser error log was empty. See proof 328.
 220. (Complete, default-on) Route Vite authored-document editor detail
      through `documents.getDoc` when `CHASTE_GO_DOCUMENTS_EDITOR_READS=1` and
      `CHASTE_GO_DOCUMENTS_VERSION_READS=1` are paired with the session route.
@@ -3625,3 +3629,11 @@ new owners and the manifest shows zero legacy runtime paths.
      200; the archived count changed to one, then returned to zero, and the
      active count returned to three. The conversation remained visible and the
      browser error log was empty. This completes item 238.
+
+328. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` loaded
+     mention candidates and searched the settings add-member picker through
+     Go's `messaging.listPeople` capability. The initial list request used
+     limit 100; the picker request used query `Proof` and limit 30. Both
+     returned HTTP 200, and `SMTP Proof User` appeared in both suggestion
+     surfaces. No legacy people-list request occurred, and the browser error
+     log was empty. This completes item 219.
