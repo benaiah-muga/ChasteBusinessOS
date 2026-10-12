@@ -2714,7 +2714,7 @@ new owners and the manifest shows zero legacy runtime paths.
      message attribution, with Go applying `support.write` permission checks
      and recording the signed-in human actor. Set
      `CHASTE_GO_SUPPORT_CONVERSATION_WRITES=0` for explicit rollback.
-250. (Vite implementation complete; browser proof pending) Route Vite Support
+250. (Complete; authenticated browser proof passed) Route Vite Support
      ticket metadata updates through the session-authenticated
      `support.updateTicket` capability behind paired
      `CHASTE_GO_SUPPORT_TICKET_WRITES=1` and
@@ -3420,3 +3420,10 @@ new owners and the manifest shows zero legacy runtime paths.
      the message and status changes rendered after refresh. No legacy Support
      write request or browser error occurred. Together with the conversation
      creation proof in item 306, this completes item 249.
+
+310. (Runtime verified) On 2026-10-12, the authenticated Vite Support session
+     saved ticket priority `High` and category `Migration verification`
+     through `support.updateTicket`. The capability request and the refreshed
+     `support.readConversation` request returned HTTP 200, and the updated
+     fields remained visible in the ticket form. No legacy Support write
+     request or browser error occurred. This completes item 250.
