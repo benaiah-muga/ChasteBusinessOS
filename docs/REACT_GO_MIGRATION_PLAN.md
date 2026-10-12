@@ -2751,13 +2751,18 @@ new owners and the manifest shows zero legacy runtime paths.
      returned HTTP 200 with no overdue balances, and the page showed that no
      customers needed chasing. No legacy accounting API request occurred, and
      the browser error log was empty. See proof 333.
-244. (Vite implementation complete; browser proof pending) Route Vite
+244. (Complete) Route Vite
      cash-basis summary reads through the session-authenticated
      `accounting.cashBasisReport` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the Go response,
      including its `accrualExpenseMinor` field, then project to the existing
      five-field UI shape. Keep failures nullable and do not fall back after a
      selected Go request; set `CHASTE_GO_ACCOUNTING_CASH_BASIS=0` for rollback.
+     On 2026-10-12, authenticated Vite `/accounting` loaded the 2026 cash-basis
+     summary through `accounting.cashBasisReport`; Go returned HTTP 200 with
+     the expected zero-valued summary, and the page rendered its overview. No
+     legacy `/api/accounting` request occurred, and the browser error log was
+     empty. See proof 334.
 245. (Complete; authenticated browser proof recorded in item 314) Route Vite
      Accounting overview reads through the session-authenticated Go
      `accounting.overview` capability unconditionally. Validate the strict
@@ -3700,3 +3705,10 @@ new owners and the manifest shows zero legacy runtime paths.
      200 with no overdue balances, and the page showed the no-customer-chasing
      empty state. No legacy `/api/accounting` request occurred, and the browser
      error log was empty. This completes item 243.
+
+334. (Runtime verified) On 2026-10-12, authenticated Vite `/accounting` loaded
+     the 2026 cash-basis summary through Go's `accounting.cashBasisReport`
+     capability with input `{"year":2026}`. Go returned HTTP 200 with the
+     expected empty-workspace summary, including `accrualExpenseMinor: 0`.
+     No legacy `/api/accounting` request occurred, and the browser error log
+     was empty. This completes item 244.
