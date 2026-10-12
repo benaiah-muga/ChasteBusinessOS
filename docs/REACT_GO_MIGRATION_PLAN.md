@@ -2259,7 +2259,7 @@ new owners and the manifest shows zero legacy runtime paths.
      `purchasing.supplierPerformance` returning HTTP 200 through Go. The empty
      price-history state and synthetic vendor metrics rendered without browser
      errors after reload.
-205. Route only the Vite Accounting Reports aggregate read through Go's
+205. (Done) Route only the Vite Accounting Reports aggregate read through Go's
      `accounting.incomeStatement`, `accounting.balanceSheet`,
      `accounting.cashFlow`, `accounting.unrealizedFxExposure`, and
      `accounting.reportCurrencyMetadata` capabilities behind paired
@@ -2273,7 +2273,10 @@ new owners and the manifest shows zero legacy runtime paths.
      Vite API/page/proxy suite passed all 310 tests; the six Go report,
      metadata, FX, permission, and organization-scope tests passed with runtime
      integration required; Vite typecheck and lint passed. Independent review
-     found no actionable issues. Browser runtime proof remains open.
+     found no actionable issues. Authenticated browser proof loaded Profit and
+     Loss, Balance Sheet, Cash Flow, and FX exposure after reload. All five
+     required Go capabilities returned HTTP 200; the legacy `/api/reports`
+     route was not requested, and no browser errors occurred.
 206. (Implemented; enabled by default in `.env.example`; selector `0` restores
      the legacy route) Route only Vite Manufacturing production cost previews,
      feasibility checks, and BOM reports through `manufacturing.costPreview`,
