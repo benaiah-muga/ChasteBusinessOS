@@ -358,6 +358,11 @@ The full v1 changelog is preserved at the bottom of this file.
   `accounting.cashBasisReport` capability by default when session routing is
   enabled. Go's additional accrual expense total is validated and omitted from
   the current UI shape; unavailable or malformed Go results stay nullable.
+- Vite bank reconciliation match and unmatch actions now use the
+  session-authenticated Go `accounting.matchBankTransaction` and
+  `accounting.unmatchBankTransaction` capabilities when both route selectors
+  are enabled. Exact actor- and organization-scoped requests survive uncertain
+  outcomes and block legacy fallback until resolved.
 - Vite Accounting overview reads now always use the session-authenticated Go
   `accounting.overview` capability.
   Go entry debit aggregates are validated as safe integer minor units, and

@@ -2082,7 +2082,7 @@ new owners and the manifest shows zero legacy runtime paths.
      accounting write request or browser error occurred. A separate Go
      database-backed test confirms permitted manual reversal still mirrors
      the original entry.
-195. (Vite/Go implementation complete; browser proof pending) Route only Vite bank reconciliation match/unmatch writes through Go's
+195. (Vite/Go implementation and authenticated browser proof complete) Route only Vite bank reconciliation match/unmatch writes through Go's
      session-authenticated `accounting.matchBankTransaction` and
      `accounting.unmatchBankTransaction` capabilities behind paired
      `CHASTE_GO_BANK_RECONCILIATION_WRITES=1` and
@@ -2096,7 +2096,11 @@ new owners and the manifest shows zero legacy runtime paths.
      coverage. Atomic browser-wide reservations prevent cross-tab intent races,
      and browsers without Web Locks fail closed. Vite API/page/proxy tests,
      typecheck, lint, and Go banking reconciliation contract tests pass.
-     Authenticated browser proof remains open.
+     Authenticated Vite browser proof imported a synthetic UGX 10,000 statement
+     line, matched it to invoice payment #1, unmatched it, then matched it
+     again through the Go session capability endpoint. Both write types
+     returned HTTP 200, the final matched state persisted after reload, and no
+     legacy banking write request or browser error occurred.
 196. (Vite/Go implementation complete; browser proof pending) Route Accounting Payables `payBill` actions through the existing Vite Go
      `payPurchasingBill` flow and `purchasing.payBill` capability under the
      existing `CHASTE_GO_PURCHASING_FINANCE_WRITES=1` selector. Preserve the
