@@ -2689,7 +2689,7 @@ new owners and the manifest shows zero legacy runtime paths.
      shapes, retain customer-bound inbox filtering, use full-detail thread
      reads, fail closed on selected Go errors, and set
      `CHASTE_GO_SUPPORT_INBOX_READS=0` for explicit legacy rollback.
-247. (Vite implementation complete; browser proof pending) Route Vite Support
+247. (Complete; authenticated browser proof passed) Route Vite Support
      canned-response and knowledge-article reads through the session-
      authenticated `support.listLibrary` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the response,
@@ -3396,3 +3396,10 @@ new owners and the manifest shows zero legacy runtime paths.
      and the browser reported no errors. This completes item 246 and verifies
      the conversation-create portion of item 249. Posting, escalation,
      resolution, and reopen remain unverified in the browser.
+
+307. (Runtime verified) In the same authenticated Vite Support session on
+     2026-10-12, opening Library loaded canned responses and knowledge articles
+     through the Go `support.listLibrary` capability. The request returned
+     HTTP 200, both lists rendered their empty states, no legacy Support API
+     request occurred, and the browser reported no errors. This completes
+     item 247.
