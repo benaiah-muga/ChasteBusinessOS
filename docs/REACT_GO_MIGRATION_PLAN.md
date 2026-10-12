@@ -2277,7 +2277,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Loss, Balance Sheet, Cash Flow, and FX exposure after reload. All five
      required Go capabilities returned HTTP 200; the legacy `/api/reports`
      route was not requested, and no browser errors occurred.
-206. (Implemented; enabled by default in `.env.example`; selector `0` restores
+206. (Done; enabled by default in `.env.example`; selector `0` restores
      the legacy route) Route only Vite Manufacturing production cost previews,
      feasibility checks, and BOM reports through `manufacturing.costPreview`,
      `manufacturing.checkProductionFeasibility`, and `manufacturing.bomReport`
@@ -2293,8 +2293,13 @@ new owners and the manifest shows zero legacy runtime paths.
      four DB-backed Go parser, feasibility, governed execution, and permission
      tests passed with runtime integration required, including permission
      denial and foreign-SKU isolation for all three reads; Vite typecheck and
-     lint passed. Expired Go sessions now show sign-in guidance. Browser
-     runtime proof remains open. Independent review found no remaining issues.
+     lint passed. Expired Go sessions now show sign-in guidance. Authenticated
+     browser proof created a synthetic component and assembly through Go,
+     defined their BOM through `manufacturing.defineBom`, and confirmed after
+     reload that feasibility, BOM report, and cost preview each returned HTTP
+     200 through Go. The page showed available component stock and the cost
+     preview, with no browser errors. Independent review found no remaining
+     issues.
 207. Route the existing Vite customer statement read through Go's
      session-authenticated `accounting.customerStatement` capability behind
      paired `CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1` and
