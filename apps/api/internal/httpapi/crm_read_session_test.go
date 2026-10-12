@@ -55,6 +55,74 @@ func TestCRMReadSessionHandlerBuildsGoClaimsForEachReadSelector(t *testing.T) {
 	}
 }
 
+func TestGoCustomersAliasUsesCRMCollectionAndSessionGuards(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["pos.sell"] = true
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"customers":[{"id":"customer-1"}]}`)}}
+	posReader := &posCustomersTestReader{data: posCustomersData{Customers: []posCustomerOption{{ID: "pos-only"}}}}
+	route := MountGoCRMReadRoute(routeMarker("legacy"), newCRMReadSessionHandlerWithPOSCustomers(resolver, executor, posReader, nil))
+	request := crmSessionRequest("/api/customers?ignored=1")
+	response := httptest.NewRecorder()
+	route.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"customers":[{"id":"customer-1"}]}` {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if executor.capID != "crm.listCustomerCollection" || string(executor.input) != `{}` {
+		t.Fatalf("capability=%q input=%s", executor.capID, executor.input)
+	}
+	if executor.calls != 1 || posReader.org != "" {
+		t.Fatalf("CRM precedence failed: executor calls=%d POS reader org=%q", executor.calls, posReader.org)
+	}
+	if resolver.resolveCalls != 1 || resolver.cookie != "session-cookie" || resolver.activeOrg != *identity.OrgID {
+		t.Fatalf("session resolution=%+v", resolver)
+	}
+	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("cache headers: Cache-Control=%q Pragma=%q", response.Header().Get("Cache-Control"), response.Header().Get("Pragma"))
+	}
+	identity.ModulesRestricted = true
+	identity.EnabledModules = []string{"sales"}
+	moduleResponse := httptest.NewRecorder()
+	route.ServeHTTP(moduleResponse, crmSessionRequest("/api/customers"))
+	if moduleResponse.Code != http.StatusForbidden || executor.calls != 1 || posReader.org != "" {
+		t.Fatalf("disabled CRM module status=%d executor calls=%d POS reader org=%q body=%s", moduleResponse.Code, executor.calls, posReader.org, moduleResponse.Body.String())
+	}
+
+	identity.Permissions = map[string]bool{"sales.read": true}
+	deniedResponse := httptest.NewRecorder()
+	route.ServeHTTP(deniedResponse, crmSessionRequest("/api/customers"))
+	if deniedResponse.Code != http.StatusForbidden || executor.calls != 1 {
+		t.Fatalf("missing crm.read status=%d executor calls=%d body=%s", deniedResponse.Code, executor.calls, deniedResponse.Body.String())
+	}
+}
+
+func TestGoCustomersAliasUsesRestrictedPOSReadOnlyWithoutCRMPermission(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions = map[string]bool{"pos.sell": true}
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"customers":[]}`)}}
+	reader := &posCustomersTestReader{data: posCustomersData{Customers: []posCustomerOption{{
+		ID: "customer-1", Name: "Amina", PurchaseCount: 2, LifetimeSpendMinor: 2400,
+	}}}}
+	route := MountGoCRMReadRoute(routeMarker("legacy"), newCRMReadSessionHandlerWithPOSCustomers(resolver, executor, reader, nil))
+	request := crmSessionRequest("/api/customers")
+	response := httptest.NewRecorder()
+	route.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || reader.org != *identity.OrgID || executor.calls != 0 {
+		t.Fatalf("status=%d reader org=%q executor calls=%d body=%s", response.Code, reader.org, executor.calls, response.Body.String())
+	}
+	var body posCustomersData
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Customers) != 1 || body.Customers[0].PurchaseCount != 2 || body.Customers[0].LifetimeSpendMinor != 2400 {
+		t.Fatalf("POS customer response=%+v", body)
+	}
+	if response.Header().Get("Cache-Control") != "no-store" || resolver.resolveCalls != 1 {
+		t.Fatalf("cache-control=%q resolver=%+v", response.Header().Get("Cache-Control"), resolver)
+	}
+}
+
 func TestCRMReadSessionHandlerResolvesBearerAndFailsClosedOnInvalidAccess(t *testing.T) {
 	t.Run("bearer token", func(t *testing.T) {
 		identity := directTestIdentity()
@@ -134,6 +202,10 @@ func TestMountGoCRMReadRouteMountsOnlyExactGet(t *testing.T) {
 	for _, tc := range []struct{ method, path, want string }{
 		{http.MethodGet, "/api/crm", "go-crm"},
 		{http.MethodGet, "/api/crm?customers=1", "go-crm"},
+		{http.MethodGet, "/api/customers", "go-crm"},
+		{http.MethodGet, "/api/customers/extra", "legacy"},
+		{http.MethodGet, "/api/customers/", "legacy"},
+		{http.MethodPost, "/api/customers", "legacy"},
 		{http.MethodPost, "/api/crm", "legacy"},
 		{http.MethodGet, "/api/crm/timeline", "legacy"},
 	} {

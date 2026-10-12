@@ -13,6 +13,7 @@ import (
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type crmReadSessionResolver interface {
@@ -21,13 +22,22 @@ type crmReadSessionResolver interface {
 }
 
 type CRMReadSessionHandler struct {
-	resolver crmReadSessionResolver
-	executor CapabilityExecutor
-	logger   *slog.Logger
+	resolver  crmReadSessionResolver
+	executor  CapabilityExecutor
+	posReader posCustomersReader
+	logger    *slog.Logger
 }
 
 func NewCRMReadSessionHandler(resolver crmReadSessionResolver, executor CapabilityExecutor, logger *slog.Logger) http.Handler {
 	return &CRMReadSessionHandler{resolver: resolver, executor: executor, logger: logger}
+}
+
+func NewCRMReadSessionHandlerWithPOSCustomers(resolver crmReadSessionResolver, executor CapabilityExecutor, pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
+	return newCRMReadSessionHandlerWithPOSCustomers(resolver, executor, postgresPosCustomersReader{pool: pool}, logger)
+}
+
+func newCRMReadSessionHandlerWithPOSCustomers(resolver crmReadSessionResolver, executor CapabilityExecutor, reader posCustomersReader, logger *slog.Logger) http.Handler {
+	return &CRMReadSessionHandler{resolver: resolver, executor: executor, posReader: reader, logger: logger}
 }
 
 func (h *CRMReadSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -43,10 +53,17 @@ func (h *CRMReadSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	capabilityID, input, err := crmReadRequest(r.URL.Query())
-	if err != nil || !validCRMReadSelector(r) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid CRM read selector"})
-		return
+	var capabilityID string
+	var input json.RawMessage
+	if r.URL.Path == "/api/customers" {
+		capabilityID, input = "crm.listCustomerCollection", json.RawMessage(`{}`)
+	} else {
+		var err error
+		capabilityID, input, err = crmReadRequest(r.URL.Query())
+		if err != nil || !validCRMReadSelector(r) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid CRM read selector"})
+			return
+		}
 	}
 	selector, valid := activeOrganizationSelector(r)
 	if !valid {
@@ -64,7 +81,12 @@ func (h *CRMReadSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "organization access denied"})
 		return
 	}
-	if !resolved.HasPermission("crm.read") && !resolved.HasPermission("*") {
+	crmAllowed := resolved.HasPermission("crm.read") || resolved.HasPermission("*")
+	if !crmAllowed && r.URL.Path == "/api/customers" && resolved.HasPermission("pos.sell") {
+		h.servePOSCustomers(w, r, resolved)
+		return
+	}
+	if !crmAllowed {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: missing crm.read"})
 		return
 	}
@@ -105,6 +127,25 @@ func (h *CRMReadSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, json.RawMessage(result.Data))
+}
+
+func (h *CRMReadSessionHandler) servePOSCustomers(w http.ResponseWriter, r *http.Request, resolved *session.ResolvedUser) {
+	if h.posReader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "customer service unavailable"})
+		return
+	}
+	data, err := h.posReader.Read(r.Context(), *resolved.OrgID)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Error("Go POS customer read failed", "error", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if data.Customers == nil {
+		data.Customers = []posCustomerOption{}
+	}
+	writeJSON(w, http.StatusOK, data)
 }
 
 func validCRMReadSelector(r *http.Request) bool {

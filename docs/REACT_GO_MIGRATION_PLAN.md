@@ -3371,3 +3371,19 @@ new owners and the manifest shows zero legacy runtime paths.
      to Go, confirmed by Go's unauthenticated 401 response. An authenticated
      notifications browser response was not recaptured after that selector
      correction.
+
+305. (Complete; focused Go/Vite tests, independent review, and authenticated
+     browser proof passed) Move the Vite CRM customer directory to the stable
+     `GET /api/customers` endpoint owned by Go. The session-authenticated Go
+     handler delegates CRM readers to `crm.listCustomerCollection` and retains
+     the POS-only restricted projection with purchase counts and lifetime
+     spend. Both paths resolve the active organization; POS reads use
+     `dbx.WithOrgTx`. Keep POST and trailing customer paths on their existing
+     owner, and use `CHASTE_GO_CRM_READS` to select Go or legacy for the exact
+     directory GET. The focused Go and Vite tests cover permission precedence,
+     tenant scoping, response fields, exact method/path routing, and rollback.
+     On 2026-10-12, authenticated `agent-browser` created and verified a local
+     account through Go auth and onboarding, then loaded the Vite CRM directory
+     with Go enabled. `GET /api/customers` returned HTTP 200, the directory
+     rendered, no legacy customer GET occurred, and the browser reported no
+     errors. Independent review found no actionable issue.

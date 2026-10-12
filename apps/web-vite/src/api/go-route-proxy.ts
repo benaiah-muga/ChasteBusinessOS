@@ -452,6 +452,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.approvalsRead && method === "GET" && /^\/api\/approvals(?:\?.*)?$/.test(path)) return true;
   if (flags.approvalsDecision && method === "POST" && /^\/api\/approvals(?:\?.*)?$/.test(path)) return true;
   if (method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
+  if (flags.crmReads && method === "GET" && /^\/api\/customers(?:\?.*)?$/.test(path)) return true;
   if (flags.crmReads && method === "GET" && isGoCrmReadRequest(path)) return true;
   if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;
   if (method === "GET" && /^\/api\/pos\/customers(?:\?.*)?$/.test(path)) return true;

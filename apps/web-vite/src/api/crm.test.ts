@@ -57,12 +57,21 @@ describe("CRM API client", () => {
     await expect(fetchCrmTasks(undefined, { openOnly: true })).resolves.toHaveLength(1);
     await expect(fetchCrmViews()).resolves.toHaveLength(1);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/crm?customers=1",
+      "/api/customers",
       "/api/crm?tasks=1",
       "/api/crm?tasks=1&open=1",
       "/api/crm?views=1",
     ]);
     for (const [, init] of fetchMock.mock.calls) expect(init?.credentials).toBe("same-origin");
+  });
+
+  it("keeps the stable customer directory URL when Go CRM reads are rolled back", async () => {
+    vi.stubGlobal("__GO_CRM_READS__", false);
+    const fetchMock = vi.fn(async () => Response.json({ customers: [{ id: customerId, name: "Northwind" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCrmCustomers()).resolves.toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/customers", expect.objectContaining({ credentials: "same-origin" }));
   });
 
   it("restores the legacy deals, customers, and views URLs when Go CRM reads are disabled", async () => {

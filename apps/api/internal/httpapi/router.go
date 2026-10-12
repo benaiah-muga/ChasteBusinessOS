@@ -282,6 +282,7 @@ func MountGoCRMReadRoute(base, route http.Handler) http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/crm", route)
+	mux.Handle("GET /api/customers", route)
 	if base != nil {
 		mux.Handle("/", base)
 	}

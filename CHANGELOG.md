@@ -36,6 +36,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Support quick-create now uses Go's `crm.createCustomer` capability with
   actor- and organization-scoped retry protection, and fails closed when the
   Go customer-create route is disabled.
+- Vite CRM customer-directory reads now use Go's session-authenticated
+  `GET /api/customers` route, with the existing restricted customer projection
+  retained for POS-only users.
 
 - Marketing segment lifetime spend thresholds now use PostgreSQL `bigint`, so
   valid minor-unit amounts above the old 32-bit limit persist without a 500.

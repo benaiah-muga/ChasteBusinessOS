@@ -1712,6 +1712,48 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(disabled, "GET", "/api/crm?deals=1")).toBe(false);
   });
 
+  it("routes only GET /api/customers to Go under the CRM read selector", () => {
+    const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_CRM_READS: "1" });
+    expect(isGoRouteRequest(enabled, "GET", "/api/customers")).toBe(true);
+    expect(isGoRouteRequest(enabled, "GET", "/api/customers?active=1")).toBe(true);
+    expect(isGoRouteRequest(enabled, "POST", "/api/customers")).toBe(false);
+    expect(isGoRouteRequest(enabled, "GET", "/api/customers/extra")).toBe(false);
+
+    const crmRollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_CRM_READS: "0" });
+    expect(isGoRouteRequest(crmRollback, "GET", "/api/customers")).toBe(false);
+  });
+
+  it("proxies only the selected customer-directory GET to Go", async () => {
+    const go = requestRecorder("go");
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
+    const legacy = requestRecorder("legacy");
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
+    const vite: ViteDevServer = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_CRM_READS: "1" }), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+      },
+    });
+    await vite.listen();
+    runningServers.push({ close: () => vite.close() });
+    const address = vite.httpServer?.address() as AddressInfo;
+    const origin = `http://127.0.0.1:${address.port}`;
+
+    const directory = await fetch(`${origin}/api/customers`);
+    expect(await directory.json()).toMatchObject({ target: "go", method: "GET", url: "/api/customers" });
+    const create = await fetch(`${origin}/api/customers`, { method: "POST", body: "{}" });
+    expect(await create.json()).toMatchObject({ target: "legacy", method: "POST", url: "/api/customers" });
+    const suffix = await fetch(`${origin}/api/customers/extra`);
+    expect(await suffix.json()).toMatchObject({ target: "legacy", method: "GET", url: "/api/customers/extra" });
+  });
+
   it("routes only exact GET /api/pos requests when the POS read selector is enabled", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_READ_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "GET", "/api/pos")).toBe(true);
@@ -1762,7 +1804,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/support/customers?active=1")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/support/customers")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/support/customers/extra")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/customers")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/customers")).toBe(true);
   });
 
   it("keeps SCIM read and write selectors independent", () => {

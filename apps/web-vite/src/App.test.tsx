@@ -157,7 +157,7 @@ beforeEach(() => {
       catalog: ["accounting.read", "accounting.write"],
     });
     if (path === "/api/crm?deals=1") return Response.json({ deals: [] });
-    if (path === "/api/crm?customers=1") return Response.json({ customers: [] });
+    if (path === "/api/customers") return Response.json({ customers: [] });
     if (path.startsWith("/api/documents?id=")) return Response.json({ document: {
       id: "document-1",
       title: "Supplier agreement",
@@ -435,7 +435,7 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Good to see you." })).not.toBeNull();
     expect(window.location.pathname).toBe("/login");
-    expect(fetchMock.mock.calls.some(([input]) => ["/api/deals", "/api/customers", "/api/crm", "/api/crm?deals=1", "/api/crm?customers=1", "/api/crm?views=1", "/api/crm/views"].includes(String(input)))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => ["/api/deals", "/api/crm", "/api/crm?deals=1", "/api/crm?customers=1", "/api/crm?views=1", "/api/crm/views"].includes(String(input)))).toBe(false);
   });
 
   it("loads the authenticated home and signs out through Better Auth", async () => {
@@ -683,7 +683,7 @@ describe("Vite app frame", () => {
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/crm?deals=1", expect.objectContaining({ credentials: "same-origin" }));
-      expect(fetchMock).toHaveBeenCalledWith("/api/crm?customers=1", expect.objectContaining({ credentials: "same-origin" }));
+      expect(fetchMock).toHaveBeenCalledWith("/api/customers", expect.objectContaining({ credentials: "same-origin" }));
     });
   });
 

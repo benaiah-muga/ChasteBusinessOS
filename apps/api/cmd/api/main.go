@@ -452,8 +452,8 @@ func run(logger *slog.Logger) error {
 		if resolverErr != nil {
 			return resolverErr
 		}
-		crmReadRoute = httpapi.NewCRMReadSessionHandler(resolver, capabilityExecutor, logger)
-		logger.Info("Go CRM session read route mounted", "path", "GET /api/crm")
+		crmReadRoute = httpapi.NewCRMReadSessionHandlerWithPOSCustomers(resolver, capabilityExecutor, pool, logger)
+		logger.Info("Go CRM session read routes mounted", "paths", []string{"GET /api/crm", "GET /api/customers"})
 	}
 	var posReadRoute http.Handler
 	if goPosReadRouteEnabledFromEnv(os.Getenv("GO_POS_READ_ROUTE")) {

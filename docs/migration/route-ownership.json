@@ -350,8 +350,8 @@
       "path": "/api/customers",
       "method": "GET",
       "source": "apps/web/src/app/api/customers/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

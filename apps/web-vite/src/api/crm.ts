@@ -160,8 +160,7 @@ export async function fetchCrmDeals(signal?: AbortSignal): Promise<CrmDeal[]> {
 }
 
 export async function fetchCrmCustomers(signal?: AbortSignal): Promise<CrmCustomer[]> {
-  const path = crmReadsUseGo() ? "/api/crm?customers=1" : "/api/customers";
-  const result = await get(path, z.object({ customers: z.array(CrmCustomerSchema) }), signal);
+  const result = await get("/api/customers", z.object({ customers: z.array(CrmCustomerSchema) }), signal);
   return result.customers;
 }
 
