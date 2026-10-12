@@ -46,7 +46,8 @@ function formatMinutes(minutes: number): string {
 }
 
 function goHrReportForTab(tab: TabId): boolean {
-  return tab === "overview" || tab === "people" || tab === "time" || (tab === "leave" && goHrLeaveUseGo()) || (tab === "payroll" && goHrPayrollUseGo()) || (tab === "hiring" && goHrHiringUseGo());
+  const goExpenses = typeof __GO_HR_EXPENSES__ !== "undefined" && __GO_HR_EXPENSES__;
+  return tab === "overview" || tab === "people" || tab === "time" || (tab === "expenses" && goExpenses) || (tab === "leave" && goHrLeaveUseGo()) || (tab === "payroll" && goHrPayrollUseGo()) || (tab === "hiring" && goHrHiringUseGo());
 }
 
 export function HrPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {

@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite HR Expenses now loads its employee and workspace report through Go's
+  authenticated `hr.report` capability whenever Go expense reads and writes are
+  enabled. The expense page no longer needs the legacy `/api/hr` route before
+  it can use Go `accounting.*` capabilities.
 - Vite CRM lead conversion now uses the authenticated Go `crm.convertLead`
   capability. Go records a receipt-bound inverse that restores the lead and
   removes a newly created customer only when that customer is unchanged and

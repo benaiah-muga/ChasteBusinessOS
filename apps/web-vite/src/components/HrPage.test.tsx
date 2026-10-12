@@ -637,6 +637,7 @@ describe("Vite People page", () => {
     window.history.replaceState(null, "", "/hr?tab=expenses");
     vi.stubGlobal("__GO_HR_EXPENSES__", true);
     let pendingFirstSubmit = true;
+    const readCapabilities: string[] = [];
     const requests: Array<{ capabilityId: string; intentId: string; input: Record<string, unknown> }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -646,6 +647,10 @@ describe("Vite People page", () => {
       if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
       if (path === "/api/capabilities/execute") {
         const body = JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> };
+        if (body.capabilityId === "hr.report") {
+          readCapabilities.push(body.capabilityId);
+          return Response.json({ ok: true, data: report });
+        }
         if (body.capabilityId === "accounting.listExpenseClaims") return Response.json({ ok: true, data: { claims: [expenseClaim] } });
         if (body.capabilityId === "accounting.listExpensePolicies") return Response.json({ ok: true, data: { policies: [] } });
         requests.push(body);
@@ -661,6 +666,8 @@ describe("Vite People page", () => {
     const page = render(<HrPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     await screen.findByRole("heading", { name: "Submit an expense claim" });
+    expect(readCapabilities).toEqual(["hr.report"]);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
     fireEvent.change(screen.getByRole("spinbutton", { name: "Expense amount" }), { target: { value: "42.50" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Expense explanation" }), { target: { value: "Client travel" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit claim" }));
@@ -677,6 +684,7 @@ describe("Vite People page", () => {
     expect(requests[0]?.intentId).toBe(requests[1]?.intentId);
     expect(requests[0]?.input).toEqual({ amountMinor: 4250, memo: "Client travel" });
     expect(requests[1]?.input).toEqual(requests[0]?.input);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/expenses")).toBe(false);
     expect(fetchMock).not.toHaveBeenCalledWith("/api/expenses", expect.anything());
   });
 

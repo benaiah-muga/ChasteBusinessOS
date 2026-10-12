@@ -566,3 +566,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests .* passed|ok.*internal\/capability|ok.*internal\/httpapi/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Capability manifest and route ownership checks passed. The Go capability tests and real worker-role DB proof passed convert -> approved undo -> reapply. An authenticated agent-browser signup, verification, sign-in, and onboarding used Go; both Vite conversion modes returned HTTP 200 from `/api/capabilities/execute`, CRM reads returned HTTP 200, no legacy CRM write request occurred, and browser console/errors were empty. Fresh independent review found no blocker.
+
+- [x] G111: Vite HR Expenses loads employee context and expense data through Go, without requiring the legacy HR or Expenses APIs.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/components/HrPage.test.tsx src/api/hr.test.ts src/api/expenses.test.ts && git diff --check
+  EXPECT: /Tests .* passed|git diff --check/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: The focused HR and Expenses suite passed 66 tests, and the full Vite suite passed 1,866 tests across 97 files. Vite typecheck, changed-file ESLint, production build, route ownership check (`94 files, 161 methods, 30 pages`), and diff check passed. Authenticated agent-browser loaded `/hr?tab=expenses`; `GET /api/modules` and Go `hr.report`, expense claim, and policy reads returned HTTP 200. A synthetic UGX 1,000 claim was submitted through Go and remained visible after reload. No `/api/hr` or `/api/expenses` request occurred, and browser errors were empty.

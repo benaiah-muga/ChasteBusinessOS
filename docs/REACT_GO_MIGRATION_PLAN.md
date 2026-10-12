@@ -1989,8 +1989,12 @@ new owners and the manifest shows zero legacy runtime paths.
      blocks legacy writes while a Go attempt remains unresolved. A Go 404 never
      falls back to `/api/expenses`. Preserve the existing claim and policy UI.
      Focused API, proxy selector, and HrPage tests pass; existing DB-backed Go
-     expense capability tests remain the contract proof. Authenticated browser
-     proof remains open.
+     expense capability tests remain the contract proof. When the Go expense
+     selector is enabled, bootstrap the HR Expenses page with Go `hr.report` so
+     the page never needs the legacy `/api/hr` route. Authenticated browser
+     proof passed: report, claim and policy reads, and claim submission returned
+     HTTP 200 through Go, with no legacy HR or Expenses API request or browser
+     errors.
 190. (Implemented; browser proof pending) Route only the Vite HR Leave tab through Go's session-authenticated
      `hr.report`, `hr.requestLeave`, `hr.decideLeave`, and `hr.cancelLeave`
      capabilities behind paired `CHASTE_GO_HR_LEAVE=1` and
