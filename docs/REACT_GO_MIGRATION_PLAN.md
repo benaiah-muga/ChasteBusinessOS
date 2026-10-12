@@ -2632,12 +2632,16 @@ new owners and the manifest shows zero legacy runtime paths.
      `typing: false` to the Go session route with HTTP 200, and received HTTP
      200 for the online presence GET polls. The browser error log was empty.
      See proof 322.
-235. (Vite implementation complete; browser proof pending) Route pending
+235. (Complete) Route pending
      conversation attachment uploads through the session-authenticated
      `messaging.uploadMessageAttachment` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the upload receipt,
      enforce the existing 1-byte to 5-MiB limit before dispatch, and set
-     `CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD=0` for legacy rollback.
+     `CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD=0` for legacy rollback. On
+     2026-10-12, authenticated Vite `/messages` uploaded a 70-byte synthetic
+     text attachment through `messaging.uploadMessageAttachment` with HTTP
+     200, then sent it with a Go `messaging.sendMessage` request. The file
+     appeared in the refreshed thread, with no browser errors. See proof 323.
 236. (Complete) Route conversation
      creation through the session-authenticated `messaging.createConversation`
      capability when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the Go
@@ -3564,3 +3568,10 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_MESSAGING_PRESENCE=1`, and
      `GO_MESSAGING_PRESENCE_ROUTE=1` were set, and the browser error log was
      empty. This completes item 234.
+
+323. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` uploaded
+     the 70-byte file `chaste-message-attachment-proof-20261012.txt` through Go's
+     `messaging.uploadMessageAttachment` capability; the upload and subsequent
+     `messaging.sendMessage` requests both returned HTTP 200. The file appeared
+     in the refreshed synthetic thread, and the browser error log was empty.
+     This completes item 235.
