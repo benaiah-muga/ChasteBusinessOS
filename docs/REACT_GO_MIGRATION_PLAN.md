@@ -2730,12 +2730,12 @@ new owners and the manifest shows zero legacy runtime paths.
      status under `dbx.WithOrgTx`. Changed pending or skipped steps create the
      same notification as before in the state transaction. Keep the existing
      Go POST behavior and use the selector as an explicit rollback switch.
-     (Go/Vite implementation complete; browser proof pending) The Vite
+     (Complete; authenticated browser proof passed) The Vite
      onboarding API, wizard, page, and route-proxy suite passed all 190 tests;
      Vite typecheck and lint passed. The full Go HTTP API package passed with
      runtime integration required, including onboarding session, organization
      scope, state, notification, origin, and error-mapping cases. Independent
-     review found no remaining issues. Browser runtime proof remains open.
+     review found no remaining issues.
 
 252. Route the Vite Manufacturing overview report through a new
      `manufacturing.overviewReport` Go capability under the existing
@@ -3435,3 +3435,12 @@ new owners and the manifest shows zero legacy runtime paths.
      `support.updateTicket`, Go returned HTTP 200, and the refreshed ticket
      showed all three fields blank. No legacy Support write request or browser
      error occurred. Together with item 310, this completes item 250.
+
+312. (Runtime verified) On 2026-10-12, the authenticated Vite browser session
+     read onboarding state from `/api/onboarding`, sent an idempotent
+     `business_profile: done` update, and read the state again. Go returned
+     HTTP 200 for GET, PATCH, and the follow-up GET; the state remained
+     consistent, and the browser error log was empty. The captured request log
+     showed no legacy onboarding endpoint calls. The Vite process had
+     `CHASTE_GO_ONBOARDING_ROUTE=1` and pointed to the running Go API. This
+     completes item 251.
