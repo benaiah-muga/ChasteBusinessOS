@@ -310,6 +310,20 @@
     },
     {
       "kind": "api",
+      "path": "/api/docs/[id]/workspace",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]/workspace",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
       "path": "/api/inventory",
       "method": "GET",
       "owner": "go",

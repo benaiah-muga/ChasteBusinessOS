@@ -422,16 +422,16 @@
       "path": "/api/docs/[id]/workspace",
       "method": "POST",
       "source": "apps/web/src/app/api/docs/[id]/workspace/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/docs/[id]/workspace",
       "method": "DELETE",
       "source": "apps/web/src/app/api/docs/[id]/workspace/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
