@@ -2677,7 +2677,7 @@ new owners and the manifest shows zero legacy runtime paths.
      including its `accrualExpenseMinor` field, then project to the existing
      five-field UI shape. Keep failures nullable and do not fall back after a
      selected Go request; set `CHASTE_GO_ACCOUNTING_CASH_BASIS=0` for rollback.
-245. (Go/Vite implementation complete; browser proof pending) Route Vite
+245. (Complete; authenticated browser proof recorded in item 314) Route Vite
      Accounting overview reads through the session-authenticated Go
      `accounting.overview` capability unconditionally. Validate the strict
      overview response and safe-integer entry debit aggregates, and fail closed
@@ -3455,3 +3455,12 @@ new owners and the manifest shows zero legacy runtime paths.
      disappeared from the active directory. The browser request log contained
      no `/api/import` calls, and the browser error log was empty. This completes
      item 188.
+
+314. (Runtime verified) On 2026-10-12, the authenticated Vite Accounting page
+     loaded its books and reports through Go. `accounting.overview`, the five
+     financial report capabilities, `accounting.cashBasisReport`, and
+     `accounting.listBankingWorkspace` each returned HTTP 200. The overview and
+     accounting sections rendered, no legacy `/api/reports` request occurred,
+     and the browser error log was empty. Vite had
+     `CHASTE_GO_ACCOUNTING_REPORTS=1` and used the running Go API. This completes
+     item 245.
