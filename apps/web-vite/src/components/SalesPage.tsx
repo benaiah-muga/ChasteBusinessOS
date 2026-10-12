@@ -3,7 +3,7 @@ import { currencyMinorUnits } from "@chaste/erp-core";
 import { clearRouteLessSalesOrderAttempt, confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite, type RouteLessSalesOrderMarker, type SalesOrder } from "../api/sales";
 import { PosApiError } from "../api/pos";
 import { fetchPosCustomers, type PosCustomer } from "../api/pos-session";
-import { legacyUrl } from "../legacy";
+import { SalesQuoteWorkspace } from "./SalesQuoteWorkspace";
 import "./sales-page.css";
 
 type PageState =
@@ -513,16 +513,17 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         <div>
           <p className="sales-eyebrow">Revenue · preview</p>
           <h1 id="sales-title">Sales orders</h1>
-          <p>Review orders, create drafts, and deliver or cancel confirmed orders. Use the full workspace for quotes and advanced workflows.</p>
+          <p>Review and create orders, quotes, and customer relationships. Quote actions and CRM views run through authenticated Go capabilities.</p>
         </div>
         <div className="sales-header-actions">
           {state.status === "ready" && <span className="sales-order-count">{state.orders.length} {state.orders.length === 1 ? "order" : "orders"}</span>}
           <button className="sales-new-order" type="button" disabled={createAttemptPending} onClick={() => { setShowCreateForm((open) => !open); setCreateError(null); }} aria-expanded={showCreateForm}>
             {showCreateForm ? "Close order form" : "Create sales order"}
           </button>
-          <a className="sales-full-workspace" href={legacyUrl("/sales")}>Open full sales workspace</a>
         </div>
       </header>
+
+      <SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency={baseCurrency} />
 
       {actionNotice && <p className={`sales-action-notice sales-action-notice-${actionNotice.tone}`} role={actionNotice.tone === "error" ? "alert" : "status"}>{actionNotice.message}</p>}
 

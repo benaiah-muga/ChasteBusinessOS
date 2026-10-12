@@ -50,27 +50,165 @@
   font-weight: 600;
 }
 
+.sales-quotes-workspace {
+  margin: 0 0 2rem;
+  border: 1px solid #e9e6de;
+  border-radius: 1rem;
+  padding: 1.25rem;
+  background: #fbfaf7;
+}
+
+.sales-quotes-heading,
+.sales-quote-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.sales-quotes-heading h2,
+.sales-quote-form h3,
+.sales-quote-list h3,
+.sales-relationship-list h3 {
+  margin: 0;
+  color: #25241f;
+}
+
+.sales-quotes-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.sales-quotes-tabs button {
+  border: 1px solid #d9d4c8;
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  background: #fff;
+  color: #302f29;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sales-quotes-tabs button[aria-pressed="true"] {
+  border-color: #302f29;
+  background: #302f29;
+  color: #fff;
+}
+
+.sales-quote-form,
+.sales-quote-list,
+.sales-relationship-list {
+  margin-top: 1rem;
+  border: 1px solid #e9e6de;
+  border-radius: 0.8rem;
+  padding: 1rem;
+  background: #fff;
+}
+
+.sales-quote-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.sales-quote-fields label,
+.sales-quote-line label,
+.sales-quote-list-heading label {
+  display: grid;
+  gap: 0.35rem;
+  color: #68665d;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.sales-quote-fields input,
+.sales-quote-fields select,
+.sales-quote-fields textarea,
+.sales-quote-line input,
+.sales-quote-list-heading input,
+.sales-quote-list-heading select {
+  min-width: 0;
+  border: 1px solid #e5e2d9;
+  border-radius: 0.55rem;
+  padding: 0.6rem 0.7rem;
+  background: #fff;
+  color: #25241f;
+  font: inherit;
+}
+
+.sales-quote-fields textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
+.sales-quote-memo {
+  grid-column: 1 / -1;
+}
+
+.sales-quote-lines {
+  display: grid;
+  gap: 0.8rem;
+  margin: 1.1rem 0;
+}
+
+.sales-quote-lines h4 {
+  margin: 0;
+}
+
+.sales-quote-line {
+  display: grid;
+  grid-template-columns: minmax(10rem, 2fr) repeat(3, minmax(6rem, 1fr)) auto;
+  align-items: end;
+  gap: 0.6rem;
+}
+
+.sales-quote-help,
+.sales-quote-empty {
+  color: #77756d;
+  font-size: 0.85rem;
+}
+
+.sales-relationship-list ul {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sales-relationship-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid #eeeae2;
+  padding: 0.8rem 0;
+}
+
+.sales-relationship-list li div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.sales-relationship-list li span {
+  color: #77756d;
+  font-size: 0.84rem;
+}
+
+.sales-relationship-list a,
+.sales-quote-list a {
+  color: #66502d;
+  font-weight: 650;
+}
+
 .sales-header-actions {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   gap: 0.7rem;
-}
-
-.sales-full-workspace {
-  border: 1px solid #302f29;
-  border-radius: 0.7rem;
-  padding: 0.65rem 0.85rem;
-  background: #302f29;
-  color: #fff;
-  font-size: 0.82rem;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.sales-full-workspace:focus-visible {
-  outline: 3px solid #b88a4f;
-  outline-offset: 2px;
 }
 
 .sales-new-order,
@@ -466,6 +604,15 @@
 
   .sales-error-actions {
     align-self: flex-end;
+  }
+
+  .sales-quote-fields,
+  .sales-quote-line {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .sales-quote-line label:first-child {
+    grid-column: 1 / -1;
   }
 
   .sales-table th,

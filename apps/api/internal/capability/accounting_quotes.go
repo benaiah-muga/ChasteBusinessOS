@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
@@ -86,21 +87,61 @@ func ParseCreateQuoteInput(raw json.RawMessage) (CreateQuoteInput, error) {
 	if err != nil {
 		return CreateQuoteInput{}, err
 	}
+	if err := rejectQuoteFields(fields, "customerId", "memo", "expiresAt", "lines"); err != nil {
+		return CreateQuoteInput{}, err
+	}
 	var input CreateQuoteInput
 	input.CustomerID, err = requiredString(fields, "customerId")
-	if err != nil {
-		return CreateQuoteInput{}, err
+	if err != nil || !isZodUUID(input.CustomerID) {
+		return CreateQuoteInput{}, errors.New("customerId must be a UUID")
 	}
 	if input.Memo, err = optionalString(fields, "memo"); err != nil {
 		return CreateQuoteInput{}, err
+	} else if input.Memo != nil && (utf16Length(*input.Memo) > 4000 || strings.ContainsRune(*input.Memo, '\x00')) {
+		return CreateQuoteInput{}, errors.New("memo must be at most 4000 characters and cannot contain a null byte")
 	}
-	if input.ExpiresAt, err = crmTaskOptionalDateTime(fields, "expiresAt"); err != nil {
+	if input.ExpiresAt, err = quoteOptionalDateTime(fields, "expiresAt"); err != nil {
 		return CreateQuoteInput{}, err
 	}
 	if input.Lines, err = parseCreateQuoteLines(fields); err != nil {
 		return CreateQuoteInput{}, err
 	}
 	return input, nil
+}
+
+func rejectQuoteFields(fields map[string]json.RawMessage, allowed ...string) error {
+	allowedFields := make(map[string]struct{}, len(allowed))
+	for _, field := range allowed {
+		allowedFields[field] = struct{}{}
+	}
+	for field := range fields {
+		if _, ok := allowedFields[field]; !ok {
+			return fmt.Errorf("unknown quote field %q", field)
+		}
+	}
+	return nil
+}
+
+func quoteOptionalDateTime(fields map[string]json.RawMessage, key string) (*string, error) {
+	value, err := optionalString(fields, key)
+	if err != nil || value == nil {
+		return value, err
+	}
+	if _, err := time.Parse(time.RFC3339Nano, *value); err != nil {
+		return nil, fmt.Errorf("%s must be an ISO datetime with a timezone", key)
+	}
+	return value, nil
+}
+
+func quoteDateTimeValue(value *string) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, *value)
+	if err != nil {
+		return nil, errors.New("quote expiry must be an ISO datetime with a timezone")
+	}
+	return parsed.UTC().Truncate(time.Millisecond), nil
 }
 
 func parseCreateQuoteLines(fields map[string]json.RawMessage) ([]CreateInvoiceLine, error) {
@@ -112,35 +153,37 @@ func parseCreateQuoteLines(fields map[string]json.RawMessage) ([]CreateInvoiceLi
 	if err := json.Unmarshal(linesRaw, &lineValues); err != nil || len(lineValues) == 0 {
 		return nil, errors.New("lines must contain at least one line")
 	}
+	if len(lineValues) > 100 {
+		return nil, errors.New("lines must contain at most 100 entries")
+	}
 	lines := make([]CreateInvoiceLine, 0, len(lineValues))
 	for _, lineRaw := range lineValues {
 		lineFields, err := decodeJSONObject(lineRaw)
 		if err != nil {
 			return nil, errors.New("each quote line must be an object")
 		}
+		if err := rejectQuoteFields(lineFields, "description", "quantity", "unitPriceMinor", "taxMinor"); err != nil {
+			return nil, err
+		}
 		var line CreateInvoiceLine
 		line.Description, err = requiredString(lineFields, "description")
-		if err != nil || utf16Length(line.Description) < 1 {
-			return nil, errors.New("line description must contain at least one character")
+		if err != nil {
+			return nil, err
+		}
+		line.Description = strings.TrimSpace(line.Description)
+		if length := utf16Length(line.Description); length < 1 || length > 500 || strings.ContainsRune(line.Description, '\x00') {
+			return nil, errors.New("description must contain 1 to 500 characters after trimming and no null byte")
 		}
 		line.Quantity, err = requiredSafeInteger(lineFields, "quantity")
-		if err != nil || line.Quantity <= 0 {
+		if err != nil || line.Quantity <= 0 || line.Quantity > maxDatabaseInteger {
 			return nil, errors.New("quantity must be a positive integer")
 		}
 		line.UnitPriceMinor, err = requiredSafeInteger(lineFields, "unitPriceMinor")
-		if err != nil || line.UnitPriceMinor < 0 {
+		if err != nil || line.UnitPriceMinor < 0 || line.UnitPriceMinor > maxDatabaseInteger {
 			return nil, errors.New("unitPriceMinor must be a non-negative integer")
 		}
-		if line.TaxMinor, err = optionalSafeInteger(lineFields, "taxMinor"); err != nil || line.TaxMinor != nil && *line.TaxMinor < 0 {
+		if line.TaxMinor, err = optionalSafeInteger(lineFields, "taxMinor"); err != nil || line.TaxMinor != nil && (*line.TaxMinor < 0 || *line.TaxMinor > maxDatabaseInteger) {
 			return nil, errors.New("taxMinor must be a non-negative integer")
-		}
-		if line.TaxCodeID, err = optionalString(lineFields, "taxCodeId"); err != nil {
-			return nil, errors.New("taxCodeId must be a UUID")
-		} else if line.TaxCodeID != nil && !isZodUUID(*line.TaxCodeID) {
-			return nil, errors.New("taxCodeId must be a UUID")
-		}
-		if line.TaxCodeID != nil && line.TaxMinor != nil {
-			return nil, errors.New("use a configured tax code or a manual tax amount, not both")
 		}
 		lines = append(lines, line)
 	}
@@ -150,6 +193,9 @@ func parseCreateQuoteLines(fields map[string]json.RawMessage) ([]CreateInvoiceLi
 func ParseAcceptQuoteInput(raw json.RawMessage) (AcceptQuoteInput, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
+		return AcceptQuoteInput{}, err
+	}
+	if err := rejectQuoteFields(fields, "quoteId"); err != nil {
 		return AcceptQuoteInput{}, err
 	}
 	quoteID, err := requiredString(fields, "quoteId")
@@ -165,6 +211,9 @@ func ParseAcceptQuoteInput(raw json.RawMessage) (AcceptQuoteInput, error) {
 func ParseDeclineQuoteInput(raw json.RawMessage) (DeclineQuoteInput, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
+		return DeclineQuoteInput{}, err
+	}
+	if err := rejectQuoteFields(fields, "quoteId"); err != nil {
 		return DeclineQuoteInput{}, err
 	}
 	quoteID, err := requiredString(fields, "quoteId")
@@ -211,17 +260,17 @@ func ParseListQuotesInput(raw json.RawMessage) (ListQuotesInput, error) {
 func computeQuoteTotals(lines []CreateInvoiceLine) (int64, int64, int64, error) {
 	var subtotal, tax big.Int
 	for _, line := range lines {
-		if line.Quantity <= 0 || line.Quantity > maxSafeInteger {
+		if line.Quantity <= 0 || line.Quantity > maxDatabaseInteger {
 			return 0, 0, 0, errors.New("invalid quantity")
 		}
-		if line.UnitPriceMinor < 0 || line.UnitPriceMinor > maxSafeInteger {
+		if line.UnitPriceMinor < 0 || line.UnitPriceMinor > maxDatabaseInteger {
 			return 0, 0, 0, errors.New("invalid unit price")
 		}
 		taxMinor := int64(0)
 		if line.TaxMinor != nil {
 			taxMinor = *line.TaxMinor
 		}
-		if taxMinor < 0 || taxMinor > maxSafeInteger {
+		if taxMinor < 0 || taxMinor > maxDatabaseInteger {
 			return 0, 0, 0, errors.New("invalid tax")
 		}
 		numerator := new(big.Int).Mul(big.NewInt(line.Quantity), big.NewInt(line.UnitPriceMinor))
@@ -231,11 +280,11 @@ func computeQuoteTotals(lines []CreateInvoiceLine) (int64, int64, int64, error) 
 	}
 	total := new(big.Int).Add(&subtotal, &tax)
 	if total.Sign() <= 0 {
-		return 0, 0, 0, errors.New("invoice must have a non-zero total")
+		return 0, 0, 0, AccountingDomainError("invoice must have a non-zero total")
 	}
-	safeMax := big.NewInt(maxSafeInteger)
-	if subtotal.Cmp(safeMax) > 0 || tax.Cmp(safeMax) > 0 || total.Cmp(safeMax) > 0 {
-		return 0, 0, 0, errors.New("invoice total exceeds the supported amount range")
+	databaseMax := big.NewInt(maxDatabaseInteger)
+	if subtotal.Cmp(databaseMax) > 0 || tax.Cmp(databaseMax) > 0 || total.Cmp(databaseMax) > 0 {
+		return 0, 0, 0, AccountingDomainError("invoice total exceeds the supported amount range")
 	}
 	return subtotal.Int64(), tax.Int64(), total.Int64(), nil
 }
@@ -264,7 +313,7 @@ func createQuote(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityCla
 		return CreateQuoteOutput{}, err
 	}
 	if !customerExists {
-		return CreateQuoteOutput{}, errors.New("customer not found")
+		return CreateQuoteOutput{}, AccountingDomainError("customer not found")
 	}
 	subtotalMinor, taxMinor, totalMinor, err := computeQuoteTotals(input.Lines)
 	if err != nil {
@@ -274,7 +323,7 @@ func createQuote(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityCla
 	if err != nil {
 		return CreateQuoteOutput{}, err
 	}
-	expiresAt, err := projectDateTimeValue(input.ExpiresAt)
+	expiresAt, err := quoteDateTimeValue(input.ExpiresAt)
 	if err != nil {
 		return CreateQuoteOutput{}, err
 	}

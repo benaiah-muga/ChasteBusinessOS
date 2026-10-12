@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Sales now creates and lists quotes, accepts sent quotes into invoices,
+  and shows Go-backed customers and deals. Quote writes use authenticated Go
+  capabilities with actor/workspace-scoped exact retry intents, including
+  non-UUID Better Auth user IDs. Go validates quote inputs against PostgreSQL integer limits and returns a
+  client error when the selected customer is outside the active workspace. The
+  Sales page no longer links to the legacy workspace.
 - Vite Documents now creates editable drafts, saves templates, and ingests
   pasted text or PDF/image records through authenticated Go capabilities. The
   browser checks upload size, MIME type, text length, scope, and exact retry

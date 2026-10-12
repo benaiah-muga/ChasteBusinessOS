@@ -3860,3 +3860,24 @@ new owners and the manifest shows zero legacy runtime paths.
      onboarding POST/PATCH flow and opened the Vite dashboard. The route
      ownership manifest now records `/onboarding` as Vite-verified. This
      completes item 354.
+
+356. (Complete) Add Vite Sales quote creation/listing/acceptance through Go's
+     authenticated `accounting.createQuote`, `accounting.listQuotes`, and
+     `accounting.acceptQuote` capabilities. Load the related customer and deal
+     views with `crm.listCustomers` and `crm.listDeals`, validate response
+     UUIDs and amounts, preserve exact actor/workspace-scoped retry intents for
+     writes, and remove the link to the legacy Sales workspace.
+
+357. (Runtime verified) On 2026-10-13, the authenticated Vite browser created
+     quote #1 for a synthetic customer, then accepted it into invoice #1.
+     The quote list showed the accepted status and UGX 125 total; the customer
+     and deal tabs loaded from the Go-backed workspace. Quote create, accept,
+     and subsequent quote/customer/deal reads used authenticated
+     `/api/capabilities/execute` requests with HTTP 200. No quote or deal
+     traffic used `/api/quotes`, `/api/deals`, or port 3001. The browser page
+     error log was empty. Runtime testing also caught and fixed a retry-scope
+     check that incorrectly required Better Auth user IDs to be UUIDs. The
+     full CRM page still has legacy customer reads, so this proof only covers
+     the Sales quote workspace. Go rejects invalid input and amounts beyond
+     PostgreSQL integer bounds, and returns HTTP 422 for a missing or foreign-
+     workspace customer. This completes item 356.

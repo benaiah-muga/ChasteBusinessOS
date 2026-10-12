@@ -2,7 +2,9 @@ package capability
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,13 +15,14 @@ import (
 
 func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 	quoteID := "11111111-1111-4111-8111-111111111111"
-	createRaw := `{"customerId":"acme-corp-001","memo":"Spring offer","expiresAt":"2026-10-01T09:30:00.123Z","lines":[{"description":"Legacy migration","quantity":1500,"unitPriceMinor":999},{"description":"With tax","quantity":1000,"unitPriceMinor":50000,"taxMinor":2000}],"unknown":true}`
+	customerID := "22222222-2222-4222-8222-222222222222"
+	createRaw := `{"customerId":"` + customerID + `","memo":"Spring offer","expiresAt":"2026-10-01T09:30:00.123Z","lines":[{"description":"Legacy migration","quantity":1500,"unitPriceMinor":999},{"description":"With tax","quantity":1000,"unitPriceMinor":50000,"taxMinor":2000}]}`
 	created, err := ParseCreateQuoteInput(json.RawMessage(createRaw))
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantCreate := CreateQuoteInput{
-		CustomerID: "acme-corp-001",
+		CustomerID: customerID,
 		Memo:       crmStringPointer("Spring offer"),
 		ExpiresAt:  crmStringPointer("2026-10-01T09:30:00.123Z"),
 		Lines: []CreateInvoiceLine{
@@ -38,17 +41,26 @@ func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCreateJSON := `{"customerId":"acme-corp-001","memo":"Spring offer","expiresAt":"2026-10-01T09:30:00.123Z","lines":[{"description":"Legacy migration","quantity":1500,"unitPriceMinor":999},{"description":"With tax","quantity":1000,"unitPriceMinor":50000,"taxMinor":2000}]}`
+	wantCreateJSON := `{"customerId":"` + customerID + `","memo":"Spring offer","expiresAt":"2026-10-01T09:30:00.123Z","lines":[{"description":"Legacy migration","quantity":1500,"unitPriceMinor":999},{"description":"With tax","quantity":1000,"unitPriceMinor":50000,"taxMinor":2000}]}`
 	if string(encoded) != wantCreateJSON {
 		t.Fatalf("ParseCreateQuoteInput() JSON = %s, want %s", encoded, wantCreateJSON)
 	}
 
-	minimal, err := ParseCreateQuoteInput(json.RawMessage(`{"customerId":"c","lines":[{"description":"d","quantity":1000,"unitPriceMinor":10}]}`))
+	minimal, err := ParseCreateQuoteInput(json.RawMessage(`{"customerId":"` + customerID + `","lines":[{"description":"d","quantity":1000,"unitPriceMinor":10}]}`))
 	if err != nil || minimal.Memo != nil || minimal.ExpiresAt != nil || minimal.Lines[0].TaxMinor != nil || minimal.Lines[0].TaxCodeID != nil {
 		t.Fatalf("minimal createQuote input=%+v err=%v, want absent optionals", minimal, err)
 	}
+	offsetExpiry := `{"customerId":"` + customerID + `","expiresAt":"2026-10-01T09:30:00+02:00","lines":[{"description":"d","quantity":1000,"unitPriceMinor":10}]}`
+	offsetQuote, err := ParseCreateQuoteInput(json.RawMessage(offsetExpiry))
+	if err != nil {
+		t.Fatalf("ParseCreateQuoteInput rejected offset datetime: %v", err)
+	}
+	storedExpiry, err := quoteDateTimeValue(offsetQuote.ExpiresAt)
+	if err != nil || storedExpiry.(time.Time).Format(time.RFC3339) != "2026-10-01T07:30:00Z" {
+		t.Fatalf("quoteDateTimeValue(%v) = %v, %v, want normalized UTC expiry", offsetQuote.ExpiresAt, storedExpiry, err)
+	}
 
-	accepted, err := ParseAcceptQuoteInput(json.RawMessage(`{"quoteId":"` + quoteID + `","unknown":2}`))
+	accepted, err := ParseAcceptQuoteInput(json.RawMessage(`{"quoteId":"` + quoteID + `"}`))
 	if err != nil || accepted.QuoteID != quoteID {
 		t.Fatalf("ParseAcceptQuoteInput() = %+v, %v", accepted, err)
 	}
@@ -77,32 +89,43 @@ func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 	for _, raw := range []string{
 		`[]`,
 		`{}`,
+		`{"customerId":"not-a-uuid","lines":[` + line + `]}`,
 		`{"customerId":null,"lines":[` + line + `]}`,
 		`{"customerId":123,"lines":[` + line + `]}`,
-		`{"customerId":"c"}`,
-		`{"customerId":"c","lines":[]}`,
-		`{"customerId":"c","lines":null}`,
-		`{"customerId":"c","lines":{"description":"d"}}`,
-		`{"customerId":"c","memo":null,"lines":[` + line + `]}`,
-		`{"customerId":"c","expiresAt":null,"lines":[` + line + `]}`,
-		`{"customerId":"c","expiresAt":"2026-10-01T09:30:00+02:00","lines":[` + line + `]}`,
-		`{"customerId":"c","expiresAt":"2026-10-01 09:30:00","lines":[` + line + `]}`,
-		`{"customerId":"c","expiresAt":"soon","lines":[` + line + `]}`,
-		`{"customerId":"c","lines":["not-an-object"]}`,
-		`{"customerId":"c","lines":[{"description":"","quantity":1000,"unitPriceMinor":1}]}`,
-		`{"customerId":"c","lines":[{"description":null,"quantity":1000,"unitPriceMinor":1}]}`,
-		`{"customerId":"c","lines":[{"quantity":1000,"unitPriceMinor":1}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":0,"unitPriceMinor":1}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":-1000,"unitPriceMinor":1}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":1000.5,"unitPriceMinor":1}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":1000}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":1000,"unitPriceMinor":-1}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxMinor":-5}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxMinor":null}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxMinor":0.5}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxCodeId":"nope"}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxCodeId":null}]}`,
-		`{"customerId":"c","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxCodeId":"` + quoteID + `","taxMinor":5}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222"}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":null}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":{"description":"d"}}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","memo":null,"lines":[` + line + `]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","expiresAt":null,"lines":[` + line + `]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","expiresAt":"2026-10-01 09:30:00","lines":[` + line + `]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","expiresAt":"soon","lines":[` + line + `]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","unknown":true,"lines":[` + line + `]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":["not-an-object"]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"","quantity":1000,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":null,"quantity":1000,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"quantity":1000,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":0,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":-1000,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000.5,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":-1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxMinor":-5}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxMinor":null}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxMinor":0.5}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":2147483648,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":2147483648}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxMinor":2147483648}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxCodeId":"nope"}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxCodeId":null}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxCodeId":"` + quoteID + `","taxMinor":5}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","memo":"` + strings.Repeat("x", 4001) + `","lines":[` + line + `]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","memo":"bad\u0000memo","lines":[` + line + `]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"` + strings.Repeat("x", 501) + `","quantity":1000,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"   ","quantity":1000,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"bad\u0000description","quantity":1000,"unitPriceMinor":1}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[{"description":"d","quantity":1000,"unitPriceMinor":1,"taxCodeId":"` + quoteID + `"}]}`,
+		`{"customerId":"22222222-2222-4222-8222-222222222222","lines":[` + strings.TrimSuffix(strings.Repeat(line+",", 101), ",") + `]}`,
 	} {
 		if _, err := ParseCreateQuoteInput(json.RawMessage(raw)); err == nil {
 			t.Errorf("ParseCreateQuoteInput accepted %s", raw)
@@ -114,6 +137,7 @@ func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 		`{"quoteId":123}`,
 		`{"quoteId":"not-a-uuid"}`,
 		`{"quoteId":"11111111-1111-1111-1111-111111111111"}`,
+		`{"quoteId":"` + quoteID + `","unknown":2}`,
 	} {
 		if _, err := ParseAcceptQuoteInput(json.RawMessage(raw)); err == nil {
 			t.Errorf("ParseAcceptQuoteInput accepted %s", raw)
@@ -139,6 +163,21 @@ func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 	}
 	if _, err := ParseExpireQuoteInput(json.RawMessage(`{"unknown":true}`)); err != nil {
 		t.Errorf("ParseExpireQuoteInput rejected unknown fields: %v", err)
+	}
+}
+
+func TestComputeQuoteTotalsClassifiesClientDomainErrors(t *testing.T) {
+	for name, lines := range map[string][]CreateInvoiceLine{
+		"zero total":     {{Description: "Free service", Quantity: 1_000, UnitPriceMinor: 0}},
+		"database total": {{Description: "Large service", Quantity: 2_000, UnitPriceMinor: 1_073_741_824}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, _, err := computeQuoteTotals(lines)
+			var domainError AccountingDomainError
+			if !errors.As(err, &domainError) {
+				t.Fatalf("computeQuoteTotals error = %v, want AccountingDomainError", err)
+			}
+		})
 	}
 }
 
@@ -303,7 +342,8 @@ func TestGoAccountingQuotesCreatePersistsLinesTotalsAndSequences(t *testing.T) {
 				Lines:      []CreateInvoiceLine{{Description: "Nope", Quantity: 1_000, UnitPriceMinor: 1}},
 			})
 		})
-		if err == nil || err.Error() != "customer not found" {
+		var domainError AccountingDomainError
+		if !errors.As(err, &domainError) || domainError.Error() != "customer not found" {
 			t.Fatalf("createQuote for customer %s error = %v, want customer not found", badCustomer, err)
 		}
 	}
