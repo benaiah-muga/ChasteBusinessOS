@@ -2319,7 +2319,7 @@ new owners and the manifest shows zero legacy runtime paths.
      through `accounting.customerStatement` with HTTP 200 after reload. The
      legacy `/api/accounting` write route was not requested and no browser
      errors occurred.
-208. (Implemented; default-on for Vite direct capability actions) Route the
+208. (Done; default-on for Vite direct capability actions) Route the
      existing Vite Projects create, archive, task create, move, and assignment
      actions through Go's session-authenticated capabilities when
      `CHASTE_GO_PROJECTS_WRITES=1` and
@@ -2343,8 +2343,11 @@ new owners and the manifest shows zero legacy runtime paths.
      Retry marker lookup, reservation, and cleanup now share a per-scope Web
      Lock; tests prove concurrent identical submissions reuse an intent and
      missing Web Locks prevent dispatch. Independent review found no remaining
-     issues. The in-app browser was unavailable, so browser runtime proof
-     remains open.
+     issues. Authenticated browser proof created a project and task, moved the
+     task to Doing, assigned it to the owner, archived the project, and restored
+     it through `projects.restoreProject`. Each Go capability returned HTTP
+     200; the active project, task status, and assignment remained after reload.
+     No legacy project POST or browser errors occurred.
 209. (Implemented) Route Vite cycle-count create, record, post, and cancel
      through Go's session-authenticated `inventory.createCycleCount`,
      `inventory.recordCycleCounts`, `inventory.postCycleCount`, and
