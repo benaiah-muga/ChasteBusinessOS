@@ -3082,7 +3082,8 @@ new owners and the manifest shows zero legacy runtime paths.
      token and the exact GET returns 404 without browser console errors.
 
 278. (Implemented; handler and proxy proof added; authenticated persona browser
-     proof remains pending) Route exact Vite `PUT` and `PATCH /api/org` persona
+     proof passed; live legacy differential remains pending) Route exact Vite
+     `PUT` and `PATCH /api/org` persona
      requests through Go. Keep exact path matching, preserve existing GET and
      POST routing, and leave DELETE and suffix paths with their current owner.
      Go enforces an 8,000 UTF-16-code-unit persona limit, including multibyte
@@ -3723,3 +3724,10 @@ new owners and the manifest shows zero legacy runtime paths.
      displayed the invite link and refreshed member list. No legacy team
      request or browser error occurred. The invite was created but not
      accepted. This completes item 148.
+
+336. (Runtime verified) On 2026-10-12, authenticated Vite Settings loaded the
+     agent persona, saved a synthetic persona through `PATCH /api/org` with
+     HTTP 200, and reloaded it from Go after a full page reload. The browser
+     showed the saved value, with no browser errors. This completes the
+     authenticated browser proof for item 278; its live legacy differential
+     remains open.
