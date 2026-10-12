@@ -298,6 +298,86 @@ func TestAuthFlowIsCompatibleWithRuntimeBetterAuthSchema(t *testing.T) {
 	}
 }
 
+func TestSignInAndRecoveryAcceptPreIssuerBetterAuthCredential(t *testing.T) {
+	runtimeURL, err := testenv.RuntimeDatabaseURL()
+	if errors.Is(err, testenv.ErrDatabaseURLNotConfigured) {
+		t.Skip("GO_DATABASE_URL or DATABASE_URL is not configured")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, runtimeURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	service, err := NewService(pool, "pre-issuer-better-auth-compatibility-secret", Options{BaseURL: "http://localhost:3000/api/auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, err := randomIDBytes(24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accountID, err := randomIDBytes(24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetID, err := randomIDBytes(24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		email       = "pre-issuer-credential@example.test"
+		oldHash     = "00112233445566778899aabbccddeeff:f5b22309b28fe412c82a4b2cab57498b8f8a42c849af16cb908974048f61c13933421858db3a8f111430bdc493c7cef90f61f904061c77206e3820a2e8b11bc2"
+		oldPassword = "correct horse battery staple"
+		resetToken  = "pre-issuer-recovery-token"
+	)
+	now := time.Now().UTC()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO auth_user (id, name, email, email_verified, created_at, updated_at)
+		VALUES ($1, 'Pre issuer user', $2, true, $3, $3)`, userID, email, now); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM auth_user WHERE id = $1`, userID); err != nil {
+			t.Errorf("remove pre-issuer auth fixture: %v", err)
+		}
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO auth_account (id, account_id, provider_id, user_id, password, issuer, created_at, updated_at)
+		VALUES ($1, $2, 'credential', $2, $3, NULL, $4, $4)`, accountID, userID, oldHash, now); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := service.SignIn(ctx, email, oldPassword)
+	if err != nil {
+		t.Fatalf("pre-issuer credential sign-in: %v", err)
+	}
+	if identity.User.ID != userID {
+		t.Fatalf("signed in as user %q, want %q", identity.User.ID, userID)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO auth_verification (id, identifier, value, expires_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5)`, resetID, "reset-password:"+resetToken, userID, now.Add(time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ResetPassword(ctx, resetToken, "a replacement password 123"); err != nil {
+		t.Fatalf("recovery for pre-issuer credential: %v", err)
+	}
+	var issuer string
+	if err := pool.QueryRow(ctx, `SELECT issuer FROM auth_account WHERE id = $1`, accountID).Scan(&issuer); err != nil {
+		t.Fatal(err)
+	}
+	if issuer != credentialIssuer {
+		t.Fatalf("recovered account issuer = %q, want %q", issuer, credentialIssuer)
+	}
+	if _, err := service.SignIn(ctx, email, "a replacement password 123"); err != nil {
+		t.Fatalf("sign-in after recovering pre-issuer credential: %v", err)
+	}
+}
+
 func waitForRecoveryRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

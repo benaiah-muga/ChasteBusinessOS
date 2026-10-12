@@ -13,6 +13,8 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Go sign-in and password recovery now accept existing Better Auth credential
+  rows with a null issuer and canonicalize the issuer when a password is reset.
 - Go authored-document creation now persists default A4 portrait page settings
   when callers omit the optional page settings object.
 - Vite document editor presence, autosave drafts, and editing locks now use

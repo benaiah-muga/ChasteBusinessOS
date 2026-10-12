@@ -272,7 +272,7 @@ func (s *Service) SignInWithRememberMeCallback(ctx context.Context, email, passw
 		SELECT u.id, u.name, u.email, u.email_verified, u.image, u.created_at, u.updated_at, a.password
 		FROM auth_user u
 		JOIN auth_account a ON a.user_id = u.id
-		WHERE lower(u.email) = $1 AND a.provider_id = $2 AND a.issuer = $3 AND a.account_id = u.id
+		WHERE lower(u.email) = $1 AND a.provider_id = $2 AND (a.issuer = $3 OR a.issuer IS NULL) AND a.account_id = u.id
 		LIMIT 1`, email, credentialProvider, credentialIssuer).Scan(
 		&user.ID, &user.Name, &user.Email, &user.EmailVerified, &user.Image, &user.CreatedAt, &user.UpdatedAt, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -686,8 +686,8 @@ func (s *Service) ResetPassword(ctx context.Context, token, newPassword string) 
 		return err
 	}
 	result, err := tx.Exec(ctx, `
-		UPDATE auth_account SET password = $1, updated_at = $2
-		WHERE user_id = $3 AND provider_id = $4 AND issuer = $5 AND account_id = $3`,
+		UPDATE auth_account SET password = $1, issuer = $5, updated_at = $2
+		WHERE user_id = $3 AND provider_id = $4 AND (issuer = $5 OR issuer IS NULL) AND account_id = $3`,
 		hash, s.now().UTC(), userID, credentialProvider, credentialIssuer)
 	if err != nil {
 		return err

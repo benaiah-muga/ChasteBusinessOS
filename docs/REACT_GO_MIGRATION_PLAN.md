@@ -241,10 +241,10 @@ explicit signed opt-in; CRM writes and unported read modes remain on the
 legacy route. The Go metrics reader matches the newest-200-session aggregate,
 null-rate, rounding, and organization-scope behavior. Its short-lived signed
 HTTP adapter is opt-in through `GO_METRICS_READ=1`; the public route remains
-legacy-owned by default. The current route census has 94 API route files, 160
-API methods, and 30 pages. Go owns 44 verified API methods, 114 API methods
-remain legacy-owned, and two auth methods remain pending Go parity. Vite owns 13
-verified pages; 17 pages remain legacy-owned.
+legacy-owned by default. The current route census has 94 API route files, 161
+API methods, and 30 pages. Go owns 64 verified API methods, 95 API methods
+remain legacy-owned, and two auth methods remain pending Go parity. Vite owns 15
+verified pages; 15 pages remain legacy-owned.
 
 The key seams are `apps/web/src/lib/api.ts` (HTTP and 202 approval semantics),
 `apps/web/src/server/auth.ts` and `session.ts` (identity and active org),
@@ -258,9 +258,10 @@ backup behavior. Phase 0 records exact manifests from these sources.
 Method-level owner and parity changes belong in
 `route-ownership-overrides.json`; the generator rejects duplicate or stale
 keys and prevents a route from moving to Go or Vite before parity is verified.
-The current manifest records 44 Go-owned API methods and 13 Vite-owned pages;
-remaining methods and pages retain their legacy or pending owners until their
-parity and runtime gates pass.
+The current manifest records 64 Go-owned API methods and 15 Vite-owned pages;
+95 API methods and 15 pages retain legacy ownership, while the two auth methods
+remain pending Go compatibility parity. Owners move only after their parity
+and runtime gates pass.
 
 Local verification on 2026-10-04 passed `pnpm typecheck`, `pnpm lint`,
 `pnpm test`, and `pnpm go:verify` with `GO_DATABASE_URL` set to the
