@@ -2619,12 +2619,17 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the upload receipt,
      enforce the existing 1-byte to 5-MiB limit before dispatch, and set
      `CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD=0` for legacy rollback.
-236. (Vite implementation complete; browser proof pending) Route conversation
+236. (Complete) Route conversation
      creation through the session-authenticated `messaging.createConversation`
      capability when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the Go
      receipt, retain the exact request intent across reloads within the actor
      and organization session scope, and set
-     `CHASTE_GO_MESSAGING_CONVERSATION_CREATE=0` for legacy rollback.
+     `CHASTE_GO_MESSAGING_CONVERSATION_CREATE=0` for legacy rollback. On
+     2026-10-12, authenticated Vite `/messages` created a synthetic channel
+     with `messaging.createConversation` through Go, then refreshed the list
+     and opened the thread; all capability requests returned HTTP 200, no
+     legacy conversation-create request occurred, and the browser error log
+     was empty. See proof 319.
 237. (Vite implementation complete; browser proof pending) Route conversation
      settings updates through the session-authenticated
      `messaging.updateConversation` capability when
@@ -3506,3 +3511,11 @@ new owners and the manifest shows zero legacy runtime paths.
      HTTP 200, the channel remained visible after a full page reload, no legacy
      conversation-list request occurred, and the browser error log was empty.
      This completes item 226.
+
+319. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` created
+     `Go Messaging Create Proof 20261012` with the Go
+     `messaging.createConversation` capability. The captured request body
+     contained the intended title and agent-enabled setting and returned HTTP
+     200; Go then refreshed the conversation list and read the selected thread.
+     No legacy conversation-create request occurred, and the browser error log
+     was empty. This completes item 236.
