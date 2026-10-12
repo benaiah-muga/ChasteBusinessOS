@@ -2468,7 +2468,7 @@ new owners and the manifest shows zero legacy runtime paths.
      browser proof loaded the Requests & RFQs tab with the Go workflow selector
      enabled; list capability requests returned HTTP 200, no legacy
      `/api/purchasing` request or browser errors occurred.
-218. (Implemented) Route Vite authored-document version history and archived
+218. (Complete) Route Vite authored-document version history and archived
      compare previews through `documents.listDocVersions` and
      `documents.getDocVersion` behind paired
      `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
@@ -2476,8 +2476,12 @@ new owners and the manifest shows zero legacy runtime paths.
      `GO_DOCUMENTS_VERSION_READS=1` on the Go session capability route for all
      callers, validate the full Go output, and project archived previews to the
      existing sanitized shape. Keep document content, collaboration, writes,
-     and the Vite library read path unchanged. Selected Go errors fail closed;
-     browser proof remains open.
+     and the Vite library read path unchanged. Selected Go errors fail closed.
+     Authenticated Vite browser proof loaded the editor detail through Go,
+     opened version history, and compared archived v1 and v2 content through
+     the Go capability route. The comparison showed the expected archived
+     contents, workspace POST and DELETE returned HTTP 200, and browser errors
+     were empty with Next stopped.
 219. (Implemented) Route Vite mention-people and add-member lookups through
      `messaging.listPeople` unconditionally; the Vite people selector and
      legacy `GET /api/conversations/people` dependency are removed. The Go API
@@ -2488,7 +2492,7 @@ new owners and the manifest shows zero legacy runtime paths.
      the Vite person/agent alias shape. Keep conversation, thread, presence,
      and message-search reads and all writes unchanged. Browser proof remains
      open.
-220. (Implemented, default-on) Route Vite authored-document editor detail
+220. (Complete, default-on) Route Vite authored-document editor detail
      through `documents.getDoc` when `CHASTE_GO_DOCUMENTS_EDITOR_READS=1` and
      `CHASTE_GO_DOCUMENTS_VERSION_READS=1` are paired with the session route.
      The API independently gates `documents.getDoc` and
@@ -2498,13 +2502,16 @@ new owners and the manifest shows zero legacy runtime paths.
      detail never retries through legacy. For full legacy rollback, set all
      four Vite and API editor/version selectors to `0`. Keep workspace,
      presence, autosave, collaboration, content writes, archive reads,
-     compare-owned routes, and the
-     Documents library unchanged. Browser proof remains open.
-221. (Implemented; browser proof pending) Route the Vite HR Overview report
+     compare-owned routes, and the Documents library unchanged. Authenticated
+     browser proof loaded the editor detail and version rows from Go with Next
+     stopped, and no browser errors occurred.
+221. (Complete) Route the Vite HR Overview report
      through the existing Go `hr.report` capability unconditionally and remove
      the Overview selector and compile global. Keep other HR tabs on their
      current route selections. A Go error must fail closed without retrying
-     legacy `/api/hr`.
+     legacy `/api/hr`. Authenticated Vite browser proof loaded `/hr` with Next
+     stopped, received HTTP 200 for Go capability requests, and reported no
+     browser errors or `/api/hr` request.
 222. (Implemented) Remove the selected-Go 404 retry to legacy for Vite Manufacturing writes:
      BOM definition, work-order create/release/complete/cancel, BOM production,
      and production reversal. Preserve actor/org-scoped exact action and intent
@@ -3061,8 +3068,8 @@ new owners and the manifest shows zero legacy runtime paths.
      clients. The capability endpoint is already Go-owned; no global route
      ownership change is implied. `graft build` completed.
 
-284. (Implemented; runtime-role DB projection proof and focused Vite API/proxy
-     tests passed; authenticated Support browser proof remains pending) Move
+284. (Complete; runtime-role DB projection proof, focused Vite API/proxy tests,
+     and authenticated Support browser proof passed) Move
      only the Vite Support create-conversation customer picker to Go's exact
      `GET /api/support/customers` endpoint. Keep the shared `/api/customers`
      route and its POST writes with their existing owner because Vite CRM still
@@ -3072,21 +3079,27 @@ new owners and the manifest shows zero legacy runtime paths.
      POS-only readers see active, non-merged customers. The query uses
      `dbx.WithOrgTx` and returns the picker `id`, `name`, and `email` fields in
      name order with the existing 500-row limit. The generated manifest adds
-     only the new exact Go GET route.
+     only the new exact Go GET route. With Next stopped, authenticated Vite
+     Support opened the new-conversation customer picker, showed the seeded
+     customer, and received HTTP 200 from `/api/support/customers` with no
+     browser errors.
 
-285. (Implemented; focused Vite HR page proof and existing runtime-role Go
-     `hr.report` integration proof passed) Route the Vite HR People directory
+285. (Complete; focused Vite HR page proof, runtime-role Go `hr.report`
+     integration proof, and authenticated browser proof passed) Route the Vite HR People directory
      through the existing Go `hr.report` capability, matching Overview and
      retaining existing selected-Go behavior for Leave, Payroll, and Hiring.
      Preserve active organization resolution through the signed capability
      session, the shared `HrReport` response shape, and the employee list's
      newest-hired-first ordering with a 200-row limit. The People tab must not
      request legacy `GET /api/hr`; Go errors fail closed as they do for
-     Overview. No route ownership changes are required.
+     Overview. No route ownership changes are required. Direct authenticated
+     load of `/hr?tab=people` with Next stopped rendered the People view, sent
+     three Go capability requests with HTTP 200, made no `/api/hr` request,
+     and reported no browser errors.
 
-286. (Implemented; focused Vite API/page tests, Go runtime-role projection
-     proof, module checks, and manifest parity check passed; authenticated
-     browser proof remains pending) Replace the Vite Purchasing workspace
+286. (Complete; focused Vite API/page tests, Go runtime-role projection proof,
+     module checks, manifest parity check, and authenticated browser proof
+     passed) Replace the Vite Purchasing workspace
      `GET /api/purchasing` read with the authenticated Go
      `purchasing.listWorkspace` capability. Preserve vendor, recent order and
      bill projections, payable aging, purchase requests and RFQs, price
@@ -3094,27 +3107,36 @@ new owners and the manifest shows zero legacy runtime paths.
      Require `purchasing.read`, preserve ordering, limits, nullable values,
      and legacy amount calculations, and keep every section populated when
      the dedicated workflow and Intel selectors are disabled. Do not change
-     Purchasing writes or route ownership for the legacy Next app.
+     Purchasing writes or route ownership for the legacy Next app. With Next
+     stopped, authenticated Vite loaded Purchasing overview, received HTTP
+     200 from the Go workspace and inventory reads, made no `/api/purchasing`
+     request, and reported no browser errors.
 
-287. (Implemented; focused Vite API/page tests, Go runtime-role projection
-     proof, module checks, and manifest parity check passed; authenticated
-     browser proof remains pending) Replace the Vite Accounting Banking detail
+287. (Complete; focused Vite API/page tests, Go runtime-role projection proof,
+     module checks, manifest parity check, and authenticated browser proof
+     passed) Replace the Vite Accounting Banking detail
      GET with the authenticated Go `accounting.listBankingWorkspace` capability.
      Return accounts, newest unmatched/matched/excluded statement lines, recent
      payment candidates, and the `accounting.bankSummary` projection from one
      `dbx.WithOrgTx` transaction. Require `accounting.read`, preserve the
      existing ordering and limits, and validate the full response in Vite.
      Keep reconciliation writes on their current route and do not change the
-     legacy Next route owner.
+     legacy Next route owner. Direct authenticated load of
+     `/accounting?tab=bank` with Next stopped rendered the Banking detail,
+     received HTTP 200 from Go capability requests, made no `/api/banking`
+     request, and reported no browser errors.
 
-288. (Implemented; focused HR API/page tests and the existing Go runtime-role
-     `hr.report` proof passed; authenticated browser proof remains pending)
+288. (Complete; focused HR API/page tests, Go runtime-role `hr.report` proof,
+     and authenticated browser proof passed)
      Route the Vite HR Time tab's employee-picker report through the existing
      session-authenticated `hr.report` capability. Keep time totals and
      pending-entry approvals on `hr.timeReport` and `hr.pendingTimeEntries`,
      respectively, and preserve existing time writes. A direct load of
      `/hr?tab=time` must render the employee picker using Go, request all three
-     capabilities, and never call legacy `GET /api/hr`.
+     capabilities, and never call legacy `GET /api/hr`. Direct authenticated
+     load of `/hr?tab=time` with Next stopped rendered the employee picker,
+     sent all three Go capability requests with HTTP 200, made no `/api/hr`
+     request, and reported no browser errors.
 
 289. (Implemented; focused Vite API/page tests and authenticated browser proof
      passed) Route Vite
