@@ -75,7 +75,8 @@ describe("Vite settings page", () => {
 
     expect(await screen.findByText("Benson's Hardware")).not.toBeNull();
     expect(screen.getByText(/Managed by owners/)).not.toBeNull();
-    expect(screen.getByRole("link", { name: /Team & roles/ }).getAttribute("href")).toContain("/team");
+    expect(screen.getByRole("link", { name: /Team & roles/ }).getAttribute("href")).toBe("/team");
+    expect(screen.getByRole("link", { name: /View trajectory log/ }).getAttribute("href")).toBe("/sessions");
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain("/api/org");
   }, 20_000);
 
@@ -200,6 +201,8 @@ describe("Vite settings page", () => {
     fireEvent.click(screen.getByRole("tab", { name: "AI & automation" }));
 
     const keyField = (await screen.findByLabelText("API key")) as HTMLInputElement;
+    expect(screen.getByRole("link", { name: /Creator mode/ }).getAttribute("href")).toBe("/proposals");
+    expect(screen.getByRole("link", { name: /Agent sessions/ }).getAttribute("href")).toBe("/sessions");
     expect(keyField.type).toBe("password");
     expect(keyField.value).toBe("");
     expect(keyField.placeholder).toBe("Current key ••••1234");

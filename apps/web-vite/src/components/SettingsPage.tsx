@@ -34,7 +34,6 @@ import {
   type Routine,
 } from "../api/settings";
 import { fetchOrganizations } from "../api/organizations";
-import { legacyUrl } from "../legacy";
 import { parseScheduleText } from "@chaste/erp-core";
 import "./SettingsPage.css";
 
@@ -275,12 +274,12 @@ function WorkspaceTab({ accountingOn }: { accountingOn: boolean | null }) {
               <span style={ui.muted}>Modules</span>
               <span style={{ fontSize: "11px" }}>
                 {accountingOn === null ? "Checking" : accountingOn ? "Managed by owners" : "Restricted set"} ·{" "}
-                <a href={legacyUrl("/team")} style={ui.link}>Team &amp; roles</a>
+                <a href="/team" style={ui.link}>Team &amp; roles</a>
               </span>
             </div>
             <div style={ui.listRow}>
               <span style={ui.muted}>Agent sessions</span>
-              <a href={legacyUrl("/sessions")} style={ui.link}>View trajectory log →</a>
+              <a href="/sessions" style={ui.link}>View trajectory log →</a>
             </div>
           </div>
         </div>
@@ -1012,13 +1011,13 @@ function AiTab() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "10px" }}>
-              <a href={legacyUrl("/proposals")} style={{ ...ui.card, display: "block", textDecoration: "none" }}>
+              <a href="/proposals" style={{ ...ui.card, display: "block", textDecoration: "none" }}>
                 <p style={{ margin: "0 0 4px", color: INK, fontSize: "12px", fontWeight: 600 }}>Creator mode</p>
                 <p style={{ ...ui.muted, margin: 0, fontSize: "10px" }}>
                   Connect a coding agent to propose capabilities as reviewed diffs.
                 </p>
               </a>
-              <a href={legacyUrl("/sessions")} style={{ ...ui.card, display: "block", textDecoration: "none" }}>
+              <a href="/sessions" style={{ ...ui.card, display: "block", textDecoration: "none" }}>
                 <p style={{ margin: "0 0 4px", color: INK, fontSize: "12px", fontWeight: 600 }}>Agent sessions</p>
                 <p style={{ ...ui.muted, margin: 0, fontSize: "10px" }}>
                   Every model action, its capability, and its outcome, auditable forever.

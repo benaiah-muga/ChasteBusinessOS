@@ -3881,3 +3881,14 @@ new owners and the manifest shows zero legacy runtime paths.
      the Sales quote workspace. Go rejects invalid input and amounts beyond
      PostgreSQL integer bounds, and returns HTTP 422 for a missing or foreign-
      workspace customer. This completes item 356.
+
+358. (Complete) Keep the Settings links for Team & roles, agent sessions, and
+     creator proposals on their same-origin Vite routes instead of sending
+     users to the legacy application.
+
+359. (Runtime verified) On 2026-10-13, the authenticated Vite Settings page
+     exposed `/team` and `/sessions` for its Workspace links and `/proposals`
+     and `/sessions` for its AI links, all resolving to `localhost:3000`.
+     Clicking Team & roles opened the Vite `/team` page in the same tab. The
+     browser error log was empty; 14 Settings tests, Vite typecheck, focused
+     lint, and diff checks passed. This completes item 358.
