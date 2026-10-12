@@ -2682,7 +2682,7 @@ new owners and the manifest shows zero legacy runtime paths.
      `accounting.overview` capability unconditionally. Validate the strict
      overview response and safe-integer entry debit aggregates, and fail closed
      on Go errors without retrying the legacy overview route.
-246. (Vite implementation complete; browser proof pending) Route Vite Support
+246. (Complete; authenticated browser proof passed) Route Vite Support
      inbox and selected-thread reads through the session-authenticated
      `support.listConversations` and `support.readConversation` capabilities
      when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the strict Go wire
@@ -3387,3 +3387,12 @@ new owners and the manifest shows zero legacy runtime paths.
      with Go enabled. `GET /api/customers` returned HTTP 200, the directory
      rendered, no legacy customer GET occurred, and the browser reported no
      errors. Independent review found no actionable issue.
+
+306. (Runtime verified) On 2026-10-12, authenticated `agent-browser` opened
+     Vite `/support`, created a local customer and conversation through Go's
+     session capability endpoint, then saw the new conversation in the inbox
+     and its selected thread in the page. All three capability requests
+     returned HTTP 200; the request trace contained no legacy Support API calls
+     and the browser reported no errors. This completes item 246 and verifies
+     the conversation-create portion of item 249. Posting, escalation,
+     resolution, and reopen remain unverified in the browser.
