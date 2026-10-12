@@ -2664,13 +2664,18 @@ new owners and the manifest shows zero legacy runtime paths.
      and opened the thread; all capability requests returned HTTP 200, no
      legacy conversation-create request occurred, and the browser error log
      was empty. See proof 319.
-237. (Vite implementation complete; browser proof pending) Route conversation
+237. (Complete) Route conversation
      settings updates through the session-authenticated
      `messaging.updateConversation` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the Go receipt, reject
      empty updates before dispatch, retain the exact pending settings and
      intent across reloads within the actor, organization, and conversation
      scope, and set `CHASTE_GO_MESSAGING_CONVERSATION_UPDATE=0` for rollback.
+     On 2026-10-12, authenticated Vite `/messages` renamed the synthetic
+     channel through `messaging.updateConversation` with HTTP 200, and the new
+     title appeared in the channel list and thread. No legacy conversation
+     update request occurred, and the browser error log was empty. See proof
+     326.
 238. (Vite implementation complete; browser proof pending) Route conversation
      archive and restore actions through the session-authenticated
      `messaging.archiveConversation` capability when
@@ -3602,3 +3607,10 @@ new owners and the manifest shows zero legacy runtime paths.
      message appeared. The capability request returned HTTP 200, the
      conversation list refreshed, no legacy read-receipt request occurred, and
      the browser error log was empty. This completes item 231.
+
+326. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` renamed
+     `Go Thread Proof 20261012` to `Go Thread Proof 20261012 Updated` through
+     Go's `messaging.updateConversation` capability. The request returned
+     HTTP 200, and the updated title appeared in the conversation list and
+     selected thread. No legacy conversation-update request occurred, and the
+     browser error log was empty. This completes item 237.
