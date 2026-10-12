@@ -2703,7 +2703,7 @@ new owners and the manifest shows zero legacy runtime paths.
      and organization; block fallback to legacy while a Go attempt is
      unresolved. Set `CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE=0` for explicit
      rollback of new writes.
-249. (Vite implementation complete; browser proof pending) Route Vite Support
+249. (Complete; authenticated browser proof passed) Route Vite Support
      conversation creation, posting messages, escalation, resolve, and reopen
      through the session-authenticated `support.startConversation`,
      `support.postMessage`, `support.escalateConversation`,
@@ -3410,3 +3410,13 @@ new owners and the manifest shows zero legacy runtime paths.
      HTTP 200, the exact shortcut, title, and body appeared in the refreshed
      library, no legacy Support write request occurred, and the browser
      reported no page errors. This completes item 248.
+
+309. (Runtime verified) In the authenticated Vite Support session on
+     2026-10-12, the existing Go-created conversation accepted a
+     customer-attributed message, escalation with a required human-review
+     reason, resolution, and reopen. The `support.postMessage`,
+     `support.escalateConversation`, `support.resolveConversation`, and
+     `support.reopenConversation` capability requests each returned HTTP 200;
+     the message and status changes rendered after refresh. No legacy Support
+     write request or browser error occurred. Together with the conversation
+     creation proof in item 306, this completes item 249.
