@@ -2178,7 +2178,7 @@ new owners and the manifest shows zero legacy runtime paths.
      tax, and UGX 900 net. The draft remained visible after reload. The Go
      report and draft requests returned HTTP 200; no legacy HR POST or browser
      error occurred.
-200. (Vite/Go implementation complete; browser proof pending) Route only the
+200. (Vite/Go implementation and authenticated browser proof complete) Route only the
      Vite Hiring tab's report, opening creation, applicant creation, and
      applicant stage changes through Go's `hr.report`,
      `hr.createOpening`, `hr.addApplicant`, and `hr.moveApplicant` capabilities
@@ -2192,7 +2192,11 @@ new owners and the manifest shows zero legacy runtime paths.
      cross-tab intent races, stale responses cannot clear a newer action, and
      browsers without Web Locks fail closed. Vite API/page/proxy tests,
      typecheck, lint, and Go Hiring contract tests pass. Authenticated browser
-     proof remains open.
+     proof created the Migration QA Analyst opening, added a synthetic
+     applicant, and moved the candidate to screening through Go. The opening,
+     applicant, and stage remained visible after reload. All selected Go
+     capability requests returned HTTP 200; no legacy HR write or browser
+     error occurred.
 201. (Vite/Go implementation complete; browser proof pending) Route only Vite
      period-close readiness reads through Go's session-authenticated
      `accounting.periodCloseWorkbench` capability behind paired

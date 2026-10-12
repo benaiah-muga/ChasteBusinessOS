@@ -378,6 +378,10 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Payroll report reads and draft creation now use Go capabilities when
   `CHASTE_GO_HR_PAYROLL=1`. The draft is generated from the active employees'
   current salary, tax, and approved unpaid leave data.
+- Vite HR Hiring report reads, opening creation, applicant creation, and
+  applicant stage changes now use Go capabilities when `CHASTE_GO_HR_HIRING=1`.
+  The Hiring pipeline stays in Vite and records each change through the governed
+  Go path.
 - Vite Accounting overview reads now always use the session-authenticated Go
   `accounting.overview` capability.
   Go entry debit aggregates are validated as safe integer minor units, and
