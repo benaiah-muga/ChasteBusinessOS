@@ -668,6 +668,25 @@ func TestGoDocumentsAuthoredLifecycle(t *testing.T) {
 		t.Fatalf("stored page size = %q, want Letter with the other two fields defaulted", storedSize)
 	}
 
+	defaultedDocument := documentsExecuteFor(t, fx, documentsCreateDocCapabilityID,
+		`{"title":"Default page settings","content":{"type":"doc"},"html":"<p>draft</p>"}`)
+	if !defaultedDocument.OK {
+		t.Fatalf("createDoc without pageSettings result=%+v", defaultedDocument)
+	}
+	var defaultedDocumentOut CreateAuthoredDocumentOutput
+	if err := json.Unmarshal(defaultedDocument.Data, &defaultedDocumentOut); err != nil {
+		t.Fatal(err)
+	}
+	var storedSettings DocumentsPageSettings
+	if err := fx.owner.QueryRow(fx.ctx,
+		`SELECT page_settings FROM authored_docs WHERE id=$1::uuid`, defaultedDocumentOut.DocumentID).
+		Scan(&storedSettings); err != nil {
+		t.Fatal(err)
+	}
+	if want := defaultDocumentsPageSettings(); storedSettings != want {
+		t.Fatalf("defaulted page settings = %+v, want %+v", storedSettings, want)
+	}
+
 	published := documentsExecuteFor(t, fx, documentsSaveDocVersionCapabilityID,
 		`{"documentId":"`+documentOut.DocumentID+`","title":"Quotation v1","content":{"type":"doc","version":1},"html":"<p>v1</p>","note":"first release"}`)
 	if !published.OK {

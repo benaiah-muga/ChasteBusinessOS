@@ -13,6 +13,8 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Go authored-document creation now persists default A4 portrait page settings
+  when callers omit the optional page settings object.
 - Vite Documents now handles Go list results with omitted empty arrays as an
   empty library while continuing to validate every returned document row.
 

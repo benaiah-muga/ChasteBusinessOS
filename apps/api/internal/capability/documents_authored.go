@@ -260,13 +260,13 @@ func createAuthoredDocument(ctx context.Context, tx pgx.Tx, claims authbridge.Ca
 	}
 
 	folder := documentsNullableTextValue(input.Folder)
-	pageSettings := any(nil)
+	pageSettings := defaultDocumentsPageSettings()
 	if input.PageSettings != nil {
-		encoded, err := json.Marshal(input.PageSettings)
-		if err != nil {
-			return CreateAuthoredDocumentOutput{}, err
-		}
-		pageSettings = encoded
+		pageSettings = *input.PageSettings
+	}
+	encodedPageSettings, err := json.Marshal(pageSettings)
+	if err != nil {
+		return CreateAuthoredDocumentOutput{}, err
 	}
 
 	var documentID string
@@ -280,7 +280,7 @@ func createAuthoredDocument(ctx context.Context, tx pgx.Tx, claims authbridge.Ca
 		claims.OrganizationID, *input.Title, []byte(input.Content), *input.HTML, input.TemplateID,
 		folder, input.DocumentType, documentsPlainNullableText(input.LinkedRecordType),
 		documentsPlainNullableText(input.LinkedRecordID), documentsPlainNullableText(input.LinkedRecordLabel),
-		pageSettings, claims.ActorType, claims.ActorID).Scan(&documentID); err != nil {
+		encodedPageSettings, claims.ActorType, claims.ActorID).Scan(&documentID); err != nil {
 		return CreateAuthoredDocumentOutput{}, err
 	}
 	return CreateAuthoredDocumentOutput{DocumentID: documentID}, nil
