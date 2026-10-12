@@ -1995,7 +1995,7 @@ new owners and the manifest shows zero legacy runtime paths.
      proof passed: report, claim and policy reads, and claim submission returned
      HTTP 200 through Go, with no legacy HR or Expenses API request or browser
      errors.
-190. (Implemented; browser proof pending) Route only the Vite HR Leave tab through Go's session-authenticated
+190. (Implemented and verified: DB-backed Go test and authenticated browser proof pass) Route only the Vite HR Leave tab through Go's session-authenticated
      `hr.report`, `hr.requestLeave`, `hr.decideLeave`, and `hr.cancelLeave`
      capabilities behind paired `CHASTE_GO_HR_LEAVE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the Leave selector
@@ -2005,8 +2005,11 @@ new owners and the manifest shows zero legacy runtime paths.
      Go 404 without falling back to `/api/hr`. Keep all other HR tabs on their
      existing routes. Focused API, proxy selector, and HrPage coverage pass,
      including malformed success-output retry retention. The DB-backed Go
-     leave executor test and `go vet` pass. Authenticated browser proof remains
-     open.
+     leave executor test and `go vet` pass. Authenticated browser proof
+     submitted and approved a two-day synthetic request through the Go
+     capability route, then confirmed the Approved state after reload. Both
+     writes returned HTTP 200; no legacy `/api/hr` request or browser error
+     occurred.
 191. (Vite/Go implementation complete; browser proof pending) Route only Vite invoice `recordPayment` writes through Go's
      session-authenticated `accounting.recordPayment` capability behind paired
      `CHASTE_GO_ACCOUNTING_RECORD_PAYMENT=1` and
