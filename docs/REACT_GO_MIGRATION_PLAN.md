@@ -2363,7 +2363,7 @@ new owners and the manifest shows zero legacy runtime paths.
      both item quantities, posted it, then created and cancelled a second count.
      The Go capability requests returned HTTP 200; both final states persisted
      after reload. No browser errors occurred.
-210. (Implemented) Route Vite Product Catalog CSV import, undo, and restore
+210. (Done) Route Vite Product Catalog CSV import, undo, and restore
      through Go's session-authenticated `inventory.importItems`,
      `inventory.undoItemImport`, and `inventory.restoreItemImport` capabilities
      behind paired `CHASTE_GO_INVENTORY_IMPORT_SLICE=1` and
@@ -2374,8 +2374,11 @@ new owners and the manifest shows zero legacy runtime paths.
      unsupported rows and payloads above the Vite 64 KiB capability limit
      before dispatch. The authenticated Go route validates import, undo, and
      restore inputs and applies the inventory write permission and per-org
-     import rate limit. Focused Vite API/UI and Go route/capability tests pass;
-     browser proof remains open.
+     import rate limit. Focused Vite API/UI and Go route/capability tests pass.
+     Authenticated `agent-browser` proof imported a CSV product through Go,
+     undid the import, restored it, then reloaded and confirmed the product and
+     active recovery receipt remained. Go capability requests returned HTTP
+     200; no legacy `/api/import` requests or browser errors occurred.
 211. (Implemented; default-on in `.env.example`) Route Vite Marketing campaign analytics through the
      session-authenticated `marketing.campaignAnalytics` capability when
      `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=1` and
