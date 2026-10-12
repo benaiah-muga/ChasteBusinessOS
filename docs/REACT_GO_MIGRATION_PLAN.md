@@ -2676,13 +2676,17 @@ new owners and the manifest shows zero legacy runtime paths.
      title appeared in the channel list and thread. No legacy conversation
      update request occurred, and the browser error log was empty. See proof
      326.
-238. (Vite implementation complete; browser proof pending) Route conversation
+238. (Complete) Route conversation
      archive and restore actions through the session-authenticated
      `messaging.archiveConversation` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Require and validate the archived
      state, retain unresolved action and intent across reloads and selector
      rollback, and set `CHASTE_GO_MESSAGING_CONVERSATION_ARCHIVE=0` for
-     rollback of new actions.
+     rollback of new actions. On 2026-10-12, authenticated Vite `/messages`
+     archived and restored the synthetic conversation through
+     `messaging.archiveConversation`; both requests returned HTTP 200 and the
+     active/archived counts updated after each action. The channel ended in
+     Active, with no browser errors. See proof 327.
 239. (Vite implementation complete; browser proof pending) Route leave-
      conversation actions through the session-authenticated
      `messaging.leaveConversation` capability when
@@ -3614,3 +3618,10 @@ new owners and the manifest shows zero legacy runtime paths.
      HTTP 200, and the updated title appeared in the conversation list and
      selected thread. No legacy conversation-update request occurred, and the
      browser error log was empty. This completes item 237.
+
+327. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` archived
+     and restored `Go Thread Proof 20261012 Updated` through Go's
+     `messaging.archiveConversation` capability. Both requests returned HTTP
+     200; the archived count changed to one, then returned to zero, and the
+     active count returned to three. The conversation remained visible and the
+     browser error log was empty. This completes item 238.
