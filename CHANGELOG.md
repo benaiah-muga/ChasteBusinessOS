@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Support ticket edits now send explicit nulls when clearing a category,
+  assignee, or SLA deadline, and Go persists those clears within the active
+  organization. Go also rejects unknown fields on Support conversation create
+  and message writes.
 - Go sign-in and password recovery now accept existing Better Auth credential
   rows with a null issuer and canonicalize the issuer when a password is reset.
 - Go authored-document creation now persists default A4 portrait page settings

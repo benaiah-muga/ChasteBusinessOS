@@ -2714,7 +2714,7 @@ new owners and the manifest shows zero legacy runtime paths.
      message attribution, with Go applying `support.write` permission checks
      and recording the signed-in human actor. Set
      `CHASTE_GO_SUPPORT_CONVERSATION_WRITES=0` for explicit rollback.
-250. (Complete; authenticated browser proof passed) Route Vite Support
+250. (Complete; field updates and clears passed authenticated browser proof) Route Vite Support
      ticket metadata updates through the session-authenticated
      `support.updateTicket` capability behind paired
      `CHASTE_GO_SUPPORT_TICKET_WRITES=1` and
@@ -3426,4 +3426,12 @@ new owners and the manifest shows zero legacy runtime paths.
      through `support.updateTicket`. The capability request and the refreshed
      `support.readConversation` request returned HTTP 200, and the updated
      fields remained visible in the ticket form. No legacy Support write
-     request or browser error occurred. This completes item 250.
+     request or browser error occurred. This verified setting metadata only;
+     clearing existing fields remained unverified.
+
+311. (Runtime verified) On 2026-10-12, the same authenticated Vite Support
+     session cleared a previously set ticket category, assignee, and SLA
+     deadline. The Vite request sent explicit `null` values through
+     `support.updateTicket`, Go returned HTTP 200, and the refreshed ticket
+     showed all three fields blank. No legacy Support write request or browser
+     error occurred. Together with item 310, this completes item 250.

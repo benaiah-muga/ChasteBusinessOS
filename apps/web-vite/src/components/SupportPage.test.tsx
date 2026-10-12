@@ -66,6 +66,8 @@ function moduleSwitchboard(enabled = true) {
 interface Handlers {
   post?: (payload: Record<string, unknown>) => Response;
   execute?: (payload: Record<string, unknown>) => Response;
+  getThread?: () => Response;
+  team?: () => Response;
 }
 
 function supportFetch(handlers: Handlers = {}) {
@@ -81,9 +83,10 @@ function supportFetch(handlers: Handlers = {}) {
       return handlers.post?.(payload) ?? Response.json({ ok: true, data: { updated: true } });
     }
     if (path === "/api/modules") return moduleSwitchboard();
+    if (path === "/api/team") return handlers.team?.() ?? Response.json({ members: [] });
     if (path === "/api/support/customers") return Response.json({ customers: [] });
     if (path === "/api/support") return Response.json({ conversations });
-    if (path.startsWith("/api/support?")) return Response.json(thread);
+    if (path.startsWith("/api/support?")) return handlers.getThread?.() ?? Response.json(thread);
     return new Response(null, { status: 404 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -391,6 +394,43 @@ describe("Vite support page", () => {
       intentId,
     });
     expect(fetchMock.mock.calls.map(([path]) => String(path))).not.toContain("/api/support");
+  }, SLOW);
+
+  it("sends explicit nulls when saving cleared ticket metadata", async () => {
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const organizationId = "66666666-6666-4666-8666-666666666666";
+    const assigneeId = "77777777-7777-4777-8777-777777777777";
+    vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", true);
+    const { calls } = supportFetch({
+      getThread: () => Response.json({
+        ...thread,
+        conversation: {
+          ...thread.conversation,
+          category: "billing",
+          assignedUserId: assigneeId,
+          slaDueAt: "2026-10-13T12:00:00.000Z",
+        },
+      }),
+      team: () => Response.json({ members: [{ userId: assigneeId, name: "Proof Assignee", email: "proof-assignee@example.test" }] }),
+      execute: (payload) => payload.capabilityId === "support.updateTicket"
+        ? Response.json({ ok: true, data: { updated: true } })
+        : Response.json({ error: "unexpected capability" }, { status: 400 }),
+    });
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+
+    await openTab(/^Inbox/);
+    fireEvent.click(await screen.findByRole("button", { name: "Ticket" }));
+    fireEvent.change(await screen.findByLabelText("Category"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Assignee"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("SLA due"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(calls.find((call) => call.payload?.capabilityId === "support.updateTicket")?.payload).toMatchObject({
+        capabilityId: "support.updateTicket",
+        input: { conversationId, priority: "normal", category: null, assigneeUserId: null, slaDueAt: null },
+      });
+    });
   }, SLOW);
 
   it("does not load customer care while the module is disabled", async () => {

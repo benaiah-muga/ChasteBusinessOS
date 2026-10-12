@@ -112,6 +112,32 @@ func TestParseSupportUpdateTicketRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestParseSupportUpdateTicketAllowsExplicitClears(t *testing.T) {
+	input := json.RawMessage(`{"conversationId":"11111111-1111-4111-8111-111111111111","category":null,"assigneeUserId":null,"slaDueAt":null}`)
+	parsed, err := ParseSupportUpdateTicketInput(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Category != nil || !parsed.CategorySet {
+		t.Fatalf("category=(%v, set=%t), want null and set", parsed.Category, parsed.CategorySet)
+	}
+	if parsed.AssigneeUserID != nil || !parsed.AssigneeUserIDSet {
+		t.Fatalf("assignee=(%v, set=%t), want null and set", parsed.AssigneeUserID, parsed.AssigneeUserIDSet)
+	}
+	if parsed.SlaDueAt != nil || !parsed.SlaDueAtSet {
+		t.Fatalf("SLA=(%v, set=%t), want null and set", parsed.SlaDueAt, parsed.SlaDueAtSet)
+	}
+}
+
+func TestParseSupportConversationWritesRejectUnknownFields(t *testing.T) {
+	if _, err := ParseSupportStartConversationInput(json.RawMessage(`{"customerId":"11111111-1111-4111-8111-111111111111","subject":"Order question","orgId":"22222222-2222-4222-8222-222222222222"}`)); err == nil {
+		t.Fatal("ParseSupportStartConversationInput accepted an organization override")
+	}
+	if _, err := ParseSupportPostMessageInput(json.RawMessage(`{"conversationId":"11111111-1111-4111-8111-111111111111","body":"Hello","from":"customer","orgId":"22222222-2222-4222-8222-222222222222"}`)); err == nil {
+		t.Fatal("ParseSupportPostMessageInput accepted an organization override")
+	}
+}
+
 func TestParseSupportConversationIDInputLimit(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -181,6 +181,42 @@ func TestGoWave9SupportGovernedExecutorPath(t *testing.T) {
 	if err == nil || deniedAssignee.OK || !strings.Contains(err.Error(), "assignee is not a member of this organization") {
 		t.Fatalf("updateTicket assigned non-member=%+v err=%v, want organization membership failure", deniedAssignee, err)
 	}
+	setTicketFields := json.RawMessage(`{"conversationId":"` + startedOut.ConversationID + `","priority":"high","category":"billing","assigneeUserId":"` + fx.userID + `","slaDueAt":"2026-10-13T12:00:00Z"}`)
+	setTicket, err := fx.executor.Execute(fx.ctx,
+		waveModuleClaims(fx, supportUpdateTicketCapabilityID, "support.write", setTicketFields, "human", "", "wave9-support-ticket-set"),
+		supportUpdateTicketCapabilityID, setTicketFields)
+	if err != nil || !setTicket.OK {
+		t.Fatalf("updateTicket set fields=%+v err=%v", setTicket, err)
+	}
+	var setCategory string
+	var setAssignee string
+	var setSLA time.Time
+	if err := fx.owner.QueryRow(fx.ctx, `
+		SELECT category, assigned_user_id::text, sla_due_at
+		FROM support_conversations WHERE org_id=$1::uuid AND id=$2::uuid`,
+		fx.orgID, startedOut.ConversationID).Scan(&setCategory, &setAssignee, &setSLA); err != nil {
+		t.Fatal(err)
+	}
+	if setCategory != "billing" || setAssignee != fx.userID || !setSLA.Equal(time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("set ticket fields=(%q, %q, %s), want billing, %s, and the requested deadline", setCategory, setAssignee, setSLA, fx.userID)
+	}
+	clearTicketFields := json.RawMessage(`{"conversationId":"` + startedOut.ConversationID + `","category":null,"assigneeUserId":null,"slaDueAt":null}`)
+	clearedTicket, err := fx.executor.Execute(fx.ctx,
+		waveModuleClaims(fx, supportUpdateTicketCapabilityID, "support.write", clearTicketFields, "human", "", "wave9-support-ticket-clear"),
+		supportUpdateTicketCapabilityID, clearTicketFields)
+	if err != nil || !clearedTicket.OK {
+		t.Fatalf("updateTicket clear fields=%+v err=%v", clearedTicket, err)
+	}
+	var categoryCleared, assigneeCleared, slaCleared bool
+	if err := fx.owner.QueryRow(fx.ctx, `
+		SELECT category IS NULL, assigned_user_id IS NULL, sla_due_at IS NULL
+		FROM support_conversations WHERE org_id=$1::uuid AND id=$2::uuid`,
+		fx.orgID, startedOut.ConversationID).Scan(&categoryCleared, &assigneeCleared, &slaCleared); err != nil {
+		t.Fatal(err)
+	}
+	if !categoryCleared || !assigneeCleared || !slaCleared {
+		t.Fatalf("cleared ticket fields=(category %t, assignee %t, SLA %t), want all NULL", categoryCleared, assigneeCleared, slaCleared)
+	}
 	replay, err := fx.executor.Execute(fx.ctx, startClaims, supportStartConversationCapabilityID, startInput)
 	if err != nil || !replay.OK || !replay.Replayed {
 		t.Fatalf("startConversation replay=%+v err=%v, want governed receipt replay", replay, err)

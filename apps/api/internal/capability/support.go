@@ -247,11 +247,14 @@ type SupportCreateTicketOutput struct {
 }
 
 type SupportUpdateTicketInput struct {
-	ConversationID string  `json:"conversationId"`
-	Priority       *string `json:"priority,omitempty"`
-	Category       *string `json:"category,omitempty"`
-	AssigneeUserID *string `json:"assigneeUserId,omitempty"`
-	SlaDueAt       *string `json:"slaDueAt,omitempty"`
+	ConversationID    string  `json:"conversationId"`
+	Priority          *string `json:"priority,omitempty"`
+	Category          *string `json:"category,omitempty"`
+	CategorySet       bool    `json:"-"`
+	AssigneeUserID    *string `json:"assigneeUserId,omitempty"`
+	AssigneeUserIDSet bool    `json:"-"`
+	SlaDueAt          *string `json:"slaDueAt,omitempty"`
+	SlaDueAtSet       bool    `json:"-"`
 }
 
 type SupportUpdateTicketOutput struct {
@@ -307,9 +310,25 @@ func supportSuggestTicketCategory(memo string) string {
 	return "general"
 }
 
+func rejectUnknownSupportFields(fields map[string]json.RawMessage, allowed ...string) error {
+	allowedFields := make(map[string]struct{}, len(allowed))
+	for _, field := range allowed {
+		allowedFields[field] = struct{}{}
+	}
+	for key := range fields {
+		if _, ok := allowedFields[key]; !ok {
+			return fmt.Errorf("unknown field: %s", key)
+		}
+	}
+	return nil
+}
+
 func ParseSupportStartConversationInput(raw json.RawMessage) (SupportStartConversationInput, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
+		return SupportStartConversationInput{}, err
+	}
+	if err := rejectUnknownSupportFields(fields, "customerId", "subject"); err != nil {
 		return SupportStartConversationInput{}, err
 	}
 	var input SupportStartConversationInput
@@ -325,6 +344,9 @@ func ParseSupportStartConversationInput(raw json.RawMessage) (SupportStartConver
 func ParseSupportPostMessageInput(raw json.RawMessage) (SupportPostMessageInput, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
+		return SupportPostMessageInput{}, err
+	}
+	if err := rejectUnknownSupportFields(fields, "conversationId", "body", "from"); err != nil {
 		return SupportPostMessageInput{}, err
 	}
 	var input SupportPostMessageInput
@@ -516,17 +538,8 @@ func ParseSupportUpdateTicketInput(raw json.RawMessage) (SupportUpdateTicketInpu
 	if err != nil {
 		return SupportUpdateTicketInput{}, err
 	}
-	allowedFields := map[string]struct{}{
-		"conversationId": {},
-		"priority":       {},
-		"category":       {},
-		"assigneeUserId": {},
-		"slaDueAt":       {},
-	}
-	for key := range fields {
-		if _, ok := allowedFields[key]; !ok {
-			return SupportUpdateTicketInput{}, fmt.Errorf("unknown field: %s", key)
-		}
+	if err := rejectUnknownSupportFields(fields, "conversationId", "priority", "category", "assigneeUserId", "slaDueAt"); err != nil {
+		return SupportUpdateTicketInput{}, err
 	}
 	var input SupportUpdateTicketInput
 	if input.ConversationID, err = projectRequiredUUID(fields, "conversationId"); err != nil {
@@ -544,32 +557,41 @@ func ParseSupportUpdateTicketInput(raw json.RawMessage) (SupportUpdateTicketInpu
 		}
 		input.Priority = &priority
 	}
-	if rawCategory, ok := fields["category"]; ok && string(rawCategory) != "null" {
-		var category string
-		if err := json.Unmarshal(rawCategory, &category); err != nil {
-			return SupportUpdateTicketInput{}, errors.New("category must be a string")
+	if rawCategory, ok := fields["category"]; ok {
+		input.CategorySet = true
+		if string(rawCategory) != "null" {
+			var category string
+			if err := json.Unmarshal(rawCategory, &category); err != nil {
+				return SupportUpdateTicketInput{}, errors.New("category must be a string")
+			}
+			if len(category) > 40 {
+				return SupportUpdateTicketInput{}, errors.New("category must be at most 40 characters")
+			}
+			input.Category = &category
 		}
-		if len(category) > 40 {
-			return SupportUpdateTicketInput{}, errors.New("category must be at most 40 characters")
-		}
-		input.Category = &category
 	}
-	if rawAssignee, ok := fields["assigneeUserId"]; ok && string(rawAssignee) != "null" {
-		assignee, err := projectRequiredUUID(fields, "assigneeUserId")
-		if err != nil {
-			return SupportUpdateTicketInput{}, err
+	if rawAssignee, ok := fields["assigneeUserId"]; ok {
+		input.AssigneeUserIDSet = true
+		if string(rawAssignee) != "null" {
+			assignee, err := projectRequiredUUID(fields, "assigneeUserId")
+			if err != nil {
+				return SupportUpdateTicketInput{}, err
+			}
+			input.AssigneeUserID = &assignee
 		}
-		input.AssigneeUserID = &assignee
 	}
-	if rawSla, ok := fields["slaDueAt"]; ok && string(rawSla) != "null" {
-		var sla string
-		if err := json.Unmarshal(rawSla, &sla); err != nil {
-			return SupportUpdateTicketInput{}, errors.New("slaDueAt must be a string")
+	if rawSla, ok := fields["slaDueAt"]; ok {
+		input.SlaDueAtSet = true
+		if string(rawSla) != "null" {
+			var sla string
+			if err := json.Unmarshal(rawSla, &sla); err != nil {
+				return SupportUpdateTicketInput{}, errors.New("slaDueAt must be a string")
+			}
+			if _, err := time.Parse(time.RFC3339, sla); err != nil {
+				return SupportUpdateTicketInput{}, errors.New("slaDueAt must be an ISO datetime")
+			}
+			input.SlaDueAt = &sla
 		}
-		if _, err := time.Parse(time.RFC3339, sla); err != nil {
-			return SupportUpdateTicketInput{}, errors.New("slaDueAt must be an ISO datetime")
-		}
-		input.SlaDueAt = &sla
 	}
 	return input, nil
 }
@@ -1082,14 +1104,26 @@ func supportUpdateTicket(ctx context.Context, tx pgx.Tx, orgID string, input Sup
 	if input.Priority != nil {
 		sets = append(sets, "priority="+arg(*input.Priority))
 	}
-	if input.Category != nil {
-		sets = append(sets, "category="+arg(*input.Category))
+	if input.CategorySet {
+		var category any
+		if input.Category != nil {
+			category = *input.Category
+		}
+		sets = append(sets, "category="+arg(category))
 	}
-	if input.AssigneeUserID != nil {
-		sets = append(sets, "assigned_user_id="+arg(*input.AssigneeUserID))
+	if input.AssigneeUserIDSet {
+		var assignee any
+		if input.AssigneeUserID != nil {
+			assignee = *input.AssigneeUserID
+		}
+		sets = append(sets, "assigned_user_id="+arg(assignee))
 	}
-	if input.SlaDueAt != nil {
-		sla, _ := time.Parse(time.RFC3339, *input.SlaDueAt)
+	if input.SlaDueAtSet {
+		var sla any
+		if input.SlaDueAt != nil {
+			parsed, _ := time.Parse(time.RFC3339, *input.SlaDueAt)
+			sla = parsed
+		}
 		sets = append(sets, "sla_due_at="+arg(sla))
 	}
 	query := "UPDATE support_conversations SET "

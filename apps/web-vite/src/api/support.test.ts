@@ -649,15 +649,33 @@ describe("Go support conversation writes", () => {
     expect(window.localStorage.getItem(storageKey)).toBeNull();
   });
 
+  it("routes explicit ticket metadata clears through Go without dropping null fields", async () => {
+    vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { updated: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = {
+      action: "updateTicket" as const,
+      conversationId,
+      priority: "normal" as const,
+      category: null,
+      assigneeUserId: null,
+      slaDueAt: null,
+    };
+
+    await expect(submitSupportConversationAction(action, scope)).resolves.toEqual({ kind: "completed", data: { updated: true } });
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { input: Record<string, unknown> };
+    expect(request.input).toEqual({ conversationId, priority: "normal", category: null, assigneeUserId: null, slaDueAt: null });
+  });
+
   it("keeps the exact Go ticket update for retry and blocks legacy after selector rollback", async () => {
     vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", true);
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ error: "temporarily unavailable" }, 503));
     vi.stubGlobal("fetch", fetchMock);
-    const action = { action: "updateTicket" as const, conversationId, priority: "high" as const, category: "billing" };
+    const action = { action: "updateTicket" as const, conversationId, priority: "high" as const, category: null, assigneeUserId: null, slaDueAt: null };
 
     await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({ status: 503 });
     const pending = readPendingSupportConversationWrite(scope);
-    expect(pending).toEqual({ capabilityId: "support.updateTicket", input: { conversationId, priority: "high", category: "billing" } });
+    expect(pending).toEqual({ capabilityId: "support.updateTicket", input: { conversationId, priority: "high", category: null, assigneeUserId: null, slaDueAt: null } });
     const firstIntent = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}").intentId;
     expect(supportWriteActionFromPending(pending!)).toEqual(action);
 

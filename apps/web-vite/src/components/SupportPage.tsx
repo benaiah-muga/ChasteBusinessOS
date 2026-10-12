@@ -389,9 +389,9 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       action: "updateTicket",
       conversationId: activeId,
       priority: PRIORITIES.includes(ticket.priority as (typeof PRIORITIES)[number]) ? (ticket.priority as (typeof PRIORITIES)[number]) : "normal",
-      ...(ticket.category.trim() ? { category: ticket.category.trim() } : {}),
-      ...(ticket.assigneeUserId ? { assigneeUserId: ticket.assigneeUserId } : {}),
-      ...(ticket.slaDueAt ? { slaDueAt: new Date(ticket.slaDueAt).toISOString() } : {}),
+      category: ticket.category.trim() || null,
+      assigneeUserId: ticket.assigneeUserId || null,
+      slaDueAt: ticket.slaDueAt ? new Date(ticket.slaDueAt).toISOString() : null,
     });
     if (accepted) setTicketSaved(true);
   }

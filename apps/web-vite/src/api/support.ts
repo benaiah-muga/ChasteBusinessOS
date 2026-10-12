@@ -381,9 +381,9 @@ const UpdateTicketInputSchema = z.object({
   action: z.literal("updateTicket"),
   conversationId: uuid,
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
-  category: z.string().max(40).optional(),
-  assigneeUserId: uuid.optional(),
-  slaDueAt: z.string().datetime().optional(),
+  category: z.string().max(40).nullable().optional(),
+  assigneeUserId: uuid.nullable().optional(),
+  slaDueAt: z.string().datetime().nullable().optional(),
 }).strict();
 const SuggestCategoryInputSchema = z.object({ action: z.literal("suggestCategory"), text: z.string().min(1).max(2000) }).strict();
 const CreateCannedResponseInputSchema = z.object({
@@ -503,7 +503,7 @@ export async function submitSupportAction<Action extends SupportWriteAction>(
 const GoSupportConversationInputSchema = z.discriminatedUnion("capabilityId", [
   z.object({ capabilityId: z.literal("support.startConversation"), input: z.object({ customerId: uuid, subject: z.string().min(1).max(200) }).strict() }).strict(),
   z.object({ capabilityId: z.literal("support.postMessage"), input: z.object({ conversationId: uuid, body: z.string().min(1).max(4000), from: z.enum(["customer", "staff"]) }).strict() }).strict(),
-  z.object({ capabilityId: z.literal("support.updateTicket"), input: z.object({ conversationId: uuid, priority: z.enum(["low", "normal", "high", "urgent"]).optional(), category: z.string().max(40).optional(), assigneeUserId: uuid.optional(), slaDueAt: z.string().datetime().optional() }).strict() }).strict(),
+  z.object({ capabilityId: z.literal("support.updateTicket"), input: z.object({ conversationId: uuid, priority: z.enum(["low", "normal", "high", "urgent"]).optional(), category: z.string().max(40).nullable().optional(), assigneeUserId: uuid.nullable().optional(), slaDueAt: z.string().datetime().nullable().optional() }).strict() }).strict(),
   z.object({ capabilityId: z.literal("support.escalateConversation"), input: z.object({ conversationId: uuid, reason: z.string().min(3).max(4000) }).strict() }).strict(),
   z.object({ capabilityId: z.literal("support.resolveConversation"), input: z.object({ conversationId: uuid }).strict() }).strict(),
   z.object({ capabilityId: z.literal("support.reopenConversation"), input: z.object({ conversationId: uuid }).strict() }).strict(),
