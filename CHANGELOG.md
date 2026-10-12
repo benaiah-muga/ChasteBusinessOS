@@ -26,6 +26,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Purchasing receipt history and the Receiving desk now load orders and
   receipt details through Go capabilities. Purchasing navigation stays on
   Vite routes, with no legacy Purchasing requests or links.
+- Vite now loads its `CHASTE_` and `GO_` settings from the repository-root
+  `.env`, matching the documented workspace setup so Go capability selectors
+  are honored when the app runs from its package directory.
 - Vite CRM now reads deals, customers, follow-up tasks, saved views, and
   customer timelines through authenticated Go capabilities. Go resolves the
   session and organization scope, and invalid or unavailable responses fail

@@ -3961,3 +3961,16 @@ new owners and the manifest shows zero legacy runtime paths.
      Purchasing links now stay under Vite routes. Receipt, Receiving desk, and
      proxy suites passed (252 tests), Vite typecheck and scoped lint passed.
      This completes item 368.
+
+370. (Complete) Load Vite development selectors from the repository-root
+     `.env` so the documented `pnpm dev` setup reaches the configured Go
+     capabilities when Vite runs inside its workspace package.
+
+371. (Runtime verified) On 2026-10-13, the authenticated Vite purchasing flow
+     created a vendor and purchase order, recorded a receipt against its
+     stocked line, then showed receipt #1 and the accepted/outstanding
+     quantities in receipt history. Vendor, order, receipt, and history
+     requests used `/api/capabilities/execute` with HTTP 200 after Vite loaded
+     the repository-root configuration. No `/api/purchasing` request was made
+     during the proof. Typecheck, focused lint, and the 252 purchasing and
+     proxy tests passed. This completes item 370.
