@@ -3935,3 +3935,17 @@ new owners and the manifest shows zero legacy runtime paths.
      requests or browser errors occurred. The page suite passed 24 tests,
      focused Vite API and Go handler checks passed, along with typecheck and
      scoped lint. This completes item 364.
+
+366. (Complete) Move the Vite Proposals page reads, human review decisions,
+     and candidate release transitions to authenticated Go capabilities.
+     Scope proposal review by organization and stored permission, preserve
+     compare-and-set transitions, and show setup guidance that applies to the
+     user's local agent instead of relying on the Next server's PATH.
+
+367. (Runtime verified) On 2026-10-13, the authenticated Vite Proposals page
+     rendered proposals, capability gaps, and setup guidance. Both list calls
+     used `/api/capabilities/execute` and returned HTTP 200. No legacy proposal,
+     capability-gap, or creator-agent routes were requested and the browser
+     error log was empty. The Vite proposal suite, typecheck, scoped lint, and
+     database-backed Go capability and HTTP tests passed. This completes item
+     366.

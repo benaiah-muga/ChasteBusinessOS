@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  fetchCapabilityGaps,
   fetchProposals,
   ProposalsApiError,
   submitEvolutionAction,
@@ -85,9 +86,33 @@ describe("proposal reads", () => {
   it("refuses a proposal list that is missing releases", async () => {
     const malformed = proposal() as Record<string, unknown>;
     delete malformed.releases;
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ proposals: [malformed] })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { proposals: [malformed] } })));
 
     await expect(fetchProposals()).rejects.toBeInstanceOf(ProposalsApiError);
+  });
+
+  it("reads proposal details and release history through the Go capability", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(payload).toMatchObject({ capabilityId: "creator.listProposals", input: {} });
+      expect(payload.intentId).toEqual(expect.any(String));
+      return Response.json({ ok: true, data: { proposals: [proposal()] } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchProposals()).resolves.toEqual([proposal()]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("reads capability gaps through the Go capability", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(payload).toMatchObject({ capabilityId: "creator.listCapabilityGaps", input: {} });
+      return Response.json({ ok: true, data: { gaps: [{ id: gapTicketId, title: "Gap", description: "A capability gap", status: "open", createdAt: "2026-09-20T09:30:00.000Z" }] } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCapabilityGaps()).resolves.toEqual([{ id: gapTicketId, title: "Gap", description: "A capability gap", status: "open", createdAt: "2026-09-20T09:30:00.000Z" }]);
   });
 
   it("surfaces the permission refusal instead of an empty list", async () => {
@@ -105,7 +130,7 @@ describe("proposal reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const request = fetchProposals();
-    expect(fetchMock).toHaveBeenCalledWith("/api/proposals", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ signal: expect.any(AbortSignal) }));
     timeoutController.abort();
     await expect(request).rejects.toMatchObject({ status: 0, message: expect.stringContaining("Creator service") });
   });
@@ -115,9 +140,9 @@ describe("proposal review", () => {
   it("records a decision with an idempotent intent", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      expect(payload).toMatchObject({ proposalId, decision: "approved" });
+      expect(payload).toMatchObject({ capabilityId: "creator.reviewProposal", input: { proposalId, decision: "approved" } });
       expect(payload.intentId).toEqual(expect.any(String));
-      return Response.json({ ok: true, note: "decision recorded; merge the change through your normal PR flow" });
+      return Response.json({ ok: true, data: { note: "decision recorded; merge the change through your normal PR flow" } });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -126,7 +151,7 @@ describe("proposal review", () => {
   });
 
   it("surfaces a compare-and-set conflict rather than a silent success", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "conflict: proposal already decided or no longer in review" }, { status: 409 })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, error: "conflict: proposal already decided or no longer in review" }, { status: 422 })));
 
     await expect(submitProposalReview({ proposalId, decision: "rejected" })).rejects.toMatchObject({
       status: 409,
@@ -139,7 +164,10 @@ describe("governed release actions", () => {
   it("sends the verified digest and artifact through the governed path", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      expect(payload).toMatchObject({ action: "stage", proposalId, gapTicketId, candidateDigest: digest });
+      expect(payload).toMatchObject({
+        capabilityId: "creator.stageCandidate",
+        input: { proposalId, gapTicketId, candidateDigest: digest },
+      });
       expect(payload.intentId).toEqual(expect.any(String));
       return Response.json({ ok: true, data: { releaseId, status: "staged", gapTicketId, candidateDigest: digest, artifactRef: `artifact://creator/candidate/${digest}` } });
     });
@@ -154,7 +182,23 @@ describe("governed release actions", () => {
     });
 
     expect(outcome.kind).toBe("completed");
-    expect(fetchMock).toHaveBeenCalledWith("/api/creator/evolution", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("routes each release transition to its Go capability and preserves the intent id", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(payload).toEqual({
+        capabilityId: "creator.promoteCandidate",
+        input: { releaseId, candidateDigest: digest },
+        intentId: "retry-intent-1",
+      });
+      return Response.json({ ok: true, data: { releaseId, status: "promoted", gapTicketId, candidateDigest: digest, artifactRef: `artifact://creator/candidate/${digest}` } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submitEvolutionAction({ action: "promote", releaseId, candidateDigest: digest }, "retry-intent-1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
   });
 
   it("reports an approval-pending release as pending, not as a promotion", async () => {
@@ -199,7 +243,7 @@ describe("governed release actions", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { releaseId, status: "promoted" } })));
 
     await expect(submitEvolutionAction({ action: "promote", releaseId, candidateDigest: digest })).rejects.toMatchObject({
-      message: "The Creator service returned an unexpected release result.",
+      message: "The Go Creator service returned an unexpected release result.",
     });
   });
 

@@ -359,6 +359,29 @@ func TestCreatorOptionalInputsRejectExplicitNull(t *testing.T) {
 	}
 }
 
+func TestCreatorReviewProposalParserMirrorsReviewContract(t *testing.T) {
+	const proposalID = "11111111-1111-4111-8111-111111111111"
+	valid := `{"proposalId":"` + proposalID + `","decision":"approved","comment":"Looks good"}`
+	parsed, err := ParseCreatorReviewProposalInput(json.RawMessage(valid))
+	if err != nil || parsed.ProposalID != proposalID || parsed.Decision != "approved" || parsed.Comment == nil || *parsed.Comment != "Looks good" {
+		t.Fatalf("ParseCreatorReviewProposalInput() = %+v, %v", parsed, err)
+	}
+	if _, err := ParseCreatorReviewProposalInput(json.RawMessage(`{"proposalId":"` + proposalID + `","decision":"rejected"}`)); err != nil {
+		t.Fatalf("optional comment was rejected: %v", err)
+	}
+	for _, raw := range []string{
+		`{"proposalId":"not-a-uuid","decision":"approved"}`,
+		`{"proposalId":"` + proposalID + `","decision":"merged"}`,
+		`{"proposalId":"` + proposalID + `","decision":"approved","comment":null}`,
+		`{"proposalId":"` + proposalID + `","decision":"approved","comment":5}`,
+		`{"proposalId":"` + proposalID + `","decision":"approved","comment":"` + strings.Repeat("a", 4001) + `"}`,
+	} {
+		if _, err := ParseCreatorReviewProposalInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("ParseCreatorReviewProposalInput accepted invalid input: %s", raw[:min(len(raw), 120)])
+		}
+	}
+}
+
 func TestCreatorScaffoldRenderersMatchCreatorModuleContracts(t *testing.T) {
 	description := `Customer's "preferred" warehouse`
 	spec := CreatorScaffoldSpec{

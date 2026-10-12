@@ -24,6 +24,8 @@ import (
 const (
 	creatorSubmitProposalCapabilityID      = "creator.submitProposal"
 	creatorListProposalsCapabilityID       = "creator.listProposals"
+	creatorReviewProposalCapabilityID      = "creator.reviewProposal"
+	creatorListCapabilityGapsCapabilityID  = "creator.listCapabilityGaps"
 	creatorScaffoldCapabilityID            = "creator.scaffoldCapability"
 	creatorVerifyPluginCapabilityID        = "creator.verifyPlugin"
 	creatorPublishListingCapabilityID      = "creator.publishListing"
@@ -36,6 +38,10 @@ const (
 	creatorRollbackCandidateCapabilityID   = "creator.rollbackCandidate"
 	creatorRecordCanaryOutcomeCapabilityID = "creator.recordCanaryOutcome"
 )
+
+type CreatorDomainError string
+
+func (e CreatorDomainError) Error() string { return string(e) }
 
 var (
 	creatorSlugPattern        = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -585,11 +591,62 @@ type CreatorListProposalsInput struct {
 	Status *string `json:"status,omitempty"`
 }
 
+type CreatorReviewProposalInput struct {
+	ProposalID string  `json:"proposalId"`
+	Decision   string  `json:"decision"`
+	Comment    *string `json:"comment,omitempty"`
+}
+
+type CreatorReviewProposalOutput struct {
+	Note string `json:"note"`
+}
+
+type CreatorListCapabilityGapsInput struct{}
+
+type CreatorCapabilityGapListItem struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	CreatedAt   string `json:"createdAt"`
+}
+
+type CreatorListCapabilityGapsOutput struct {
+	Gaps []CreatorCapabilityGapListItem `json:"gaps"`
+}
+
 type CreatorProposalListItem struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"createdAt"`
+	ID             string                            `json:"id"`
+	Title          string                            `json:"title"`
+	Summary        string                            `json:"summary"`
+	DiffText       string                            `json:"diffText"`
+	TestEvidence   *string                           `json:"testEvidence"`
+	RiskAssessment *string                           `json:"riskAssessment"`
+	Status         string                            `json:"status"`
+	GapTicketID    *string                           `json:"gapTicketId"`
+	ReviewComment  *string                           `json:"reviewComment"`
+	CreatedAt      string                            `json:"createdAt"`
+	Releases       []CreatorEvolutionReleaseListItem `json:"releases"`
+}
+
+type CreatorEvolutionReleaseListItem struct {
+	ID              string                            `json:"id"`
+	GapTicketID     *string                           `json:"gapTicketId"`
+	CandidateDigest string                            `json:"candidateDigest"`
+	ArtifactRef     string                            `json:"artifactRef"`
+	Status          string                            `json:"status"`
+	StagedAt        string                            `json:"stagedAt"`
+	PromotedAt      *string                           `json:"promotedAt"`
+	RolledBackAt    *string                           `json:"rolledBackAt"`
+	Outcomes        []CreatorEvolutionOutcomeListItem `json:"outcomes"`
+}
+
+type CreatorEvolutionOutcomeListItem struct {
+	ID          string          `json:"id"`
+	Verdict     string          `json:"verdict"`
+	EvidenceRef string          `json:"evidenceRef"`
+	Metrics     json.RawMessage `json:"metrics"`
+	ObservedAt  string          `json:"observedAt"`
 }
 
 type CreatorListProposalsOutput struct {
@@ -868,6 +925,38 @@ func ParseCreatorListProposalsInput(raw json.RawMessage) (CreatorListProposalsIn
 	return input, nil
 }
 
+func ParseCreatorReviewProposalInput(raw json.RawMessage) (CreatorReviewProposalInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return CreatorReviewProposalInput{}, err
+	}
+	input := CreatorReviewProposalInput{}
+	if input.ProposalID, err = projectRequiredUUID(fields, "proposalId"); err != nil {
+		return CreatorReviewProposalInput{}, err
+	}
+	if input.Decision, err = projectRequiredEnum(fields, "decision", []string{"approved", "rejected"}); err != nil {
+		return CreatorReviewProposalInput{}, err
+	}
+	if rawComment, ok := fields["comment"]; ok {
+		var comment string
+		if strings.TrimSpace(string(rawComment)) == "null" || json.Unmarshal(rawComment, &comment) != nil {
+			return CreatorReviewProposalInput{}, errors.New("comment must be a string")
+		}
+		if utf16Length(comment) > 4000 {
+			return CreatorReviewProposalInput{}, errors.New("comment must be at most 4000 characters")
+		}
+		input.Comment = &comment
+	}
+	return input, nil
+}
+
+func ParseCreatorListCapabilityGapsInput(raw json.RawMessage) (CreatorListCapabilityGapsInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return CreatorListCapabilityGapsInput{}, err
+	}
+	return CreatorListCapabilityGapsInput{}, nil
+}
+
 func ParseCreatorScaffoldInput(raw json.RawMessage) (CreatorScaffoldInput, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
@@ -1067,6 +1156,10 @@ func parseCreatorInput(capabilityID string, raw json.RawMessage) (any, error) {
 		return ParseCreatorSubmitProposalInput(raw)
 	case creatorListProposalsCapabilityID:
 		return ParseCreatorListProposalsInput(raw)
+	case creatorReviewProposalCapabilityID:
+		return ParseCreatorReviewProposalInput(raw)
+	case creatorListCapabilityGapsCapabilityID:
+		return ParseCreatorListCapabilityGapsInput(raw)
 	case creatorScaffoldCapabilityID:
 		return ParseCreatorScaffoldInput(raw)
 	case creatorVerifyPluginCapabilityID:
@@ -1102,13 +1195,13 @@ func creatorVerifyGapTicket(ctx context.Context, tx pgx.Tx, orgID, gapTicketID s
 	err := tx.QueryRow(ctx, `SELECT origin FROM tickets WHERE id=$1::uuid AND org_id=$2::uuid LIMIT 1`,
 		gapTicketID, orgID).Scan(&origin)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return errors.New("capability gap ticket not found for organization")
+		return CreatorDomainError("capability gap ticket not found for organization")
 	}
 	if err != nil {
 		return err
 	}
 	if origin != "capability_gap" {
-		return errors.New("outcome must link to a capability gap ticket")
+		return CreatorDomainError("outcome must link to a capability gap ticket")
 	}
 	return nil
 }
@@ -1136,7 +1229,7 @@ func creatorSubmitProposal(ctx context.Context, tx pgx.Tx, claims authbridge.Cap
 }
 
 func creatorListProposals(ctx context.Context, tx pgx.Tx, orgID string, input CreatorListProposalsInput) (CreatorListProposalsOutput, error) {
-	query := `SELECT id::text, title, status, created_at FROM creator_proposals WHERE org_id=$1::uuid`
+	query := `SELECT id::text, title, summary, diff_text, test_evidence, risk_assessment, status, gap_ticket_id::text, review_comment, created_at FROM creator_proposals WHERE org_id=$1::uuid`
 	args := []any{orgID}
 	if input.Status != nil {
 		args = append(args, *input.Status)
@@ -1149,14 +1242,165 @@ func creatorListProposals(ctx context.Context, tx pgx.Tx, orgID string, input Cr
 	}
 	defer rows.Close()
 	out := CreatorListProposalsOutput{Proposals: []CreatorProposalListItem{}}
+	proposalIDs := make([]string, 0, 50)
 	for rows.Next() {
 		var item CreatorProposalListItem
 		var createdAt time.Time
-		if err := rows.Scan(&item.ID, &item.Title, &item.Status, &createdAt); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.Title, &item.Summary, &item.DiffText, &item.TestEvidence,
+			&item.RiskAssessment, &item.Status, &item.GapTicketID, &item.ReviewComment, &createdAt,
+		); err != nil {
 			return CreatorListProposalsOutput{}, err
 		}
 		item.CreatedAt = createdAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		item.Releases = []CreatorEvolutionReleaseListItem{}
+		proposalIDs = append(proposalIDs, item.ID)
 		out.Proposals = append(out.Proposals, item)
+	}
+	if err := rows.Err(); err != nil {
+		return CreatorListProposalsOutput{}, err
+	}
+	if len(proposalIDs) == 0 {
+		return out, nil
+	}
+
+	proposalIndex := make(map[string]int, len(out.Proposals))
+	for index, proposal := range out.Proposals {
+		proposalIndex[proposal.ID] = index
+	}
+	releaseRows, err := tx.Query(ctx, `
+		SELECT id::text, proposal_id::text, gap_ticket_id::text, candidate_digest, artifact_ref, status,
+		       staged_at, promoted_at, rolled_back_at
+		FROM creator_evolution_releases
+		WHERE org_id=$1::uuid AND proposal_id=ANY($2::uuid[])
+		ORDER BY staged_at`, orgID, proposalIDs)
+	if err != nil {
+		return CreatorListProposalsOutput{}, err
+	}
+	defer releaseRows.Close()
+	releaseIDs := make([]string, 0)
+	type releasePosition struct {
+		proposal int
+		release  int
+	}
+	releaseIndex := make(map[string]releasePosition)
+	for releaseRows.Next() {
+		var release CreatorEvolutionReleaseListItem
+		var proposalID string
+		var stagedAt time.Time
+		var promotedAt, rolledBackAt *time.Time
+		if err := releaseRows.Scan(
+			&release.ID, &proposalID, &release.GapTicketID, &release.CandidateDigest, &release.ArtifactRef,
+			&release.Status, &stagedAt, &promotedAt, &rolledBackAt,
+		); err != nil {
+			return CreatorListProposalsOutput{}, err
+		}
+		release.StagedAt = stagedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		if promotedAt != nil {
+			value := promotedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+			release.PromotedAt = &value
+		}
+		if rolledBackAt != nil {
+			value := rolledBackAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+			release.RolledBackAt = &value
+		}
+		release.Outcomes = []CreatorEvolutionOutcomeListItem{}
+		proposalPosition, found := proposalIndex[proposalID]
+		if !found {
+			return CreatorListProposalsOutput{}, errors.New("creator release belongs to an unlisted proposal")
+		}
+		out.Proposals[proposalPosition].Releases = append(out.Proposals[proposalPosition].Releases, release)
+		position := len(out.Proposals[proposalPosition].Releases) - 1
+		releaseIndex[release.ID] = releasePosition{proposal: proposalPosition, release: position}
+		releaseIDs = append(releaseIDs, release.ID)
+	}
+	if err := releaseRows.Err(); err != nil {
+		return CreatorListProposalsOutput{}, err
+	}
+	if len(releaseIDs) == 0 {
+		return out, nil
+	}
+
+	outcomeRows, err := tx.Query(ctx, `
+		SELECT id::text, release_id::text, verdict, evidence_ref, metrics::text, observed_at
+		FROM creator_evolution_outcomes
+		WHERE org_id=$1::uuid AND release_id=ANY($2::uuid[])
+		ORDER BY observed_at`, orgID, releaseIDs)
+	if err != nil {
+		return CreatorListProposalsOutput{}, err
+	}
+	defer outcomeRows.Close()
+	for outcomeRows.Next() {
+		var outcome CreatorEvolutionOutcomeListItem
+		var releaseID string
+		var metrics string
+		var observedAt time.Time
+		if err := outcomeRows.Scan(&outcome.ID, &releaseID, &outcome.Verdict, &outcome.EvidenceRef, &metrics, &observedAt); err != nil {
+			return CreatorListProposalsOutput{}, err
+		}
+		position, found := releaseIndex[releaseID]
+		if !found {
+			return CreatorListProposalsOutput{}, errors.New("creator outcome belongs to an unlisted release")
+		}
+		outcome.Metrics = json.RawMessage(metrics)
+		if !json.Valid(outcome.Metrics) {
+			return CreatorListProposalsOutput{}, errors.New("creator outcome metrics are invalid JSON")
+		}
+		outcome.ObservedAt = observedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		release := &out.Proposals[position.proposal].Releases[position.release]
+		release.Outcomes = append(release.Outcomes, outcome)
+	}
+	if err := outcomeRows.Err(); err != nil {
+		return CreatorListProposalsOutput{}, err
+	}
+	return out, nil
+}
+
+func creatorReviewProposal(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CreatorReviewProposalInput) (CreatorReviewProposalOutput, error) {
+	var existing bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM creator_proposals WHERE id=$1::uuid AND org_id=$2::uuid)`, input.ProposalID, claims.OrganizationID).Scan(&existing); err != nil {
+		return CreatorReviewProposalOutput{}, err
+	}
+	if !existing {
+		return CreatorReviewProposalOutput{}, CreatorDomainError("creator proposal not found for organization")
+	}
+	var reviewedID string
+	err := tx.QueryRow(ctx, `
+		UPDATE creator_proposals
+		SET status=$3, reviewed_by_user_id=$4::uuid, review_comment=$5, reviewed_at=clock_timestamp()
+		WHERE id=$1::uuid AND org_id=$2::uuid AND status='in_review'
+		RETURNING id::text`, input.ProposalID, claims.OrganizationID, input.Decision, claims.Subject, input.Comment).Scan(&reviewedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CreatorReviewProposalOutput{}, CreatorDomainError("conflict: proposal already decided or no longer in review")
+	}
+	if err != nil {
+		return CreatorReviewProposalOutput{}, err
+	}
+	if reviewedID == "" {
+		return CreatorReviewProposalOutput{}, errors.New("creator proposal review did not return an id")
+	}
+	return CreatorReviewProposalOutput{Note: "decision recorded; merge the change through your normal PR flow"}, nil
+}
+
+func creatorListCapabilityGaps(ctx context.Context, tx pgx.Tx, orgID string) (CreatorListCapabilityGapsOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, title, description, status, created_at
+		FROM tickets
+		WHERE org_id=$1::uuid AND origin='capability_gap'
+		ORDER BY created_at DESC LIMIT 100`, orgID)
+	if err != nil {
+		return CreatorListCapabilityGapsOutput{}, err
+	}
+	defer rows.Close()
+	out := CreatorListCapabilityGapsOutput{Gaps: []CreatorCapabilityGapListItem{}}
+	for rows.Next() {
+		var gap CreatorCapabilityGapListItem
+		var createdAt time.Time
+		if err := rows.Scan(&gap.ID, &gap.Title, &gap.Description, &gap.Status, &createdAt); err != nil {
+			return CreatorListCapabilityGapsOutput{}, err
+		}
+		gap.CreatedAt = createdAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		out.Gaps = append(out.Gaps, gap)
 	}
 	return out, rows.Err()
 }
@@ -1417,16 +1661,16 @@ func creatorVerifiedCandidate(ctx context.Context, tx pgx.Tx, orgID, proposalID,
 		SELECT status, gap_ticket_id::text, test_evidence FROM creator_proposals
 		WHERE id=$1::uuid AND org_id=$2::uuid LIMIT 1`, proposalID, orgID).Scan(&status, &proposalGapTicketID, &testEvidence)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", errors.New("creator proposal not found for organization")
+		return "", CreatorDomainError("creator proposal not found for organization")
 	}
 	if err != nil {
 		return "", err
 	}
 	if status != "approved" {
-		return "", fmt.Errorf("proposal is %s; approval is required before release", status)
+		return "", CreatorDomainError(fmt.Sprintf("proposal is %s; approval is required before release", status))
 	}
 	if testEvidence == nil {
-		return "", errors.New("proposal lacks valid isolated candidate evidence")
+		return "", CreatorDomainError("proposal lacks valid isolated candidate evidence")
 	}
 	var evidence struct {
 		Kind            string   `json:"kind"`
@@ -1447,18 +1691,18 @@ func creatorVerifiedCandidate(ctx context.Context, tx pgx.Tx, orgID, proposalID,
 		!evidence.Verification.Passed ||
 		evidence.Verification.Network == "" ||
 		evidence.Verification.ProductionCredentials {
-		return "", errors.New("proposal lacks valid isolated candidate evidence")
+		return "", CreatorDomainError("proposal lacks valid isolated candidate evidence")
 	}
 	for _, file := range evidence.Files {
 		if file == "" {
-			return "", errors.New("proposal lacks valid isolated candidate evidence")
+			return "", CreatorDomainError("proposal lacks valid isolated candidate evidence")
 		}
 	}
 	if evidence.CandidateDigest != candidateDigest {
-		return "", errors.New("candidate digest does not match verified evidence")
+		return "", CreatorDomainError("candidate digest does not match verified evidence")
 	}
 	if proposalGapTicketID == nil {
-		return "", errors.New("proposal lacks valid isolated candidate evidence")
+		return "", CreatorDomainError("proposal lacks valid isolated candidate evidence")
 	}
 	return *proposalGapTicketID, nil
 }
@@ -1469,7 +1713,7 @@ func creatorStageCandidate(ctx context.Context, tx pgx.Tx, orgID string, input C
 		return CreatorReleaseOutput{}, err
 	}
 	if gapTicketID != input.GapTicketID {
-		return CreatorReleaseOutput{}, errors.New("candidate proposal is not linked to the requested capability gap")
+		return CreatorReleaseOutput{}, CreatorDomainError("candidate proposal is not linked to the requested capability gap")
 	}
 	if err := creatorVerifyGapTicket(ctx, tx, orgID, input.GapTicketID); err != nil {
 		return CreatorReleaseOutput{}, err
@@ -1487,7 +1731,7 @@ func creatorStageCandidate(ctx context.Context, tx pgx.Tx, orgID string, input C
 		&existingID, &existingStatus, &existingGapTicketID, &existingDigest, &existingArtifactRef)
 	if err == nil {
 		if existingGapTicketID != input.GapTicketID {
-			return CreatorReleaseOutput{}, errors.New("release gap ticket does not match the requested gap")
+			return CreatorReleaseOutput{}, CreatorDomainError("release gap ticket does not match the requested gap")
 		}
 		return CreatorReleaseOutput{ReleaseID: existingID, Status: "staged", GapTicketID: existingGapTicketID, CandidateDigest: existingDigest, ArtifactRef: existingArtifactRef}, nil
 	}
@@ -1514,16 +1758,16 @@ func creatorPromoteCandidate(ctx context.Context, tx pgx.Tx, orgID string, input
 		FROM creator_evolution_releases WHERE id=$1::uuid AND org_id=$2::uuid LIMIT 1`,
 		input.ReleaseID, orgID).Scan(&releaseID, &status, &gapTicketID, &digest, &artifactRef)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return CreatorReleaseOutput{}, errors.New("creator evolution release not found for organization")
+		return CreatorReleaseOutput{}, CreatorDomainError("creator evolution release not found for organization")
 	}
 	if err != nil {
 		return CreatorReleaseOutput{}, err
 	}
 	if digest != input.CandidateDigest {
-		return CreatorReleaseOutput{}, errors.New("release digest mismatch")
+		return CreatorReleaseOutput{}, CreatorDomainError("release digest mismatch")
 	}
 	if status != "staged" {
-		return CreatorReleaseOutput{}, fmt.Errorf("release is %s; only staged artifacts may be promoted", status)
+		return CreatorReleaseOutput{}, CreatorDomainError(fmt.Sprintf("release is %s; only staged artifacts may be promoted", status))
 	}
 	var promotedID, promotedGapTicketID, promotedDigest, promotedArtifactRef string
 	err = tx.QueryRow(ctx, `
@@ -1531,8 +1775,11 @@ func creatorPromoteCandidate(ctx context.Context, tx pgx.Tx, orgID string, input
 		WHERE id=$1::uuid AND org_id=$2::uuid AND status='staged'
 		RETURNING id::text, gap_ticket_id::text, candidate_digest, artifact_ref`,
 		releaseID, orgID, time.Now()).Scan(&promotedID, &promotedGapTicketID, &promotedDigest, &promotedArtifactRef)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CreatorReleaseOutput{}, CreatorDomainError("release changed before promotion")
+	}
 	if err != nil {
-		return CreatorReleaseOutput{}, errors.New("release changed before promotion")
+		return CreatorReleaseOutput{}, err
 	}
 	return CreatorReleaseOutput{ReleaseID: promotedID, Status: "promoted", GapTicketID: promotedGapTicketID, CandidateDigest: promotedDigest, ArtifactRef: promotedArtifactRef}, nil
 }
@@ -1545,7 +1792,7 @@ func creatorRollbackCandidate(ctx context.Context, tx pgx.Tx, orgID string, inpu
 		RETURNING id::text, candidate_digest, artifact_ref`,
 		input.ReleaseID, orgID, input.CandidateDigest, time.Now()).Scan(&releaseID, &digest, &artifactRef)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return CreatorReleaseOutput{}, errors.New("release not found or digest mismatch")
+		return CreatorReleaseOutput{}, CreatorDomainError("release not found, digest mismatch, or release state changed")
 	}
 	if err != nil {
 		return CreatorReleaseOutput{}, err
@@ -1560,19 +1807,19 @@ func creatorRecordCanaryOutcome(ctx context.Context, tx pgx.Tx, orgID string, in
 		FROM creator_evolution_releases WHERE id=$1::uuid AND org_id=$2::uuid LIMIT 1`,
 		input.ReleaseID, orgID).Scan(&releaseID, &status, &gapTicketID, &digest)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return CreatorRecordCanaryOutcomeOutput{}, errors.New("creator evolution release not found for organization")
+		return CreatorRecordCanaryOutcomeOutput{}, CreatorDomainError("creator evolution release not found for organization")
 	}
 	if err != nil {
 		return CreatorRecordCanaryOutcomeOutput{}, err
 	}
 	if status != "promoted" {
-		return CreatorRecordCanaryOutcomeOutput{}, fmt.Errorf("release is %s; canary evidence requires a promoted release", status)
+		return CreatorRecordCanaryOutcomeOutput{}, CreatorDomainError(fmt.Sprintf("release is %s; canary evidence requires a promoted release", status))
 	}
 	if digest != input.CandidateDigest {
-		return CreatorRecordCanaryOutcomeOutput{}, errors.New("release digest mismatch")
+		return CreatorRecordCanaryOutcomeOutput{}, CreatorDomainError("release digest mismatch")
 	}
 	if gapTicketID != input.GapTicketID {
-		return CreatorRecordCanaryOutcomeOutput{}, errors.New("outcome gap ticket does not match the release")
+		return CreatorRecordCanaryOutcomeOutput{}, CreatorDomainError("outcome gap ticket does not match the release")
 	}
 	if err := creatorVerifyGapTicket(ctx, tx, orgID, input.GapTicketID); err != nil {
 		return CreatorRecordCanaryOutcomeOutput{}, err

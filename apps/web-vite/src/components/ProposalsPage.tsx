@@ -2,14 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import "./ProposalsPage.css";
 import {
   fetchCapabilityGaps,
-  fetchCreatorAgent,
   fetchCreatorEnabled,
   fetchProposals,
   ProposalsApiError,
   submitEvolutionAction,
   submitProposalReview,
   verifyCandidateEvidence,
-  type AgentStatus,
   type CapabilityGap,
   type CreatorProposal,
   type EvolutionAction,
@@ -89,8 +87,6 @@ const styles = `
 .cp-gap-head h2 { margin: 0; color: #2c3930; font-size: 12px; font-weight: 700; }
 .cp-gap pre { max-height: 210px; overflow: auto; margin: 0; border-radius: 7px; padding: 10px; background: #f8f7f2; color: #5f655d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1.6; white-space: pre-wrap; }
 .cp-gap-id { margin: 0; color: #a09f96; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
-.cp-agent-ready { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 0 0 14px; border: 1px solid #cfe0cd; border-radius: 9px; padding: 12px 14px; background: #f2f8f0; color: #466a48; font-size: 11px; }
-.cp-agent-ready small { width: 100%; color: #5e7d5f; font-size: 9px; }
 .cp-agent-setup { margin-bottom: 14px; border: 1px solid #e5e3da; border-radius: 10px; padding: 15px; background: #fffefa; }
 .cp-agent-setup h2 { display: flex; align-items: center; gap: 7px; margin: 0 0 6px; color: #2c3930; font-size: 12px; font-weight: 700; }
 .cp-agent-setup > p { margin: 0; max-width: 720px; color: #6a6f66; font-size: 11px; line-height: 1.65; }
@@ -192,61 +188,36 @@ function CopyDigest({ value, label = "Copy digest" }: { value: string; label?: s
   );
 }
 
-/**
- * Creator-mode onboarding: detect an installed coding agent, or walk the human
- * through installing one. The app never runs the install itself, it only hands
- * over the command and verifies afterwards.
- */
+const codingAgentOptions = [
+  { label: "Claude Code", install: "npm install -g @anthropic-ai/claude-code", auth: "Run claude in a terminal and sign in with your Anthropic account." },
+  { label: "OpenAI Codex CLI", install: "npm install -g @openai/codex", auth: "Run codex in a terminal and sign in with your ChatGPT account." },
+  { label: "Gemini CLI", install: "npm install -g @google/gemini-cli", auth: "Run gemini in a terminal and sign in with your Google account." },
+  { label: "OpenCode", install: "curl -fsSL https://opencode.ai/install | bash", auth: "Run opencode in a terminal and sign in with your provider account." },
+  { label: "Kilo Code", install: "npm install -g @kilocode/cli", auth: "Run kilo in a terminal and sign in with your Kilo account." },
+  { label: "Aider", install: "python -m pip install aider-install && aider-install", auth: "Set an ANTHROPIC_API_KEY or OPENAI_API_KEY, then run aider." },
+];
+
+/** The browser cannot inspect the user's terminal, so setup is guidance only. */
 function AgentSetupCard() {
-  const [agent, setAgent] = useState<AgentStatus | null>(null);
-  const [checking, setChecking] = useState(false);
-
-  const check = useCallback(async (signal?: AbortSignal) => {
-    if (!signal) setChecking(true);
-    const status = await fetchCreatorAgent(signal);
-    if (signal?.aborted) return;
-    setAgent(status);
-    if (!signal) setChecking(false);
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void check(controller.signal);
-    return () => controller.abort();
-  }, [check]);
-
-  if (!agent) return null;
-  if (agent.installed) {
-    return (
-      <p className="cp-agent-ready">
-        <strong>{agent.label}</strong>
-        <span>is connected{agent.version ? ` · ${agent.version}` : ""}. Switch on Creator mode in the console and ask it for an improvement.</span>
-        {agent.agents.length > 1 && (
-          <small>
-            Also detected:{" "}
-            {agent.agents
-              .filter((entry) => entry.label !== agent.label)
-              .map((entry) => `${entry.label}${entry.version ? ` (${entry.version})` : entry.viaBinary ? "" : " (config only)"}`)
-              .join(" · ")}
-          </small>
-        )}
-      </p>
-    );
-  }
-
-  const first = agent.candidates[0];
   return (
     <section className="cp-agent-setup" aria-labelledby="cp-agent-setup-heading">
       <h2 id="cp-agent-setup-heading">Connect a coding agent to use Creator mode</h2>
       <p>
-        Creator mode works by an agent proposing changes as reviewed diffs. No supported coding CLI
-        {agent.candidates.map((candidate) => ` ${candidate.label}`).join(" ·")} was found on this machine&apos;s PATH.
-        Install one: you only leave the app to sign in with the vendor.
+        Creator mode works by an agent proposing changes as reviewed diffs. This browser cannot inspect
+        your terminal or verify which tools are installed. Install and sign in to one of these CLIs in
+        your development environment, then use Creator mode from the console. This page does not install
+        tools or verify their connection state.
       </p>
       <ol className="cp-agent-steps">
-        <li><b>1</b><span>Install {first?.label ?? "an agent"}:</span><code>{first?.install}</code><CopyDigest value={first?.install ?? ""} label="Copy install command" /></li>
-        <li><b>2</b><span>{first?.authNote}</span></li>
-        <li><b>3</b><button type="button" disabled={checking} onClick={() => void check()}>{checking ? "Checking…" : "Check again"}</button></li>
+        {codingAgentOptions.map((agent) => (
+          <li key={agent.label}>
+            <b aria-hidden="true">•</b>
+            <strong>{agent.label}</strong>
+            <code>{agent.install}</code>
+            <CopyDigest value={agent.install} label={`Copy ${agent.label} install command`} />
+            <span>{agent.auth}</span>
+          </li>
+        ))}
       </ol>
     </section>
   );

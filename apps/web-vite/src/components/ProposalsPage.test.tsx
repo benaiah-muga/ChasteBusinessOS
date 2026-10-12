@@ -39,7 +39,13 @@ function modules(enabled = true) {
   });
 }
 
-const noGaps = Response.json({ gaps: [] });
+function creatorReadResponse(input: RequestInfo | URL, init: RequestInit | undefined, proposals: Record<string, unknown>[] = [], gaps: Record<string, unknown>[] = []) {
+  if (String(input) !== "/api/capabilities/execute" || init?.method !== "POST") return null;
+  const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
+  if (payload.capabilityId === "creator.listProposals") return Response.json({ ok: true, data: { proposals } });
+  if (payload.capabilityId === "creator.listCapabilityGaps") return Response.json({ ok: true, data: { gaps } });
+  return null;
+}
 
 afterEach(() => {
   cleanup();
@@ -54,18 +60,40 @@ afterEach(() => {
 const PAGE_TEST_TIMEOUT = 20_000;
 
 describe("Vite proposals page", () => {
+  it("shows browser-local agent setup guidance without calling the legacy agent detector", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return modules();
+      const read = creatorReadResponse(input, init);
+      if (read) return read;
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ProposalsPage />);
+    await screen.findByRole("tab", { name: "Proposals" });
+    fireEvent.click(screen.getByRole("tab", { name: "Setup" }));
+
+    expect(await screen.findByRole("heading", { name: "Connect a coding agent to use Creator mode" })).not.toBeNull();
+    expect(screen.getByText("npm install -g @openai/codex")).not.toBeNull();
+    expect(screen.getByText(/This browser cannot inspect your terminal/)).not.toBeNull();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls.every(([input]) => ["/api/modules", "/api/capabilities/execute"].includes(String(input)))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/creator/agent"))).toBe(false);
+  }, PAGE_TEST_TIMEOUT);
+
   it("offers the release lane only for evidence that verifies in full", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/creator/evolution" && init?.method === "POST") {
+      const read = creatorReadResponse(input, init, [proposal()]);
+      if (read) return read;
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
         const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
-        expect(payload).toMatchObject({ action: "stage", proposalId, gapTicketId, candidateDigest: digest });
+        expect(payload).toMatchObject({ capabilityId: "creator.stageCandidate", input: { proposalId, gapTicketId, candidateDigest: digest } });
         expect(payload.intentId).toEqual(expect.any(String));
         return Response.json({ ok: true, data: { releaseId: "9f8e7d6c-5b4a-4392-8180-7f6e5d4c3b2a", status: "staged", gapTicketId, candidateDigest: digest, artifactRef: `artifact://creator/candidate/${digest}` } });
       }
-      if (path === "/api/proposals") return Response.json({ proposals: [proposal()] });
-      if (path === "/api/capability-gaps") return noGaps;
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -78,11 +106,11 @@ describe("Vite proposals page", () => {
   }, PAGE_TEST_TIMEOUT);
 
   it("never offers the release lane for unverified evidence and shows why", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/proposals") return Response.json({ proposals: [proposal({ testEvidence: "ran the tests, all green" })] });
-      if (path === "/api/capability-gaps") return noGaps;
+      const read = creatorReadResponse(input, init, [proposal({ testEvidence: "ran the tests, all green" })]);
+      if (read) return read;
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -93,7 +121,10 @@ describe("Vite proposals page", () => {
     expect(screen.getAllByText(/Candidate evidence is not valid JSON, so its digest cannot be trusted\./).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Request staging" })).toBeNull();
     expect(screen.getByText(/cannot enter the controlled release lane, and it is not offered as verified/)).not.toBeNull();
-    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/creator/evolution")).toBe(false);
+    expect(fetchMock.mock.calls.some(([input, init]) => {
+      if (String(input) !== "/api/capabilities/execute" || !init?.body) return false;
+      return (JSON.parse(String(init.body)) as { capabilityId?: string }).capabilityId === "creator.stageCandidate";
+    })).toBe(false);
   }, PAGE_TEST_TIMEOUT);
 
   it("does not treat evidence with a failed verification block as verified", async () => {
@@ -104,11 +135,11 @@ describe("Vite proposals page", () => {
       files: ["modules/creator/src/evolution.ts"],
       verification: { passed: false, network: "open", productionCredentials: true },
     });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/proposals") return Response.json({ proposals: [proposal({ testEvidence: tampered })] });
-      if (path === "/api/capability-gaps") return noGaps;
+      const read = creatorReadResponse(input, init, [proposal({ testEvidence: tampered })]);
+      if (read) return read;
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -124,11 +155,11 @@ describe("Vite proposals page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/creator/evolution" && init?.method === "POST") {
+      const read = creatorReadResponse(input, init, [proposal()]);
+      if (read) return read;
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
         return Response.json({ ok: false, pendingApproval: true, reason: "identity risk needs approval" }, { status: 202 });
       }
-      if (path === "/api/proposals") return Response.json({ proposals: [proposal()] });
-      if (path === "/api/capability-gaps") return noGaps;
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -145,11 +176,11 @@ describe("Vite proposals page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/creator/evolution" && init?.method === "POST") {
+      const read = creatorReadResponse(input, init, [proposal()]);
+      if (read) return read;
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
         return Response.json({ ok: false, error: "proposal lacks valid isolated candidate evidence" }, { status: 422 });
       }
-      if (path === "/api/proposals") return Response.json({ proposals: [proposal()] });
-      if (path === "/api/capability-gaps") return noGaps;
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -166,14 +197,14 @@ describe("Vite proposals page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/proposals" && init?.method === "POST") {
+      const read = creatorReadResponse(input, init, [proposal({ status: decided ? "approved" : "in_review" })]);
+      if (read) return read;
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
         const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
-        expect(payload).toMatchObject({ proposalId, decision: "approved" });
+        expect(payload).toMatchObject({ capabilityId: "creator.reviewProposal", input: { proposalId, decision: "approved" } });
         decided = true;
-        return Response.json({ ok: true, note: "decision recorded; merge the change through your normal PR flow" });
+        return Response.json({ ok: true, data: { note: "decision recorded; merge the change through your normal PR flow" } });
       }
-      if (path === "/api/proposals") return Response.json({ proposals: [proposal({ status: decided ? "approved" : "in_review" })] });
-      if (path === "/api/capability-gaps") return noGaps;
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -196,11 +227,11 @@ describe("Vite proposals page", () => {
       rolledBackAt: null,
       outcomes: [],
     };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/proposals") return Response.json({ proposals: [proposal({ releases: [release] })] });
-      if (path === "/api/capability-gaps") return noGaps;
+      const read = creatorReadResponse(input, init, [proposal({ releases: [release] })]);
+      if (read) return read;
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -218,11 +249,14 @@ describe("Vite proposals page", () => {
   }, PAGE_TEST_TIMEOUT);
 
   it("surfaces a failed proposal read instead of an empty list", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/proposals") return Response.json({ error: "requires platform.creator permission" }, { status: 403 });
-      if (path === "/api/capability-gaps") return noGaps;
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
+        if (payload.capabilityId === "creator.listProposals") return Response.json({ error: "requires platform.creator permission" }, { status: 403 });
+        if (payload.capabilityId === "creator.listCapabilityGaps") return Response.json({ ok: true, data: { gaps: [] } });
+      }
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -235,7 +269,7 @@ describe("Vite proposals page", () => {
   }, PAGE_TEST_TIMEOUT);
 
   it("does not read proposals while Creator mode is disabled", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (String(input) === "/api/modules" ? modules(false) : Response.json({ proposals: [] })));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (String(input) === "/api/modules" ? modules(false) : new Response(null, { status: 404 })));
     vi.stubGlobal("fetch", fetchMock);
 
     render(<ProposalsPage />);

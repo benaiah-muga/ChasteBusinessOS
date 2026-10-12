@@ -24,6 +24,8 @@ func TestGoCreatorExecutorContractsAndInverseLinks(t *testing.T) {
 	}{
 		{creatorSubmitProposalCapabilityID, "platform.creator", "write", "", "", nil},
 		{creatorListProposalsCapabilityID, "platform.creator", "read", "", "", nil},
+		{creatorReviewProposalCapabilityID, "platform.creator", "write", "", "", nil},
+		{creatorListCapabilityGapsCapabilityID, "platform.creator", "read", "", "", nil},
 		{creatorScaffoldCapabilityID, "platform.creator", "read", "", "", nil},
 		{creatorVerifyPluginCapabilityID, "platform.creator", "read", "", "", nil},
 		{creatorPublishListingCapabilityID, "platform.creator", "write", creatorRetractListingCapabilityID, "output", []string{"slug"}},
@@ -46,6 +48,9 @@ func TestGoCreatorExecutorContractsAndInverseLinks(t *testing.T) {
 			if spec.module != "creator" || spec.permission != test.permission || spec.risk != test.risk || spec.inverseCapabilityID != test.inverse || spec.inverseInputSource != test.source || !reflect.DeepEqual(spec.inverseFields, test.fields) {
 				t.Fatalf("executor spec=%+v, want permission=%q risk=%q inverse=%q source=%q fields=%v", spec, test.permission, test.risk, test.inverse, test.source, test.fields)
 			}
+			if test.id == creatorReviewProposalCapabilityID && (!spec.approvalExempt || !spec.humanOnly) {
+				t.Fatalf("review capability spec=%+v, want human-only and approval-exempt", spec)
+			}
 			permission, ok := permissionForCapability(test.id)
 			if !ok || permission != test.permission {
 				t.Fatalf("approval permission=(%q,%t), want %q", permission, ok, test.permission)
@@ -67,6 +72,8 @@ func TestGoCreatorExecutorParsesEveryRegisteredCapability(t *testing.T) {
 	}{
 		{creatorSubmitProposalCapabilityID, `{"title":"Proposal title","summary":"A sufficiently detailed proposal summary","diffText":"--- a/file\n+++ b/file","riskAssessment":"A sufficiently detailed risk assessment"}`},
 		{creatorListProposalsCapabilityID, `{}`},
+		{creatorReviewProposalCapabilityID, `{"proposalId":"` + proposalID + `","decision":"approved","comment":"Reviewed"}`},
+		{creatorListCapabilityGapsCapabilityID, `{}`},
 		{creatorScaffoldCapabilityID, `{"module":"inventory","action":"cycleCount","title":"Cycle count","intent":"Record a cycle count against existing inventory data","risk":"write","permission":"inventory.write","submitAsProposal":false}`},
 		{creatorVerifyPluginCapabilityID, `{"manifest":{},"signatureBase64":"signature","publisherPublicKeyBase64":"public-key"}`},
 		{creatorPublishListingCapabilityID, `{"manifest":` + creatorTestManifest + `,"signatureBase64":"0123456789abcdef","publisherPublicKeyBase64":"0123456789abcdef"}`},

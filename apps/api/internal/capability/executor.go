@@ -340,44 +340,47 @@ var capabilitySpecs = map[string]capabilitySpec{
 	analyticsAskYourBusinessCapabilityID:      {module: "analytics", permission: "analytics.report", risk: "read"},
 	creatorSubmitProposalCapabilityID:         {module: "creator", permission: "platform.creator", risk: "write"},
 	creatorListProposalsCapabilityID:          {module: "creator", permission: "platform.creator", risk: "read"},
-	creatorScaffoldCapabilityID:               {module: "creator", permission: "platform.creator", risk: "read"},
-	creatorVerifyPluginCapabilityID:           {module: "creator", permission: "platform.creator", risk: "read"},
-	creatorPublishListingCapabilityID:         {module: "creator", permission: "platform.creator", risk: "write", inverseCapabilityID: creatorRetractListingCapabilityID, inverseInputSource: "output", inverseFields: []string{"slug"}},
-	creatorRetractListingCapabilityID:         {module: "creator", permission: "platform.creator", risk: "write"},
-	creatorInstallListingCapabilityID:         {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorUninstallListingCapabilityID, inverseInputSource: "input", inverseFields: []string{"listingId"}},
-	creatorUninstallListingCapabilityID:       {module: "creator", permission: "platform.creator", risk: "write"},
-	creatorListMarketplaceCapabilityID:        {module: "creator", permission: "platform.browse", risk: "read"},
-	creatorStageCandidateCapabilityID:         {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
-	creatorPromoteCandidateCapabilityID:       {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
-	creatorRollbackCandidateCapabilityID:      {module: "creator", permission: "platform.creator", risk: "destructive"},
-	creatorRecordCanaryOutcomeCapabilityID:    {module: "creator", permission: "platform.creator.release", risk: "write"},
-	supportStartConversationCapabilityID:      {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.resolveConversation"},
-	supportPostMessageCapabilityID:            {module: "support", permission: "support.write", risk: "write"},
-	supportListConversationsCapabilityID:      {module: "support", permission: "support.read", risk: "read"},
-	supportListLibraryCapabilityID:            {module: "support", permission: "support.read", risk: "read"},
-	supportReadConversationCapabilityID:       {module: "support", permission: "support.read", risk: "read"},
-	supportLookupOrderStatusCapabilityID:      {module: "support", permission: "support.read", risk: "read"},
-	supportSearchKnowledgeCapabilityID:        {module: "support", permission: "support.read", risk: "read"},
-	supportEscalateConversationCapabilityID:   {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.reopenConversation"},
-	supportResolveConversationCapabilityID:    {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.reopenConversation"},
-	supportReopenConversationCapabilityID:     {module: "support", permission: "support.write", risk: "write"},
-	supportCreateTicketCapabilityID:           {module: "support", permission: "support.write", risk: "write"},
-	supportUpdateTicketCapabilityID:           {module: "support", permission: "support.write", risk: "write"},
-	supportSuggestCategoryCapabilityID:        {module: "support", permission: "support.read", risk: "read"},
-	supportCreateCannedResponseCapabilityID:   {module: "support", permission: "support.write", risk: "write"},
-	supportCreateKbArticleCapabilityID:        {module: "support", permission: "support.write", risk: "write"},
-	createProjectCapabilityID:                 {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: archiveProjectCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
-	ProjectBoardReadCapabilityID:              {module: "projects", permission: "projects.read", risk: "read"},
-	archiveProjectCapabilityID:                {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: projectRestoreCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
-	projectRestoreCapabilityID:                {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: archiveProjectCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
-	createProjectTaskCapabilityID:             {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: deleteProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
-	deleteProjectTaskCapabilityID:             {module: "projects", permission: "projects.write", risk: "destructive", inverseCapabilityID: restoreProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
-	restoreProjectTaskCapabilityID:            {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: deleteProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
-	moveProjectTaskCapabilityID:               {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: restoreProjectTaskPlacementCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "restoreStatus", "restorePosition", "expectedStatus", "expectedPosition"}},
-	restoreProjectTaskPlacementCapabilityID:   {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: moveProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "status", "position"}},
-	assignProjectTaskCapabilityID:             {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: restoreProjectTaskAssigneeCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "restoreAssigneeUserId", "expectedAssigneeUserId"}},
-	restoreProjectTaskAssigneeCapabilityID:    {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: assignProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "assigneeUserId"}},
-	iamListMembersCapabilityID:                {module: "iam", permission: "iam.read", risk: "read"},
+	// A review is a terminal human decision; an inverse would erase that decision and is intentionally absent.
+	creatorReviewProposalCapabilityID:       {module: "creator", permission: "platform.creator", risk: "write", approvalExempt: true, humanOnly: true},
+	creatorListCapabilityGapsCapabilityID:   {module: "creator", permission: "platform.creator", risk: "read"},
+	creatorScaffoldCapabilityID:             {module: "creator", permission: "platform.creator", risk: "read"},
+	creatorVerifyPluginCapabilityID:         {module: "creator", permission: "platform.creator", risk: "read"},
+	creatorPublishListingCapabilityID:       {module: "creator", permission: "platform.creator", risk: "write", inverseCapabilityID: creatorRetractListingCapabilityID, inverseInputSource: "output", inverseFields: []string{"slug"}},
+	creatorRetractListingCapabilityID:       {module: "creator", permission: "platform.creator", risk: "write"},
+	creatorInstallListingCapabilityID:       {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorUninstallListingCapabilityID, inverseInputSource: "input", inverseFields: []string{"listingId"}},
+	creatorUninstallListingCapabilityID:     {module: "creator", permission: "platform.creator", risk: "write"},
+	creatorListMarketplaceCapabilityID:      {module: "creator", permission: "platform.browse", risk: "read"},
+	creatorStageCandidateCapabilityID:       {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
+	creatorPromoteCandidateCapabilityID:     {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
+	creatorRollbackCandidateCapabilityID:    {module: "creator", permission: "platform.creator", risk: "destructive"},
+	creatorRecordCanaryOutcomeCapabilityID:  {module: "creator", permission: "platform.creator.release", risk: "write"},
+	supportStartConversationCapabilityID:    {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.resolveConversation"},
+	supportPostMessageCapabilityID:          {module: "support", permission: "support.write", risk: "write"},
+	supportListConversationsCapabilityID:    {module: "support", permission: "support.read", risk: "read"},
+	supportListLibraryCapabilityID:          {module: "support", permission: "support.read", risk: "read"},
+	supportReadConversationCapabilityID:     {module: "support", permission: "support.read", risk: "read"},
+	supportLookupOrderStatusCapabilityID:    {module: "support", permission: "support.read", risk: "read"},
+	supportSearchKnowledgeCapabilityID:      {module: "support", permission: "support.read", risk: "read"},
+	supportEscalateConversationCapabilityID: {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.reopenConversation"},
+	supportResolveConversationCapabilityID:  {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.reopenConversation"},
+	supportReopenConversationCapabilityID:   {module: "support", permission: "support.write", risk: "write"},
+	supportCreateTicketCapabilityID:         {module: "support", permission: "support.write", risk: "write"},
+	supportUpdateTicketCapabilityID:         {module: "support", permission: "support.write", risk: "write"},
+	supportSuggestCategoryCapabilityID:      {module: "support", permission: "support.read", risk: "read"},
+	supportCreateCannedResponseCapabilityID: {module: "support", permission: "support.write", risk: "write"},
+	supportCreateKbArticleCapabilityID:      {module: "support", permission: "support.write", risk: "write"},
+	createProjectCapabilityID:               {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: archiveProjectCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
+	ProjectBoardReadCapabilityID:            {module: "projects", permission: "projects.read", risk: "read"},
+	archiveProjectCapabilityID:              {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: projectRestoreCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
+	projectRestoreCapabilityID:              {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: archiveProjectCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
+	createProjectTaskCapabilityID:           {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: deleteProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
+	deleteProjectTaskCapabilityID:           {module: "projects", permission: "projects.write", risk: "destructive", inverseCapabilityID: restoreProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
+	restoreProjectTaskCapabilityID:          {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: deleteProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
+	moveProjectTaskCapabilityID:             {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: restoreProjectTaskPlacementCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "restoreStatus", "restorePosition", "expectedStatus", "expectedPosition"}},
+	restoreProjectTaskPlacementCapabilityID: {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: moveProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "status", "position"}},
+	assignProjectTaskCapabilityID:           {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: restoreProjectTaskAssigneeCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "restoreAssigneeUserId", "expectedAssigneeUserId"}},
+	restoreProjectTaskAssigneeCapabilityID:  {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: assignProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "assigneeUserId"}},
+	iamListMembersCapabilityID:              {module: "iam", permission: "iam.read", risk: "read"},
 	// SCIM deprovisioning removes role grants and revokes pending invitations.
 	// It deliberately has no inverse because an IdP re-provision must not
 	// silently restore authorization that an administrator needs to review.
@@ -526,7 +529,8 @@ func supportedCapability(capabilityID string) bool {
 		analyticsRevenueByMonthCapabilityID, analyticsInvoiceAgingCapabilityID,
 		analyticsSalesByCustomerCapabilityID, analyticsStockLevelsCapabilityID,
 		analyticsExplainChangeCapabilityID, analyticsAskYourBusinessCapabilityID,
-		creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorScaffoldCapabilityID,
+		creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorReviewProposalCapabilityID,
+		creatorListCapabilityGapsCapabilityID, creatorScaffoldCapabilityID,
 		creatorVerifyPluginCapabilityID, creatorPublishListingCapabilityID, creatorRetractListingCapabilityID,
 		creatorInstallListingCapabilityID, creatorUninstallListingCapabilityID, creatorListMarketplaceCapabilityID,
 		creatorStageCandidateCapabilityID, creatorPromoteCandidateCapabilityID, creatorRollbackCandidateCapabilityID,
@@ -1352,7 +1356,8 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorScaffoldCapabilityID,
+		case creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorReviewProposalCapabilityID,
+			creatorListCapabilityGapsCapabilityID, creatorScaffoldCapabilityID,
 			creatorVerifyPluginCapabilityID, creatorPublishListingCapabilityID, creatorRetractListingCapabilityID,
 			creatorInstallListingCapabilityID, creatorUninstallListingCapabilityID, creatorListMarketplaceCapabilityID,
 			creatorStageCandidateCapabilityID, creatorPromoteCandidateCapabilityID, creatorRollbackCandidateCapabilityID,
@@ -1578,6 +1583,18 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case CreatorListProposalsInput:
 			output, err := creatorListProposals(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorReviewProposalInput:
+			output, err := creatorReviewProposal(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorListCapabilityGapsInput:
+			output, err := creatorListCapabilityGaps(ctx, tx, claims.OrganizationID)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3582,7 +3599,8 @@ func canonicalInputHash(input any) (string, error) {
 		return parsed.CanonicalHash()
 	case CustomerProfileSnapshotsInput:
 		return parsed.CanonicalHash()
-	case CreatorSubmitProposalInput, CreatorListProposalsInput, CreatorScaffoldInput,
+	case CreatorSubmitProposalInput, CreatorListProposalsInput, CreatorReviewProposalInput, CreatorListCapabilityGapsInput,
+		CreatorScaffoldInput,
 		CreatorVerifyPluginInput, CreatorPublishListingInput, CreatorRetractListingInput,
 		CreatorInstallListingInput, CreatorListMarketplaceInput, CreatorStageCandidateInput,
 		CreatorPromoteCandidateInput, CreatorRollbackCandidateInput, CreatorRecordCanaryOutcomeInput:

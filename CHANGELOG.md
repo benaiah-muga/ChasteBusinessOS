@@ -18,6 +18,11 @@ The full v1 changelog is preserved at the bottom of this file.
   longer select the legacy manufacturing endpoint. Uncertain writes persist
   their validated action and exact intent for replay after reload, and
   expected business refusals return a recoverable client error.
+- Vite Proposals now reads proposal details and capability gaps from Go, and
+  performs reviews and release transitions through authenticated Go
+  capabilities. Human review uses organization scoped permissions and
+  compare-and-set state changes; release domain refusals retain their typed
+  client errors.
 - Vite CRM now reads deals, customers, follow-up tasks, saved views, and
   customer timelines through authenticated Go capabilities. Go resolves the
   session and organization scope, and invalid or unavailable responses fail

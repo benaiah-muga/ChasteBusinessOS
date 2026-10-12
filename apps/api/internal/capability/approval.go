@@ -638,7 +638,8 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
-		case creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorScaffoldCapabilityID,
+		case creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorReviewProposalCapabilityID,
+			creatorListCapabilityGapsCapabilityID, creatorScaffoldCapabilityID,
 			creatorVerifyPluginCapabilityID, creatorPublishListingCapabilityID, creatorRetractListingCapabilityID,
 			creatorInstallListingCapabilityID, creatorUninstallListingCapabilityID, creatorListMarketplaceCapabilityID,
 			creatorStageCandidateCapabilityID, creatorPromoteCandidateCapabilityID, creatorRollbackCandidateCapabilityID,
@@ -942,7 +943,8 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "signals.read", true
 	case skillsFindCapabilityID, skillsLoadCapabilityID:
 		return "documents.read", true
-	case creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorScaffoldCapabilityID,
+	case creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorReviewProposalCapabilityID,
+		creatorListCapabilityGapsCapabilityID, creatorScaffoldCapabilityID,
 		creatorVerifyPluginCapabilityID, creatorPublishListingCapabilityID, creatorRetractListingCapabilityID,
 		creatorInstallListingCapabilityID, creatorUninstallListingCapabilityID,
 		creatorStageCandidateCapabilityID, creatorPromoteCandidateCapabilityID, creatorRollbackCandidateCapabilityID:

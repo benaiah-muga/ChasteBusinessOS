@@ -53,28 +53,6 @@ const CapabilityGapSchema = z.object({
 }).strict();
 const CapabilityGapListSchema = z.object({ gaps: z.array(CapabilityGapSchema) });
 
-const AgentCandidateSchema = z.object({
-  cli: z.string(),
-  label: z.string(),
-  install: z.string(),
-  authNote: z.string(),
-}).strict();
-const DetectedAgentInfoSchema = z.object({
-  id: z.string(),
-  label: z.string(),
-  version: z.string().nullable(),
-  viaBinary: z.boolean(),
-  configDirs: z.array(z.string()),
-}).strict();
-const AgentStatusSchema = z.object({
-  installed: z.boolean(),
-  cli: z.string().nullable(),
-  label: z.string().nullable(),
-  version: z.string().nullable(),
-  agents: z.array(DetectedAgentInfoSchema),
-  candidates: z.array(AgentCandidateSchema),
-}).strict();
-
 const ModuleResponseSchema = z.object({
   catalog: z.array(z.object({
     id: z.string().min(1),
@@ -171,7 +149,6 @@ export type CreatorProposal = z.infer<typeof ProposalSchema>;
 export type EvolutionRelease = z.infer<typeof EvolutionReleaseSchema>;
 export type EvolutionOutcome = z.infer<typeof EvolutionOutcomeSchema>;
 export type CapabilityGap = z.infer<typeof CapabilityGapSchema>;
-export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 export type ReviewDecision = z.infer<typeof ReviewInputSchema>;
 export type EvolutionAction = z.infer<typeof EvolutionActionSchema>;
 export type EvolutionOutput<Action extends EvolutionAction> = z.infer<typeof EvolutionOutputSchemas[Action["action"]]>;
@@ -252,13 +229,13 @@ function requestSignal(signal?: AbortSignal, timeoutMs = 15_000): AbortSignal {
  * capabilities refuse with the reason that matters (an unverified candidate, a
  * digest mismatch, a release already rolled back).
  */
-function errorMessage(status: number, raw: unknown, fallback: string): string {
+function errorMessage(status: number, raw: unknown, fallback: string, resource: "proposal" | "release" = "proposal"): string {
   const body = ApiErrorSchema.safeParse(raw);
   const serverMessage = body.success ? body.data.error ?? body.data.message : undefined;
   if (status === 401) return "Your session has ended. Sign in again to continue.";
-  if (status === 403) return "You do not have permission to review Creator proposals.";
-  if (status === 404) return "This proposal no longer exists. Reload the list.";
-  if (status === 409) return "This proposal was already decided or has left review. Reload the list.";
+  if (status === 403) return "You do not have permission to use this Creator action.";
+  if (status === 404) return resource === "release" ? "This release no longer exists. Reload the list." : "This proposal no longer exists. Reload the list.";
+  if (status === 409) return resource === "release" ? "This release changed. Reload the list." : "This proposal was already decided or has left review. Reload the list.";
   if (status === 428) return "Finish setting up your workspace before using Creator mode.";
   if (status >= 500) return "The Creator service is unavailable. Check release status before retrying.";
   if (serverMessage && serverMessage.length <= 240 && !/[{}<>]/.test(serverMessage)) return serverMessage;
@@ -299,9 +276,21 @@ async function getJson(path: string, signal?: AbortSignal): Promise<unknown> {
   return body;
 }
 
-async function get<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal, fallback = "The Creator service returned data in an unexpected format."): Promise<T> {
-  const parsed = schema.safeParse(await getJson(path, signal));
-  if (!parsed.success) throw new ProposalsApiError(200, fallback);
+async function executeCreatorCapability<T>(
+  capabilityId: string,
+  input: Record<string, unknown>,
+  schema: z.ZodType<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (!response.ok) throw new ProposalsApiError(response.status, errorMessage(response.status, body, "The Go Creator request failed."));
+  const envelope = z.object({ ok: z.literal(true), data: z.unknown() }).strict().safeParse(body);
+  if (!envelope.success) throw new ProposalsApiError(response.status, "The Go Creator service returned an unexpected response.");
+  const parsed = schema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new ProposalsApiError(response.status, "The Go Creator service returned data in an unexpected format.");
   return parsed.data;
 }
 
@@ -317,26 +306,17 @@ export async function fetchCreatorEnabled(signal?: AbortSignal): Promise<boolean
 }
 
 export async function fetchProposals(signal?: AbortSignal): Promise<CreatorProposal[]> {
-  const result = await get("/api/proposals", ProposalListSchema, signal, "The proposal list came back in an unexpected format.");
+  const result = await executeCreatorCapability("creator.listProposals", {}, ProposalListSchema, signal);
   return result.proposals;
 }
 
 export async function fetchCapabilityGaps(signal?: AbortSignal): Promise<CapabilityGap[]> {
   try {
-    const result = await get("/api/capability-gaps", CapabilityGapListSchema, signal, "The capability gap list came back in an unexpected format.");
+    const result = await executeCreatorCapability("creator.listCapabilityGaps", {}, CapabilityGapListSchema, signal);
     return result.gaps;
   } catch (error) {
     if (signal?.aborted) throw error;
     return [];
-  }
-}
-
-export async function fetchCreatorAgent(signal?: AbortSignal): Promise<AgentStatus | null> {
-  try {
-    return await get("/api/creator/agent", AgentStatusSchema, signal, "The coding agent check came back in an unexpected format.");
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    return null;
   }
 }
 
@@ -351,19 +331,31 @@ export async function submitProposalReview(
   const parsedReview = ReviewInputSchema.safeParse(review);
   if (!parsedReview.success) throw new ProposalsApiError(0, "The review decision contains invalid details.");
 
-  const { response, body } = await request("/api/proposals", {
+  const { proposalId, ...input } = parsedReview.data;
+  const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
-    body: JSON.stringify({ ...parsedReview.data, intentId }),
+    body: JSON.stringify({ capabilityId: "creator.reviewProposal", input: { proposalId, ...input }, intentId }),
   });
   if (response.status === 202) {
     const pending = PendingSchema.safeParse(body);
     if (!pending.success) throw new ProposalsApiError(response.status, "The Creator service returned an unexpected approval response.");
     return { kind: "pending", reason: pending.data.reason ?? "This decision is waiting for approval. It is in the Approvals inbox." };
   }
-  if (!response.ok) throw new ProposalsApiError(response.status, errorMessage(response.status, body, "The review decision could not be recorded."));
-  const parsed = z.object({ ok: z.literal(true), note: z.string().optional() }).safeParse(body);
-  if (!parsed.success) throw new ProposalsApiError(response.status, "The Creator service returned an unexpected review response.");
-  return { kind: "completed", note: parsed.data.note ?? `Proposal ${parsedReview.data.decision}.` };
+  if (!response.ok) {
+    const refusal = RefusalSchema.safeParse(body);
+    const message = refusal.success ? refusal.data.error : undefined;
+    if (response.status === 422 && message?.startsWith("conflict:")) {
+      throw new ProposalsApiError(409, errorMessage(409, body, "The review decision could not be recorded."));
+    }
+    if (response.status === 422 && message?.includes("not found for organization")) {
+      throw new ProposalsApiError(404, errorMessage(404, body, "The review decision could not be recorded."));
+    }
+    throw new ProposalsApiError(response.status, errorMessage(response.status, body, "The review decision could not be recorded."));
+  }
+  const envelope = SuccessSchema.safeParse(body);
+  const result = envelope.success ? z.object({ note: z.string() }).strict().safeParse(envelope.data.data) : null;
+  if (!result?.success) throw new ProposalsApiError(response.status, "The Go Creator service returned an unexpected review response.");
+  return { kind: "completed", note: result.data.note };
 }
 
 /**
@@ -380,9 +372,16 @@ export async function submitEvolutionAction<Action extends EvolutionAction>(
   if (!parsedAction.success) throw new ProposalsApiError(0, "The release action contains invalid details.");
   if (!intentId.trim()) throw new ProposalsApiError(0, "The release action needs an intent identity. Try again.");
 
-  const { response, body } = await request("/api/creator/evolution", {
+  const { action: actionName, ...input } = parsedAction.data;
+  const capabilityId = {
+    stage: "creator.stageCandidate",
+    promote: "creator.promoteCandidate",
+    rollback: "creator.rollbackCandidate",
+    canary: "creator.recordCanaryOutcome",
+  }[actionName];
+  const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
-    body: JSON.stringify({ ...parsedAction.data, intentId }),
+    body: JSON.stringify({ capabilityId, input, intentId }),
   });
   if (response.status === 202) {
     const pending = PendingSchema.safeParse(body);
@@ -391,11 +390,11 @@ export async function submitEvolutionAction<Action extends EvolutionAction>(
   }
   if (!response.ok) {
     const refusal = RefusalSchema.safeParse(body);
-    throw new ProposalsApiError(response.status, errorMessage(response.status, refusal.success ? refusal.data : body, "The release action could not be completed."));
+    throw new ProposalsApiError(response.status, errorMessage(response.status, refusal.success ? refusal.data : body, "The release action could not be completed.", "release"));
   }
   const envelope = SuccessSchema.safeParse(body);
-  if (!envelope.success) throw new ProposalsApiError(response.status, "The Creator service returned an unexpected release response.");
-  const output = EvolutionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
-  if (!output.success) throw new ProposalsApiError(response.status, "The Creator service returned an unexpected release result.");
+  if (!envelope.success) throw new ProposalsApiError(response.status, "The Go Creator service returned an unexpected release response.");
+  const output = EvolutionOutputSchemas[actionName].safeParse(envelope.data.data);
+  if (!output.success) throw new ProposalsApiError(response.status, "The Go Creator service returned an unexpected release result.");
   return { kind: "completed", data: output.data as EvolutionOutput<Action> };
 }
