@@ -2555,7 +2555,7 @@ new owners and the manifest shows zero legacy runtime paths.
      through legacy. Other Manufacturing routes remain unchanged. The Vite
      selector test covers explicit rollback, and the Go session handler test
      covers disabled and enabled capability behavior.
-226. (Go/Vite implementation complete; browser proof pending) Route the Vite Messaging conversation
+226. (Complete) Route the Vite Messaging conversation
      list and refresh through the session-authenticated
      `messaging.listConversations` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Enable the Vite selector by default
@@ -2563,7 +2563,12 @@ new owners and the manifest shows zero legacy runtime paths.
      rollback. Validate the strict Go envelope and preserve the page's list
      fields, including up to 100 conversations, unread counts, last-message previews, and the current
      user ID. Selected Go failures fail closed; thread reads and message search
-     remain outside this slice.
+     remain outside this slice. Authenticated `agent-browser` verification on
+     2026-10-12 loaded the conversation list and refreshed it after creating a
+     synthetic channel through Go; each `/api/capabilities/execute` request
+     returned HTTP 200, the channel remained visible after page reload, no
+     legacy conversation-list request occurred, and the browser error log was
+     empty. See proof 318.
 227. (Go/Vite implementation complete; browser proof pending) Route initial and
      refreshed Vite Messaging threads through the session-authenticated
      `messaging.readMessages` capability. Return the latest 60-message window
@@ -3494,3 +3499,10 @@ new owners and the manifest shows zero legacy runtime paths.
      request trace contained no legacy customer-create POST, and the browser
      error log was empty. Vite and Go had the CRM customer-create and read
      selectors enabled. This completes item 172.
+
+318. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` loaded
+     its conversation list through Go and refreshed the list after a synthetic
+     channel was created. The `/api/capabilities/execute` requests returned
+     HTTP 200, the channel remained visible after a full page reload, no legacy
+     conversation-list request occurred, and the browser error log was empty.
+     This completes item 226.
