@@ -1398,14 +1398,17 @@ new owners and the manifest shows zero legacy runtime paths.
      Vite selector enable this exact GET route by default, with `=0` opt-outs;
      other methods and paths retain legacy fallback. Focused handler, reader,
      and proxy tests cover the behavior and organization scope.
-140. (Implemented; GET and POST Go-owned) Go serves session-authenticated
+140. (Complete; GET and POST Go-owned) Go serves session-authenticated
      analytics dataset discovery, previews, and report generation through
      exact `GET` and `POST /api/analytics`. The paired Vite selectors and Go
      mounts are enabled by default and accept `=0` opt-outs; unsupported
      methods and paths continue to legacy. Focused handler and real Vite
      middleware tests pass, and both methods are recorded as Go-owned in the
-     route manifest. The authenticated Analytics browser proof remains open
-     as a separate runtime gate.
+     route manifest. Authenticated Vite browser proof with Next stopped loaded
+     dataset discovery, previewed `analytics.pipelineByStage`, and generated
+     the report through Go. The discovery, preview, and generation requests
+     returned HTTP 200 while the legacy Next process remained stopped, and
+     browser errors were empty.
 141. (Implemented; route ownership remains legacy) Add separate default-off
      Vite selectors for Go SCIM reads and writes. Reads cover the user
      collection and UUID items; writes cover collection provisioning and UUID
