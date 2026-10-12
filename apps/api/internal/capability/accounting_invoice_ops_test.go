@@ -646,6 +646,19 @@ func TestAccountingInvoiceOpsReverseEntryMirrorsAndRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed invoice entry: %v", err)
 	}
+	creditNoteEntryID, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (string, error) {
+		return postJournalEntry(fx.ctx, tx, PostJournalEntryInput{
+			OrgID: fx.orgID, Memo: "Credit note on invoice 9", SourceType: "invoice_credit_note", SourceID: &routedInvoiceID,
+			Currency: "USD", PostedAt: postedAt, ActorType: claims.ActorType, ActorID: claims.ActorID,
+			Lines: []JournalEntryLineInput{
+				{AccountCode: "4000", DebitMinor: 900},
+				{AccountCode: "1100", CreditMinor: 900},
+			},
+		})
+	})
+	if err != nil {
+		t.Fatalf("seed invoice credit-note entry: %v", err)
+	}
 	paymentEntryID, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (string, error) {
 		return postJournalEntry(fx.ctx, tx, PostJournalEntryInput{
 			OrgID: fx.orgID, Memo: "Payment for invoice 9", SourceType: "payment",
@@ -680,6 +693,7 @@ func TestAccountingInvoiceOpsReverseEntryMirrorsAndRoutes(t *testing.T) {
 		{reversed.ReversalEntryID, "cannot reverse a reversal"},
 		{entryID, "journal entry has already been reversed"},
 		{invoiceEntryID, "a invoice entry is undone by its domain workflow: use accounting.creditNote against the invoice"},
+		{creditNoteEntryID, "an invoice credit note changes the invoice subledger and cannot be reversed with accounting.reverseEntry; issue a follow-up invoice to restore the receivable"},
 		{paymentEntryID, "a payment entry is undone by its domain workflow: use accounting.reversePayment on the payment"},
 		{yearEndEntryID, "a year-end closing entry is replaced by accounting.closeYear (reopen December first), not mirrored"},
 		{executorUUID(t), "entry not found"},

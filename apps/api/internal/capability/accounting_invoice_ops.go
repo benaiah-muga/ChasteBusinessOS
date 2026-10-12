@@ -59,6 +59,11 @@ type ReverseEntryInput struct {
 	EntryID string `json:"entryId"`
 }
 
+// AccountingDomainError marks an expected accounting workflow refusal for HTTP adapters.
+type AccountingDomainError string
+
+func (e AccountingDomainError) Error() string { return string(e) }
+
 type ReverseEntryOutput struct {
 	ReversalEntryID string `json:"reversalEntryId"`
 }
@@ -492,6 +497,9 @@ func executeReverseEntry(ctx context.Context, tx pgx.Tx, claims authbridge.Capab
 	}
 	if original.SourceType == "reversal" || original.SourceType == "payment-reversal" {
 		return ReverseEntryOutput{}, errors.New("cannot reverse a reversal")
+	}
+	if original.SourceType == "invoice_credit_note" {
+		return ReverseEntryOutput{}, AccountingDomainError("an invoice credit note changes the invoice subledger and cannot be reversed with accounting.reverseEntry; issue a follow-up invoice to restore the receivable")
 	}
 	if original.SourceType != "" {
 		if route, routed := reverseEntryDomainRoutes[original.SourceType]; routed {

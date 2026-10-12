@@ -238,6 +238,11 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		case errors.Is(err, capability.ErrNotMember):
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		default:
+			var domainError capability.AccountingDomainError
+			if errors.As(err, &domainError) {
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": domainError.Error()})
+				return
+			}
 			if h.logger != nil {
 				h.logger.Error("Go direct capability execution failed", "capabilityId", body.CapabilityID, "error", err)
 			}

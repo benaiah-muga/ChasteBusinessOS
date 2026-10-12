@@ -443,6 +443,16 @@ func TestSessionCapabilityHandlerRejectsInvalidAuthOriginAndCallerClaims(t *test
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
 	})
+
+	t.Run("accounting domain refusals are definitive client errors", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{err: capability.AccountingDomainError("credit note requires invoice workflow")}
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"accounting.reverseEntry","input":{}}`))
+		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "credit note requires invoice workflow") {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
 }
 
 func TestSessionCapabilityHandlerReturnsApprovalPendingEnvelope(t *testing.T) {

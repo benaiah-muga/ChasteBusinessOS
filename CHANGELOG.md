@@ -393,6 +393,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Go `accounting.reverseEntry` now refuses generic journal reversal of invoice
+  credit notes. A mirror-only reversal would leave the invoice's credited
+  balance unchanged; the error directs operators to a follow-up invoice. The
+  session capability API returns this expected workflow refusal as HTTP 422,
+  so Vite treats it as a definitive failure instead of an uncertain write.
+
 - Go session authorization now expands an organization's wildcard role grant
   when checking named permissions, so newly bootstrapped workspace owners can
   use admin-gated settings and capabilities.

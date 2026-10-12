@@ -2060,7 +2060,7 @@ new owners and the manifest shows zero legacy runtime paths.
      proof applied a synthetic UGX 5,000 credit to invoice #2 through Go and
      confirmed zero outstanding balance after reload. The write returned
      HTTP 200; no legacy accounting request or browser error occurred.
-194. (Vite/Go implementation complete; browser proof pending) Route only Vite manual/general `reverse` writes through Go's
+194. (Vite/Go implementation and authenticated browser proof complete) Route only Vite manual/general `reverse` writes through Go's
      session-authenticated `accounting.reverseEntry` capability behind paired
      `CHASTE_GO_ACCOUNTING_REVERSE_ENTRY=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the reversal selector
@@ -2074,8 +2074,14 @@ new owners and the manifest shows zero legacy runtime paths.
      governed-executor tests remain the contract proof. Atomic browser-wide
      reservations prevent cross-tab intent races, and browsers without Web
      Locks fail closed. Vite API/page/proxy tests, typecheck, lint, and the Go
-     reverse-entry contract test pass. Authenticated browser proof remains
-     open.
+     reverse-entry contract test pass. Authenticated Vite browser proof
+     submitted a reversal for a synthetic invoice credit note and confirmed Go
+     returned HTTP 422 with workflow guidance, Vite displayed the refusal
+     without an exact-retry action, and the journal stayed unchanged after
+     reload. The action used the Go session capability endpoint; no legacy
+     accounting write request or browser error occurred. A separate Go
+     database-backed test confirms permitted manual reversal still mirrors
+     the original entry.
 195. (Vite/Go implementation complete; browser proof pending) Route only Vite bank reconciliation match/unmatch writes through Go's
      session-authenticated `accounting.matchBankTransaction` and
      `accounting.unmatchBankTransaction` capabilities behind paired
