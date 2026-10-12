@@ -74,7 +74,7 @@ describe("Go auth browser client", () => {
 
     expect(result.error).toBeNull();
     expect(result.data).toEqual({
-      user: { id: "user-id", name: "Ada Lovelace", email: "ada@example.test" },
+      user: { id: "user-id", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true },
       session: { id: "session-id", userId: "user-id", expiresAt: "2026-09-09T10:00:00Z" },
     });
   });

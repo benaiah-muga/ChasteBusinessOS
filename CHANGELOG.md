@@ -13,6 +13,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite team invitation links now preview and accept invitations through Go.
+  Acceptance requires a verified signed-in account with the invited email,
+  and updates membership, role, and invitation status atomically.
 - Vite Support ticket edits now send explicit nulls when clearing a category,
   assignee, or SLA deadline, and Go persists those clears within the active
   organization. Go also rejects unknown fields on Support conversation create

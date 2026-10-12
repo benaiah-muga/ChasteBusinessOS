@@ -18,6 +18,7 @@ import { PasswordResetPage } from "./components/PasswordResetPage";
 import { PortalInvoicePage } from "./components/PortalInvoicePage";
 import { WidgetPage } from "./components/WidgetPage";
 import { InvoicePrintPage } from "./components/InvoicePrintPage";
+import { InvitationPage } from "./components/InvitationPage";
 import { authClient } from "./api/auth";
 import { navigate } from "./navigation";
 import { legacyUrl, redirectToLegacy } from "./legacy";
@@ -95,7 +96,7 @@ const additionalVitePaths = ["/accounting", "/purchasing"];
 const viteAppPaths = new Set(["/", "/login", ...navigationItems.map((item) => item.href), ...additionalVitePaths]);
 
 export function isViteAppPath(pathname: string): boolean {
-  return viteAppPaths.has(pathname) || /^\/documents\/editor\/[^/]+$/.test(pathname);
+  return viteAppPaths.has(pathname) || /^\/documents\/editor\/[^/]+$/.test(pathname) || /^\/invite\/[^/]+$/.test(pathname);
 }
 
 function AuthenticatedApp({ pathname }: { pathname: string }) {
@@ -347,6 +348,7 @@ export function App() {
 
   if (pathname === "/login") return <LoginPage />;
   if (pathname === "/reset-password") return <PasswordResetPage />;
+  if (/^\/invite\/[^/]+$/.test(pathname)) return <InvitationPage pathname={pathname} />;
   // Onboarding resolves the session itself: it redirects to /login when signed
   // out and to / when a workspace already exists, so it must render outside the
   // authenticated shell.

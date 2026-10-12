@@ -118,7 +118,7 @@ describe("Vite login page", () => {
     expect(screen.getByRole("alert").textContent).toContain("That email isn't verified yet. We just sent a fresh link");
     expect(authMocks.sendVerificationEmail).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Resend verification email" }));
-    await waitFor(() => expect(authMocks.sendVerificationEmail).toHaveBeenCalledWith("ada@example.test"));
+    await waitFor(() => expect(authMocks.sendVerificationEmail).toHaveBeenCalledWith("ada@example.test", "/login?verified=1"));
     expect(await screen.findByText("If this account still needs verification, check your inbox for a new link.")).not.toBeNull();
   });
 
@@ -151,6 +151,35 @@ describe("Vite login page", () => {
     expect(authMocks.requestPasswordReset).toHaveBeenCalledWith("ada@example.test");
     expect(await screen.findByRole("status")).not.toBeNull();
     expect(screen.getByRole("heading", { level: 2 }).textContent).toContain("If the address has an account");
+  });
+
+  it("preserves an invitation return path in the signup verification callback", async () => {
+    window.history.replaceState(null, "", "/login?returnTo=%2Finvite%2Fsample");
+    render(<LoginPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Create an account" }));
+    fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "Ada Lovelace" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ada@example.test" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "long-password" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account" }).closest("form") as HTMLFormElement);
+
+    await waitFor(() => expect(authMocks.signUpEmail).toHaveBeenCalledWith(expect.objectContaining({
+      callbackURL: "/login?verified=1&returnTo=%2Finvite%2Fsample",
+    })));
+  });
+
+  it("preserves an invitation return path when resending verification email", async () => {
+    window.history.replaceState(null, "", "/login?returnTo=%2Finvite%2Fsample");
+    authMocks.signInEmail.mockResolvedValue({ data: null, error: { message: "Email not verified" } });
+    render(<LoginPage />);
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ada@example.test" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "long-password" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Sign in" }).closest("form") as HTMLFormElement);
+    fireEvent.click(await screen.findByRole("button", { name: "Resend verification email" }));
+
+    await waitFor(() => expect(authMocks.sendVerificationEmail).toHaveBeenCalledWith(
+      "ada@example.test",
+      "/login?verified=1&returnTo=%2Finvite%2Fsample",
+    ));
   });
 
   it("shows a verification-complete notice after Go redirects back", () => {

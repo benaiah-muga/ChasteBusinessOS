@@ -49,6 +49,10 @@ function Brand({ compact = false }: { compact?: boolean }) {
 }
 
 export function LoginPage() {
+  const returnTo = (() => {
+    const requested = new URLSearchParams(window.location.search).get("returnTo");
+    return requested?.startsWith("/") && !requested.startsWith("//") ? requested : "/";
+  })();
   const [mode, setMode] = useState<"signin" | "signup" | "recovery">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -64,7 +68,7 @@ export function LoginPage() {
   useEffect(() => {
     let mounted = true;
     void authClient.getSession().then((result) => {
-      if (mounted && result.data?.user) navigate("/", true);
+      if (mounted && result.data?.user) navigate(returnTo, true);
     }).catch(() => undefined);
     return () => {
       mounted = false;
@@ -89,7 +93,7 @@ export function LoginPage() {
             email,
             password,
             name: name || (email.split("@")[0] ?? "Founder"),
-            callbackURL: "/login?verified=1",
+            callbackURL: `/login?${new URLSearchParams({ verified: "1", ...(returnTo === "/" ? {} : { returnTo }) }).toString()}`,
           })
         : await authClient.signIn.email({ email, password });
       if (result.error) throw new Error(result.error.message ?? "authentication failed");
@@ -98,7 +102,7 @@ export function LoginPage() {
         setBusy(false);
         return;
       }
-      navigate("/", true);
+      navigate(returnTo, true);
     } catch (submitError) {
       if (submittedMode === "signin" && (submitError instanceof Error ? submitError.message : String(submitError)).toLowerCase().includes("verif")) {
         setVerificationSource("signin");
@@ -120,7 +124,8 @@ export function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      const result = await authClient.sendVerificationEmail(email.trim());
+      const callbackURL = `/login?${new URLSearchParams({ verified: "1", ...(returnTo === "/" ? {} : { returnTo }) }).toString()}`;
+      const result = await authClient.sendVerificationEmail(email.trim(), callbackURL);
       if (result.error) throw new Error(result.error.message);
       setVerificationResent(true);
     } catch (resendError) {

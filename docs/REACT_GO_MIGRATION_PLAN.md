@@ -1507,12 +1507,12 @@ new owners and the manifest shows zero legacy runtime paths.
      default in both runtimes. Roll back either method independently by
      setting its Go and Vite selector flags to `0`. Direct Go routing dispatches
      only exact GET and POST requests; HEAD, unsupported methods, and suffix
-     paths retain legacy fallback. Handler and selector tests pass. On
-     2026-10-12, authenticated Vite `/team` created a synthetic member invite
-     through Go's `/api/team` route with HTTP 200, then refreshed the member
-     list through Go with HTTP 200. The page displayed the invite link; no
-     legacy team request or browser error occurred. This proves invite
-     creation, not invite acceptance. See proof 335.
+     paths retain legacy fallback. Go also owns Vite invitation preview and
+     acceptance under `/api/auth/invitations/{token}`. Acceptance requires a
+     verified session whose email matches the invitation, and commits the
+     membership, role, and invitation status in one organization-scoped
+     transaction. Handler, selector, and database RLS tests pass. Proof 335
+     covers invite creation; proof 337 covers authenticated acceptance.
 149. (Implemented; Go route ownership verified) Enable Vite's authenticated
      `GET /api/modules` switchboard reads and the Projects page's
      `GET`/`POST /api/projects` requests through Go by default. Each route can
@@ -3731,3 +3731,12 @@ new owners and the manifest shows zero legacy runtime paths.
      showed the saved value, with no browser errors. This completes the
      authenticated browser proof for item 278; its live legacy differential
      remains open.
+
+337. (Runtime verified) On 2026-10-12, authenticated Vite `/team` created a
+     synthetic invitation through Go, and the invitee opened the Vite
+     `/invite/{token}` route, completed signup and email verification through
+     the local SMTP service, then accepted the invitation through Go with HTTP
+     200. After reloading `/team`, the invitee appeared in the organization's
+     member list with the invited role. No legacy invite route or browser
+     error occurred. This completes the invitation acceptance proof for item
+     148.

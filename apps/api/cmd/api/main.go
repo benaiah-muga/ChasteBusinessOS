@@ -674,6 +674,16 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
+		invitationResolver, err := getSessionResolver()
+		if err != nil {
+			return err
+		}
+		invitationRoute, err := httpapi.NewGoInvitationHandler(pool, invitationResolver, trustedProxyCIDRs, logger)
+		if err != nil {
+			return err
+		}
+		authRoute = httpapi.MountGoInvitationRoutes(authRoute, invitationRoute)
+		logger.Info("Go invitation routes mounted", "paths", []string{"GET /api/auth/invitations/{token}", "POST /api/auth/invitations/{token}"})
 		logger.Info("Go authentication routes mounted", "path", "/api/auth")
 	}
 	var supportPublicRoute http.Handler

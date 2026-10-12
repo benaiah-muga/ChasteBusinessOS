@@ -310,6 +310,8 @@ describe("Vite app frame", () => {
     expect(isViteAppPath("/sessions")).toBe(true);
     expect(isViteAppPath("/team")).toBe(true);
     expect(isViteAppPath("/products")).toBe(true);
+    expect(isViteAppPath("/invite/opaque-token")).toBe(true);
+    expect(isViteAppPath("/invite/")).toBe(false);
     expect(isViteAppPath("/documents/editor/doc-123")).toBe(true);
     expect(isViteAppPath("/documents/editor/")).toBe(false);
     expect(isViteAppPath("/documents/editor/doc-123/extra")).toBe(false);

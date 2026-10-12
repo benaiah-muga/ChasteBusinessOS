@@ -4,6 +4,7 @@ const UserSchema = z.object({
   id: z.string().min(1),
   name: z.string().nullable().optional(),
   email: z.string().email(),
+  emailVerified: z.boolean().optional(),
 });
 
 const SessionSchema = z.object({
