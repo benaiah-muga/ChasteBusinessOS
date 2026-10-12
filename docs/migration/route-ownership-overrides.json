@@ -529,6 +529,12 @@
     },
     {
       "kind": "page",
+      "path": "/onboarding",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
       "path": "/team",
       "owner": "vite",
       "parity": "verified"

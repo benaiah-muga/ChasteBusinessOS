@@ -3851,3 +3851,12 @@ new owners and the manifest shows zero legacy runtime paths.
      browser console or page errors occurred. Go tests verified that 5 MiB
      document payloads pass and oversized document payloads fail, while other
      capabilities retain the 64 KiB limit. This completes item 352.
+
+354. (Complete) Mark `/onboarding` as Vite-owned after matching the route
+     ownership manifest to the existing Vite wizard and its Go onboarding API.
+
+355. (Runtime verified) The authenticated signup and email-verification proof
+     in GATES.md item G102 used the local SMTP sink, then completed the Go
+     onboarding POST/PATCH flow and opened the Vite dashboard. The route
+     ownership manifest now records `/onboarding` as Vite-verified. This
+     completes item 354.

@@ -1398,8 +1398,8 @@
       "kind": "page",
       "path": "/onboarding",
       "source": "apps/web/src/app/onboarding/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",
