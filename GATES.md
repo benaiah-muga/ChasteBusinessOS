@@ -590,3 +590,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests  .* passed|PASS.*TestGoInvoiceCreationMatchesLegacyAndRollsBackOnAuditFailure/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: The focused Vite Accounting API, page, and proxy suite passed 338 tests; the DB-backed Go invoice-creation executor test passed. Authenticated agent-browser posted a synthetic UGX 10,000 invoice through Go and showed invoice #1, sent status, and its full outstanding balance in Vite. The Go capability request returned HTTP 200; no legacy accounting API request or browser error occurred.
+
+- [x] G115: Vite invoice credit notes use Go `accounting.creditNote` and reduce the outstanding balance.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/accounting.test.ts src/components/AccountingPage.test.tsx src/api/go-route-proxy.test.ts && GO_RUNTIME_INTEGRATION_REQUIRED=1 DATABASE_URL=postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2 CHASTE_APP_DB_PASSWORD=chaste_app_dev_only PATH=/home/benaiah/.local/share/go/1.27.1/bin:$PATH go -C apps/api test ./internal/capability -run '^TestAccountingInvoiceOpsCreditNoteMirrorsLedgerAndBalance$' -count=1 -v && git diff --check
+  EXPECT: /Tests  .* passed|PASS.*TestAccountingInvoiceOpsCreditNoteMirrorsLedgerAndBalance/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: The focused Vite Accounting API, page, and proxy suite passed 338 tests; the DB-backed Go credit-note executor test passed. Authenticated agent-browser applied a synthetic UGX 5,000 credit to invoice #2. Go returned HTTP 200, the outstanding balance fell to zero and stayed zero after reload, with no legacy accounting API request or browser error.

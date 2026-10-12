@@ -2043,7 +2043,7 @@ new owners and the manifest shows zero legacy runtime paths.
      posted a synthetic UGX 10,000 invoice through `accounting.createInvoice`
      and showed invoice #1 with the full outstanding balance. Go returned
      HTTP 200; no legacy accounting request or browser error occurred.
-193. (Vite/Go implementation complete; browser proof pending) Route only Vite `creditNote` writes through Go's session-authenticated
+193. (Vite/Go implementation verified: DB-backed Go test and authenticated browser proof pass) Route only Vite `creditNote` writes through Go's session-authenticated
      `accounting.creditNote` capability behind paired
      `CHASTE_GO_ACCOUNTING_CREDIT_NOTE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the credit-note
@@ -2056,8 +2056,10 @@ new owners and the manifest shows zero legacy runtime paths.
      credit-note integration test remains the contract proof. Atomic
      browser-wide reservations prevent cross-tab intent races, and browsers
      without Web Locks fail closed. Vite API/page/proxy tests, typecheck, lint,
-     and the Go credit-note contract test pass. Authenticated browser proof
-     remains open.
+     and the Go credit-note contract test pass. Authenticated Vite browser
+     proof applied a synthetic UGX 5,000 credit to invoice #2 through Go and
+     confirmed zero outstanding balance after reload. The write returned
+     HTTP 200; no legacy accounting request or browser error occurred.
 194. (Vite/Go implementation complete; browser proof pending) Route only Vite manual/general `reverse` writes through Go's
      session-authenticated `accounting.reverseEntry` capability behind paired
      `CHASTE_GO_ACCOUNTING_REVERSE_ENTRY=1` and
