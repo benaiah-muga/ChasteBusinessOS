@@ -2619,12 +2619,19 @@ new owners and the manifest shows zero legacy runtime paths.
      both returned HTTP 200, and the reaction and pinned marker appeared in
      the thread. No legacy reaction or pin request occurred, and the browser
      error log was empty. See proof 321.
-234. (Vite implementation complete; browser proof pending) Route Vite typing
-     and online presence heartbeats through the session-authenticated
-     `messaging.updateConversationPresence` capability when
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the conversation UUID,
-     typing flag, and strict previous-state output; set
-     `CHASTE_GO_MESSAGING_PRESENCE=0` for legacy rollback.
+234. (Complete) Route Vite typing and online presence through the
+     session-authenticated Go conversation presence route when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` and
+     `CHASTE_GO_MESSAGING_PRESENCE=1`. The POST handler executes the
+     `messaging.updateConversationPresence` capability and validates the
+     conversation UUID, typing flag, and strict previous-state output. The GET
+     handler reads presence within the authenticated organization and
+     membership scope. Set `CHASTE_GO_MESSAGING_PRESENCE=0` for legacy
+     rollback. On 2026-10-12, authenticated Vite `/messages` ran with both
+     Vite and Go presence selectors enabled, sent `typing: true` and
+     `typing: false` to the Go session route with HTTP 200, and received HTTP
+     200 for the online presence GET polls. The browser error log was empty.
+     See proof 322.
 235. (Vite implementation complete; browser proof pending) Route pending
      conversation attachment uploads through the session-authenticated
      `messaging.uploadMessageAttachment` capability when
@@ -3548,3 +3555,12 @@ new owners and the manifest shows zero legacy runtime paths.
      requests both returned HTTP 200, and the refreshed thread displayed the
      reaction and pinned marker. No legacy reaction or pin request occurred,
      and the browser error log was empty. This completes item 233.
+
+322. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` sent
+     typing heartbeat updates with `typing: true` and `typing: false` through
+     Go's session-authenticated `/api/conversations/{id}/presence` route; both
+     returned HTTP 200. The online presence GET polls also returned HTTP 200.
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`,
+     `CHASTE_GO_MESSAGING_PRESENCE=1`, and
+     `GO_MESSAGING_PRESENCE_ROUTE=1` were set, and the browser error log was
+     empty. This completes item 234.
