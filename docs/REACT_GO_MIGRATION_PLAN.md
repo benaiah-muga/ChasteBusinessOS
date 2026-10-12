@@ -2348,7 +2348,7 @@ new owners and the manifest shows zero legacy runtime paths.
      it through `projects.restoreProject`. Each Go capability returned HTTP
      200; the active project, task status, and assignment remained after reload.
      No legacy project POST or browser errors occurred.
-209. (Implemented) Route Vite cycle-count create, record, post, and cancel
+209. (Done) Route Vite cycle-count create, record, post, and cancel
      through Go's session-authenticated `inventory.createCycleCount`,
      `inventory.recordCycleCounts`, `inventory.postCycleCount`, and
      `inventory.cancelCycleCount` capabilities behind paired
@@ -2359,7 +2359,10 @@ new owners and the manifest shows zero legacy runtime paths.
      Do not retry a missing Go route through `/api/inventory`. Keep the legacy
      selector for rollback when no Go action is unresolved, and pass the active
      workspace scope from InventoryPage. Focused Vite API/UI and Go capability
-     tests pass; browser proof remains open.
+     tests pass. Authenticated `agent-browser` proof created a count, recorded
+     both item quantities, posted it, then created and cancelled a second count.
+     The Go capability requests returned HTTP 200; both final states persisted
+     after reload. No browser errors occurred.
 210. (Implemented) Route Vite Product Catalog CSV import, undo, and restore
      through Go's session-authenticated `inventory.importItems`,
      `inventory.undoItemImport`, and `inventory.restoreItemImport` capabilities
