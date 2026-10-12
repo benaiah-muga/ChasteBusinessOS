@@ -1966,7 +1966,7 @@ new owners and the manifest shows zero legacy runtime paths.
      caller-supplied snapshots, and rejects undo when any restored field changed
      after the merge. All other CRM mutations keep their existing routes.
      Browser proof remains open.
-188. (Go/Vite implementation complete; browser proof pending) Route Vite CRM customer CSV import and undo through Go's existing
+188. (Complete; CRM page browser proof recorded in item 313) Route Vite CRM customer CSV import and undo through Go's existing
      `crm.importCustomers` and `crm.undoCustomerImport` capabilities under the
      paired `CHASTE_GO_CRM_CUSTOMER_IMPORT=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` flags. Set the import selector to
@@ -1980,7 +1980,7 @@ new owners and the manifest shows zero legacy runtime paths.
      receipt, consumes it atomically, rejects edits after import, and binds its
      restore inverse to the successful undo receipt while rejecting later edits.
      Keep CSV mapping and review behavior unchanged. Focused API, proxy, UI, and
-     DB-backed Go tests pass; authenticated browser proof remains open.
+     DB-backed Go tests pass; CRM page browser proof is recorded in item 313.
 189. (Implemented) Route only Vite HR Expenses reads and writes through Go's
      session-authenticated `accounting.listExpenseClaims`,
      `accounting.listExpensePolicies`, `accounting.submitExpenseClaim`,
@@ -3445,3 +3445,13 @@ new owners and the manifest shows zero legacy runtime paths.
      showed no legacy onboarding endpoint calls. The Vite process had
      `CHASTE_GO_ONBOARDING_ROUTE=1` and pointed to the running Go API. This
      completes item 251.
+
+313. (Runtime verified) On 2026-10-12, the authenticated Vite CRM customer
+     directory mapped a custom CSV's organization, email, and phone columns,
+     reviewed one valid row, one invalid row, and a possible duplicate, then
+     imported the selected customer through `crm.importCustomers` with HTTP
+     200. After reload, the page restored the import's Undo action; undo through
+     `crm.undoCustomerImport` also returned HTTP 200 and the imported customer
+     disappeared from the active directory. The browser request log contained
+     no `/api/import` calls, and the browser error log was empty. This completes
+     item 188.
