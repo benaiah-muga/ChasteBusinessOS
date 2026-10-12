@@ -2617,11 +2617,17 @@ new owners and the manifest shows zero legacy runtime paths.
      `messaging.advanceReadCursor`; Go returned HTTP 200 and Vite refreshed the
      conversation list. No legacy read-receipt request occurred, and the
      browser error log was empty. See proof 325.
-232. (Go/Vite implementation complete; browser proof pending) Route Vite
+232. (Complete) Route Vite
      pending attachment removal through `messaging.deletePendingAttachment`.
      Serialize deletion with concurrent message sends by locking the row and
      rechecking that it is still pending and owned by the actor. Keep the
      attachment in the draft and show an error when selected Go deletion fails.
+     On 2026-10-12, authenticated Vite `/messages` uploaded a synthetic
+     attachment through Go with HTTP 200, then retained it after the browser
+     intercepted `POST /api/conversations/{id}/messages` and supplied HTTP 503.
+     Removing the retained file through Go returned HTTP 200 and cleared it
+     from the composer. No legacy attachment-delete
+     request occurred, and the browser error log was empty. See proof 331.
 233. (Complete) Route Vite message
      reactions and pins through the session-authenticated
      `messaging.setMessageReaction` and `messaging.setMessagePin` capabilities
@@ -3661,3 +3667,13 @@ new owners and the manifest shows zero legacy runtime paths.
      No legacy delete request occurred, and the browser error log was empty.
      This proof covers the confirmed delete flow; retry and selector-rollback
      behavior were not exercised. This completes item 241.
+
+331. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` uploaded
+     the synthetic attachment through `messaging.uploadMessageAttachment`,
+     which returned HTTP 200, then retained it after the browser intercepted
+     `POST /api/conversations/{id}/messages` and supplied HTTP 503. Removing
+     the pending file through `messaging.deletePendingAttachment` returned
+     HTTP 200 and cleared the file from the composer. No legacy
+     attachment-delete request occurred, and the browser error log was empty.
+     The test send was intentionally intercepted and did not create a message.
+     This completes item 232.
