@@ -2118,7 +2118,7 @@ new owners and the manifest shows zero legacy runtime paths.
      the optional payment method to exercise Go's `bank_transfer` default,
      returned HTTP 200, and left the bill paid with zero outstanding after
      reload. No legacy Accounting write request or browser error occurred.
-197. (Vite/Go implementation complete; browser proof pending) Route Vite HR
+197. (Vite/Go implementation and authenticated browser proof complete) Route Vite HR
      Time report and pending-entry reads, time logging, and submitted-entry
      decisions through Go's session-authenticated
      `hr.timeReport`, `hr.pendingTimeEntries`, `hr.logTime`, and
@@ -2133,8 +2133,12 @@ new owners and the manifest shows zero legacy runtime paths.
      executor, org-scope, Vite API, proxy selector, and HR page tests. Atomic
      browser-wide reservations prevent cross-tab intent races, and browsers
      without Web Locks fail closed. Vite API/page/proxy tests, typecheck, lint,
-     and Go HR time contract tests pass. Authenticated browser proof remains
-     open.
+     and Go HR time contract tests pass. Authenticated Vite browser proof
+     logged 90 minutes for the synthetic Leave Flow Test Employee, showed the
+     entry in the submitted queue, then approved it through Go. The report
+     showed 1h 30m approved and zero pending after reload. All three write/read
+     capability responses returned HTTP 200; no legacy HR POST or browser
+     error occurred.
 198. (Vite/Go implementation complete; browser proof pending) Route Vite
      supplier payment run reads and lifecycle actions through Go's
      `purchasing.listPaymentRuns`, `purchasing.listPaymentRunBills`,

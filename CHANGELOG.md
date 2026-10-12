@@ -367,6 +367,10 @@ The full v1 changelog is preserved at the bottom of this file.
   Purchasing finance flow when `CHASTE_GO_PURCHASING_FINANCE_WRITES=1`. The
   exact amount is preserved, and Go applies its `bank_transfer` default when
   the payment method is omitted.
+- Vite People time reports, submitted-entry lists, time logging, and time
+  decisions now use Go capabilities when `CHASTE_GO_HR_TIME=1`. The report and
+  pending queue use separate capabilities so decisions retain their entry IDs
+  and employee details.
 - Vite Accounting overview reads now always use the session-authenticated Go
   `accounting.overview` capability.
   Go entry debit aggregates are validated as safe integer minor units, and
