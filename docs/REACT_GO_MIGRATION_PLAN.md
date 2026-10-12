@@ -2602,12 +2602,17 @@ new owners and the manifest shows zero legacy runtime paths.
      target with up to 30 older and 30 newer visible messages, use stable
      `(created_at, id)` ordering, and report older-side pagination metadata.
      Keep search result discovery separate from the thread read.
-231. (Vite implementation complete; browser proof pending) Route Vite read
+231. (Complete) Route Vite read
      receipt updates through the session-authenticated
      `messaging.advanceReadCursor` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
      `CHASTE_GO_MESSAGING_READ_CURSOR=0` for explicit legacy rollback. Validate
-     the strict capability result and fail closed on selected Go errors.
+     the strict capability result and fail closed on selected Go errors. On
+     2026-10-12, authenticated Vite `/messages` advanced the read position
+     after sending the synthetic attachment message through
+     `messaging.advanceReadCursor`; Go returned HTTP 200 and Vite refreshed the
+     conversation list. No legacy read-receipt request occurred, and the
+     browser error log was empty. See proof 325.
 232. (Go/Vite implementation complete; browser proof pending) Route Vite
      pending attachment removal through `messaging.deletePendingAttachment`.
      Serialize deletion with concurrent message sends by locking the row and
@@ -3590,3 +3595,10 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD=1`, and
      `GO_MESSAGE_ATTACHMENT_DOWNLOAD_ROUTE=1` were enabled. The browser error
      log was empty. This completes item 228.
+
+325. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` advanced
+     the read cursor for `Go Thread Proof 20261012` through Go's
+     `messaging.advanceReadCursor` capability after the synthetic attachment
+     message appeared. The capability request returned HTTP 200, the
+     conversation list refreshed, no legacy read-receipt request occurred, and
+     the browser error log was empty. This completes item 231.
