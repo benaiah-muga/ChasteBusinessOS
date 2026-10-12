@@ -45,6 +45,7 @@ export type GoRouteProxyFlags = {
   messagingPresence: boolean;
   approvalsRead: boolean;
   approvalsDecision: boolean;
+  email: boolean;
 };
 
 export function goPosOpenSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
@@ -69,6 +70,10 @@ export function goMarketingOverviewReadsFromEnv(env: Record<string, string | und
 
 export function goSessionCapabilityRouteFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
+}
+
+export function goEmailRouteFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.GO_EMAIL_ROUTE !== "0";
 }
 
 export function goInventoryTransferWritesFromEnv(env: Record<string, string | undefined>): boolean {
@@ -397,12 +402,14 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     messagingPresence: goMessagingPresenceFromEnv(env),
     approvalsRead: env.CHASTE_GO_APPROVALS_READ_ROUTE !== "0",
     approvalsDecision: env.CHASTE_GO_APPROVALS_DECISION_ROUTE !== "0",
+    email: goEmailRouteFromEnv(env),
   };
 }
 
 export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?: string): boolean {
   const path = url ?? "";
   if (flags.onboarding && ["GET", "POST", "PATCH"].includes(method ?? "") && /^\/api\/onboarding(?:\?.*)?$/.test(path)) return true;
+  if (flags.email && ["GET", "POST"].includes(method ?? "") && /^\/api\/email(?:\?.*)?$/.test(path)) return true;
   if (["GET", "POST", "PUT", "PATCH"].includes(method ?? "") && /^\/api\/org(?:\?.*)?$/.test(path)) return true;
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;

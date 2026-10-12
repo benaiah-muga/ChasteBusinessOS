@@ -105,6 +105,15 @@ the forwarded scheme without accepting another origin.
 to a remote or private service you control; the Vite development proxy accepts
 cleartext HTTP only for loopback hosts.
 
+Settings SMTP status and test sends, plus Accounting invoice email, use the Go
+`/api/email` route through Vite by default. Set `GO_EMAIL_ROUTE=0` only to
+restore the compatibility route. Go verifies the
+session or bearer token and derives the organization server-side. Configure
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and
+`SMTP_FROM` for delivery. Set `GO_PUBLIC_APP_URL` to the public app origin when
+invoice emails are sent by bearer clients; cookie-authenticated browser requests
+use their validated same-origin URL when this setting is empty.
+
 The setup checklist read `GET /api/setup` uses Go by default in Vite and the Go
 API. Set both `CHASTE_GO_SETUP_ROUTE=0` and `GO_SETUP_ROUTE=0` to restore the
 compatibility handler. Go resolves the signed-in session and active organization

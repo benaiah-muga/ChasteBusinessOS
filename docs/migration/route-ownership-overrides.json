@@ -2,18 +2,30 @@
   "schemaVersion": 1,
   "overrides": [
     {
-      "kind": "api",
-      "path": "/api/auth/[...all]",
-      "method": "GET",
-      "owner": "auth",
-      "parity": "pending"
+      "kind": "page",
+      "path": "/",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/analytics",
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/auth/[...all]",
+      "path": "/api/analytics",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/analytics",
       "method": "POST",
-      "owner": "auth",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -30,21 +42,191 @@
       "parity": "verified"
     },
     {
-      "kind": "page",
-      "path": "/approvals",
-      "owner": "vite",
+      "kind": "api",
+      "path": "/api/auth/[...all]",
+      "method": "GET",
+      "owner": "auth",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/auth/[...all]",
+      "method": "POST",
+      "owner": "auth",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/branding",
+      "method": "GET",
+      "owner": "go",
       "parity": "verified"
     },
     {
-      "kind": "page",
-      "path": "/crm",
-      "owner": "vite",
+      "kind": "api",
+      "path": "/api/branding",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/presence",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/presence",
+      "method": "POST",
+      "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/crm",
       "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/dashboard",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]/workspace",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]/workspace",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/email",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/email",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/inventory",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ledger",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/memory",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/memory",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/metrics",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/module-settings",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/module-settings",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/modules",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/modules",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/my-work",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/my-work/summarize",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/notifications",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/notifications",
+      "method": "POST",
       "owner": "go",
       "parity": "verified"
     },
@@ -65,6 +247,13 @@
     {
       "kind": "api",
       "path": "/api/org",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
       "method": "POST",
       "owner": "go",
       "parity": "verified"
@@ -78,41 +267,6 @@
     },
     {
       "kind": "api",
-      "path": "/api/org",
-      "method": "PATCH",
-      "owner": "go",
-      "parity": "pending"
-    },
-    {
-      "kind": "api",
-      "path": "/api/memory",
-      "method": "GET",
-      "owner": "go",
-      "parity": "pending"
-    },
-    {
-      "kind": "api",
-      "path": "/api/memory",
-      "method": "POST",
-      "owner": "go",
-      "parity": "pending"
-    },
-    {
-      "kind": "api",
-      "path": "/api/module-settings",
-      "method": "GET",
-      "owner": "go",
-      "parity": "pending"
-    },
-    {
-      "kind": "api",
-      "path": "/api/module-settings",
-      "method": "POST",
-      "owner": "go",
-      "parity": "pending"
-    },
-    {
-      "kind": "api",
       "path": "/api/policy",
       "method": "GET",
       "owner": "go",
@@ -127,64 +281,8 @@
     },
     {
       "kind": "api",
-      "path": "/api/routines",
+      "path": "/api/portal/invoice/[token]",
       "method": "GET",
-      "owner": "go",
-      "parity": "pending"
-    },
-    {
-      "kind": "api",
-      "path": "/api/routines",
-      "method": "POST",
-      "owner": "go",
-      "parity": "pending"
-    },
-    {
-      "kind": "api",
-      "path": "/api/my-work",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/my-work/summarize",
-      "method": "POST",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/signals",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/branding",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/branding",
-      "method": "POST",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/modules",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/modules",
-      "method": "POST",
       "owner": "go",
       "parity": "verified"
     },
@@ -196,100 +294,36 @@
       "parity": "verified"
     },
     {
-      "kind": "page",
-      "path": "/login",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/marketing",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/ledger",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/sessions",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/portal/[token]",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/print/invoice/[orderId]",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/widget/[token]",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/team",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/projects",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/products",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/analytics",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
-      "kind": "page",
-      "path": "/pos",
-      "owner": "vite",
-      "parity": "verified"
-    },
-    {
       "kind": "api",
-      "path": "/api/dashboard",
+      "path": "/api/projects",
       "method": "GET",
       "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/setup",
-      "method": "GET",
+      "path": "/api/projects",
+      "method": "POST",
       "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/portal/invoice/[token]",
+      "path": "/api/routines",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sales",
       "method": "GET",
       "owner": "go",
       "parity": "verified"
@@ -303,56 +337,49 @@
     },
     {
       "kind": "api",
-      "path": "/api/sales",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/docs/[id]/workspace",
-      "method": "POST",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/docs/[id]/workspace",
+      "path": "/api/scim/tokens",
       "method": "DELETE",
       "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/conversations/[id]/presence",
+      "path": "/api/scim/tokens",
       "method": "GET",
       "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/conversations/[id]/presence",
+      "path": "/api/scim/tokens",
       "method": "POST",
       "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/inventory",
+      "path": "/api/scim/v2/Users",
       "method": "GET",
       "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/support/public",
+      "path": "/api/scim/v2/Users",
       "method": "POST",
       "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/ledger",
+      "path": "/api/scim/v2/Users/[id]",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users/[id]",
       "method": "GET",
       "owner": "go",
       "parity": "verified"
@@ -380,99 +407,15 @@
     },
     {
       "kind": "api",
-      "path": "/api/durable-runs",
+      "path": "/api/setup",
       "method": "GET",
       "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/durable-runs/[id]",
+      "path": "/api/signals",
       "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/metrics",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/analytics",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/analytics",
-      "method": "POST",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/scim/tokens",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/scim/tokens",
-      "method": "POST",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/scim/tokens",
-      "method": "DELETE",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/notifications",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/notifications",
-      "method": "POST",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/projects",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/projects",
-      "method": "POST",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/team",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/team",
-      "method": "POST",
       "owner": "go",
       "parity": "verified"
     },
@@ -492,30 +435,101 @@
     },
     {
       "kind": "api",
-      "path": "/api/scim/v2/Users",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/scim/v2/Users/[id]",
-      "method": "GET",
-      "owner": "go",
-      "parity": "verified"
-    },
-    {
-      "kind": "api",
-      "path": "/api/scim/v2/Users",
+      "path": "/api/support/public",
       "method": "POST",
       "owner": "go",
       "parity": "verified"
     },
     {
       "kind": "api",
-      "path": "/api/scim/v2/Users/[id]",
-      "method": "DELETE",
+      "path": "/api/team",
+      "method": "GET",
       "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/approvals",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/crm",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/ledger",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/login",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/marketing",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/portal/[token]",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/pos",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/print/invoice/[orderId]",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/products",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/projects",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/sessions",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/team",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/widget/[token]",
+      "owner": "vite",
       "parity": "verified"
     }
   ],

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -753,6 +754,20 @@ func run(logger *slog.Logger) error {
 		scimTokenManagementRoute = httpapi.NewSCIMTokenSessionHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
 		logger.Info("Go SCIM token management route mounted", "path", "/api/scim/tokens")
 	}
+	emailResolver, emailResolverErr := getSessionResolver()
+	if emailResolverErr != nil {
+		logger.Warn("Go email route authentication is unavailable", "error", emailResolverErr)
+	}
+	smtpPort, smtpPortErr := strconv.Atoi(strings.TrimSpace(os.Getenv("SMTP_PORT")))
+	if smtpPortErr != nil || smtpPort < 1 || smtpPort > 65535 {
+		smtpPort = 587
+	}
+	emailRoute := httpapi.NewEmailHandler(
+		pool, emailResolver, capabilityExecutor, os.Getenv("SMTP_HOST"), smtpPort,
+		strings.EqualFold(os.Getenv("SMTP_SECURE"), "true"), os.Getenv("SMTP_USER"), os.Getenv("SMTP_PASS"),
+		os.Getenv("SMTP_FROM"), os.Getenv("GO_PUBLIC_APP_URL"), logger, trustedProxyCIDRs,
+	)
+	logger.Info("Go email route mounted", "path", "/api/email")
 
 	apiHandler := httpapi.MountGoMessageAttachmentDownloadRoute(httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoCRMReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
 		pool,
@@ -777,6 +792,10 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoAIConfigRoute(apiHandler, aiConfigRoute)
 	apiHandler = httpapi.MountGoDocumentsEditorWorkspaceRoute(apiHandler, documentsEditorWorkspaceRoute)
 	apiHandler = httpapi.MountGoMessagingPresenceRoute(apiHandler, messagingPresenceRoute)
+	apiMux := http.NewServeMux()
+	apiMux.Handle("/api/email", emailRoute)
+	apiMux.Handle("/", apiHandler)
+	apiHandler = apiMux
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,

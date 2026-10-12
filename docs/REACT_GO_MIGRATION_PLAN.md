@@ -3328,3 +3328,19 @@ new owners and the manifest shows zero legacy runtime paths.
      Go, searched it from Vite `/messages`, and opened the result. The
      capability route returned HTTP 200, no legacy message-search request was
      made, and the browser reported no errors.
+
+302. (Complete) Move Vite Settings SMTP status and test sends, plus
+     Accounting invoice email, from the legacy `/api/email` route to Go.
+     Go authenticates the session or bearer token, derives actor and
+     organization identity, reads invoices within the organization, creates
+     invoice links through `accounting.shareInvoice`, and sends email through
+     SMTP. Failed sends use a bounded detached cleanup context to revoke newly
+     created links; successful SMTP DATA remains delivered if QUIT fails.
+     Sender parsing accepts a valid display name and rejects malformed or
+     injected values. Focused Go tests, proxy tests, route ownership generation,
+     independent review, and authenticated Vite Settings browser proof pass.
+     The browser received HTTP 200 from Go status and test-send routes, the
+     local TLS SMTP sink received the message, and the browser reported no page
+     errors. Full workspace verification passed: typecheck, lint, all
+     workspace tests, Go verification and vet, and generated route ownership
+     checks.

@@ -26,6 +26,11 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Messaging global search now uses Go's session-authenticated
   `messaging.searchMessages` capability with organization and conversation
   membership scoping, literal wildcard handling, and fail-closed errors.
+- Vite Settings SMTP status and test sends, plus Accounting invoice email,
+  now use the authenticated Go `/api/email` route. Go owns SMTP delivery and
+  derives the actor and organization from the verified session or bearer token.
+  Invoice lookup is organization scoped, invoice links use the governed share
+  capability, and a failed SMTP send revokes its new link when possible.
 
 - Marketing segment lifetime spend thresholds now use PostgreSQL `bigint`, so
   valid minor-unit amounts above the old 32-bit limit persist without a 500.
