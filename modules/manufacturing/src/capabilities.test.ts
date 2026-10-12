@@ -69,6 +69,7 @@ describe("production with scrap, lots and multi-level BOMs", () => {
     // Wheel assembly: 1 rim + 32 spokes at 5% scrap.
     await run("manufacturing.defineBom", {
       assemblySku: "WHEEL-ASSY",
+      expectedComponents: [],
       components: [
         { sku: "RIM", quantityThousandths: 1000 },
         { sku: "SPOKE", quantityThousandths: 32000, scrapPctThousandths: 50_000 },
@@ -77,6 +78,7 @@ describe("production with scrap, lots and multi-level BOMs", () => {
     // Bike: 1 frame + 2 wheel assemblies.
     await run("manufacturing.defineBom", {
       assemblySku: "BIKE",
+      expectedComponents: [],
       components: [
         { sku: "FRAME", quantityThousandths: 1000 },
         { sku: "WHEEL-ASSY", quantityThousandths: 2000 },
@@ -336,12 +338,18 @@ describe("locations & BOM deletion", () => {
     };
     expect(hist.movements.some((m) => m.locationCode === "STAGING")).toBe(true);
 
-    const deleted = (await run("manufacturing.deleteBom", { assemblySku: "WHEEL-ASSY" })) as {
+    const expectedComponents = [
+      { sku: "RIM", quantityThousandths: 1000, scrapPctThousandths: 0 },
+      { sku: "SPOKE", quantityThousandths: 32000, scrapPctThousandths: 50_000 },
+    ];
+    const deleted = (await run("manufacturing.deleteBom", { assemblySku: "WHEEL-ASSY", expectedComponents })) as {
       removedCount: number;
-      removedLines: { sku: string; quantityThousandths: number; scrapPctThousandths: number }[];
+      previousComponents: { sku: string; quantityThousandths: number; scrapPctThousandths: number }[];
+      components: { sku: string; quantityThousandths: number; scrapPctThousandths: number }[];
     };
     expect(deleted.removedCount).toBe(2);
-    expect(deleted.removedLines.find((l) => l.sku === "SPOKE")?.scrapPctThousandths).toBe(50_000);
+    expect(deleted.previousComponents.find((l) => l.sku === "SPOKE")?.scrapPctThousandths).toBe(50_000);
+    expect(deleted.components).toEqual([]);
 
     await expect(run("manufacturing.costPreview", { assemblySku: "WHEEL-ASSY", quantityThousandths: 1000 })).rejects.toThrow(
       /no bill of materials/,
@@ -350,6 +358,7 @@ describe("locations & BOM deletion", () => {
     // Restore via the declared inverse path.
     await run("manufacturing.defineBom", {
       assemblySku: "WHEEL-ASSY",
+      expectedComponents: [],
       components: [
         { sku: "RIM", quantityThousandths: 1000 },
         { sku: "SPOKE", quantityThousandths: 32000, scrapPctThousandths: 50_000 },

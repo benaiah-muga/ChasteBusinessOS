@@ -266,6 +266,7 @@ var GoCapabilityPermissions = map[string]string{
 	"manufacturing.produceFromBom":             "manufacturing.write",
 	"manufacturing.defineBom":                  "manufacturing.write",
 	"manufacturing.deleteBom":                  "manufacturing.write",
+	"manufacturing.restoreBom":                 "manufacturing.write",
 	"manufacturing.bomTree":                    "manufacturing.read",
 	"manufacturing.bomReport":                  "manufacturing.read",
 	"manufacturing.costPreview":                "manufacturing.read",

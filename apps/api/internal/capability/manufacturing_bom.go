@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
@@ -14,6 +15,7 @@ import (
 const (
 	manufacturingDefineBomCapabilityID      = "manufacturing.defineBom"
 	manufacturingDeleteBomCapabilityID      = "manufacturing.deleteBom"
+	manufacturingRestoreBomCapabilityID     = "manufacturing.restoreBom"
 	manufacturingBomTreeCapabilityID        = "manufacturing.bomTree"
 	manufacturingBomReportCapabilityID      = "manufacturing.bomReport"
 	manufacturingCostPreviewCapabilityID    = "manufacturing.costPreview"
@@ -28,28 +30,42 @@ type ManufacturingBomComponentInput struct {
 }
 
 type ManufacturingDefineBomInput struct {
-	AssemblySKU string                           `json:"assemblySku"`
-	Components  []ManufacturingBomComponentInput `json:"components"`
+	AssemblySKU        string                           `json:"assemblySku"`
+	ExpectedComponents []ManufacturingBomComponentInput `json:"expectedComponents"`
+	Components         []ManufacturingBomComponentInput `json:"components"`
 }
 
 type ManufacturingDefineBomOutput struct {
-	AssemblyItemID string `json:"assemblyItemId"`
-	ComponentCount int    `json:"componentCount"`
+	AssemblyItemID     string                           `json:"assemblyItemId"`
+	AssemblySKU        string                           `json:"assemblySku"`
+	ComponentCount     int                              `json:"componentCount"`
+	PreviousComponents []ManufacturingBomComponentInput `json:"previousComponents"`
+	Components         []ManufacturingBomComponentInput `json:"components"`
 }
 
 type ManufacturingDeleteBomInput struct {
-	AssemblySKU string `json:"assemblySku"`
+	AssemblySKU        string                           `json:"assemblySku"`
+	ExpectedComponents []ManufacturingBomComponentInput `json:"expectedComponents"`
 }
 
-type ManufacturingDeleteBomLine struct {
-	SKU                 string `json:"sku"`
-	QuantityThousandths int64  `json:"quantityThousandths"`
-	ScrapPctThousandths int64  `json:"scrapPctThousandths"`
+type ManufacturingRestoreBomInput struct {
+	AssemblySKU        string                           `json:"assemblySku"`
+	ExpectedComponents []ManufacturingBomComponentInput `json:"expectedComponents"`
+	Components         []ManufacturingBomComponentInput `json:"components"`
+}
+
+type ManufacturingRestoreBomOutput struct {
+	AssemblySKU        string                           `json:"assemblySku"`
+	RestoredCount      int                              `json:"restoredCount"`
+	PreviousComponents []ManufacturingBomComponentInput `json:"previousComponents"`
+	Components         []ManufacturingBomComponentInput `json:"components"`
 }
 
 type ManufacturingDeleteBomOutput struct {
-	RemovedCount int                          `json:"removedCount"`
-	RemovedLines []ManufacturingDeleteBomLine `json:"removedLines"`
+	AssemblySKU        string                           `json:"assemblySku"`
+	RemovedCount       int                              `json:"removedCount"`
+	PreviousComponents []ManufacturingBomComponentInput `json:"previousComponents"`
+	Components         []ManufacturingBomComponentInput `json:"components"`
 }
 
 type ManufacturingBomTreeNode struct {
@@ -161,36 +177,68 @@ func ParseManufacturingDefineBomInput(raw json.RawMessage) (ManufacturingDefineB
 	if input.AssemblySKU, err = requiredCRMDealString(fields, "assemblySku", 0, 0); err != nil {
 		return ManufacturingDefineBomInput{}, err
 	}
-	rawComponents, ok := fields["components"]
+	input.ExpectedComponents, err = parseManufacturingBomComponents(fields, "expectedComponents", true)
+	if err != nil {
+		return ManufacturingDefineBomInput{}, err
+	}
+	input.Components, err = parseManufacturingBomComponents(fields, "components", true)
+	if err != nil {
+		return ManufacturingDefineBomInput{}, err
+	}
+	return input, nil
+}
+
+func parseManufacturingBomComponents(fields map[string]json.RawMessage, key string, allowEmpty bool) ([]ManufacturingBomComponentInput, error) {
+	rawComponents, ok := fields[key]
 	if !ok {
-		return ManufacturingDefineBomInput{}, errors.New("components is required")
+		return nil, fmt.Errorf("%s is required", key)
 	}
 	var components []json.RawMessage
-	if err := json.Unmarshal(rawComponents, &components); err != nil {
-		return ManufacturingDefineBomInput{}, errors.New("components must be an array")
+	if err := json.Unmarshal(rawComponents, &components); err != nil || components == nil {
+		return nil, fmt.Errorf("%s must be an array", key)
 	}
-	if len(components) < 1 {
-		return ManufacturingDefineBomInput{}, errors.New("components must have at least 1 items")
+	if len(components) == 0 && !allowEmpty {
+		return nil, fmt.Errorf("%s must have at least 1 items", key)
 	}
 	if len(components) > 100 {
-		return ManufacturingDefineBomInput{}, errors.New("components must have at most 100 items")
+		return nil, fmt.Errorf("%s must have at most 100 items", key)
 	}
+	parsed := make([]ManufacturingBomComponentInput, 0, len(components))
+	var err error
 	for _, rawComponent := range components {
 		var componentFields map[string]json.RawMessage
 		if err := json.Unmarshal(rawComponent, &componentFields); err != nil {
-			return ManufacturingDefineBomInput{}, errors.New("components must be objects")
+			return nil, fmt.Errorf("%s must contain objects", key)
 		}
 		component := ManufacturingBomComponentInput{}
 		if component.SKU, err = requiredCRMDealString(componentFields, "sku", 0, 0); err != nil {
-			return ManufacturingDefineBomInput{}, err
+			return nil, err
 		}
 		if component.QuantityThousandths, err = manufacturingRequiredPositiveQuantity(componentFields, "quantityThousandths"); err != nil {
-			return ManufacturingDefineBomInput{}, err
+			return nil, err
 		}
 		if component.ScrapPctThousandths, err = manufacturingOptionalPctThousandths(componentFields, "scrapPctThousandths", 0); err != nil {
-			return ManufacturingDefineBomInput{}, err
+			return nil, err
 		}
-		input.Components = append(input.Components, component)
+		parsed = append(parsed, component)
+	}
+	return parsed, nil
+}
+
+func ParseManufacturingRestoreBomInput(raw json.RawMessage) (ManufacturingRestoreBomInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return ManufacturingRestoreBomInput{}, err
+	}
+	var input ManufacturingRestoreBomInput
+	if input.AssemblySKU, err = requiredCRMDealString(fields, "assemblySku", 0, 0); err != nil {
+		return ManufacturingRestoreBomInput{}, err
+	}
+	if input.ExpectedComponents, err = parseManufacturingBomComponents(fields, "expectedComponents", true); err != nil {
+		return ManufacturingRestoreBomInput{}, err
+	}
+	if input.Components, err = parseManufacturingBomComponents(fields, "components", true); err != nil {
+		return ManufacturingRestoreBomInput{}, err
 	}
 	return input, nil
 }
@@ -202,6 +250,10 @@ func ParseManufacturingDeleteBomInput(raw json.RawMessage) (ManufacturingDeleteB
 	}
 	var input ManufacturingDeleteBomInput
 	if input.AssemblySKU, err = requiredCRMDealString(fields, "assemblySku", 0, 0); err != nil {
+		return ManufacturingDeleteBomInput{}, err
+	}
+	input.ExpectedComponents, err = parseManufacturingBomComponents(fields, "expectedComponents", false)
+	if err != nil {
 		return ManufacturingDeleteBomInput{}, err
 	}
 	return input, nil
@@ -301,6 +353,8 @@ func parseManufacturingBomInput(capabilityID string, raw json.RawMessage) (any, 
 		return ParseManufacturingDefineBomInput(raw)
 	case manufacturingDeleteBomCapabilityID:
 		return ParseManufacturingDeleteBomInput(raw)
+	case manufacturingRestoreBomCapabilityID:
+		return ParseManufacturingRestoreBomInput(raw)
 	case manufacturingBomTreeCapabilityID:
 		return ParseManufacturingBomTreeInput(raw)
 	case manufacturingBomReportCapabilityID:
@@ -332,10 +386,66 @@ func manufacturingItemIDBySKU(ctx context.Context, tx pgx.Tx, orgID, sku string)
 	return itemID, err
 }
 
+func manufacturingLockBomAssembly(ctx context.Context, tx pgx.Tx, orgID, assemblyID string) error {
+	var lockedID string
+	return tx.QueryRow(ctx, `SELECT id::text FROM items WHERE org_id=$1::uuid AND id=$2::uuid FOR UPDATE`, orgID, assemblyID).Scan(&lockedID)
+}
+
+func manufacturingBomComponentSnapshot(ctx context.Context, tx pgx.Tx, orgID, assemblyID string) ([]ManufacturingBomComponentInput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT component.sku, bl.quantity_thousandths, bl.scrap_pct_thousandths
+		FROM bom_lines bl
+		JOIN items component ON component.id=bl.component_item_id AND component.org_id=bl.org_id
+		WHERE bl.org_id=$1::uuid AND bl.assembly_item_id=$2::uuid
+		ORDER BY component.sku`, orgID, assemblyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	components := make([]ManufacturingBomComponentInput, 0)
+	for rows.Next() {
+		var component ManufacturingBomComponentInput
+		if err := rows.Scan(&component.SKU, &component.QuantityThousandths, &component.ScrapPctThousandths); err != nil {
+			return nil, err
+		}
+		components = append(components, component)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return components, nil
+}
+
+func sameManufacturingBomComponents(left, right []ManufacturingBomComponentInput) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	left = append([]ManufacturingBomComponentInput(nil), left...)
+	right = append([]ManufacturingBomComponentInput(nil), right...)
+	sort.Slice(left, func(i, j int) bool { return left[i].SKU < left[j].SKU })
+	sort.Slice(right, func(i, j int) bool { return right[i].SKU < right[j].SKU })
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func manufacturingDefineBom(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input ManufacturingDefineBomInput) (ManufacturingDefineBomOutput, error) {
 	assemblyID, err := manufacturingItemIDBySKU(ctx, tx, claims.OrganizationID, input.AssemblySKU)
 	if err != nil {
 		return ManufacturingDefineBomOutput{}, err
+	}
+	if err := manufacturingLockBomAssembly(ctx, tx, claims.OrganizationID, assemblyID); err != nil {
+		return ManufacturingDefineBomOutput{}, err
+	}
+	previousComponents, err := manufacturingBomComponentSnapshot(ctx, tx, claims.OrganizationID, assemblyID)
+	if err != nil {
+		return ManufacturingDefineBomOutput{}, err
+	}
+	if !sameManufacturingBomComponents(previousComponents, input.ExpectedComponents) {
+		return ManufacturingDefineBomOutput{}, errors.New("bill of materials changed since it was read; define was not applied")
 	}
 	resolved := map[string]string{}
 	for _, component := range input.Components {
@@ -366,7 +476,68 @@ func manufacturingDefineBom(ctx context.Context, tx pgx.Tx, claims authbridge.Ca
 	if _, err := manufacturingExplodeBom(allEdges, assemblyID, 1000); err != nil {
 		return ManufacturingDefineBomOutput{}, fmt.Errorf("rejected: %s", err.Error())
 	}
-	return ManufacturingDefineBomOutput{AssemblyItemID: assemblyID, ComponentCount: len(input.Components)}, nil
+	resultingComponents, err := manufacturingBomComponentSnapshot(ctx, tx, claims.OrganizationID, assemblyID)
+	if err != nil {
+		return ManufacturingDefineBomOutput{}, err
+	}
+	return ManufacturingDefineBomOutput{
+		AssemblyItemID: assemblyID, AssemblySKU: input.AssemblySKU,
+		ComponentCount: len(resultingComponents), PreviousComponents: previousComponents, Components: resultingComponents,
+	}, nil
+}
+
+func manufacturingRestoreBom(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input ManufacturingRestoreBomInput) (ManufacturingRestoreBomOutput, error) {
+	assemblyID, err := manufacturingItemIDBySKU(ctx, tx, claims.OrganizationID, input.AssemblySKU)
+	if err != nil {
+		return ManufacturingRestoreBomOutput{}, err
+	}
+	if err := manufacturingLockBomAssembly(ctx, tx, claims.OrganizationID, assemblyID); err != nil {
+		return ManufacturingRestoreBomOutput{}, err
+	}
+	previousComponents, err := manufacturingBomComponentSnapshot(ctx, tx, claims.OrganizationID, assemblyID)
+	if err != nil {
+		return ManufacturingRestoreBomOutput{}, err
+	}
+	if !sameManufacturingBomComponents(previousComponents, input.ExpectedComponents) {
+		return ManufacturingRestoreBomOutput{}, errors.New("bill of materials changed since it was read; restore was not applied")
+	}
+	resolved := map[string]string{}
+	for _, component := range input.Components {
+		if component.SKU == input.AssemblySKU {
+			return ManufacturingRestoreBomOutput{}, errors.New("an assembly cannot contain itself")
+		}
+		componentID, err := manufacturingItemIDBySKU(ctx, tx, claims.OrganizationID, component.SKU)
+		if err != nil {
+			return ManufacturingRestoreBomOutput{}, err
+		}
+		resolved[component.SKU] = componentID
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM bom_lines WHERE org_id=$1::uuid AND assembly_item_id=$2::uuid`, claims.OrganizationID, assemblyID); err != nil {
+		return ManufacturingRestoreBomOutput{}, err
+	}
+	for _, component := range input.Components {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO bom_lines (org_id, assembly_item_id, component_item_id, quantity_thousandths, scrap_pct_thousandths)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5)`,
+			claims.OrganizationID, assemblyID, resolved[component.SKU], component.QuantityThousandths, component.ScrapPctThousandths); err != nil {
+			return ManufacturingRestoreBomOutput{}, err
+		}
+	}
+	allEdges, err := manufacturingOrgBomEdges(ctx, tx, claims.OrganizationID, nil)
+	if err != nil {
+		return ManufacturingRestoreBomOutput{}, err
+	}
+	if _, err := manufacturingExplodeBom(allEdges, assemblyID, 1000); err != nil {
+		return ManufacturingRestoreBomOutput{}, fmt.Errorf("rejected: %s", err.Error())
+	}
+	resultingComponents, err := manufacturingBomComponentSnapshot(ctx, tx, claims.OrganizationID, assemblyID)
+	if err != nil {
+		return ManufacturingRestoreBomOutput{}, err
+	}
+	return ManufacturingRestoreBomOutput{
+		AssemblySKU: input.AssemblySKU, RestoredCount: len(resultingComponents),
+		PreviousComponents: previousComponents, Components: resultingComponents,
+	}, nil
 }
 
 func manufacturingDeleteBom(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input ManufacturingDeleteBomInput) (ManufacturingDeleteBomOutput, error) {
@@ -374,44 +545,29 @@ func manufacturingDeleteBom(ctx context.Context, tx pgx.Tx, claims authbridge.Ca
 	if err != nil {
 		return ManufacturingDeleteBomOutput{}, err
 	}
-	rows, err := tx.Query(ctx, `
-		DELETE FROM bom_lines WHERE org_id=$1::uuid AND assembly_item_id=$2::uuid
-		RETURNING component_item_id::text, quantity_thousandths, scrap_pct_thousandths`,
-		claims.OrganizationID, assemblyID)
+	if err := manufacturingLockBomAssembly(ctx, tx, claims.OrganizationID, assemblyID); err != nil {
+		return ManufacturingDeleteBomOutput{}, err
+	}
+	currentComponents, err := manufacturingBomComponentSnapshot(ctx, tx, claims.OrganizationID, assemblyID)
 	if err != nil {
 		return ManufacturingDeleteBomOutput{}, err
 	}
-	type removedLine struct {
-		componentItemID     string
-		quantityThousandths int64
-		scrapPctThousandths int64
+	if !sameManufacturingBomComponents(currentComponents, input.ExpectedComponents) {
+		return ManufacturingDeleteBomOutput{}, errors.New("bill of materials changed since it was read; delete was not applied")
 	}
-	var removed []removedLine
-	for rows.Next() {
-		var line removedLine
-		if err := rows.Scan(&line.componentItemID, &line.quantityThousandths, &line.scrapPctThousandths); err != nil {
-			rows.Close()
-			return ManufacturingDeleteBomOutput{}, err
-		}
-		removed = append(removed, line)
-	}
-	rows.Close()
-	if len(removed) == 0 {
+	if len(currentComponents) == 0 {
 		return ManufacturingDeleteBomOutput{}, fmt.Errorf("%s has no bill of materials", input.AssemblySKU)
 	}
-	skuByItem, err := manufacturingSkuMap(ctx, tx, claims.OrganizationID)
+	deleted, err := tx.Exec(ctx, `DELETE FROM bom_lines WHERE org_id=$1::uuid AND assembly_item_id=$2::uuid`, claims.OrganizationID, assemblyID)
 	if err != nil {
 		return ManufacturingDeleteBomOutput{}, err
 	}
-	out := ManufacturingDeleteBomOutput{RemovedCount: len(removed)}
-	for _, line := range removed {
-		sku, ok := skuByItem[line.componentItemID]
-		if !ok {
-			sku = line.componentItemID
-		}
-		out.RemovedLines = append(out.RemovedLines, ManufacturingDeleteBomLine{
-			SKU: sku, QuantityThousandths: line.quantityThousandths, ScrapPctThousandths: line.scrapPctThousandths,
-		})
+	if deleted.RowsAffected() != int64(len(currentComponents)) {
+		return ManufacturingDeleteBomOutput{}, errors.New("bill of materials changed during delete")
+	}
+	out := ManufacturingDeleteBomOutput{
+		AssemblySKU: input.AssemblySKU, RemovedCount: len(currentComponents),
+		PreviousComponents: currentComponents, Components: []ManufacturingBomComponentInput{},
 	}
 	return out, nil
 }

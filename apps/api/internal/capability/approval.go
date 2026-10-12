@@ -567,7 +567,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
-		case manufacturingDefineBomCapabilityID, manufacturingDeleteBomCapabilityID, manufacturingBomTreeCapabilityID,
+		case manufacturingDefineBomCapabilityID, manufacturingDeleteBomCapabilityID, manufacturingRestoreBomCapabilityID, manufacturingBomTreeCapabilityID,
 			manufacturingBomReportCapabilityID, manufacturingCostPreviewCapabilityID, manufacturingLotTraceCapabilityID,
 			manufacturingProductionRunsCapabilityID:
 			parsed, parseErr := parseManufacturingBomInput(transition.row.CapabilityID, transition.row.Payload)
@@ -921,7 +921,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case manufacturingCreateWorkOrderCapabilityID, manufacturingReleaseWorkOrderCapabilityID,
 		manufacturingCompleteWorkOrderCapabilityID, manufacturingCancelWorkOrderCapabilityID,
 		manufacturingProduceFromBomCapabilityID, manufacturingDefineBomCapabilityID,
-		manufacturingReverseProductionRunCapabilityID, manufacturingDeleteBomCapabilityID:
+		manufacturingReverseProductionRunCapabilityID, manufacturingDeleteBomCapabilityID, manufacturingRestoreBomCapabilityID:
 		return "manufacturing.write", true
 	case manufacturingCheckProductionFeasibilityCapabilityID, manufacturingWorkOrdersListCapabilityID,
 		manufacturingBomTreeCapabilityID, manufacturingBomReportCapabilityID, manufacturingCostPreviewCapabilityID,

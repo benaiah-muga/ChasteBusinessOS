@@ -2553,17 +2553,20 @@ new owners and the manifest shows zero legacy runtime paths.
      all three Go capability calls and reject legacy-shaped responses. Existing
      Go receipt executor tests cover permission, tenant scope, governed writes,
      and receipt results. Authenticated browser proof is recorded in item 338.
-225. (Implemented; default-on) Route only Vite BOM definition through Go's
+225. (Complete; authenticated browser proof recorded in item 343) Route Vite
+     BOM definition and deletion through Go's
      authenticated `manufacturing.defineBom` capability when
      `CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`, with
      `GO_MANUFACTURING_DEFINE_BOM_SLICE=1` enforced server-side for all
      capability callers. Set both BOM selector flags to `0` for legacy
-     rollback. Preserve `manufacturing.write` authorization, tenant scope, and
-     actor/org-scoped exact retry behavior; selected Go failures do not retry
-     through legacy. Other Manufacturing routes remain unchanged. The Vite
-     selector test covers explicit rollback, and the Go session handler test
-     covers disabled and enabled capability behavior.
+     rollback. Compare exact current BOM components under an assembly row lock,
+     return prior and resulting snapshots for inverse execution, and preserve
+     `manufacturing.write` authorization, tenant scope, and actor/org-scoped
+     exact retry behavior. Selected Go failures do not retry through legacy.
+     Authenticated browser proof 343 verified a BOM replacement through Go and
+     confirmed the updated component quantity on the Vite page. Other
+     Manufacturing routes remain unchanged.
 226. (Complete) Route the Vite Messaging conversation
      list and refresh through the session-authenticated
      `messaging.listConversations` capability when
@@ -3774,3 +3777,9 @@ new owners and the manifest shows zero legacy runtime paths.
      accepted, zero rejected, and zero outstanding. No legacy purchasing
      request occurred and the browser error log was empty. This completes item
      162 and extends the receiving runtime proof in item 338.
+
+343. (Runtime verified) On 2026-10-13, authenticated Vite `/manufacturing`
+     replaced a synthetic assembly BOM through `POST /api/capabilities/execute`
+     (HTTP 200). The page showed the updated component quantity, no legacy
+     `/api/manufacturing` request occurred, and the browser error log was empty.
+     This completes item 225.

@@ -148,9 +148,41 @@ describe("Vite manufacturing page", () => {
     const define = postedActions(fetchMock).find((body) => body.action === "defineBom");
     expect(define).toMatchObject({
       assemblySku: "DESK-1",
+      expectedComponents: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
       components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
     });
     expect(String(define?.intentId)).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  it("deletes a BOM through Go without calling the legacy manufacturing endpoint", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_DEFINE_BOM_SLICE__", true);
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    const fetchMock = manufacturingFetch({
+      onPost: (body) => body.action === "overviewReport"
+        ? Response.json({ ok: true, data: report })
+        : body.action === "deleteBom"
+          ? Response.json({ ok: true, data: { assemblySku: "DESK-1", removedCount: 1, previousComponents: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }], components: [] } })
+          : Response.json({ ok: true, data: {} }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
+
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: /^BOMs/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete BOM" }));
+
+    expect(await screen.findByText("Delete BOM DESK-1 done.")).not.toBeNull();
+    const calls = fetchMock.mock.calls;
+    expect(calls.some(([input]) => input === "/api/manufacturing")).toBe(false);
+    const deletion = calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
+      .find((body) => body.capabilityId === "manufacturing.deleteBom");
+    expect(deletion).toMatchObject({
+      capabilityId: "manufacturing.deleteBom",
+      input: { assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }] },
+      intentId: expect.any(String),
+    });
   });
 
   it("keeps feasibility shortfalls visible for the chosen assembly", async () => {

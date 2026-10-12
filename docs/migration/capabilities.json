@@ -16737,7 +16737,7 @@
       "permission": "manufacturing.write",
       "executionScope": "organization",
       "moneyThresholdMinor": null,
-      "inverseCapabilityId": null,
+      "inverseCapabilityId": "manufacturing.restoreBom",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -16745,7 +16745,174 @@
           "assemblySku": {
             "type": "string"
           },
+          "expectedComponents": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantityThousandths": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scrapPctThousandths": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
+                }
+              },
+              "required": [
+                "sku",
+                "quantityThousandths",
+                "scrapPctThousandths"
+              ],
+              "additionalProperties": false
+            }
+          },
           "components": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantityThousandths": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scrapPctThousandths": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
+                }
+              },
+              "required": [
+                "sku",
+                "quantityThousandths",
+                "scrapPctThousandths"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "assemblySku",
+          "expectedComponents",
+          "components"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "assemblyItemId": {
+            "type": "string"
+          },
+          "assemblySku": {
+            "type": "string"
+          },
+          "componentCount": {
+            "type": "number"
+          },
+          "previousComponents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantityThousandths": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scrapPctThousandths": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
+                }
+              },
+              "required": [
+                "sku",
+                "quantityThousandths",
+                "scrapPctThousandths"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantityThousandths": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scrapPctThousandths": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
+                }
+              },
+              "required": [
+                "sku",
+                "quantityThousandths",
+                "scrapPctThousandths"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "assemblyItemId",
+          "assemblySku",
+          "componentCount",
+          "previousComponents",
+          "components"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "manufacturing.deleteBom",
+      "title": "Delete bill of materials",
+      "intent": "Delete an assembly bill of materials only when its current component snapshot matches the expected state",
+      "module": "manufacturing",
+      "risk": "destructive",
+      "permission": "manufacturing.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "manufacturing.restoreBom",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "assemblySku": {
+            "type": "string"
+          },
+          "expectedComponents": {
             "minItems": 1,
             "maxItems": 100,
             "type": "array",
@@ -16779,59 +16946,21 @@
         },
         "required": [
           "assemblySku",
-          "components"
+          "expectedComponents"
         ],
         "additionalProperties": false
       },
       "outputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "assemblyItemId": {
-            "type": "string"
-          },
-          "componentCount": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "assemblyItemId",
-          "componentCount"
-        ],
-        "additionalProperties": false
-      }
-    },
-    {
-      "id": "manufacturing.deleteBom",
-      "title": "Delete bill of materials",
-      "intent": "Remove an assembly's bill of materials entirely when the product is no longer built; production and work orders refuse assemblies without a BOM",
-      "module": "manufacturing",
-      "risk": "destructive",
-      "permission": "manufacturing.write",
-      "executionScope": "organization",
-      "moneyThresholdMinor": null,
-      "inverseCapabilityId": null,
-      "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
           "assemblySku": {
             "type": "string"
-          }
-        },
-        "required": [
-          "assemblySku"
-        ],
-        "additionalProperties": false
-      },
-      "outputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
+          },
           "removedCount": {
             "type": "number"
           },
-          "removedLines": {
+          "previousComponents": {
             "type": "array",
             "items": {
               "type": "object",
@@ -16840,10 +16969,45 @@
                   "type": "string"
                 },
                 "quantityThousandths": {
-                  "type": "number"
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
                 },
                 "scrapPctThousandths": {
-                  "type": "number"
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
+                }
+              },
+              "required": [
+                "sku",
+                "quantityThousandths",
+                "scrapPctThousandths"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantityThousandths": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scrapPctThousandths": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
                 }
               },
               "required": [
@@ -16856,8 +17020,10 @@
           }
         },
         "required": [
+          "assemblySku",
           "removedCount",
-          "removedLines"
+          "previousComponents",
+          "components"
         ],
         "additionalProperties": false
       }
@@ -17149,6 +17315,169 @@
         },
         "required": [
           "released"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "manufacturing.restoreBom",
+      "title": "Restore bill of materials state",
+      "intent": "Restore an assembly bill of materials only when its current component snapshot exactly matches the expected state",
+      "module": "manufacturing",
+      "risk": "write",
+      "permission": "manufacturing.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "manufacturing.defineBom",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "assemblySku": {
+            "type": "string"
+          },
+          "expectedComponents": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantityThousandths": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scrapPctThousandths": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
+                }
+              },
+              "required": [
+                "sku",
+                "quantityThousandths",
+                "scrapPctThousandths"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "components": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantityThousandths": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scrapPctThousandths": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
+                }
+              },
+              "required": [
+                "sku",
+                "quantityThousandths",
+                "scrapPctThousandths"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "assemblySku",
+          "expectedComponents",
+          "components"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "assemblySku": {
+            "type": "string"
+          },
+          "restoredCount": {
+            "type": "number"
+          },
+          "previousComponents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantityThousandths": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scrapPctThousandths": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
+                }
+              },
+              "required": [
+                "sku",
+                "quantityThousandths",
+                "scrapPctThousandths"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantityThousandths": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scrapPctThousandths": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000,
+                  "description": "thousandths of a percent: 5% = 5000"
+                }
+              },
+              "required": [
+                "sku",
+                "quantityThousandths",
+                "scrapPctThousandths"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "assemblySku",
+          "restoredCount",
+          "previousComponents",
+          "components"
         ],
         "additionalProperties": false
       }

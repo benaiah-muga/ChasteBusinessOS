@@ -465,31 +465,48 @@ func TestSessionCapabilityHandlerReturnsApprovalPendingEnvelope(t *testing.T) {
 	}
 }
 
-func TestSessionCapabilityHandlerCanGateManufacturingDefineBom(t *testing.T) {
-	body := `{"capabilityId":"manufacturing.defineBom","input":{"assemblySku":"DESK-1","components":[{"sku":"LEG-1","quantityThousandths":4000,"scrapPctThousandths":20000}]},"intentId":"bom-intent"}`
-	t.Run("explicitly disabled", func(t *testing.T) {
-		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
-		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"componentCount":1}`)}}
-		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, map[string]struct{}{"manufacturing.defineBom": {}})
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
-		if response.Code != http.StatusServiceUnavailable || executor.calls != 0 {
-			t.Fatalf("status=%d executor=%d body=%s", response.Code, executor.calls, response.Body.String())
-		}
-	})
-	t.Run("enabled", func(t *testing.T) {
-		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
-		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"componentCount":1}`)}}
-		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, map[string]struct{}{})
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
-		if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != "manufacturing.defineBom" {
-			t.Fatalf("status=%d capability=%q executor=%d body=%s", response.Code, executor.capID, executor.calls, response.Body.String())
-		}
-		if string(executor.input) != `{"assemblySku":"DESK-1","components":[{"sku":"LEG-1","quantityThousandths":4000,"scrapPctThousandths":20000}]}` {
-			t.Fatalf("unexpected input passed to governed executor: %s", executor.input)
-		}
-	})
+func TestSessionCapabilityHandlerCanGateManufacturingBomWrites(t *testing.T) {
+	for _, test := range []struct {
+		capabilityID string
+		input        string
+	}{
+		{capabilityID: "manufacturing.defineBom", input: `{"assemblySku":"DESK-1","components":[{"sku":"LEG-1","quantityThousandths":4000,"scrapPctThousandths":20000}]}`},
+		{capabilityID: "manufacturing.deleteBom", input: `{"assemblySku":"DESK-1"}`},
+	} {
+		t.Run(test.capabilityID, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{
+				"capabilityId": test.capabilityID,
+				"input":        json.RawMessage(test.input),
+				"intentId":     "bom-intent",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Run("explicitly disabled", func(t *testing.T) {
+				resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+				executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+				handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, map[string]struct{}{test.capabilityID: {}})
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, string(body)))
+				if response.Code != http.StatusServiceUnavailable || executor.calls != 0 {
+					t.Fatalf("status=%d executor=%d body=%s", response.Code, executor.calls, response.Body.String())
+				}
+			})
+			t.Run("enabled", func(t *testing.T) {
+				resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+				executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+				handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, map[string]struct{}{})
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, string(body)))
+				if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != test.capabilityID {
+					t.Fatalf("status=%d capability=%q executor=%d body=%s", response.Code, executor.capID, executor.calls, response.Body.String())
+				}
+				if string(executor.input) != test.input {
+					t.Fatalf("unexpected input passed to governed executor: %s", executor.input)
+				}
+			})
+		})
+	}
 }
 
 func TestSessionCapabilityHandlerCanGateIngestedDocumentsRead(t *testing.T) {

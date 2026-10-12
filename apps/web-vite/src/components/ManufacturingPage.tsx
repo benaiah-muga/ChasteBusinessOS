@@ -424,7 +424,16 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
       setNotice({ tone: "error", text: "Enter an assembly SKU and at least one component with a quantity above zero." });
       return;
     }
-    void run({ action: "defineBom", assemblySku, components }, `Save BOM for ${assemblySku}`);
+    const expectedComponents = state.status === "ready"
+      ? state.report.boms
+          .filter((edge) => edge.assemblySku === assemblySku)
+          .map((edge) => ({
+            sku: edge.componentSku,
+            quantityThousandths: edge.quantityThousandths,
+            scrapPctThousandths: edge.scrapPctThousandths,
+          }))
+      : [];
+    void run({ action: "defineBom", assemblySku, expectedComponents, components }, `Save BOM for ${assemblySku}`);
   }
 
   function checkFeasibility(assemblySku: string) {
@@ -695,7 +704,15 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
                     >
                       {openTree === assemblySku ? "Hide tree" : "tree"}
                     </button>
-                    <button type="button" style={styles.ghostButton} disabled={busy} onClick={() => void run({ action: "deleteBom", assemblySku }, `Delete BOM ${assemblySku}`)}>
+                    <button type="button" style={styles.ghostButton} disabled={busy} onClick={() => void run({
+                      action: "deleteBom",
+                      assemblySku,
+                      expectedComponents: boms.filter((edge) => edge.assemblySku === assemblySku).map((edge) => ({
+                        sku: edge.componentSku,
+                        quantityThousandths: edge.quantityThousandths,
+                        scrapPctThousandths: edge.scrapPctThousandths,
+                      })),
+                    }, `Delete BOM ${assemblySku}`)}>
                       Delete BOM
                     </button>
                   </div>

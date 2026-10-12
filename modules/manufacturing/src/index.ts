@@ -793,48 +793,144 @@ const lotTrace = (deps: ModuleDeps) =>
       }),
   });
 
+type BomComponentSnapshot = {
+  sku: string;
+  quantityThousandths: number;
+  scrapPctThousandths: number;
+};
+
+const bomComponentSchema = z.object({
+  sku: z.string(),
+  quantityThousandths: z.number().int().positive(),
+  scrapPctThousandths: pctInput.default(0),
+});
+
+const lockBomAssembly = async (tx: Tx, orgId: string, assemblyItemId: string) => {
+  await tx
+    .select({ id: items.id })
+    .from(items)
+    .where(and(eq(items.orgId, orgId), eq(items.id, assemblyItemId)))
+    .for("update");
+};
+
+const bomComponentSnapshot = async (tx: Tx, orgId: string, assemblyItemId: string): Promise<BomComponentSnapshot[]> =>
+  tx
+    .select({
+      sku: items.sku,
+      quantityThousandths: bomLines.quantityThousandths,
+      scrapPctThousandths: bomLines.scrapPctThousandths,
+    })
+    .from(bomLines)
+    .innerJoin(items, and(eq(items.id, bomLines.componentItemId), eq(items.orgId, bomLines.orgId)))
+    .where(and(eq(bomLines.orgId, orgId), eq(bomLines.assemblyItemId, assemblyItemId)))
+    .orderBy(items.sku);
+
+const sameBomComponents = (left: BomComponentSnapshot[], right: BomComponentSnapshot[]) =>
+  JSON.stringify([...left].sort((a, b) => a.sku.localeCompare(b.sku))) ===
+  JSON.stringify([...right].sort((a, b) => a.sku.localeCompare(b.sku)));
+
 const deleteBom = (deps: ModuleDeps) =>
   defineCapability({
     id: "manufacturing.deleteBom",
     title: "Delete bill of materials",
-    intent:
-      "Remove an assembly's bill of materials entirely when the product is no longer built; production and work orders refuse assemblies without a BOM",
+    intent: "Delete an assembly bill of materials only when its current component snapshot matches the expected state",
     module: "manufacturing",
     risk: "destructive",
     permission: "manufacturing.write",
-    // No mechanical inverse: the previous component list is snapshotted into
-    // the audit payload; redefinition via defineBom is the recovery path.
-    input: z.object({ assemblySku: z.string() }),
+    inverse: {
+      capabilityId: "manufacturing.restoreBom",
+      buildInput: (input, output) => ({
+        assemblySku: input.assemblySku,
+        expectedComponents: output.components,
+        components: output.previousComponents,
+      }),
+    },
+    input: z.object({ assemblySku: z.string(), expectedComponents: z.array(bomComponentSchema).min(1).max(100) }),
     output: z.object({
+      assemblySku: z.string(),
       removedCount: z.number(),
-      removedLines: z.array(
-        z.object({ sku: z.string(), quantityThousandths: z.number(), scrapPctThousandths: z.number() }),
-      ),
+      previousComponents: z.array(bomComponentSchema),
+      components: z.array(bomComponentSchema),
     }),
     execute: async (ctx, input) =>
       withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const assembly = await itemBySku(tx, ctx.actor.orgId, input.assemblySku);
         if (!assembly) throw new Error(`no item with SKU ${input.assemblySku}`);
-        const removed = await tx
-          .delete(bomLines)
-          .where(and(eq(bomLines.orgId, ctx.actor.orgId), eq(bomLines.assemblyItemId, assembly.id)))
-          .returning({
-            sku: bomLines.componentItemId,
-            quantityThousandths: bomLines.quantityThousandths,
-            scrapPctThousandths: bomLines.scrapPctThousandths,
-          });
-        if (removed.length === 0) throw new Error(`${input.assemblySku} has no bill of materials`);
-        // Resolve component SKUs for the audit snapshot.
-        const allItems = await tx.select({ id: items.id, sku: items.sku }).from(items).where(eq(items.orgId, ctx.actor.orgId));
-        const skuOf = new Map(allItems.map((i) => [i.id, i.sku]));
-        return {
-          removedCount: removed.length,
-          removedLines: removed.map((r) => ({
-            sku: skuOf.get(r.sku) ?? String(r.sku),
-            quantityThousandths: r.quantityThousandths,
-            scrapPctThousandths: r.scrapPctThousandths,
-          })),
-        };
+        await lockBomAssembly(tx, ctx.actor.orgId, assembly.id);
+        const previousComponents = await bomComponentSnapshot(tx, ctx.actor.orgId, assembly.id);
+        if (!sameBomComponents(previousComponents, input.expectedComponents)) {
+          throw new Error("bill of materials changed since it was read; delete was not applied");
+        }
+        if (previousComponents.length === 0) throw new Error(`${input.assemblySku} has no bill of materials`);
+        await tx.delete(bomLines).where(and(eq(bomLines.orgId, ctx.actor.orgId), eq(bomLines.assemblyItemId, assembly.id)));
+        return { assemblySku: input.assemblySku, removedCount: previousComponents.length, previousComponents, components: [] };
+      }),
+  });
+
+const restoreBom = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "manufacturing.restoreBom",
+    title: "Restore bill of materials state",
+    intent: "Restore an assembly bill of materials only when its current component snapshot exactly matches the expected state",
+    module: "manufacturing",
+    risk: "write",
+    permission: "manufacturing.write",
+    inverse: {
+      capabilityId: "manufacturing.defineBom",
+      buildInput: (input, output) => ({
+        assemblySku: input.assemblySku,
+        expectedComponents: output.components,
+        components: output.previousComponents,
+      }),
+    },
+    input: z.object({
+      assemblySku: z.string(),
+      expectedComponents: z.array(bomComponentSchema).max(100),
+      components: z.array(bomComponentSchema).max(100),
+    }),
+    output: z.object({
+      assemblySku: z.string(),
+      restoredCount: z.number(),
+      previousComponents: z.array(bomComponentSchema),
+      components: z.array(bomComponentSchema),
+    }),
+    execute: async (ctx, input) =>
+      withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const assembly = await itemBySku(tx, ctx.actor.orgId, input.assemblySku);
+        if (!assembly) throw new Error(`no item with SKU ${input.assemblySku}`);
+        await lockBomAssembly(tx, ctx.actor.orgId, assembly.id);
+        const previousComponents = await bomComponentSnapshot(tx, ctx.actor.orgId, assembly.id);
+        if (!sameBomComponents(previousComponents, input.expectedComponents)) {
+          throw new Error("bill of materials changed since it was read; restore was not applied");
+        }
+        const resolved = new Map<string, string>();
+        for (const component of input.components) {
+          if (component.sku === input.assemblySku) throw new Error("an assembly cannot contain itself");
+          const item = await itemBySku(tx, ctx.actor.orgId, component.sku);
+          if (!item) throw new Error(`no item with SKU ${component.sku}`);
+          resolved.set(component.sku, item.id);
+        }
+        await tx.delete(bomLines).where(and(eq(bomLines.orgId, ctx.actor.orgId), eq(bomLines.assemblyItemId, assembly.id)));
+        if (input.components.length > 0) {
+          await tx.insert(bomLines).values(input.components.map((component) => ({
+            orgId: ctx.actor.orgId,
+            assemblyItemId: assembly.id,
+            componentItemId: resolved.get(component.sku)!,
+            quantityThousandths: component.quantityThousandths,
+            scrapPctThousandths: component.scrapPctThousandths,
+          })));
+        }
+        const components = await bomComponentSnapshot(tx, ctx.actor.orgId, assembly.id);
+        const allEdges = await tx
+          .select({ assemblyItemId: bomLines.assemblyItemId, componentItemId: bomLines.componentItemId, quantityThousandths: bomLines.quantityThousandths })
+          .from(bomLines)
+          .where(eq(bomLines.orgId, ctx.actor.orgId));
+        try {
+          explodeBom(allEdges, assembly.id, 1000);
+        } catch (err) {
+          throw new Error(`rejected: ${err instanceof Error ? err.message : "invalid bill of materials"}`);
+        }
+        return { assemblySku: input.assemblySku, restoredCount: components.length, previousComponents, components };
       }),
   });
 
@@ -933,6 +1029,7 @@ export function registerManufacturingCapabilities(registry: CapabilityRegistry, 
   registry.register(produceFromBom(deps));
   registry.register(bomReport(deps));
   registry.register(deleteBom(deps));
+  registry.register(restoreBom(deps));
   registry.register(lotTrace(deps));
 }
 
@@ -956,27 +1053,35 @@ const defineBom = (deps: ModuleDeps) =>
     module: "manufacturing",
     risk: "write",
     permission: "manufacturing.write",
-    // No mechanical inverse: restoring a replaced BOM requires the previous
-    // definition, which we deliberately snapshot into the proposal/audit
-    // payload rather than a second capability call.
+    inverse: {
+      capabilityId: "manufacturing.restoreBom",
+      buildInput: (_input, output) => ({
+        assemblySku: output.assemblySku,
+        expectedComponents: output.components,
+        components: output.previousComponents,
+      }),
+    },
     input: z.object({
       assemblySku: z.string(),
-      components: z
-        .array(
-          z.object({
-            sku: z.string(),
-            quantityThousandths: z.number().int().positive(),
-            scrapPctThousandths: pctInput.default(0),
-          }),
-        )
-        .min(1)
-        .max(100),
+      expectedComponents: z.array(bomComponentSchema).max(100),
+      components: z.array(bomComponentSchema).max(100),
     }),
-    output: z.object({ assemblyItemId: z.string(), componentCount: z.number() }),
+    output: z.object({
+      assemblyItemId: z.string(),
+      assemblySku: z.string(),
+      componentCount: z.number(),
+      previousComponents: z.array(bomComponentSchema),
+      components: z.array(bomComponentSchema),
+    }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const assembly = await itemBySku(tx, ctx.actor.orgId, input.assemblySku);
         if (!assembly) throw new Error(`no item with SKU ${input.assemblySku}`);
+        await lockBomAssembly(tx, ctx.actor.orgId, assembly.id);
+        const previousComponents = await bomComponentSnapshot(tx, ctx.actor.orgId, assembly.id);
+        if (!sameBomComponents(previousComponents, input.expectedComponents)) {
+          throw new Error("bill of materials changed since it was read; define was not applied");
+        }
 
         const resolved = new Map<string, string>();
         for (const c of input.components) {
@@ -989,15 +1094,15 @@ const defineBom = (deps: ModuleDeps) =>
         await tx.delete(bomLines).where(
           and(eq(bomLines.orgId, ctx.actor.orgId), eq(bomLines.assemblyItemId, assembly.id)),
         );
-        await tx.insert(bomLines).values(
-          input.components.map((c) => ({
+        if (input.components.length > 0) {
+          await tx.insert(bomLines).values(input.components.map((c) => ({
             orgId: ctx.actor.orgId,
             assemblyItemId: assembly.id,
             componentItemId: resolved.get(c.sku)!,
             quantityThousandths: c.quantityThousandths,
             scrapPctThousandths: c.scrapPctThousandths,
-          })),
-        );
+          })));
+        }
 
         // Cycle check over the whole graph this assembly participates in.
         const allEdges = await tx
@@ -1013,7 +1118,14 @@ const defineBom = (deps: ModuleDeps) =>
         } catch (err) {
           throw new Error(`rejected: ${err instanceof Error ? err.message : "invalid bill of materials"}`);
         }
-        return { assemblyItemId: assembly.id, componentCount: input.components.length };
+        const components = await bomComponentSnapshot(tx, ctx.actor.orgId, assembly.id);
+        return {
+          assemblyItemId: assembly.id,
+          assemblySku: input.assemblySku,
+          componentCount: components.length,
+          previousComponents,
+          components,
+        };
       });
     },
   });

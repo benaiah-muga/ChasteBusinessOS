@@ -302,8 +302,8 @@ func run(logger *slog.Logger) error {
 			return resolverErr
 		}
 		disabledCapabilities := map[string]struct{}{}
-		if os.Getenv("GO_MANUFACTURING_DEFINE_BOM_SLICE") != "1" {
-			disabledCapabilities["manufacturing.defineBom"] = struct{}{}
+		for capabilityID := range goManufacturingBomWriteDisabledCapabilities(os.Getenv("GO_MANUFACTURING_DEFINE_BOM_SLICE") == "1") {
+			disabledCapabilities[capabilityID] = struct{}{}
 		}
 		for capabilityID := range httpapi.InventoryCycleCountDisabledCapabilities(os.Getenv("GO_INVENTORY_CYCLE_COUNT_WRITES") == "1") {
 			disabledCapabilities[capabilityID] = struct{}{}
@@ -839,5 +839,16 @@ func run(logger *slog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
+	}
+}
+
+func goManufacturingBomWriteDisabledCapabilities(enabled bool) map[string]struct{} {
+	if enabled {
+		return map[string]struct{}{}
+	}
+	return map[string]struct{}{
+		"manufacturing.defineBom":  {},
+		"manufacturing.deleteBom":  {},
+		"manufacturing.restoreBom": {},
 	}
 }

@@ -25,6 +25,9 @@ The full v1 changelog is preserved at the bottom of this file.
   legacy fallback, concurrent exact-draft retries share one actor and
   organization scoped intent, and responses require a valid purchase order
   number.
+- Vite Manufacturing BOM definition and deletion now use Go capabilities with
+  exact before-and-after component snapshots. Guarded inverses refuse stale
+  changes, and selected Go failures do not retry through the legacy route.
 - Vite team invitation links now preview and accept invitations through Go.
   Acceptance requires a verified signed-in account with the invited email,
   and updates membership, role, and invitation status atomically.

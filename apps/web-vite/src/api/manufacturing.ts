@@ -133,15 +133,58 @@ const BomReportSchema = z.object({
 const DefineBomSchema = z.object({
   action: z.literal("defineBom"),
   assemblySku: z.string().trim().min(1),
+  expectedComponents: z.array(z.object({
+    sku: z.string().trim().min(1),
+    quantityThousandths: z.number().int().positive().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()),
   components: z.array(z.object({
     sku: z.string().trim().min(1),
     quantityThousandths: z.number().int().positive().safe(),
     scrapPctThousandths: z.number().int().nonnegative().safe(),
-  }).strict()).min(1),
+  }).strict()),
 }).strict();
+const DefineBomOutputSchema = z.object({
+  assemblyItemId: z.string().min(1),
+  assemblySku: z.string().trim().min(1),
+  componentCount: z.number().int().nonnegative(),
+  previousComponents: z.array(z.object({
+    sku: z.string().min(1),
+    quantityThousandths: z.number().int().nonnegative().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()),
+  components: z.array(z.object({
+    sku: z.string().min(1),
+    quantityThousandths: z.number().int().nonnegative().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()),
+}).strict().refine((output) => output.componentCount === output.components.length, {
+  message: "BOM definition output must match its resulting component snapshot",
+});
+const DeleteBomOutputSchema = z.object({
+  assemblySku: z.string().trim().min(1),
+  removedCount: z.number().int().nonnegative(),
+  previousComponents: z.array(z.object({
+    sku: z.string(),
+    quantityThousandths: z.number().int().nonnegative().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()),
+  components: z.array(z.object({
+    sku: z.string(),
+    quantityThousandths: z.number().int().nonnegative().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()),
+}).strict().refine((output) => output.removedCount === output.previousComponents.length && output.components.length === 0, {
+  message: "BOM deletion output must carry its prior snapshot and an empty resulting state",
+});
 const DeleteBomSchema = z.object({
   action: z.literal("deleteBom"),
   assemblySku: z.string().trim().min(1),
+  expectedComponents: z.array(z.object({
+    sku: z.string().trim().min(1),
+    quantityThousandths: z.number().int().positive().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()).min(1),
 }).strict();
 const ProduceFromBomSchema = z.object({
   action: z.literal("produceFromBom"),
@@ -249,7 +292,17 @@ export function manufacturingActionRequest(
       url: "/api/capabilities/execute",
       body: {
         capabilityId: "manufacturing.defineBom",
-        input: { assemblySku: action.assemblySku, components: action.components },
+        input: { assemblySku: action.assemblySku, expectedComponents: action.expectedComponents, components: action.components },
+        intentId,
+      },
+    };
+  }
+  if (useGoDefineBom && action.action === "deleteBom") {
+    return {
+      url: "/api/capabilities/execute",
+      body: {
+        capabilityId: "manufacturing.deleteBom",
+        input: { assemblySku: action.assemblySku, expectedComponents: action.expectedComponents },
         intentId,
       },
     };
@@ -282,7 +335,7 @@ type ManufacturingRetryScope = { actorId: string | null; organizationId: string 
 type ManufacturingAttempt = { storageKey: string; fingerprint: string; intentId: string };
 const workOrderActions = new Set(["createWorkOrder", "releaseWorkOrder", "completeWorkOrder", "cancelWorkOrder"]);
 const productionActions = new Set(["produceFromBom", "reverseProductionRun"]);
-const exactGoWriteActions = new Set(["defineBom", ...workOrderActions, ...productionActions]);
+const exactGoWriteActions = new Set(["defineBom", "deleteBom", ...workOrderActions, ...productionActions]);
 const manufacturingAttemptPrefix = "chaste:manufacturing-work-order-attempt:";
 
 function parseManufacturingAttempt(value: string | null): { fingerprint: string; intentId: string } | null {
@@ -451,7 +504,7 @@ export async function submitManufacturingAction(
   const parsed = WriteActionSchema.safeParse(action);
   if (!parsed.success) throw new ManufacturingApiError(0, "Check the production details and try again.");
   const configuredForGo = typeof __GO_MANUFACTURING_DEFINE_BOM_SLICE__ !== "undefined" && __GO_MANUFACTURING_DEFINE_BOM_SLICE__;
-  const useGoDefineBom = (options.useGoDefineBom ?? configuredForGo) && parsed.data.action === "defineBom";
+  const useGoDefineBom = (options.useGoDefineBom ?? configuredForGo) && (parsed.data.action === "defineBom" || parsed.data.action === "deleteBom");
   const configuredWorkOrders = typeof __GO_MANUFACTURING_WORK_ORDER_WRITES__ !== "undefined" && __GO_MANUFACTURING_WORK_ORDER_WRITES__;
   const useGoWorkOrders = (options.useGoWorkOrders ?? configuredWorkOrders) && workOrderActions.has(parsed.data.action);
   const configuredProductionActions = typeof __GO_MANUFACTURING_PRODUCTION_WRITES__ !== "undefined" && __GO_MANUFACTURING_PRODUCTION_WRITES__;
@@ -492,6 +545,12 @@ export async function submitManufacturingAction(
   }
   if (goResponse && useGoProductionActions && !(ProductionOutputSchemas[parsed.data.action as keyof typeof ProductionOutputSchemas]?.safeParse(envelope.data.data).success ?? false)) {
     throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected production response.");
+  }
+  if (useGoDefineBom && parsed.data.action === "defineBom" && !DefineBomOutputSchema.safeParse(envelope.data.data).success) {
+    throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected BOM definition response.");
+  }
+  if (useGoDefineBom && parsed.data.action === "deleteBom" && !DeleteBomOutputSchema.safeParse(envelope.data.data).success) {
+    throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected BOM deletion response.");
   }
   if (attempt) clearManufacturingAttempt(attempt);
   return { kind: "completed" };

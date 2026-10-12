@@ -2,6 +2,29 @@ package main
 
 import "testing"
 
+func TestGoManufacturingBomWriteSelectorDisablesAllCapabilities(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		enabled bool
+		want    []string
+	}{
+		{name: "rollback", enabled: false, want: []string{"manufacturing.defineBom", "manufacturing.deleteBom", "manufacturing.restoreBom"}},
+		{name: "enabled", enabled: true, want: []string{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := goManufacturingBomWriteDisabledCapabilities(test.enabled)
+			if len(got) != len(test.want) {
+				t.Fatalf("disabled capability count=%d, want %d", len(got), len(test.want))
+			}
+			for _, capabilityID := range test.want {
+				if _, ok := got[capabilityID]; !ok {
+					t.Errorf("%s is not disabled", capabilityID)
+				}
+			}
+		})
+	}
+}
+
 func TestGoAuthRouteEnabledFromEnvMatchesViteProxyDefault(t *testing.T) {
 	for _, test := range []struct {
 		value string

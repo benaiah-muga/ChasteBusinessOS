@@ -3,6 +3,7 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -24,12 +25,15 @@ func seedManufacturingBomItem(t *testing.T, fx *executorFixture, orgID, sku, nam
 }
 
 func TestManufacturingBomParsersMirrorZodContracts(t *testing.T) {
-	defined, err := ParseManufacturingDefineBomInput(json.RawMessage(`{"assemblySku":"DESK","components":[{"sku":"LEG","quantityThousandths":4000},{"sku":"TOP","quantityThousandths":1000,"scrapPctThousandths":50000}]}`))
-	if err != nil || len(defined.Components) != 2 || defined.Components[0].ScrapPctThousandths != 0 || defined.Components[1].ScrapPctThousandths != 50000 {
+	defined, err := ParseManufacturingDefineBomInput(json.RawMessage(`{"assemblySku":"DESK","expectedComponents":[],"components":[{"sku":"LEG","quantityThousandths":4000},{"sku":"TOP","quantityThousandths":1000,"scrapPctThousandths":50000}]}`))
+	if err != nil || len(defined.ExpectedComponents) != 0 || len(defined.Components) != 2 || defined.Components[0].ScrapPctThousandths != 0 || defined.Components[1].ScrapPctThousandths != 50000 {
 		t.Fatalf("defineBom parse=%+v err=%v", defined, err)
 	}
 	if _, err := ParseManufacturingDefineBomInput(json.RawMessage(`{"assemblySku":"DESK","components":[]}`)); err == nil {
-		t.Fatal("empty components refused")
+		t.Fatal("defineBom parser accepted input without an expected current snapshot")
+	}
+	if empty, err := ParseManufacturingDefineBomInput(json.RawMessage(`{"assemblySku":"DESK","expectedComponents":[],"components":[]}`)); err != nil || len(empty.Components) != 0 {
+		t.Fatalf("defineBom parser refused an empty inverse target: input=%+v err=%v", empty, err)
 	}
 	tree, err := ParseManufacturingBomTreeInput(json.RawMessage(`{"assemblySku":"DESK"}`))
 	if err != nil || tree.QuantityThousandths != 1000 {
@@ -61,6 +65,48 @@ func TestManufacturingBomParsersMirrorZodContracts(t *testing.T) {
 	}
 	if _, err := parseManufacturingBomInput("manufacturing.unknown", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("dispatcher refused unknown id")
+	}
+}
+
+func TestManufacturingBomMutationsDeclareStateSwappingInverses(t *testing.T) {
+	defineSpec, exists := capabilitySpecs[manufacturingDefineBomCapabilityID]
+	if !exists || defineSpec.inverseCapabilityID != manufacturingRestoreBomCapabilityID || defineSpec.inverseInputSource != "output" ||
+		!reflect.DeepEqual(defineSpec.inverseFieldMappings, []inverseFieldMapping{
+			{outputField: "assemblySku", inputField: "assemblySku"},
+			{outputField: "components", inputField: "expectedComponents"},
+			{outputField: "previousComponents", inputField: "components"},
+		}) {
+		t.Fatalf("defineBom executor spec=%+v, want restoreBom inverse that swaps prior and resulting state", defineSpec)
+	}
+	spec, exists := capabilitySpecs[manufacturingDeleteBomCapabilityID]
+	if !exists || spec.inverseCapabilityID != manufacturingRestoreBomCapabilityID || spec.inverseInputSource != "output" ||
+		!reflect.DeepEqual(spec.inverseFieldMappings, defineSpec.inverseFieldMappings) {
+		t.Fatalf("deleteBom executor spec=%+v, want restoreBom inverse from the returned snapshot", spec)
+	}
+	restoreSpec, exists := capabilitySpecs[manufacturingRestoreBomCapabilityID]
+	if !exists || restoreSpec.inverseCapabilityID != manufacturingDefineBomCapabilityID || restoreSpec.inverseInputSource != "output" ||
+		!reflect.DeepEqual(restoreSpec.inverseFieldMappings, defineSpec.inverseFieldMappings) {
+		t.Fatalf("restoreBom executor spec=%+v, want defineBom inverse that swaps prior and resulting state", restoreSpec)
+	}
+	inversePayload, err := json.Marshal(struct {
+		AssemblySKU        string                           `json:"assemblySku"`
+		ExpectedComponents []ManufacturingBomComponentInput `json:"expectedComponents"`
+		Components         []ManufacturingBomComponentInput `json:"components"`
+	}{
+		AssemblySKU:        "DESK",
+		ExpectedComponents: []ManufacturingBomComponentInput{{SKU: "LEG", QuantityThousandths: 1000}},
+		Components:         []ManufacturingBomComponentInput{{SKU: "LEG", QuantityThousandths: 4000, ScrapPctThousandths: 20000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := ParseManufacturingRestoreBomInput(json.RawMessage(inversePayload))
+	if err != nil || input.AssemblySKU != "DESK" || len(input.ExpectedComponents) != 1 || input.ExpectedComponents[0].QuantityThousandths != 1000 || len(input.Components) != 1 || input.Components[0].QuantityThousandths != 4000 {
+		t.Fatalf("BOM state transition inverse %s is not accepted by restoreBom: input=%+v err=%v", inversePayload, input, err)
+	}
+	emptyTransition, err := ParseManufacturingRestoreBomInput(json.RawMessage(`{"assemblySku":"DESK","expectedComponents":[],"components":[]}`))
+	if err != nil || len(emptyTransition.ExpectedComponents) != 0 || len(emptyTransition.Components) != 0 {
+		t.Fatalf("restoreBom refused empty current/target snapshots: input=%+v err=%v", emptyTransition, err)
 	}
 }
 
@@ -102,7 +148,8 @@ func TestManufacturingBomLifecycleAndTree(t *testing.T) {
 
 	if _, err := dbx.WithOrgTx(fx.ctx, fx.owner, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
 		defined, err := manufacturingDefineBom(context.Background(), tx, claims, ManufacturingDefineBomInput{
-			AssemblySKU: "DESK",
+			AssemblySKU:        "DESK",
+			ExpectedComponents: []ManufacturingBomComponentInput{},
 			Components: []ManufacturingBomComponentInput{
 				{SKU: "LEG", QuantityThousandths: 4000},
 				{SKU: "TOP", QuantityThousandths: 1000},
@@ -115,14 +162,16 @@ func TestManufacturingBomLifecycleAndTree(t *testing.T) {
 			t.Fatalf("defineBom output=%+v, want two components on the assembly", defined)
 		}
 		if _, err := manufacturingDefineBom(context.Background(), tx, claims, ManufacturingDefineBomInput{
-			AssemblySKU: "DESK",
-			Components:  []ManufacturingBomComponentInput{{SKU: "DESK", QuantityThousandths: 1000}},
+			AssemblySKU:        "DESK",
+			ExpectedComponents: []ManufacturingBomComponentInput{{SKU: "LEG", QuantityThousandths: 4000}, {SKU: "TOP", QuantityThousandths: 1000}},
+			Components:         []ManufacturingBomComponentInput{{SKU: "DESK", QuantityThousandths: 1000}},
 		}); err == nil || err.Error() != "an assembly cannot contain itself" {
 			t.Fatalf("self containment err=%v, want refusal", err)
 		}
 		if _, err := manufacturingDefineBom(context.Background(), tx, claims, ManufacturingDefineBomInput{
-			AssemblySKU: "LEG",
-			Components:  []ManufacturingBomComponentInput{{SKU: "DESK", QuantityThousandths: 1000}},
+			AssemblySKU:        "LEG",
+			ExpectedComponents: []ManufacturingBomComponentInput{},
+			Components:         []ManufacturingBomComponentInput{{SKU: "DESK", QuantityThousandths: 1000}},
 		}); err == nil || !strings.HasPrefix(err.Error(), "rejected: ") {
 			t.Fatalf("cycle define err=%v, want rejected prefix", err)
 		}
