@@ -2709,14 +2709,18 @@ new owners and the manifest shows zero legacy runtime paths.
      target and intent across reloads and selector rollback, and set
      `CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER=0` for rollback of new
      actions.
-241. (Vite implementation complete; browser proof pending) Route confirmed
+241. (Complete) Route confirmed
      conversation deletion through the session-authenticated
      `messaging.deleteConversation` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Retain the exact request across
      reloads and selector rollback, clear it after the completed receipt
      before list refresh, and serialize deletion with sends and other
      lifecycle writes. Set `CHASTE_GO_MESSAGING_CONVERSATION_DELETE=0` for
-     rollback of new actions.
+     rollback of new actions. On 2026-10-12, authenticated Vite `/messages`
+     deleted the confirmed synthetic channel through Go; the capability
+     request returned HTTP 200 and the active conversation count returned to
+     zero. No legacy delete request occurred, and the browser error log was
+     empty. See proof 330.
 242. (Go/Vite implementation complete; browser proof pending) Route Vite
      Accounting invoice list reads through the session-authenticated
      `accounting.listInvoices` capability when
@@ -3649,3 +3653,11 @@ new owners and the manifest shows zero legacy runtime paths.
      leave request occurred, and the browser error log was empty. This proof
      covers the confirmed leave flow; retry and selector-rollback behavior were
      not exercised. This completes item 239.
+
+330. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` deleted
+     the confirmed synthetic channel `Go Delete Proof 20261012` through Go's
+     `messaging.deleteConversation` capability. The capability request
+     returned HTTP 200, and the active conversation count returned to zero.
+     No legacy delete request occurred, and the browser error log was empty.
+     This proof covers the confirmed delete flow; retry and selector-rollback
+     behavior were not exercised. This completes item 241.
