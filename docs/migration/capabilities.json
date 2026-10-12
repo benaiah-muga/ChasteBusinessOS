@@ -18960,6 +18960,90 @@
       }
     },
     {
+      "id": "messaging.searchMessages",
+      "title": "Search conversation messages",
+      "intent": "Find recent messages containing a phrase in conversations the current user belongs to, so they can open the relevant discussion",
+      "module": "messaging",
+      "risk": "read",
+      "permission": "messaging.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "conversationId": {
+                  "type": "string"
+                },
+                "conversationTitle": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                },
+                "senderType": {
+                  "type": "string"
+                },
+                "senderUserId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "conversationId",
+                "conversationTitle",
+                "body",
+                "createdAt",
+                "senderType",
+                "senderUserId"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "messaging.sendMessage",
       "title": "Send internal message",
       "intent": "Post a message into an internal team conversation (channel or DM), optionally @mentioning colleagues or the agent so they are notified. Use to keep colleagues informed or answer them in threads",
