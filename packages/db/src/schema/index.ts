@@ -3162,7 +3162,7 @@ export const marketingSegments = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     /** Deterministic filter: min lifetime spend in minor units. */
-    minSpendMinor: integer("min_spend_minor").notNull().default(0),
+    minSpendMinor: bigint("min_spend_minor", { mode: "number" }).notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [index("marketing_segment_org_idx").on(t.orgId)],

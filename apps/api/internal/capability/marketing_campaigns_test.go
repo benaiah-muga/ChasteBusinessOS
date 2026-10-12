@@ -26,6 +26,10 @@ func TestMarketingCampaignsParsersMirrorZodContracts(t *testing.T) {
 	if _, err := ParseMarketingCreateSegmentInput(json.RawMessage(`{"name":"Debtors","minSpendMinor":-1}`)); err == nil {
 		t.Fatal("negative minSpendMinor refused")
 	}
+	largeSegment, err := ParseMarketingCreateSegmentInput(json.RawMessage(`{"name":"High value","minSpendMinor":999999999999}`))
+	if err != nil || largeSegment.MinSpendMinor != 999999999999 {
+		t.Fatalf("large segment threshold parse=%+v err=%v", largeSegment, err)
+	}
 	campaign, err := ParseMarketingCreateCampaignInput(json.RawMessage(`{"segmentId":"8c1e6f4a-2b3d-4e5f-8a9b-0c1d2e3f4a5b","name":"Launch","subject":"Hello","body":"Body"}`))
 	if err != nil || campaign.Subject != "Hello" {
 		t.Fatalf("campaign parse=%+v err=%v", campaign, err)

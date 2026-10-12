@@ -13,6 +13,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Marketing segment lifetime spend thresholds now use PostgreSQL `bigint`, so
+  valid minor-unit amounts above the old 32-bit limit persist without a 500.
+
 - Vite HR Expenses now loads its employee and workspace report through Go's
   authenticated `hr.report` capability whenever Go expense reads and writes are
   enabled. The expense page no longer needs the legacy `/api/hr` route before

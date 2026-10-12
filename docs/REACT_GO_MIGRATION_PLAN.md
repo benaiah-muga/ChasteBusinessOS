@@ -2379,7 +2379,7 @@ new owners and the manifest shows zero legacy runtime paths.
      undid the import, restored it, then reloaded and confirmed the product and
      active recovery receipt remained. Go capability requests returned HTTP
      200; no legacy `/api/import` requests or browser errors occurred.
-211. (Implemented; default-on in `.env.example`) Route Vite Marketing campaign analytics through the
+211. (Done; default-on in `.env.example`) Route Vite Marketing campaign analytics through the
      session-authenticated `marketing.campaignAnalytics` capability when
      `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the campaign selector to `0`
@@ -2388,8 +2388,14 @@ new owners and the manifest shows zero legacy runtime paths.
      Go route rather than retrying through `/api/marketing`. Preserve campaign
      actor/org scoped intent receipts across pending approvals, 404s, malformed
      responses, and uncertain send results. Keep the Marketing snapshot read
-     separate on its existing path. Add focused Vite contract and retry tests;
-     browser proof remains open.
+     separate on its existing path. Focused Vite contract/retry and Go parser
+     tests pass. Browser proof created a segment with a 999,999,999,999 UGX
+     threshold, drafted and queued a campaign for its empty audience, and read
+     analytics through Go after reload. This exposed `min_spend_minor` as an
+     `int4` despite accepting safe integer inputs; it now uses PostgreSQL
+     `bigint`, and the threshold persisted. All final capability requests
+     returned HTTP 200; the empty audience queued no recipient email, and the
+     browser had no errors.
 212. (Done) Route Vite CRM saved-view create, pin, and share writes
      through `crm.saveCustomerView` behind paired
      `CHASTE_GO_CRM_VIEW_WRITES=1` and
