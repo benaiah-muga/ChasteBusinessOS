@@ -2582,11 +2582,17 @@ new owners and the manifest shows zero legacy runtime paths.
      Proof 320 confirmed that the selected thread loaded through Go after send
      and after a full page reload, and rendered the message without browser
      errors.
-228. (Go/Vite implementation complete; browser proof pending) Serve Vite
+228. (Complete) Serve Vite
      Messaging attachment downloads directly from Go while preserving the
      existing href. Go checks verified session, `messaging.read`, same-org
      conversation, membership, visible-message state, and pending uploader
-     ownership before streaming the file with private, no-store headers.
+     ownership before streaming the file with private, no-store headers. On
+     2026-10-12, authenticated Vite `/messages` downloaded the synthetic
+     attachment from `/api/message-attachments/{id}` through the Go route with
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`,
+     `CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD=1`, and
+     `GO_MESSAGE_ATTACHMENT_DOWNLOAD_ROUTE=1`. The downloaded bytes matched
+     the uploaded fixture, and the browser error log was empty. See proof 324.
 229. (Go/Vite implementation complete; browser proof pending) Route Vite older
      thread pages through `messaging.readMessages` using a visible message ID
      scoped to the same organization and conversation. Use stable keyset
@@ -3575,3 +3581,12 @@ new owners and the manifest shows zero legacy runtime paths.
      `messaging.sendMessage` requests both returned HTTP 200. The file appeared
      in the refreshed synthetic thread, and the browser error log was empty.
      This completes item 235.
+
+324. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` opened
+     the Go-backed `/api/message-attachments/{id}` link for the synthetic
+     70-byte text attachment. `agent-browser` saved the download successfully,
+     and its SHA-256 matched the local upload fixture. The selectors
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`,
+     `CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD=1`, and
+     `GO_MESSAGE_ATTACHMENT_DOWNLOAD_ROUTE=1` were enabled. The browser error
+     log was empty. This completes item 228.
