@@ -2408,15 +2408,17 @@ new owners and the manifest shows zero legacy runtime paths.
      created, pinned, and shared a customer view through the Go capability
      executor with HTTP 200 for each mutation. Reload preserved the starred,
      shared view, Go CRM reads returned HTTP 200, and browser errors were empty.
-213. (Implemented) Route the Vite Purchasing A/P aging report through Go's
+213. (Done) Route the Vite Purchasing A/P aging report through Go's
      session-authenticated `purchasing.apAging` capability behind paired
      `CHASTE_GO_PURCHASING_AP_AGING_READS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors and server-side
      `GO_PURCHASING_AP_AGING_READS=1` gate. Validate the capability envelope
      and strict bucket output, use the workspace currency because Go does not
      return currency, and fail closed without retrying the legacy
-     `/api/purchasing` read. Focused Vite and Go route tests pass; browser proof
-     remains open.
+     `/api/purchasing` read. Focused Vite and Go route tests pass. The
+     authenticated browser loaded the UGX aging buckets and zero outstanding
+     total through Go; the capability returned HTTP 200, no legacy purchasing
+     read request occurred, and browser errors were empty.
 214. (Implemented; default-on) Route Vite analytics discovery, previews, and
      report generation through the existing Go Analytics session handler.
      Exact GET and POST method selectors default to Go and can be set to `0`
