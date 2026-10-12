@@ -2197,7 +2197,7 @@ new owners and the manifest shows zero legacy runtime paths.
      applicant, and stage remained visible after reload. All selected Go
      capability requests returned HTTP 200; no legacy HR write or browser
      error occurred.
-201. (Vite/Go implementation complete; browser proof pending) Route only Vite
+201. (Done) Route only Vite
      period-close readiness reads through Go's session-authenticated
      `accounting.periodCloseWorkbench` capability behind paired
      `CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS=1` and
@@ -2208,7 +2208,9 @@ new owners and the manifest shows zero legacy runtime paths.
      route. Add focused Vite API, page, proxy selector, and Go contract checks.
      API tests (5), page tests (7), proxy tests (152), typecheck, lint, and Go
      period-close parser/workbench tests pass. Authenticated browser proof
-     remains open.
+     loaded September 2026 readiness from Go: four blocking checks and two
+     complete checks persisted on reload. The capability request returned
+     HTTP 200, with no browser errors or legacy accounting-read request.
 202. (Vite/Go implementation complete; browser proof pending) Route the existing Vite supplier statement read through the
      session-authenticated `purchasing.supplierStatement` capability behind
      paired `CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS=1` and
