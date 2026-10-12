@@ -2139,7 +2139,7 @@ new owners and the manifest shows zero legacy runtime paths.
      showed 1h 30m approved and zero pending after reload. All three write/read
      capability responses returned HTTP 200; no legacy HR POST or browser
      error occurred.
-198. (Vite/Go implementation complete; browser proof pending) Route Vite
+198. (Vite/Go implementation and authenticated browser proof complete) Route Vite
      supplier payment run reads and lifecycle actions through Go's
      `purchasing.listPaymentRuns`, `purchasing.listPaymentRunBills`,
      `purchasing.createPaymentRun`, `purchasing.cancelPaymentRunDraft`,
@@ -2155,7 +2155,11 @@ new owners and the manifest shows zero legacy runtime paths.
      coverage. Atomic browser-wide reservations prevent cross-tab intent
      races, stale responses cannot clear a newer action, and browsers without
      Web Locks fail closed. Vite API/page/proxy tests, typecheck, lint, and Go
-     payment run contract tests pass. Authenticated browser proof remains open.
+     payment run contract tests pass. Authenticated Vite browser proof created
+     PR-000001 for a synthetic UGX 250 bill, cancelled and restored its draft,
+     instructed it through Go, then reversed the unconfirmed run. Every write
+     returned HTTP 200; the reversed status and restored bill balance persisted
+     after reload. No legacy payment-run POST or browser error occurred.
 199. (Vite/Go implementation complete; browser proof pending) Route only the
      Vite Payroll tab's run report and draft creation through
      Go's `hr.report` and `hr.createPayrollRun` capabilities behind paired
