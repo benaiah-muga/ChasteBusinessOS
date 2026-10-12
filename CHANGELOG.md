@@ -20,6 +20,8 @@ The full v1 changelog is preserved at the bottom of this file.
   integer limits and returns a client error when the selected customer is
   outside the active workspace. The Sales page no longer links to the legacy
   workspace.
+- Vite HR reports, employee actions, time data, and expenses now use Go
+  capabilities without legacy HR or time API fallbacks.
 - Vite Settings now links team, agent sessions, and creator proposals to their
   same-origin Vite routes instead of the legacy application.
 - Vite Documents now creates editable drafts, saves templates, and ingests

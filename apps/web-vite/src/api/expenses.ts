@@ -100,8 +100,8 @@ async function executeRead<T>(capabilityId: string, input: Record<string, never>
   return parsed.data.data;
 }
 
-export async function fetchExpenses(signal?: AbortSignal): Promise<{ claims: ExpenseClaim[]; policies: ExpensePolicy[] }> {
-  if (goExpensesUseGo()) {
+export async function fetchExpenses(signal?: AbortSignal, useGoOverride?: boolean): Promise<{ claims: ExpenseClaim[]; policies: ExpensePolicy[] }> {
+  if (useGoOverride ?? goExpensesUseGo()) {
     const [claims, policies] = await Promise.all([
       executeRead("accounting.listExpenseClaims", {}, ListClaimsSchema, signal),
       executeRead("accounting.listExpensePolicies", {}, ListPoliciesSchema, signal),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
 import type { HrApiError } from "./hr";
 
 const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
@@ -83,7 +83,7 @@ describe("Vite People API", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks legacy rollback after a pending or uncertain Go employee hire", async () => {
+  it("keeps a pending employee hire on Go even when the old selector is disabled", async () => {
     stubHrWriteLocks();
     vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
     const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
@@ -93,8 +93,8 @@ describe("Vite People API", () => {
 
     await expect(submitHrEmployeeHireAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
     vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", false);
-    await expect(submitHrEmployeeHireAction(action, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(submitHrEmployeeHireAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     await expect(readPendingHrEmployeeHireAction(scope)).resolves.toEqual(action);
   });
 
@@ -112,8 +112,6 @@ describe("Vite People API", () => {
     await expect(readPendingHrEmployeeHireAction(scope)).resolves.toEqual(action);
     await expect(submitHrEmployeeHireAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
     await expect(readPendingHrEmployeeHireAction(scope)).resolves.toEqual(action);
-    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", false);
-    await expect(submitHrEmployeeHireAction(action, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
   });
@@ -193,74 +191,22 @@ describe("Vite People API", () => {
   it("validates the module switchboard and employee report responses", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => input === "/api/modules"
       ? Response.json(switchboard)
-      : Response.json(report));
+      : Response.json({ ok: true, data: report }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchHrEnabled()).resolves.toBe(true);
     await expect(fetchHrReport()).resolves.toEqual(report);
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/modules", expect.objectContaining({ credentials: "same-origin", cache: "no-store" }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/hr", expect.objectContaining({ credentials: "same-origin", cache: "no-store" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store" }));
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
   });
 
   it("rejects malformed HR data instead of rendering partial records", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...report, employees: [{ id: "incomplete" }] })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { ...report, employees: [{ id: "incomplete" }] } })));
     await expect(fetchHrReport()).rejects.toMatchObject({
       name: "HrApiError",
-      message: "The People service returned data in an unexpected format.",
+      message: "The Go People service returned data in an unexpected format.",
     });
-  });
-
-  it("submits governed actions with a unique intent id and retains approval status", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      expect(body.intentId).toEqual(expect.any(String));
-      expect(body.action).toBe("hireEmployee");
-      return new Response(JSON.stringify({ ok: false, pendingApproval: true, reason: "Approval required" }), { status: 202 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(submitHrAction({ action: "hireEmployee", name: "Amina", monthlySalaryMinor: 100_000 })).resolves.toEqual({
-      kind: "pending",
-      data: { reason: "Approval required" },
-    });
-    expect(fetchMock).toHaveBeenCalledWith("/api/hr", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
-  });
-
-  it("reuses the intent id when retrying a write after a network timeout", async () => {
-    const intentIds: string[] = [];
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      intentIds.push(String(body.intentId));
-      if (intentIds.length === 1) throw new Error("connection reset");
-      return Response.json({ ok: true, data: { employeeId: "employee-1" } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const action = { action: "hireEmployee" as const, name: "Amina", monthlySalaryMinor: 100_000 };
-
-    await expect(submitHrAction(action)).rejects.toMatchObject({ status: 0 });
-    await expect(submitHrAction(action)).resolves.toMatchObject({ kind: "success" });
-
-    expect(intentIds).toHaveLength(2);
-    expect(intentIds[1]).toBe(intentIds[0]);
-  });
-
-  it("keeps the intent id after an unreadable success response", async () => {
-    const intentIds: string[] = [];
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      intentIds.push(String(body.intentId));
-      return intentIds.length === 1
-        ? Response.json({ unexpected: true })
-        : Response.json({ ok: true, data: { employeeId: "employee-1" } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const action = { action: "hireEmployee" as const, name: "Mira", monthlySalaryMinor: 125_000 };
-
-    await expect(submitHrAction(action)).rejects.toMatchObject({ status: 200 });
-    await expect(submitHrAction(action)).resolves.toMatchObject({ kind: "success" });
-
-    expect(intentIds).toHaveLength(2);
-    expect(intentIds[1]).toBe(intentIds[0]);
   });
 
   it("surfaces permission failures as actionable API errors", async () => {
@@ -303,9 +249,6 @@ describe("Vite People API", () => {
     await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
     await expect(submitHrPayrollAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(action);
-    vi.stubGlobal("__GO_HR_PAYROLL__", false);
-    await expect(submitHrPayrollAction(action, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    vi.stubGlobal("__GO_HR_PAYROLL__", true);
     await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
 
     expect(intentIds).toHaveLength(3);
@@ -381,7 +324,7 @@ describe("Vite People API", () => {
     expect(window.localStorage.length).toBe(0);
   });
 
-  it("keeps an exact Hiring action after pending approval and Go 404, with no selector-off fallback", async () => {
+  it("keeps an exact Hiring action on Go after pending approval and Go 404", async () => {
     vi.stubGlobal("__GO_HR_HIRING__", true);
     stubHrWriteLocks();
     const action = { action: "createOpening" as const, title: "Field Technician" };
@@ -400,9 +343,6 @@ describe("Vite People API", () => {
     await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
     await expect(submitHrHiringAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     await expect(readPendingHrHiringAction(scope)).resolves.toEqual(action);
-    vi.stubGlobal("__GO_HR_HIRING__", false);
-    await expect(submitHrHiringAction(action, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    vi.stubGlobal("__GO_HR_HIRING__", true);
     await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
 
     expect(intentIds).toHaveLength(3);
@@ -522,12 +462,13 @@ describe("Vite People API", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitHrLeaveAction(action, scope, undefined, true)).resolves.toMatchObject({ kind: "pending" });
-    await expect(submitHrLeaveAction(action, scope, undefined, true)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(submitHrLeaveAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitHrLeaveAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     await expect(readPendingHrLeaveAction(scope)).resolves.toEqual(action);
-    await expect(submitHrLeaveAction(action, scope, undefined, false)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(intents).toHaveLength(2);
+    await expect(submitHrLeaveAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(intents).toHaveLength(3);
     expect(intents[1]).toBe(intents[0]);
+    expect(intents[2]).toBe(intents[0]);
     expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
   });
 
@@ -550,9 +491,9 @@ describe("Vite People API", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitHrLeaveAction(action, scope, undefined, true)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(submitHrLeaveAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
     await expect(readPendingHrLeaveAction(scope)).resolves.toEqual(action);
-    await expect(submitHrLeaveAction(action, scope, undefined, true)).resolves.toMatchObject({ kind: "success", data: { requestId: "44444444-4444-4444-8444-444444444444", calendarDays: 3 } });
+    await expect(submitHrLeaveAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { requestId: "44444444-4444-4444-8444-444444444444", calendarDays: 3 } });
     expect(intents).toHaveLength(2);
     expect(intents[1]).toBe(intents[0]);
     await expect(readPendingHrLeaveAction(scope)).resolves.toBeNull();
@@ -567,8 +508,8 @@ describe("Vite People API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
 
-    await expect(submitHrLeaveAction({ action: "decideLeave", requestId: "44444444-4444-4444-8444-444444444444", approve: true }, scope, undefined, true)).resolves.toMatchObject({ kind: "success", data: { status: "approved" } });
-    await expect(submitHrLeaveAction({ action: "cancelLeave", requestId: "55555555-5555-4555-8555-555555555555" }, scope, undefined, true)).resolves.toMatchObject({ kind: "success", data: { cancelled: true } });
+    await expect(submitHrLeaveAction({ action: "decideLeave", requestId: "44444444-4444-4444-8444-444444444444", approve: true }, scope)).resolves.toMatchObject({ kind: "success", data: { status: "approved" } });
+    await expect(submitHrLeaveAction({ action: "cancelLeave", requestId: "55555555-5555-4555-8555-555555555555" }, scope)).resolves.toMatchObject({ kind: "success", data: { cancelled: true } });
     expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
       expect.objectContaining({ capabilityId: "hr.decideLeave", input: { requestId: "44444444-4444-4444-8444-444444444444", approve: true } }),
       expect.objectContaining({ capabilityId: "hr.cancelLeave", input: { requestId: "55555555-5555-4555-8555-555555555555" } }),

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrEmployeeWritesUseGo, goHrHiringUseGo, goHrLeaveUseGo, goHrPayrollUseGo, HrApiError, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeHireAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
-import { legacyUrl } from "../legacy";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrTime, HrApiError, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeHireAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
 import "./hr-page.css";
 
 type TabId = "overview" | "people" | "hiring" | "leave" | "time" | "payroll" | "expenses";
@@ -45,21 +44,13 @@ function formatMinutes(minutes: number): string {
   return remainder === 0 ? `${hours}h` : hours === 0 ? `${remainder}m` : `${hours}h ${remainder}m`;
 }
 
-function goHrReportForTab(tab: TabId): boolean {
-  const goExpenses = typeof __GO_HR_EXPENSES__ !== "undefined" && __GO_HR_EXPENSES__;
-  return tab === "overview" || tab === "people" || tab === "time" || (tab === "expenses" && goExpenses) || (tab === "leave" && goHrLeaveUseGo()) || (tab === "payroll" && goHrPayrollUseGo()) || (tab === "hiring" && goHrHiringUseGo());
-}
-
 export function HrPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [tab, setTab] = useState<TabId>(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
     return tabs.find((item) => item.id === requested)?.id ?? "overview";
   });
-  const reportUsesGo = useRef(goHrReportForTab(tab));
   const reportLoaded = useRef(false);
-  const currentTab = useRef(tab);
-  currentTab.current = tab;
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [leaveRecoveryAction, setLeaveRecoveryAction] = useState<HrLeaveAction | null>(null);
@@ -81,7 +72,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   });
   const currency = baseCurrency;
 
-  const load = useCallback(async (signal?: AbortSignal, useGoReportOverride?: boolean): Promise<boolean> => {
+  const load = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     if (!signal && !reportLoaded.current) setState({ status: "loading" });
     try {
       const enabled = await fetchHrEnabled(signal);
@@ -90,7 +81,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         setState({ status: "disabled" });
         return false;
       }
-      const report = (useGoReportOverride ?? reportUsesGo.current) ? await fetchGoHrReport(signal) : await fetchHrReport(signal);
+      const report = await fetchGoHrReport(signal);
       if (!signal?.aborted) {
         reportLoaded.current = true;
         setState({ status: "ready", report });
@@ -118,20 +109,11 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
 
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal, reportUsesGo.current).then((enabled) => {
-      if (enabled && currentTab.current !== "leave") void refreshTime(range.from, range.to, controller.signal);
+    void load(controller.signal).then((enabled) => {
+      if (enabled) void refreshTime(range.from, range.to, controller.signal);
     });
     return () => controller.abort();
   }, [load, range.from, range.to, refreshTime]);
-
-  useEffect(() => {
-    const useGoReport = goHrReportForTab(tab);
-    if (reportUsesGo.current === useGoReport) return;
-    reportUsesGo.current = useGoReport;
-    void load(undefined, useGoReport).then((enabled) => {
-      if (enabled && tab !== "leave") void refreshTime(range.from, range.to);
-    });
-  }, [tab, load, range.from, range.to, refreshTime]);
 
   useEffect(() => {
     if (tab !== "payroll") {
@@ -182,7 +164,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   }, [tab, actorId, organizationId]);
 
   useEffect(() => {
-    if (tab !== "leave" || !goHrLeaveUseGo()) {
+    if (tab !== "leave") {
       setLeaveRecoveryAction(null);
       return;
     }
@@ -223,7 +205,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   }
 
   async function refreshAll(): Promise<void> {
-    if (await load(undefined, reportUsesGo.current) && tab !== "leave") await refreshTime(range.from, range.to);
+    if (await load()) await refreshTime(range.from, range.to);
   }
 
   async function runLeaveAction(action: HrLeaveAction, label: string, after: () => void = () => undefined): Promise<void> {
@@ -242,10 +224,8 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         await refreshAll();
       }
     } catch (error) {
-      if (goHrLeaveUseGo()) {
-        try { setLeaveRecoveryAction(await readPendingHrLeaveAction({ actorId, organizationId })); }
-        catch { setLeaveRecoveryAction(action); }
-      }
+      try { setLeaveRecoveryAction(await readPendingHrLeaveAction({ actorId, organizationId })); }
+      catch { setLeaveRecoveryAction(action); }
       setNotice({ tone: "error", text: error instanceof Error ? error.message : `${label} failed.` });
     } finally {
       setBusy(false);
@@ -259,12 +239,8 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     try {
       const result = await submitHrEmployeeHireAction(action, { actorId, organizationId });
       if (result.kind === "pending") {
-        if (goHrEmployeeWritesUseGo()) {
-          setEmployeeHireRecoveryAction(action);
-          setNotice({ tone: "pending", text: "Employee hire is waiting for approval or result recovery. Retry the exact details when ready." });
-        } else {
-          setNotice({ tone: "pending", text: "Employee hire needs human approval. Check the Approvals inbox." });
-        }
+        setEmployeeHireRecoveryAction(action);
+        setNotice({ tone: "pending", text: "Employee hire is waiting for approval or result recovery. Retry the exact details when ready." });
       } else {
         setEmployeeHireRecoveryAction(null);
         setHire({ name: "", email: "", title: "", salary: "" });
@@ -335,7 +311,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     if (tab !== "payroll") return null;
     return <>
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-      {payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrPayrollUseGo()} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll draft</button>{!goHrPayrollUseGo() && <small>Re-enable the Go Payroll selector to retry this draft.</small>}</div>}
+      {payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll draft</button></div>}
     </>;
   }
 
@@ -343,7 +319,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     if (tab !== "hiring") return null;
     return <>
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-      {hiringRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrHiringUseGo()} onClick={() => void runHiringAction(hiringRecoveryAction, "Hiring action", true)}>Retry exact Hiring action</button>{!goHrHiringUseGo() && <small>Re-enable the Go Hiring selector to retry this action.</small>}</div>}
+      {hiringRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runHiringAction(hiringRecoveryAction, "Hiring action", true)}>Retry exact Hiring action</button></div>}
     </>;
   }
 
@@ -351,7 +327,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     if (tab !== "people") return null;
     return <>
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-      {employeeHireRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrEmployeeWritesUseGo()} onClick={() => void runEmployeeHireAction(employeeHireRecoveryAction, true)}>Retry exact employee hire</button>{!goHrEmployeeWritesUseGo() && <small>Re-enable the Go employee write selector to retry this hire.</small>}</div>}
+      {employeeHireRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeHireAction(employeeHireRecoveryAction, true)}>Retry exact employee hire</button></div>}
     </>;
   }
 
@@ -412,7 +388,6 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
           <h1>People</h1>
           <p>Keep employee records, leave, time, hiring, and payroll work moving in one place.</p>
         </div>
-        <a className="hr-full-workspace" href={legacyUrl("/hr")}>Open full HR workspace <span aria-hidden="true">↗</span></a>
       </header>
 
       <nav className="hr-tabs" aria-label="People workspace sections" role="tablist">
@@ -446,9 +421,9 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
 
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
       {tab === "leave" && leaveRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runLeaveAction(leaveRecoveryAction, "Leave action")}>Retry exact leave action</button></div>}
-      {tab === "hiring" && hiringRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrHiringUseGo()} onClick={() => void runHiringAction(hiringRecoveryAction, "Hiring action", true)}>Retry exact Hiring action</button>{!goHrHiringUseGo() && <small>Re-enable the Go Hiring selector to retry this action.</small>}</div>}
-      {tab === "people" && employeeHireRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrEmployeeWritesUseGo()} onClick={() => void runEmployeeHireAction(employeeHireRecoveryAction, true)}>Retry exact employee hire</button>{!goHrEmployeeWritesUseGo() && <small>Re-enable the Go employee write selector to retry this hire.</small>}</div>}
-      {tab === "payroll" && payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrPayrollUseGo()} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll draft</button>{!goHrPayrollUseGo() && <small>Re-enable the Go Payroll selector to retry this draft.</small>}</div>}
+      {tab === "hiring" && hiringRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runHiringAction(hiringRecoveryAction, "Hiring action", true)}>Retry exact Hiring action</button></div>}
+      {tab === "people" && employeeHireRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeHireAction(employeeHireRecoveryAction, true)}>Retry exact employee hire</button></div>}
+      {tab === "payroll" && payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll draft</button></div>}
       {timeRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void submitTimeAction(timeRecoveryAction, "Time action", undefined, true)}>Retry exact time action</button></div>}
       <section id="hr-tab-panel" className="hr-content" role="tabpanel" aria-labelledby={`hr-tab-${tab}`}>
         {tab === "overview" && <Overview report={data} timeRows={timeRows} currency={currency} onTabChange={changeTab} />}
@@ -499,7 +474,7 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
 
   const loadClaims = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     try {
-      const data = await fetchExpenses(signal);
+      const data = await fetchExpenses(signal, true);
       if (signal?.aborted) return false;
       setClaims(data.claims);
       setPolicies(data.policies);
@@ -535,7 +510,7 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitExpenseAction(action, undefined, retryScope);
+      const result = await submitExpenseAction(action, undefined, retryScope, true);
       if (result.kind === "pending") {
         setRecoveryAction(action);
         setNotice({ tone: "pending", text: `${label} is above the payment threshold and is in the Approvals inbox. ${result.reason}` });
@@ -596,7 +571,7 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
   const displayCurrency = currency ?? "USD";
 
   return <div className="hr-content hr-expenses">
-    {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}{notice.tone === "pending" && <> <a href={legacyUrl("/approvals")}>Open approvals</a></>}{recoveryAction && <button type="button" disabled={busy} onClick={() => void post(recoveryAction, "Expense action", true)}>Retry exact expense action</button>}</p>}
+    {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}{notice.tone === "pending" && <> <a href="/approvals">Open approvals</a></>}{recoveryAction && <button type="button" disabled={busy} onClick={() => void post(recoveryAction, "Expense action", true)}>Retry exact expense action</button>}</p>}
     <section className="hr-card">
       <div className="hr-section-heading"><div><p className="hr-eyebrow">Reimbursement</p><h2>Submit an expense claim</h2></div></div>
       <form className="hr-expense-form" onSubmit={(event) => void submitClaim(event)}>

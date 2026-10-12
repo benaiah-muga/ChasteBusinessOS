@@ -124,7 +124,6 @@ export class HrApiError extends Error {
   }
 }
 
-const retryIntentIds = new Map<string, string>();
 const GO_HR_LEAVE_ATTEMPT_PREFIX = "chaste:hr:leave:go:attempt:v1:";
 const GO_HR_TIME_ATTEMPT_PREFIX = "chaste:hr:time:go:attempt:v1:";
 const GO_HR_PAYROLL_ATTEMPT_PREFIX = "chaste:hr:payroll:go:attempt:v1:";
@@ -184,22 +183,6 @@ const GoPendingEntriesSchema = z.object({
   }).strict()),
 }).strict();
 
-export function goHrLeaveUseGo(): boolean {
-  return typeof __GO_HR_LEAVE__ !== "undefined" && __GO_HR_LEAVE__;
-}
-
-export function goHrPayrollUseGo(): boolean {
-  return typeof __GO_HR_PAYROLL__ !== "undefined" && __GO_HR_PAYROLL__;
-}
-
-export function goHrHiringUseGo(): boolean {
-  return typeof __GO_HR_HIRING__ !== "undefined" && __GO_HR_HIRING__;
-}
-
-export function goHrEmployeeWritesUseGo(): boolean {
-  return typeof __GO_HR_EMPLOYEE_WRITES__ !== "undefined" && __GO_HR_EMPLOYEE_WRITES__;
-}
-
 export async function fetchHrEnabled(signal?: AbortSignal): Promise<boolean> {
   const response = await request("/api/modules", { method: "GET" }, signal);
   if (!response.ok) throw new HrApiError(response.status, "Could not check whether the People module is enabled.");
@@ -213,11 +196,7 @@ export async function fetchHrEnabled(signal?: AbortSignal): Promise<boolean> {
 }
 
 export async function fetchHrReport(signal?: AbortSignal): Promise<HrReport> {
-  const response = await request("/api/hr", { method: "GET" }, signal);
-  if (!response.ok) throw await apiError(response, "people records");
-  const parsed = HrReportSchema.safeParse(await readJson(response));
-  if (!parsed.success) throw new HrApiError(response.status, "The People service returned data in an unexpected format.");
-  return parsed.data;
+  return fetchGoHrReport(signal);
 }
 
 export async function fetchGoHrReport(signal?: AbortSignal): Promise<HrReport> {
@@ -244,16 +223,7 @@ export async function submitHrLeaveAction(
   action: HrLeaveAction,
   scope: HrRetryScope,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
 ): Promise<HrActionResult> {
-  const useGo = useGoOverride ?? goHrLeaveUseGo();
-  if (!useGo) {
-    if (await readPendingHrLeaveAction(scope)) {
-      throw new HrApiError(0, "A Go leave action is unresolved. Restore the Go leave route and retry that exact action before using the legacy route.", true);
-    }
-    return submitHrAction(action);
-  }
-
   const scoped = await hrLeaveScope(scope);
   const attempt = await goHrLeaveAttempt(action, scoped.scopeHash);
   const { capabilityId, input } = goHrLeaveCapabilityInput(action);
@@ -300,16 +270,7 @@ export async function submitHrPayrollAction(
   action: HrPayrollAction,
   scope: HrRetryScope,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
 ): Promise<HrActionResult> {
-  const useGo = useGoOverride ?? goHrPayrollUseGo();
-  if (!useGo) {
-    if (await readPendingHrPayrollAction(scope)) {
-      throw new HrApiError(0, "A Go payroll draft is unresolved. Restore the Go Payroll route and retry the exact action before using the legacy route.", true);
-    }
-    return submitHrAction(action);
-  }
-
   const scoped = await hrPayrollScope(scope);
   const attempt = await goHrPayrollAttempt(action, scoped.scopeHash);
   try {
@@ -355,16 +316,7 @@ export async function submitHrHiringAction(
   action: HrHiringAction,
   scope: HrRetryScope,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
 ): Promise<HrActionResult> {
-  const useGo = useGoOverride ?? goHrHiringUseGo();
-  if (!useGo) {
-    if (await readPendingHrHiringAction(scope)) {
-      throw new HrApiError(0, "A Go Hiring action is unresolved. Restore the Go Hiring route and retry its exact details before using the legacy route.", true);
-    }
-    return submitHrAction(action);
-  }
-
   const parsedAction = GoHrHiringActionSchema.safeParse(action);
   if (!parsedAction.success) throw new HrApiError(400, "The Hiring action does not match the Go service contract.");
   const scoped = await hrHiringScope(scope);
@@ -413,16 +365,7 @@ export async function submitHrEmployeeHireAction(
   action: HrEmployeeHireAction,
   scope: HrRetryScope,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
 ): Promise<HrActionResult> {
-  const useGo = useGoOverride ?? goHrEmployeeWritesUseGo();
-  if (!useGo) {
-    if (await readPendingHrEmployeeHireAction(scope)) {
-      throw new HrApiError(0, "A Go employee hire is unresolved. Restore the Go employee route and retry its exact details before using the legacy route.", true);
-    }
-    return submitHrAction(action);
-  }
-
   const parsedAction = GoHrEmployeeHireActionSchema.safeParse(action);
   if (!parsedAction.success) throw new HrApiError(400, "The employee hire does not match the Go service contract.");
   const scoped = await hrEmployeeScope(scope);
@@ -829,24 +772,6 @@ export async function fetchHrPendingEntries(signal?: AbortSignal): Promise<HrPen
   return parsed.data.entries;
 }
 
-export async function submitHrAction(action: HrAction): Promise<HrActionResult> {
-  const result = await submit("/api/hr", action);
-  const pending = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(result.body);
-  if (pending.success || result.response.status === 202) {
-    if (!pending.success) throw new HrApiError(result.response.status, "The action needs approval, but the People service returned an invalid approval response.");
-    retryIntentIds.delete(result.retryKey);
-    return { kind: "pending", data: { reason: pending.data.reason } };
-  }
-  if (!result.response.ok) {
-    if (result.response.status < 500) retryIntentIds.delete(result.retryKey);
-    throw parseError(result.response.status, result.body, "The People service could not complete this action.");
-  }
-  const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(result.body);
-  if (!parsed.success) throw new HrApiError(result.response.status, "The People service returned an unexpected action response.");
-  retryIntentIds.delete(result.retryKey);
-  return { kind: "success", data: parsed.data.data };
-}
-
 export async function readPendingHrTimeAction(scope: HrRetryScope): Promise<HrTimeAction | null> {
   const scoped = await hrTimeScope(scope);
   let raw: string | null;
@@ -1006,29 +931,6 @@ async function request(path: string, init: RequestInit, signal?: AbortSignal): P
     throw new HrApiError(0, timedOut
       ? "The People service timed out. The action may have completed, so check People records before retrying."
       : "The People action could not be confirmed. Check People records before retrying.");
-  }
-}
-
-async function submit(path: string, body: unknown): Promise<{ response: Response; body: unknown; retryKey: string }> {
-  const retryKey = `${path}:${JSON.stringify(body)}`;
-  const intentId = retryIntentIds.get(retryKey) ?? crypto.randomUUID();
-  let response: Response;
-  try {
-    response = await request(path, { method: "POST", body: JSON.stringify({ ...body as Record<string, unknown>, intentId }) });
-  } catch (error) {
-    rememberRetryIntent(retryKey, intentId);
-    throw error;
-  }
-  rememberRetryIntent(retryKey, intentId);
-  return { response, body: await readJson(response), retryKey };
-}
-
-function rememberRetryIntent(key: string, intentId: string): void {
-  retryIntentIds.set(key, intentId);
-  while (retryIntentIds.size > 100) {
-    const oldest = retryIntentIds.keys().next().value;
-    if (oldest === undefined) break;
-    retryIntentIds.delete(oldest);
   }
 }
 

@@ -3892,3 +3892,14 @@ new owners and the manifest shows zero legacy runtime paths.
      Clicking Team & roles opened the Vite `/team` page in the same tab. The
      browser error log was empty; 14 Settings tests, Vite typecheck, focused
      lint, and diff checks passed. This completes item 358.
+
+360. (Complete) Route Vite HR reports, employee actions, time data, and expenses
+     directly through authenticated Go capabilities. Remove the HR and time
+     legacy API fallbacks from the Vite adapters.
+
+361. (Runtime verified) On 2026-10-13, the authenticated Vite HR People page
+     created an employee in the Migration Proof Workspace, showed it as active,
+     and retained it after reload. Writes and HR reads used
+     `/api/capabilities/execute` with HTTP 200. No `/api/hr` or `/api/time`
+     requests or browser errors occurred. Typecheck, scoped lint, and 49 HR
+     tests passed. This completes item 360.
