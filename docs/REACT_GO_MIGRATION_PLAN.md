@@ -1502,13 +1502,17 @@ new owners and the manifest shows zero legacy runtime paths.
      `messaging.sendMessage` capability with HTTP 200, then rendered the
      refreshed thread; no legacy send request occurred and the browser error
      log was empty. See proof 320.
-148. (Implemented; Go route ownership verified) Enable the Vite `/team` page's
+148. (Complete) Enable the Vite `/team` page's
      session-authenticated `GET` and governed `POST /api/team` routes by
      default in both runtimes. Roll back either method independently by
      setting its Go and Vite selector flags to `0`. Direct Go routing dispatches
      only exact GET and POST requests; HEAD, unsupported methods, and suffix
-     paths retain legacy fallback. Handler and selector tests pass. Browser
-     proof remains open.
+     paths retain legacy fallback. Handler and selector tests pass. On
+     2026-10-12, authenticated Vite `/team` created a synthetic member invite
+     through Go's `/api/team` route with HTTP 200, then refreshed the member
+     list through Go with HTTP 200. The page displayed the invite link; no
+     legacy team request or browser error occurred. This proves invite
+     creation, not invite acceptance. See proof 335.
 149. (Implemented; Go route ownership verified) Enable Vite's authenticated
      `GET /api/modules` switchboard reads and the Projects page's
      `GET`/`POST /api/projects` requests through Go by default. Each route can
@@ -3712,3 +3716,10 @@ new owners and the manifest shows zero legacy runtime paths.
      expected empty-workspace summary, including `accrualExpenseMinor: 0`.
      No legacy `/api/accounting` request occurred, and the browser error log
      was empty. This completes item 244.
+
+335. (Runtime verified) On 2026-10-12, authenticated Vite `/team` created a
+     synthetic member invite through `POST /api/team`, which returned HTTP
+     200. The follow-up `GET /api/team` also returned HTTP 200, and the page
+     displayed the invite link and refreshed member list. No legacy team
+     request or browser error occurred. The invite was created but not
+     accepted. This completes item 148.
