@@ -2300,7 +2300,7 @@ new owners and the manifest shows zero legacy runtime paths.
      200 through Go. The page showed available component stock and the cost
      preview, with no browser errors. Independent review found no remaining
      issues.
-207. Route the existing Vite customer statement read through Go's
+207. (Done) Route the existing Vite customer statement read through Go's
      session-authenticated `accounting.customerStatement` capability behind
      paired `CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Validate customer UUIDs
@@ -2314,8 +2314,11 @@ new owners and the manifest shows zero legacy runtime paths.
      customer/org isolation, and audit behavior. Vite typecheck and lint passed.
      Statement dates now require offset-aware timestamps, and changing the
      selected customer clears old data and ignores late responses. Independent
-     review found no remaining issues. The in-app browser was unavailable, so
-     browser runtime proof remains open.
+     review found no remaining issues. Authenticated browser proof created a
+     synthetic customer through Go, then loaded the customer's empty statement
+     through `accounting.customerStatement` with HTTP 200 after reload. The
+     legacy `/api/accounting` write route was not requested and no browser
+     errors occurred.
 208. (Implemented; default-on for Vite direct capability actions) Route the
      existing Vite Projects create, archive, task create, move, and assignment
      actions through Go's session-authenticated capabilities when
