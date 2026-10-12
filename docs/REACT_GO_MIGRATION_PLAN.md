@@ -2243,7 +2243,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Migration Hire Proof 20261012 at UGX 1,250 monthly through
      `hr.hireEmployee` (HTTP 200). The employee remained in the directory
      after reload; no legacy HR write or browser error occurred.
-204. (Vite/Go implementation complete; browser proof pending) Route only the existing Vite Purchasing Intel price-history and supplier-
+204. (Done) Route only the existing Vite Purchasing Intel price-history and supplier-
      performance reads through `purchasing.priceHistory` and
      `purchasing.supplierPerformance` behind paired
      `CHASTE_GO_PURCHASING_INTEL_READS=1` and
@@ -2254,7 +2254,11 @@ new owners and the manifest shows zero legacy runtime paths.
      add focused Vite API, page, proxy selector, and Go executor contract tests.
      Eleven focused Vite tests passed; Go parser, reader, and governed executor
      tests passed; Vite typecheck and lint passed. Independent review found no
-     permission or tenant-scope gaps. Browser runtime proof remains open.
+     permission or tenant-scope gaps. Authenticated browser proof loaded the
+     Purchasing Intel tab with both `purchasing.priceHistory` and
+     `purchasing.supplierPerformance` returning HTTP 200 through Go. The empty
+     price-history state and synthetic vendor metrics rendered without browser
+     errors after reload.
 205. Route only the Vite Accounting Reports aggregate read through Go's
      `accounting.incomeStatement`, `accounting.balanceSheet`,
      `accounting.cashFlow`, `accounting.unrealizedFxExposure`, and
