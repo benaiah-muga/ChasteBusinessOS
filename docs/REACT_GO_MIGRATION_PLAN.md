@@ -1791,7 +1791,7 @@ new owners and the manifest shows zero legacy runtime paths.
      strict output shapes, and fail closed when account or organization scope
      or browser storage is unavailable. Authenticated browser proof remains
      open because the in-app browser is unavailable in this environment.
-172. (Implemented; local Go/Vite default-on) Route only Vite CRM customer
+172. (Complete; local Go/Vite implementation and authenticated browser proof passed) Route only Vite CRM customer
      creation through Go's session-authenticated `crm.createCustomer` capability
      under the paired `CHASTE_GO_CRM_CUSTOMER_CREATE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` flags. Set the customer-create
@@ -1805,8 +1805,8 @@ new owners and the manifest shows zero legacy runtime paths.
      closed on Go 404 without calling the legacy writer while retaining the
      scoped retry identity. Validate the customer ID and duplicate warning, and
      include the warning in the success notice. The Go parser enforces the legacy
-     120-character name limit. Authenticated browser proof remains open because
-     the in-app browser is unavailable in this environment.
+     120-character name limit. The authenticated Vite proof is recorded in
+     item 317.
 173. (Implemented; local Go/Vite default-on) Route only Vite CRM deal creation
      through Go's session-authenticated `crm.createDeal` capability under the
      paired `CHASTE_GO_CRM_DEAL_CREATE=1` and
@@ -3486,3 +3486,11 @@ new owners and the manifest shows zero legacy runtime paths.
      organization read, notifications, dashboard, setup, and My Work then each
      returned HTTP 200 from the authenticated Vite session. The browser error
      log was empty. This completes item 175.
+
+317. (Runtime verified) On 2026-10-12, the authenticated Vite CRM Customers page
+     created `Go CRM Create Proof 20261012` in the synthetic SMTP auth workspace
+     through `/api/capabilities/execute` with HTTP 200. The Go-backed customer
+     directory refresh returned HTTP 200 and showed the new row. The browser
+     request trace contained no legacy customer-create POST, and the browser
+     error log was empty. Vite and Go had the CRM customer-create and read
+     selectors enabled. This completes item 172.
