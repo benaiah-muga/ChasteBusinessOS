@@ -1365,14 +1365,14 @@ new owners and the manifest shows zero legacy runtime paths.
      authenticated Vite browser, vendor creation returned HTTP 200 from
      `/api/capabilities/execute` and the refreshed Vite vendor list showed the
      new record with no browser page errors.
-136. (Implemented; runtime proof pending for Vite order confirmation) Add one
+136. (Complete; focused Vite and Go database tests plus authenticated browser proof passed) Add one
      Sales action to the Vite page: confirm draft orders through the existing
      session-authenticated `sales.confirmOrder` capability. The API validates
      the order id and response, preserves pending approval, and reuses an intent
      id after uncertain transport outcomes. Other Sales actions and route
      ownership remain unchanged. Focused Vite API and page tests cover the
      capability request, approval response, and visible confirmed state. The
-     authenticated browser and database-backed confirmation proofs remain open.
+     authenticated browser proof is recorded in item 315.
 (Implemented; focused Vite and configured PostgreSQL proofs pass) Make Go approval requests idempotent by organization and action intent.
      Persist the intent and canonical input digest on approval rows; serialize
      requests with the executor's existing tenant+intent lock, replay a matching
@@ -3464,3 +3464,13 @@ new owners and the manifest shows zero legacy runtime paths.
      and the browser error log was empty. Vite had
      `CHASTE_GO_ACCOUNTING_REPORTS=1` and used the running Go API. This completes
      item 245.
+
+315. (Runtime verified) On 2026-10-12, the authenticated Vite Sales page created
+     a draft order for the synthetic proof customer through Go's
+     `sales.createOrder` capability, refreshed it through `sales.listOrders`,
+     and confirmed it through `sales.confirmOrder`. Each capability returned
+     HTTP 200, and the page showed the order as confirmed. The request trace
+     contained no legacy `/api/sales` calls and the browser error log was empty.
+     The existing database-backed
+     `TestSalesOrdersConfirmReservesGuardsAndBackorder` Go test passed against
+     the configured database. This completes item 136.
