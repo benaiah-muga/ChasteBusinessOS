@@ -2454,7 +2454,7 @@ new owners and the manifest shows zero legacy runtime paths.
      capability requests returned HTTP 200, no legacy `/api/documents` request
      or browser errors occurred. The empty response omits zero-length arrays;
      Vite now defaults those validated fields to empty lists.
-217. (Implemented; default-on in `.env.example`) Route only Vite Purchasing requests and RFQs through the
+217. (Done; default-on in `.env.example`) Route only Vite Purchasing requests and RFQs through the
      direct session-authenticated `purchasing.listPurchaseWorkflow` capability
      behind paired `CHASTE_GO_PURCHASING_WORKFLOW_READS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors, with the API's
@@ -2464,8 +2464,10 @@ new owners and the manifest shows zero legacy runtime paths.
      to `0` for explicit legacy rollback. Validate the full Go
      request/RFQ output and strip its additional RFQ `vendorId` field for the
      existing Vite contract. Selected-Go errors do not retry through the
-     aggregate request. Focused Vite and Go route tests pass; browser proof
-     remains open.
+     aggregate request. Focused Vite and Go route tests pass. Authenticated
+     browser proof loaded the Requests & RFQs tab with the Go workflow selector
+     enabled; list capability requests returned HTTP 200, no legacy
+     `/api/purchasing` request or browser errors occurred.
 218. (Implemented) Route Vite authored-document version history and archived
      compare previews through `documents.listDocVersions` and
      `documents.getDocVersion` behind paired
