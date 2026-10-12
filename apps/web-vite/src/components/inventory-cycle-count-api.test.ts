@@ -15,20 +15,13 @@ afterEach(() => {
 });
 
 describe("inventory cycle count API", () => {
-  it("keeps the legacy route available when the Go selector is disabled", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { countId: "count-1", lineCount: 1 } }));
+  it("fails closed without sending a legacy request when Go is disabled", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitInventoryCycleCountAction({ action: "createCycleCount", note: "Monthly audit", skus: ["MUG-1"], locationId: "loc-1" }, undefined, false, retryScope)).resolves.toEqual({ kind: "completed" });
-    expect(fetchMock).toHaveBeenCalledWith("/api/inventory", expect.objectContaining({
-      method: "POST",
-      credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      cache: "no-store",
-    }));
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({ action: "createCycleCount", note: "Monthly audit", skus: ["MUG-1"], locationId: "loc-1" });
-    expect(body.intentId).toEqual(expect.any(String));
+    await expect(submitInventoryCycleCountAction({ action: "createCycleCount", note: "Monthly audit", skus: ["MUG-1"], locationId: "loc-1" }, undefined, false, retryScope))
+      .rejects.toThrow("Go cycle-count writes are not enabled");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("distinguishes approval-pending responses and rejects malformed approvals", async () => {
@@ -224,20 +217,20 @@ describe("inventory cycle count API", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("requires a loaded actor and organization before a legacy rollback write", async () => {
+  it("fails closed when the Go write selector is disabled", async () => {
     const fetchMock = vi.fn(async (_path: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(submitInventoryCycleCountAction({ action: "cancelCycleCount", countId: "count-1" }, undefined, false))
-      .rejects.toThrow("account and organization");
+      .rejects.toThrow("Go cycle-count writes are not enabled");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("blocks legacy rollback while a Go write outcome is unresolved", async () => {
+  it("does not route an unresolved Go write through the legacy endpoint when disabled", async () => {
     const fetchMock = vi.fn(async (_path: RequestInfo | URL, _init?: RequestInit) => { throw new DOMException("Timed out", "TimeoutError"); });
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "postCycleCount", countId: "count-1" } as const;
     await expect(submitInventoryCycleCountAction(action, undefined, true, retryScope)).rejects.toThrow("Check count history");
-    await expect(submitInventoryCycleCountAction(action, undefined, false, retryScope)).rejects.toThrow("unresolved");
+    await expect(submitInventoryCycleCountAction(action, undefined, false, retryScope)).rejects.toThrow("Go cycle-count writes are not enabled");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });

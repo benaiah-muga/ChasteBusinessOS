@@ -911,13 +911,8 @@ describe("POS register session API client", () => {
     expect(Object.keys(localStorage).join(" ")).not.toMatch(/org-private|actor-private/);
   });
 
-  it("writes quick add products and their opening stock through the inventory route", async () => {
-    let writes = 0;
-    const itemId = "40000000-0000-4000-8000-000000000004";
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
-      writes += 1;
-      return writes === 1 ? Response.json({ ok: true, data: { itemId } }) : Response.json({ ok: true, data: { onHandThousandths: 5000 } });
-    });
+  it("fails closed for quick add when Go inventory writes are disabled", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
 
@@ -928,14 +923,14 @@ describe("POS register session API client", () => {
       kind: "goods",
       unitLabel: "loaf",
       salePriceMinor: 2500,
-    }, undefined, { actorId: "actor-1", organizationId: "org-1" })).resolves.toEqual({ kind: "completed", data: { itemId } });
+    }, undefined, { actorId: "actor-1", organizationId: "org-1" })).rejects.toThrow("Go inventory item writes are not enabled");
     await expect(adjustPosItemStock({
       action: "adjustStock",
       sku: "BRD-001",
       quantityDelta: 5000,
       note: "Opening stock from POS quick add",
-    }, undefined, { actorId: "actor-1", organizationId: "org-1" })).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 5000 } });
-    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/inventory", "/api/inventory"]);
+    }, undefined, { actorId: "actor-1", organizationId: "org-1" })).rejects.toThrow("Go inventory item writes are not enabled");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("routes POS quick add and opening stock through Go inventory capabilities when enabled", async () => {

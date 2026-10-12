@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { inventoryItemActionRequest, submitInventoryItemAction } from "../api/inventory-items";
 import type { InventoryItem } from "../api/inventory";
 import { InventoryItemActions } from "./InventoryItemActions";
@@ -17,10 +17,18 @@ const item: InventoryItem = {
   reorderNeeded: false,
 };
 
+function newRetryScope() {
+  return { actorId: `actor-${crypto.randomUUID()}`, organizationId: `org-${crypto.randomUUID()}` };
+}
+
 afterEach(() => {
   cleanup();
   localStorage.clear();
   vi.unstubAllGlobals();
+});
+
+beforeEach(() => {
+  vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
 });
 
 describe("InventoryItemActions", () => {
@@ -30,7 +38,7 @@ describe("InventoryItemActions", () => {
       sku: "BEANS-1KG",
       quantityDelta: 1250,
       note: "Opening stock",
-    }, "intent-1", true);
+    }, "intent-1");
 
     expect(request.url).toBe("/api/capabilities/execute");
     expect(request.body).toEqual({
@@ -40,7 +48,7 @@ describe("InventoryItemActions", () => {
     });
   });
 
-  it("keeps the legacy inventory contract selected when the Go slice is disabled", () => {
+  it("always maps item writes to the Go capability contract", () => {
     const request = inventoryItemActionRequest({
       action: "createItem",
       sku: "BEANS-1KG",
@@ -50,10 +58,17 @@ describe("InventoryItemActions", () => {
       salePriceMinor: 0,
       reorderPointThousandths: 0,
       tags: [],
-    }, "intent-2", false);
+    }, "intent-2");
 
-    expect(request.url).toBe("/api/inventory");
-    expect(request.body).toMatchObject({ action: "createItem", sku: "BEANS-1KG", intentId: "intent-2" });
+    expect(request.url).toBe("/api/capabilities/execute");
+    expect(request.body).toEqual({
+      capabilityId: "inventory.createItem",
+      input: {
+        sku: "BEANS-1KG", name: "Coffee beans", kind: "goods", unitLabel: "bag",
+        salePriceMinor: 0, reorderPointThousandths: 0, tags: [],
+      },
+      intentId: "intent-2",
+    });
   });
 
   it("creates an item and reports an opening-stock approval separately", async () => {
@@ -63,7 +78,7 @@ describe("InventoryItemActions", () => {
     const onChanged = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<InventoryItemActions items={[]} onChanged={onChanged} retryScope={{ actorId: "actor-1", organizationId: "org-1" }} />);
+    render(<InventoryItemActions items={[]} onChanged={onChanged} retryScope={newRetryScope()} />);
     fireEvent.change(screen.getByLabelText("SKU"), { target: { value: "BEANS-1KG" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Coffee beans" } });
     fireEvent.change(screen.getByLabelText("Opening stock"), { target: { value: "1.25" } });
@@ -72,9 +87,9 @@ describe("InventoryItemActions", () => {
     expect(await screen.findByText("Item created. Opening stock is waiting for approval.")).not.toBeNull();
     const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
     const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as Record<string, unknown>;
-    expect(first).toMatchObject({ action: "createItem", sku: "BEANS-1KG", name: "Coffee beans", kind: "goods", reorderPointThousandths: 0, salePriceMinor: 0 });
+    expect(first).toMatchObject({ capabilityId: "inventory.createItem", input: { sku: "BEANS-1KG", name: "Coffee beans", kind: "goods", reorderPointThousandths: 0, salePriceMinor: 0 } });
     expect(first.intentId).toEqual(expect.any(String));
-    expect(second).toMatchObject({ action: "adjustStock", sku: "BEANS-1KG", quantityDelta: 1250, note: "Opening stock" });
+    expect(second).toMatchObject({ capabilityId: "inventory.adjustStock", input: { sku: "BEANS-1KG", quantityDelta: 1250, note: "Opening stock" } });
     expect(second.intentId).toEqual(expect.any(String));
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
@@ -84,7 +99,7 @@ describe("InventoryItemActions", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId } }));
-    const retryScope = { actorId: "actor-1", organizationId: "org-1" };
+    const retryScope = newRetryScope();
     const onChanged = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
@@ -117,7 +132,7 @@ describe("InventoryItemActions", () => {
     const onChanged = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<InventoryItemActions items={[item]} onChanged={onChanged} retryScope={{ actorId: "actor-1", organizationId: "org-1" }} />);
+    render(<InventoryItemActions items={[item]} onChanged={onChanged} retryScope={newRetryScope()} />);
     await waitFor(() => expect((screen.getByRole("button", { name: "Record adjustment" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Item"), { target: { value: item.sku } });
     fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "decrease" } });
@@ -128,7 +143,7 @@ describe("InventoryItemActions", () => {
     expect(await screen.findByText("Stock adjustment recorded.")).not.toBeNull();
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
     const input = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(input).toMatchObject({ action: "adjustStock", sku: item.sku, quantityDelta: -500, note: "Damaged in storage" });
+    expect(input).toMatchObject({ capabilityId: "inventory.adjustStock", input: { sku: item.sku, quantityDelta: -500, note: "Damaged in storage" } });
     expect(input.intentId).toEqual(expect.any(String));
   });
 
@@ -137,7 +152,7 @@ describe("InventoryItemActions", () => {
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { onHandThousandths: 6500 } }));
     const onChanged = vi.fn();
-    const retryScope = { actorId: "actor-1", organizationId: "org-1" };
+    const retryScope = newRetryScope();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
 
@@ -170,7 +185,7 @@ describe("InventoryItemActions", () => {
   });
 
   it("keeps an unresolved Go adjustment locked when the selector is rolled back", async () => {
-    const retryScope = { actorId: "actor-1", organizationId: "org-1" };
+    const retryScope = newRetryScope();
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
@@ -190,8 +205,8 @@ describe("InventoryItemActions", () => {
     const delayedResponse = new Promise<Response>((resolve) => { resolveResponse = resolve; });
     const fetchMock = vi.fn().mockReturnValueOnce(delayedResponse);
     const onChanged = vi.fn();
-    const firstScope = { actorId: "actor-1", organizationId: "org-1" };
-    const secondScope = { actorId: "actor-2", organizationId: "org-2" };
+    const firstScope = newRetryScope();
+    const secondScope = newRetryScope();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
 

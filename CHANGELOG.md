@@ -16,6 +16,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Inventory no longer links users to the legacy inventory workspace.
   Stock, item actions, counts, locations, reservations, transfers, and movement
   history remain available on the Vite route.
+- Vite Inventory item, cycle-count, location, reservation, and transfer writes
+  now use Go capabilities. Disabled Go selectors and failed Go requests stop
+  the write instead of routing it through the legacy inventory endpoint.
 - Vite Purchasing receiving now loads module status, orders, and receipt history
   from Go, and records receipts through Go's governed capability route. The
   page requires authenticated actor and organization scope and fails closed if

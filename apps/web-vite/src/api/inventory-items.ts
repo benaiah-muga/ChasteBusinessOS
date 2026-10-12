@@ -26,6 +26,7 @@ const PendingSchema = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
   reason: z.string(),
+  approvalId: z.string().min(1).optional(),
 }).strict();
 const ActionResponseSchema = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).strict();
 const CreateItemOutputSchema = z.object({ itemId: z.string().uuid() }).strict();
@@ -207,9 +208,7 @@ export async function getPendingInventoryItemCreation(
 export function inventoryItemActionRequest(
   action: InventoryItemAction,
   intentId: string,
-  useGo: boolean,
 ): { url: string; body: Record<string, unknown> } {
-  if (!useGo) return { url: "/api/inventory", body: { ...action, intentId } };
   const { action: operation, ...input } = action;
   return {
     url: "/api/capabilities/execute",
@@ -232,29 +231,25 @@ export async function submitInventoryItemAction(
   if (!parsedAction.success) throw new InventoryItemActionError(0, "Check the item details and try again.");
 
   const useGo = typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
+  if (!useGo) {
+    throw new InventoryItemActionError(503, "Go inventory item writes are not enabled. Ask an administrator to enable the inventory capability route.");
+  }
   let attempt: InventoryAdjustmentAttempt | null = null;
   let createAttempt: InventoryCreateAttempt | null = null;
   const scope = retryScope ?? { actorId: null, organizationId: null };
-  const hasRetryScope = Boolean(scope.actorId?.trim() && scope.organizationId?.trim());
   if (parsedAction.data.action === "adjustStock") {
-    if (useGo) {
-      if (await getPendingInventoryItemCreation(scope)) {
-        throw new InventoryItemActionError(0, "A Go item creation is unresolved. Retry that exact item before adjusting stock.");
-      }
-      attempt = await getOrCreateAdjustmentAttempt(parsedAction.data, scope);
-    } else if (hasRetryScope && (await getPendingInventoryAdjustment(scope) || await getPendingInventoryItemCreation(scope))) {
-      throw new InventoryItemActionError(0, "A Go stock adjustment is unresolved. Restore Go inventory item writes and retry the saved adjustment before using the legacy route.");
+    if (await getPendingInventoryItemCreation(scope)) {
+      throw new InventoryItemActionError(0, "A Go item creation is unresolved. Retry that exact item before adjusting stock.");
     }
-  } else if (useGo) {
+    attempt = await getOrCreateAdjustmentAttempt(parsedAction.data, scope);
+  } else {
     if (await getPendingInventoryAdjustment(scope)) {
       throw new InventoryItemActionError(0, "A Go stock adjustment is unresolved. Retry that exact adjustment before creating an item.");
     }
     createAttempt = await getOrCreateCreateAttempt(parsedAction.data, scope);
-  } else if (hasRetryScope && (await getPendingInventoryAdjustment(scope) || await getPendingInventoryItemCreation(scope))) {
-    throw new InventoryItemActionError(0, "A Go inventory item action is unresolved. Restore Go item writes and retry that exact action before using the legacy route.");
   }
   const intentId = attempt?.intentId ?? createAttempt?.intentId ?? crypto.randomUUID();
-  const request = inventoryItemActionRequest(parsedAction.data, intentId, useGo);
+  const request = inventoryItemActionRequest(parsedAction.data, intentId);
 
   let response: Response;
   try {

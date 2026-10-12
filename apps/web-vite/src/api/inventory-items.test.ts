@@ -29,7 +29,12 @@ describe("inventory item action API client", () => {
   it("recovers the exact Go item creation and intent across approval and retry", async () => {
     const itemId = "40000000-0000-4000-8000-000000000004";
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({
+        ok: false,
+        pendingApproval: true,
+        reason: "Owner review",
+        approvalId: "40000000-0000-4000-8000-000000000005",
+      }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId } }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
@@ -114,7 +119,7 @@ describe("inventory item action API client", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
-  it("retains a Go item creation marker on 404 and blocks a fresh legacy create after rollback", async () => {
+  it("retains a Go item creation marker on 404 and fails closed when Go is disabled", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "route not mounted" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId: "40000000-0000-4000-8000-000000000004" } }));
@@ -125,7 +130,7 @@ describe("inventory item action API client", () => {
     await expect(getPendingInventoryItemCreation(retryScope)).resolves.toEqual(createAction);
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
     await expect(submitInventoryItemAction(createAction, undefined, retryScope))
-      .rejects.toThrow("A Go inventory item action is unresolved");
+      .rejects.toThrow("Go inventory item writes are not enabled");
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
@@ -138,7 +143,7 @@ describe("inventory item action API client", () => {
     expect(retry.intentId).toBe(first.intentId);
   });
 
-  it("retains a Go retry marker across rollback while allowing fresh scoped legacy adjustments", async () => {
+  it("fails closed for every item write when Go is disabled, including fresh scoped actions", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { onHandThousandths: 6500 } }));
@@ -148,14 +153,15 @@ describe("inventory item action API client", () => {
 
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
     await expect(submitInventoryItemAction(action, undefined, retryScope))
-      .rejects.toThrow("A Go stock adjustment is unresolved");
+      .rejects.toThrow("Go inventory item writes are not enabled");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await expect(getPendingInventoryAdjustment(retryScope)).resolves.toEqual(action);
 
     const freshScope = { actorId: retryScope.actorId, organizationId: "org-2" };
-    await expect(submitInventoryItemAction({ ...action, sku: "FRESH-ITEM" }, undefined, freshScope)).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 6500 } });
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/inventory"]);
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ action: "adjustStock", sku: "FRESH-ITEM" });
+    await expect(submitInventoryItemAction({ ...action, sku: "FRESH-ITEM" }, undefined, freshScope))
+      .rejects.toThrow("Go inventory item writes are not enabled");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
   });
 
   it("clears an adjustment intent after a terminal client error", async () => {

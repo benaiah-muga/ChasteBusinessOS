@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InventoryCycleCount, InventoryItem, InventoryLocation } from "../api/inventory";
 import { InventoryCycleCountPanel } from "./InventoryCycleCountPanel";
 
@@ -25,6 +25,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+beforeEach(() => {
+  vi.stubGlobal("__GO_INVENTORY_CYCLE_COUNT_WRITES__", true);
+  vi.stubGlobal("__GO_INVENTORY_BARCODE_LOOKUP__", true);
+});
+
 describe("InventoryCycleCountPanel", () => {
   function renderPanel(props: { items: InventoryItem[]; locations: InventoryLocation[]; counts: InventoryCycleCount[]; onChanged: () => void | Promise<void> }) {
     return render(<InventoryCycleCountPanel {...props} retryScope={retryScope} />);
@@ -44,15 +49,12 @@ describe("InventoryCycleCountPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start count sheet" }));
 
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
-    const writesUseGo = typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__;
-    expect(fetchMock).toHaveBeenCalledWith(writesUseGo ? "/api/capabilities/execute" : "/api/inventory", expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
       credentials: "same-origin",
     }));
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(requestBody).toMatchObject(writesUseGo
-      ? { capabilityId: "inventory.createCycleCount", input: { skus: ["MUG-1"], locationId: "location-1", note: "Aisle 4" } }
-      : { action: "createCycleCount", skus: ["MUG-1"], locationId: "location-1", note: "Aisle 4" });
+    expect(requestBody).toMatchObject({ capabilityId: "inventory.createCycleCount", input: { skus: ["MUG-1"], locationId: "location-1", note: "Aisle 4" } });
     expect(requestBody.intentId).toEqual(expect.any(String));
     expect((await screen.findByRole("status")).textContent).toContain("Open stock count done.");
   });
@@ -68,8 +70,8 @@ describe("InventoryCycleCountPanel", () => {
     fireEvent.change(screen.getByLabelText("Scan a barcode into the count"), { target: { value: "MUG-CODE" } });
     fireEvent.click(screen.getByRole("button", { name: "Add scan" }));
     expect(await screen.findByText("Ceramic mug added to this count.")).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/inventory" && init?.body === JSON.stringify({ action: "lookupByBarcode", barcode: "MUG-CODE" })
-      || path === "/api/capabilities/execute" && init?.body === JSON.stringify({ capabilityId: "inventory.lookupByBarcode", input: { barcode: "MUG-CODE" } }))).toBe(true);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/capabilities/execute"
+      && init?.body === JSON.stringify({ capabilityId: "inventory.lookupByBarcode", input: { barcode: "MUG-CODE" } }))).toBe(true);
 
     const quantityInput = screen.getByLabelText("Counted quantity") as HTMLInputElement;
     fireEvent.change(quantityInput, { target: { value: "3.75" } });
@@ -115,10 +117,7 @@ describe("InventoryCycleCountPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    const writesUseGo = typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__;
-    expect(body).toMatchObject(writesUseGo
-      ? { capabilityId: "inventory.recordCycleCounts", input: { counts: [{ sku: "MUG-1", countedThousandths: 0 }] } }
-      : { action: "recordCycleCounts", counts: [{ sku: "MUG-1", countedThousandths: 0 }] });
+    expect(body).toMatchObject({ capabilityId: "inventory.recordCycleCounts", input: { counts: [{ sku: "MUG-1", countedThousandths: 0 }] } });
     expect(body.intentId).toEqual(expect.any(String));
   });
 
@@ -132,10 +131,7 @@ describe("InventoryCycleCountPanel", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    const writesUseGo = typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__;
-    expect(body).toMatchObject(writesUseGo
-      ? { capabilityId: "inventory.recordCycleCounts", input: { counts: [{ sku: "MUG-1", countedThousandths: 1_005 }] } }
-      : { action: "recordCycleCounts", counts: [{ sku: "MUG-1", countedThousandths: 1_005 }] });
+    expect(body).toMatchObject({ capabilityId: "inventory.recordCycleCounts", input: { counts: [{ sku: "MUG-1", countedThousandths: 1_005 }] } });
   });
 
   it("cancels an open sheet and refreshes the supplied inventory state", async () => {
@@ -147,10 +143,7 @@ describe("InventoryCycleCountPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel count" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    const writesUseGo = typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__;
-    expect(body).toMatchObject(writesUseGo
-      ? { capabilityId: "inventory.cancelCycleCount", input: { countId: openCount.id } }
-      : { action: "cancelCycleCount", countId: openCount.id });
+    expect(body).toMatchObject({ capabilityId: "inventory.cancelCycleCount", input: { countId: openCount.id } });
     expect(body.intentId).toEqual(expect.any(String));
   });
 

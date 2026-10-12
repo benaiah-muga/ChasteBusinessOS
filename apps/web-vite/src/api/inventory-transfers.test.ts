@@ -41,23 +41,16 @@ describe("inventory transfer API client", () => {
     expect(requests[0]?.body.intentId).not.toBe(requests[1]?.body.intentId);
   });
 
-  it("keeps create and confirm on the legacy inventory route when disabled", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId, number: 12, status: "pending" } }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId, status: "confirmed", confirmedNowThousandths: 2500 } }));
+  it("fails closed without sending legacy writes when Go is disabled", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", false);
 
-    await createInventoryTransfer({ fromLocationCode: "MAIN", toLocationCode: "SHOP", sku: "ITEM-1", quantityThousandths: 2500 }, retryScope);
-    await confirmInventoryTransfer(transferId, retryScope);
-    const requests = fetchMock.mock.calls.map(([url, init]) => ({
-      url,
-      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-    }));
-    expect(requests.map((request) => request.url)).toEqual(["/api/inventory", "/api/inventory"]);
-    expect(requests[0]?.body).toMatchObject({ action: "createTransfer", fromLocationCode: "MAIN", toLocationCode: "SHOP", lines: [{ sku: "ITEM-1", quantityThousandths: 2500 }] });
-    expect(requests[1]?.body).toMatchObject({ action: "confirmTransfer", transferId });
-    expect(requests[0]?.body.intentId).not.toBe(requests[1]?.body.intentId);
+    await expect(createInventoryTransfer({ fromLocationCode: "MAIN", toLocationCode: "SHOP", sku: "ITEM-1", quantityThousandths: 2500 }, retryScope))
+      .rejects.toThrow("Go inventory transfer writes are not enabled");
+    await expect(confirmInventoryTransfer(transferId, retryScope))
+      .rejects.toThrow("Go inventory transfer writes are not enabled");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("fails closed for Go when actor or organization scope is unresolved", async () => {
@@ -183,12 +176,16 @@ describe("inventory transfer API client", () => {
 
     await expect(createInventoryTransfer(input, retryScope)).rejects.toMatchObject({ status: 404, message: "route missing" });
     vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", false);
+    await expect(createInventoryTransfer(input, retryScope)).rejects.toThrow("Go inventory transfer writes are not enabled");
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
     await expect(createInventoryTransfer(input, retryScope)).resolves.toEqual({ kind: "completed" });
 
-    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
     await expect(confirmInventoryTransfer(transferId, retryScope, [{ lineId, quantityThousandths: 1000 }]))
       .rejects.toMatchObject({ status: 404, message: "route missing" });
     vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", false);
+    await expect(confirmInventoryTransfer(transferId, retryScope, [{ lineId, quantityThousandths: 1000 }]))
+      .rejects.toThrow("Go inventory transfer writes are not enabled");
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
     await expect(confirmInventoryTransfer(transferId, retryScope, [{ lineId, quantityThousandths: 1000 }]))
       .resolves.toEqual({ kind: "completed" });
 

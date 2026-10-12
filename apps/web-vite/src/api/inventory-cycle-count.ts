@@ -57,11 +57,11 @@ export async function submitInventoryCycleCountAction(
   retryScope?: InventoryCycleCountRetryScope,
 ): Promise<InventoryCycleCountActionResult> {
   const useGo = useGoOverride ?? (typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__);
-  if (!useGo) await assertNoUnresolvedGoIntent(retryScope);
-  const intentId = useGo
-    ? await stableGoCycleCountIntent(input, retryScope)
-    : await stableLegacyCycleCountIntent(input);
-  const request = inventoryCycleCountActionRequest(input, intentId, useGo);
+  if (!useGo) {
+    throw new InventoryCycleCountApiError(503, "Go cycle-count writes are not enabled. Ask an administrator to enable the inventory capability route.");
+  }
+  const intentId = await stableGoCycleCountIntent(input, retryScope);
+  const request = inventoryCycleCountActionRequest(input, intentId);
   const body = await postInventory(request.url, request.body, signal);
   if (body.response.status === 202) {
     if (!PendingResponseSchema.safeParse(body.data).success) {
@@ -72,28 +72,21 @@ export async function submitInventoryCycleCountAction(
   if (!body.response.ok) {
     const rejected = RejectedResponseSchema.safeParse(body.data);
     const definiteGoRejection = rejected.success && [400, 401, 403, 422].includes(body.response.status);
-    const definiteLegacyRejection = body.response.status >= 400 && body.response.status < 500;
-    if ((useGo && definiteGoRejection) || (!useGo && definiteLegacyRejection)) {
-      if (useGo) await clearStableGoCycleCountIntent(input, intentId, retryScope);
-      else await clearStableLegacyCycleCountIntent(input);
-    }
+    if (definiteGoRejection) await clearStableGoCycleCountIntent(input, intentId, retryScope);
     throw new InventoryCycleCountApiError(body.response.status, errorMessage(body.data));
   }
   const parsed = ActionResponseSchema.safeParse(body.data);
   if (body.response.status !== 200 || !parsed.success || !CycleCountOutputSchemas[input.action].safeParse(parsed.data.data).success) {
     throw new InventoryCycleCountApiError(body.response.status, "The inventory service returned an unexpected action response.");
   }
-  if (useGo) await clearStableGoCycleCountIntent(input, intentId, retryScope);
-  else await clearStableLegacyCycleCountIntent(input);
+  await clearStableGoCycleCountIntent(input, intentId, retryScope);
   return { kind: "completed" };
 }
 
 export function inventoryCycleCountActionRequest(
   input: InventoryCycleCountAction,
   intentId: string,
-  useGo: boolean,
 ): { url: string; body: Record<string, unknown> } {
-  if (!useGo) return { url: "/api/inventory", body: { ...input, intentId } };
   const { action, ...capabilityInput } = input;
   const capabilityByAction: Record<InventoryCycleCountAction["action"], string> = {
     createCycleCount: "inventory.createCycleCount",
@@ -107,38 +100,10 @@ export function inventoryCycleCountActionRequest(
   };
 }
 
-const legacyStableIntents = new Map<string, string>();
 const goRetryIntents = new Map<string, string>();
 const activeGoRetryIntents = new Map<string, { fingerprint: string; intentId: string }>();
 const goRetryPrefix = "chaste.inventory.cycle-count.intent.v2:";
 const GoRetryMarkerSchema = z.object({ fingerprint: z.string().regex(/^[0-9a-f]{64}$/i), intentId: z.string().uuid() }).strict();
-
-async function stableLegacyCycleCountIntent(input: InventoryCycleCountAction): Promise<string> {
-  const storageKey = await cycleCountAttemptStorageKey(input);
-  try {
-    const stored = localStorage.getItem(storageKey);
-    if (stored) return stored;
-  } catch {
-    // Keep the original in-memory retry behavior for the legacy rollback route.
-  }
-  const cached = legacyStableIntents.get(storageKey);
-  if (cached) {
-    try {
-      localStorage.setItem(storageKey, cached);
-    } catch {
-      // Keep the legacy rollback attempt in memory when storage is unavailable.
-    }
-    return cached;
-  }
-  const intentId = crypto.randomUUID();
-  legacyStableIntents.set(storageKey, intentId);
-  try {
-    localStorage.setItem(storageKey, intentId);
-  } catch {
-    // The in-memory copy still keeps legacy retries in this page on the same intent.
-  }
-  return intentId;
-}
 
 async function stableGoCycleCountIntent(
   input: InventoryCycleCountAction,
@@ -228,35 +193,6 @@ async function goRetryKeys(
   }
 }
 
-async function assertNoUnresolvedGoIntent(scope?: InventoryCycleCountRetryScope): Promise<void> {
-  const actorId = scope?.actorId.trim() ?? "";
-  const organizationId = scope?.organizationId.trim() ?? "";
-  if (!actorId || !organizationId) {
-    throw new InventoryCycleCountApiError(0, "Wait for your account and organization to finish loading before changing inventory.");
-  }
-  const canonicalScope = { actorId, organizationId };
-  const scopeMemoryKey = `${goRetryPrefix}scope:${JSON.stringify(canonicalScope)}`;
-  const memoryActive = activeGoRetryIntents.get(scopeMemoryKey);
-  let scopeStorageKey: string;
-  try {
-    scopeStorageKey = `${goRetryPrefix}scope:${await digestHex(JSON.stringify(canonicalScope))}`;
-  } catch {
-    if (memoryActive) throw unresolvedGoRetryError();
-    throw new InventoryCycleCountApiError(0, "Cycle-count retry protection is unavailable. Verify inventory before using the legacy route.");
-  }
-  let storedActive: z.infer<typeof GoRetryMarkerSchema> | null;
-  try {
-    storedActive = parseGoRetryMarker(localStorage.getItem(scopeStorageKey));
-  } catch {
-    throw new InventoryCycleCountApiError(0, "A saved cycle-count retry marker is malformed or unavailable. Verify inventory before retrying.");
-  }
-  if (storedActive || memoryActive) throw unresolvedGoRetryError();
-}
-
-function unresolvedGoRetryError(): InventoryCycleCountApiError {
-  return new InventoryCycleCountApiError(0, "A Go cycle-count action is unresolved. Retry that exact action or verify inventory before using the legacy route.");
-}
-
 async function clearStableGoCycleCountIntent(
   input: InventoryCycleCountAction,
   intentId: string,
@@ -297,13 +233,6 @@ async function digestHex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function cycleCountAttemptStorageKey(input: InventoryCycleCountAction): Promise<string> {
-  const canonicalInput = JSON.stringify(canonicalize(input));
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalInput));
-  const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `chaste.inventory.cycle-count.intent.v1:${fingerprint}`;
-}
-
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === "object") {
@@ -311,16 +240,6 @@ function canonicalize(value: unknown): unknown {
     return Object.fromEntries(Object.keys(object).sort().map((key) => [key, canonicalize(object[key])]));
   }
   return value;
-}
-
-async function clearStableLegacyCycleCountIntent(input: InventoryCycleCountAction): Promise<void> {
-  const storageKey = await cycleCountAttemptStorageKey(input);
-  legacyStableIntents.delete(storageKey);
-  try {
-    localStorage.removeItem(storageKey);
-  } catch {
-    // Storage may be unavailable; a completed attempt can still be followed in memory.
-  }
 }
 
 export async function lookupInventoryBarcode(

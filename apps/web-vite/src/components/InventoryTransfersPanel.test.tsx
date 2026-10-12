@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { confirmInventoryTransfer, createInventoryTransfer, hasUnroutedInventoryTransferAttempt, InventoryTransferApiError } from "../api/inventory-transfers";
 import type { InventoryItem, InventoryLocation, InventoryTransfer } from "../api/inventory";
 import { InventoryTransfersPanel } from "./InventoryTransfersPanel";
@@ -41,15 +41,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+beforeEach(() => {
+  vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
+});
+
 describe("inventory transfer API", () => {
-  it("posts a governed transfer draft in thousandths to the same-origin compatibility BFF", async () => {
+  it("posts a governed transfer draft in thousandths through the Go capability", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { transferId: transferResponseId, number: 7, status: "pending" } }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(createInventoryTransfer({ fromLocationCode: "MAIN", toLocationCode: "SHOP", sku: "BAG-50", quantityThousandths: 1250, note: "Shelf stock" }, retryScope)).resolves.toEqual({ kind: "completed" });
-    expect(fetchMock).toHaveBeenCalledWith("/api/inventory", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store", signal: expect.any(AbortSignal) }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store", signal: expect.any(AbortSignal) }));
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
     expect(body).toMatchObject({
-      action: "createTransfer", fromLocationCode: "MAIN", toLocationCode: "SHOP", lines: [{ sku: "BAG-50", quantityThousandths: 1250 }], note: "Shelf stock",
+      capabilityId: "inventory.createTransfer", input: { fromLocationCode: "MAIN", toLocationCode: "SHOP", lines: [{ sku: "BAG-50", quantityThousandths: 1250 }], note: "Shelf stock" },
     });
     expect(body.intentId).toEqual(expect.any(String));
   });
@@ -59,7 +63,7 @@ describe("inventory transfer API", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(confirmInventoryTransfer("transfer-1", retryScope, [{ lineId: "line-1", quantityThousandths: 1250 }])).resolves.toEqual({ kind: "pending", reason: "manager review" });
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({ action: "confirmTransfer", transferId: "transfer-1", lines: [{ lineId: "line-1", quantityThousandths: 1250 }] });
+    expect(body).toMatchObject({ capabilityId: "inventory.confirmTransfer", input: { transferId: "transfer-1", lines: [{ lineId: "line-1", quantityThousandths: 1250 }] } });
     expect(body.intentId).toEqual(expect.any(String));
   });
 
@@ -94,7 +98,7 @@ describe("Vite inventory transfers panel", () => {
 
     expect((await screen.findByRole("status")).textContent).toContain("Transfer draft created.");
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ action: "createTransfer", lines: [{ sku: "BAG-50", quantityThousandths: 1250 }] });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "inventory.createTransfer", input: { lines: [{ sku: "BAG-50", quantityThousandths: 1250 }] } });
   });
 
   it("keeps approval-pending transfers visible without refreshing as completed", async () => {
@@ -233,7 +237,7 @@ describe("Vite inventory transfers panel", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("insufficient stock at source");
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({ action: "confirmTransfer", transferId: "transfer-1", lines: [{ lineId: "line-1", quantityThousandths: 1250 }] });
+    expect(body).toMatchObject({ capabilityId: "inventory.confirmTransfer", input: { transferId: "transfer-1", lines: [{ lineId: "line-1", quantityThousandths: 1250 }] } });
     expect(body.intentId).toEqual(expect.any(String));
   });
 
@@ -328,8 +332,8 @@ describe("Vite inventory transfers panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm entered quantities" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      action: "confirmTransfer",
-      lines: [{ lineId: "line-1", quantityThousandths: 1250 }, { lineId: "line-2", quantityThousandths: 2000 }],
+      capabilityId: "inventory.confirmTransfer",
+      input: { lines: [{ lineId: "line-1", quantityThousandths: 1250 }, { lineId: "line-2", quantityThousandths: 2000 }] },
     });
   });
 });

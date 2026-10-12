@@ -53,26 +53,18 @@ describe("inventory location and reservation API client", () => {
     expect(new Set(requests.map(({ body }) => body.intentId)).size).toBe(3);
   });
 
-  it("keeps the legacy inventory action route when disabled and creates a fresh intent per action", async () => {
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: { locationId: reservationId } }));
-    fetchMock
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { locationId: reservationId } }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { reservationId, availableAfterThousandths: 2500 } }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { released: true } }));
+  it("fails closed without sending legacy location or reservation writes when Go is disabled", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", false);
 
-    await createInventoryLocation({ code: "MAIN", name: "Main warehouse" }, retryScope);
-    await reserveInventoryStock({ sku: "ITEM-1", quantityThousandths: 500, reason: "Order allocation" }, retryScope);
-    await releaseInventoryReservation({ reservationId }, retryScope);
-
-    const requests = fetchMock.mock.calls.map(([url, init]) => ({
-      url,
-      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-    }));
-    expect(requests.map(({ url }) => url)).toEqual(Array(3).fill("/api/inventory"));
-    expect(requests.map(({ body }) => body.action)).toEqual(["createLocation", "reserveStock", "releaseReservation"]);
-    expect(new Set(requests.map(({ body }) => body.intentId)).size).toBe(3);
+    await expect(createInventoryLocation({ code: "MAIN", name: "Main warehouse" }, retryScope))
+      .rejects.toThrow("Go location and reservation writes are not enabled");
+    await expect(reserveInventoryStock({ sku: "ITEM-1", quantityThousandths: 500, reason: "Order allocation" }, retryScope))
+      .rejects.toThrow("Go location and reservation writes are not enabled");
+    await expect(releaseInventoryReservation({ reservationId }, retryScope))
+      .rejects.toThrow("Go location and reservation writes are not enabled");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("blocks selector rollback for any unresolved Go action in the same scope", async () => {
@@ -86,7 +78,7 @@ describe("inventory location and reservation API client", () => {
 
     vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", false);
     await expect(createInventoryLocation({ code: "MAIN", name: "Main warehouse" }, retryScope))
-      .rejects.toThrow("Restore Go inventory writes and retry it");
+      .rejects.toThrow("Go location and reservation writes are not enabled");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(saved.every((key) => localStorage.getItem(key) !== null)).toBe(true);
   });
@@ -126,11 +118,11 @@ describe("inventory location and reservation API client", () => {
 
     vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", false);
     await expect(createInventoryLocation({ code: "MAIN", name: "Main warehouse" }, retryScope))
-      .rejects.toThrow("Restore Go inventory writes and retry it");
+      .rejects.toThrow("Go location and reservation writes are not enabled");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks scope-less legacy routing after reload when a scoped Go marker is saved", async () => {
+  it("blocks scope-less writes when Go is disabled after a scoped Go marker is saved", async () => {
     const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("connection lost"));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", true);
@@ -142,7 +134,7 @@ describe("inventory location and reservation API client", () => {
     const reloaded = await import("./inventory-locations-reservations");
     vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", false);
     await expect(reloaded.createInventoryLocation({ code: "MAIN", name: "Main warehouse" }))
-      .rejects.toThrow("Restore Go inventory writes and retry it");
+      .rejects.toThrow("Go location and reservation writes are not enabled");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -176,8 +168,6 @@ describe("inventory location and reservation API client", () => {
       .find((key) => key.startsWith("chaste.inventory-location-reservation.intent.v1:") && !key.includes(":scope:"));
     expect(actionKey).toBeDefined();
     localStorage.setItem(actionKey!, "not-a-uuid");
-    vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", false);
-
     await expect(reserveInventoryStock(input, retryScope)).rejects.toThrow("retry marker is malformed");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(actionKey!)).toBe("not-a-uuid");

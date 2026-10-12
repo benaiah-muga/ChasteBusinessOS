@@ -484,7 +484,7 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Inventory" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Inventory" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("link", { name: "Open full inventory workspace" })).not.toBeNull();
+    expect(screen.queryByRole("link", { name: /inventory workspace/i })).toBeNull();
     expect(await screen.findByText("MUG-1")).not.toBeNull();
     expect(await screen.findAllByText("$20.00")).toHaveLength(2);
   });

@@ -3783,3 +3783,17 @@ new owners and the manifest shows zero legacy runtime paths.
      (HTTP 200). The page showed the updated component quantity, no legacy
      `/api/manufacturing` request occurred, and the browser error log was empty.
      This completes item 225.
+
+344. (Complete) Route Vite inventory item creation and adjustment, cycle-count
+     creation and transitions, location and reservation writes, and transfer
+     creation and confirmation through Go capabilities. Each client validates
+     output envelopes, preserves actor/org-scoped retry intents, and fails
+     closed when Go writes are disabled or unavailable. The authenticated
+     browser proof is recorded in item 345.
+
+345. (Runtime verified) On 2026-10-13, authenticated Vite `/inventory` created
+     a stock location through `POST /api/capabilities/execute` (HTTP 200). The
+     same focused browser proof exercised location and reservation creation and
+     reservation release through Go (HTTP 200). No legacy `POST /api/inventory`
+     request occurred, and the browser error log was empty. This completes
+     item 344.

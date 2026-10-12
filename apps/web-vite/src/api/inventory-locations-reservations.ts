@@ -90,13 +90,13 @@ async function postAction<T extends z.ZodType>(
 ): Promise<InventoryLocationActionResult> {
   const goEnabled = typeof __GO_INVENTORY_LOCATION_RESERVATION_WRITES__ !== "undefined"
     && __GO_INVENTORY_LOCATION_RESERVATION_WRITES__;
-  if (!goEnabled) await assertNoUnresolvedGoIntent(input, retryScope);
-  const intentId = goEnabled ? await stableIntentId(input, retryScope) : crypto.randomUUID();
+  if (!goEnabled) {
+    throw new InventoryLocationActionError(503, "Go location and reservation writes are not enabled. Ask an administrator to enable the inventory capability route.");
+  }
+  const intentId = await stableIntentId(input, retryScope);
   const { action, ...capabilityInput } = input;
-  const url = goEnabled ? "/api/capabilities/execute" : "/api/inventory";
-  const requestBody = goEnabled
-    ? { capabilityId: capabilityByAction[action], input: capabilityInput, intentId }
-    : { ...input, intentId };
+  const url = "/api/capabilities/execute";
+  const requestBody = { capabilityId: capabilityByAction[action], input: capabilityInput, intentId };
   let response: Response;
   try {
     response = await fetch(url, {
@@ -129,13 +129,13 @@ async function postAction<T extends z.ZodType>(
   if (response.ok) {
     const parsed = successSchema.safeParse(body);
     if (!parsed.success || response.status !== 200) throw unexpectedResponse(response.status);
-    if (goEnabled) await clearStableIntent(input, intentId, retryScope);
+    await clearStableIntent(input, intentId, retryScope);
     return { kind: "completed" };
   }
 
   const error = ErrorEnvelope.safeParse(body);
   if (error.success && [400, 401, 403, 422].includes(response.status)) {
-    if (goEnabled) await clearStableIntent(input, intentId, retryScope);
+    await clearStableIntent(input, intentId, retryScope);
     const message = response.status === 401
       ? "Your session has ended. Sign in again to continue."
       : response.status === 403
@@ -263,37 +263,6 @@ async function retryIntentKeys(
 async function digest(value: string): Promise<string> {
   const valueDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(valueDigest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function assertNoUnresolvedGoIntent(input: InventoryLocationAction, scope?: InventoryLocationRetryScope): Promise<void> {
-  const keys = await retryIntentKeys(input, scope);
-  const memoryActive = keys.scopeMemoryKey ? activeRetryIntents.get(keys.scopeMemoryKey) : undefined;
-  if (!keys.scopeStorageKey && !keys.storageKey) {
-    if (memoryActive || retryIntents.size > 0 || activeRetryIntents.size > 0) {
-      throw new InventoryLocationActionError(0, "A Go inventory action is unresolved. Restore Go inventory writes and retry it before using the legacy route.");
-    }
-    try {
-      for (let index = 0; index < localStorage.length; index += 1) {
-        if (localStorage.key(index)?.startsWith(retryIntentPrefix)) {
-          throw new InventoryLocationActionError(0, "A Go inventory action is unresolved. Restore Go inventory writes and retry it before using the legacy route.");
-        }
-      }
-    } catch (error) {
-      if (error instanceof InventoryLocationActionError) throw error;
-      throw new InventoryLocationActionError(0, "A saved inventory retry marker is malformed or unavailable. Verify the inventory action before retrying.");
-    }
-    return;
-  }
-  try {
-    const storedActive = keys.scopeStorageKey ? parseActiveGoIntent(localStorage.getItem(keys.scopeStorageKey)) : null;
-    const storedAction = keys.storageKey ? parseStoredIntentId(localStorage.getItem(keys.storageKey)) : null;
-    if (memoryActive || storedActive || storedAction) {
-      throw new InventoryLocationActionError(0, "A Go inventory action is unresolved. Restore Go inventory writes and retry it before using the legacy route.");
-    }
-  } catch (error) {
-    if (error instanceof InventoryLocationActionError) throw error;
-    throw new InventoryLocationActionError(0, "A saved inventory retry marker is malformed or unavailable. Verify the inventory action before retrying.");
-  }
 }
 
 function parseStoredIntentId(value: string | null): string | null {

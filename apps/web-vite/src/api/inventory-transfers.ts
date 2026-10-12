@@ -120,7 +120,7 @@ export async function resolveUnroutedInventoryTransferAttempt(retryScope: Invent
   }
 }
 
-async function createTransferAttempt(payload: InventoryTransferAction, retryScope: InventoryTransferRetryScope, selectedGo: boolean): Promise<InventoryTransferAttempt> {
+async function createTransferAttempt(payload: InventoryTransferAction, retryScope: InventoryTransferRetryScope): Promise<InventoryTransferAttempt> {
   const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
   if (!scope.actorId || !scope.organizationId) {
     throw new InventoryTransferApiError(0, "Wait for your account and organization to finish loading before changing a stock transfer.");
@@ -145,10 +145,11 @@ async function createTransferAttempt(payload: InventoryTransferAction, retryScop
   }
   if (stored) {
     if (!stored.route) throw new InventoryTransferApiError(0, "An unresolved stock transfer has no recorded route, so its result cannot be retried safely. Check transfer history and contact an administrator before retrying.");
+    if (stored.route === "legacy") throw new InventoryTransferApiError(0, "A previous legacy stock transfer is unresolved. Check transfer history before creating or confirming another transfer.");
     return { storageKey, fingerprint, intentId: stored.intentId, route: stored.route };
   }
 
-  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID(), route: selectedGo ? "go" as const : "legacy" as const };
+  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID(), route: "go" as const };
   try {
     window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, route: attempt.route }));
     const persisted = parseTransferAttempt(window.localStorage.getItem(storageKey));
@@ -204,19 +205,19 @@ export type InventoryTransferWithLineIds = Omit<InventoryTransfer, "lines"> & {
 
 async function submit(payload: InventoryTransferAction, fallback: string, retryScope: InventoryTransferRetryScope): Promise<InventoryTransferActionResult> {
   const selectedGo = typeof __GO_INVENTORY_TRANSFER_WRITES__ !== "undefined" && __GO_INVENTORY_TRANSFER_WRITES__;
-  const attempt = await createTransferAttempt(payload, retryScope, selectedGo);
-  const useGo = attempt.route === "go";
+  if (!selectedGo) {
+    throw new InventoryTransferApiError(503, "Go inventory transfer writes are not enabled. Ask an administrator to enable the inventory capability route.");
+  }
+  const attempt = await createTransferAttempt(payload, retryScope);
   const { action, ...input } = payload;
-  const request = !useGo
-    ? { url: "/api/inventory", body: { ...payload, intentId: attempt.intentId } }
-    : {
-      url: "/api/capabilities/execute",
-      body: {
-        capabilityId: action === "createTransfer" ? "inventory.createTransfer" : "inventory.confirmTransfer",
-        input,
-        intentId: attempt.intentId,
-      },
-    };
+  const request = {
+    url: "/api/capabilities/execute",
+    body: {
+      capabilityId: action === "createTransfer" ? "inventory.createTransfer" : "inventory.confirmTransfer",
+      input,
+      intentId: attempt.intentId,
+    },
+  };
 
   let response: Response;
   try {
@@ -245,7 +246,7 @@ async function submit(payload: InventoryTransferAction, fallback: string, retryS
     const failure = failureEnvelope.safeParse(body);
     const legacy = legacyFailure.safeParse(body);
     const message = failure.success ? failure.data.error : legacy.success ? legacy.data.error : fallback;
-    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429 && !(useGo && response.status === 404)) {
+    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429 && response.status !== 404) {
       clearTransferAttempt(attempt);
     }
     throw new InventoryTransferApiError(response.status, message);

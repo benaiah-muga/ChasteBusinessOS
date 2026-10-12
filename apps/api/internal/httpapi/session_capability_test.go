@@ -103,6 +103,26 @@ func TestSessionCapabilityHandlerBuildsClaimsFromResolvedSession(t *testing.T) {
 	}
 }
 
+func TestSessionCapabilityHandlerDispatchesInventoryBarcodeLookupThroughExecutor(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions = map[string]bool{"inventory.read": true}
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"item":{"sku":"MUG-1","name":"Ceramic mug"}}`)}}
+	handler := NewSessionCapabilityHandler(resolver, executor, nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"inventory.lookupByBarcode","input":{"barcode":"MUG-CODE"}}`))
+
+	if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != "inventory.lookupByBarcode" {
+		t.Fatalf("status=%d calls=%d capability=%q body=%s", response.Code, executor.calls, executor.capID, response.Body.String())
+	}
+	if string(executor.input) != `{"barcode":"MUG-CODE"}` || executor.claims.OrganizationID != *identity.OrgID || executor.claims.Subject != identity.UserID {
+		t.Fatalf("input=%s claims=%+v, want session-scoped barcode lookup", executor.input, executor.claims)
+	}
+	if strings.TrimSpace(response.Body.String()) != `{"ok":true,"data":{"item":{"sku":"MUG-1","name":"Ceramic mug"}}}` {
+		t.Fatalf("body=%s, want the governed item lookup envelope", response.Body.String())
+	}
+}
+
 func TestSessionCapabilityHandlerLimitsLargeBodiesToMessageUploads(t *testing.T) {
 	t.Run("maximum upload envelope accepted", func(t *testing.T) {
 		identity := directTestIdentity()
