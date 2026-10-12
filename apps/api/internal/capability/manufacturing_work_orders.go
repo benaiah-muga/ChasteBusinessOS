@@ -643,7 +643,7 @@ func manufacturingLoadWorkOrder(ctx context.Context, tx pgx.Tx, orgID, workOrder
 		&workOrder.plannedQtyThousandths, &workOrder.producedQtyThousandths,
 		&workOrder.yieldPctThousandths, &workOrder.status)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("no work order %s", workOrderID)
+		return nil, manufacturingRefusal(fmt.Sprintf("no work order %s", workOrderID))
 	}
 	if err != nil {
 		return nil, err
@@ -700,13 +700,13 @@ func manufacturingApplyStockDelta(ctx context.Context, tx pgx.Tx, orgID, itemID 
 			SELECT item_id::text FROM lots WHERE id = $1::uuid AND org_id = $2::uuid`,
 			*lotID, orgID).Scan(&lotItemID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("lot %s does not exist in this organization", *lotID)
+			return manufacturingRefusal(fmt.Sprintf("lot %s does not exist in this organization", *lotID))
 		}
 		if err != nil {
 			return err
 		}
 		if lotItemID != itemID {
-			return fmt.Errorf("lot %s belongs to a different item; a lot cannot move another item's stock", *lotID)
+			return manufacturingRefusal(fmt.Sprintf("lot %s belongs to a different item; a lot cannot move another item's stock", *lotID))
 		}
 	}
 	onHand, err := inventoryStockOnHand(ctx, tx, orgID, itemID, nil)
@@ -714,7 +714,7 @@ func manufacturingApplyStockDelta(ctx context.Context, tx pgx.Tx, orgID, itemID 
 		return err
 	}
 	if onHand+quantityDelta < 0 {
-		return fmt.Errorf("cannot move %d thousandths of stock that is not there: only %d on hand for this item", -quantityDelta, onHand)
+		return manufacturingRefusal(fmt.Sprintf("cannot move %d thousandths of stock that is not there: only %d on hand for this item", -quantityDelta, onHand))
 	}
 	if locationID != nil {
 		atLocation, err := inventoryStockOnHand(ctx, tx, orgID, itemID, locationID)
@@ -722,7 +722,7 @@ func manufacturingApplyStockDelta(ctx context.Context, tx pgx.Tx, orgID, itemID 
 			return err
 		}
 		if atLocation+quantityDelta < 0 {
-			return fmt.Errorf("cannot move %d thousandths from this location: only %d on hand there", -quantityDelta, atLocation)
+			return manufacturingRefusal(fmt.Sprintf("cannot move %d thousandths from this location: only %d on hand there", -quantityDelta, atLocation))
 		}
 	}
 	var noteValue any
@@ -778,7 +778,7 @@ func manufacturingPostRun(ctx context.Context, tx pgx.Tx, orgID, actorType strin
 		return manufacturingRunPosting{}, err
 	}
 	if !hasBom {
-		return manufacturingRunPosting{}, fmt.Errorf(noBomMessage, assemblySKU)
+		return manufacturingRunPosting{}, manufacturingRefusal(fmt.Sprintf(noBomMessage, assemblySKU))
 	}
 	skuByItem, err := manufacturingSkuMap(ctx, tx, orgID)
 	if err != nil {
@@ -804,7 +804,7 @@ func manufacturingPostRun(ctx context.Context, tx pgx.Tx, orgID, actorType strin
 	}
 	check := manufacturingCheckAvailability(requirements, onHandByItem)
 	if !check.producible {
-		return manufacturingRunPosting{}, fmt.Errorf("insufficient stock: %s", manufacturingShortfallMessage(check.lines, skuByItem, shortfallUsesSKU))
+		return manufacturingRunPosting{}, manufacturingRefusal(fmt.Sprintf("insufficient stock: %s", manufacturingShortfallMessage(check.lines, skuByItem, shortfallUsesSKU)))
 	}
 	var outLotID *string
 	if lotCode != nil {
@@ -868,7 +868,7 @@ func manufacturingCreateWorkOrder(ctx context.Context, tx pgx.Tx, claims authbri
 		SELECT id::text FROM items WHERE org_id = $1::uuid AND sku = $2 LIMIT 1`,
 		orgID, input.AssemblySKU).Scan(&assemblyItemID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ManufacturingCreateWorkOrderOutput{}, fmt.Errorf("no item with SKU %s", input.AssemblySKU)
+		return ManufacturingCreateWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("no item with SKU %s", input.AssemblySKU))
 	}
 	if err != nil {
 		return ManufacturingCreateWorkOrderOutput{}, err
@@ -876,7 +876,7 @@ func manufacturingCreateWorkOrder(ctx context.Context, tx pgx.Tx, claims authbri
 	if _, hasBom, err := manufacturingScrapAdjustedRequirements(ctx, tx, orgID, assemblyItemID, input.PlannedQtyThousandths); err != nil {
 		return ManufacturingCreateWorkOrderOutput{}, err
 	} else if !hasBom {
-		return ManufacturingCreateWorkOrderOutput{}, fmt.Errorf("%s has no bill of materials; define one first", input.AssemblySKU)
+		return ManufacturingCreateWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("%s has no bill of materials; define one first", input.AssemblySKU))
 	}
 	number, err := manufacturingNextWorkOrderNumber(ctx, tx, orgID)
 	if err != nil {
@@ -903,14 +903,14 @@ func manufacturingReleaseWorkOrder(ctx context.Context, tx pgx.Tx, orgID string,
 		return ManufacturingReleaseWorkOrderOutput{}, err
 	}
 	if workOrder.status != "draft" {
-		return ManufacturingReleaseWorkOrderOutput{}, fmt.Errorf("work order #%d is %s; only drafts can be released", workOrder.number, workOrder.status)
+		return ManufacturingReleaseWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("work order #%d is %s; only drafts can be released", workOrder.number, workOrder.status))
 	}
 	requirements, hasBom, err := manufacturingScrapAdjustedRequirements(ctx, tx, orgID, workOrder.assemblyItemID, workOrder.plannedQtyThousandths)
 	if err != nil {
 		return ManufacturingReleaseWorkOrderOutput{}, err
 	}
 	if !hasBom {
-		return ManufacturingReleaseWorkOrderOutput{}, fmt.Errorf("work order #%d: its bill of materials was deleted", workOrder.number)
+		return ManufacturingReleaseWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("work order #%d: its bill of materials was deleted", workOrder.number))
 	}
 	onHandByItem := make(map[string]int64, len(requirements))
 	for _, requirement := range requirements {
@@ -936,7 +936,7 @@ func manufacturingReleaseWorkOrder(ctx context.Context, tx pgx.Tx, orgID string,
 			}
 			skus = append(skus, sku)
 		}
-		return ManufacturingReleaseWorkOrderOutput{}, fmt.Errorf("cannot release: components short of stock (%s)", strings.Join(skus, ", "))
+		return ManufacturingReleaseWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("cannot release: components short of stock (%s)", strings.Join(skus, ", ")))
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE work_orders SET status = 'released', released_at = $2 WHERE id = $1::uuid`,
@@ -952,13 +952,13 @@ func manufacturingCancelWorkOrder(ctx context.Context, tx pgx.Tx, orgID string, 
 		return ManufacturingCancelWorkOrderOutput{}, err
 	}
 	if workOrder.status == "completed" {
-		return ManufacturingCancelWorkOrderOutput{}, fmt.Errorf("work order #%d is completed and cannot be cancelled; use reverseProductionRun", workOrder.number)
+		return ManufacturingCancelWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("work order #%d is completed and cannot be cancelled; use reverseProductionRun", workOrder.number))
 	}
 	if workOrder.status == "cancelled" {
-		return ManufacturingCancelWorkOrderOutput{}, fmt.Errorf("work order #%d is already cancelled", workOrder.number)
+		return ManufacturingCancelWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("work order #%d is already cancelled", workOrder.number))
 	}
 	if workOrder.producedQtyThousandths > 0 {
-		return ManufacturingCancelWorkOrderOutput{}, fmt.Errorf("work order #%d has partial completions and cannot be cancelled; reverse them via manufacturing.reverseProductionRun first", workOrder.number)
+		return ManufacturingCancelWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("work order #%d has partial completions and cannot be cancelled; reverse them via manufacturing.reverseProductionRun first", workOrder.number))
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE work_orders SET status = 'cancelled', cancelled_at = $2 WHERE id = $1::uuid`,
@@ -975,11 +975,11 @@ func manufacturingCompleteWorkOrder(ctx context.Context, tx pgx.Tx, claims authb
 		return ManufacturingCompleteWorkOrderOutput{}, err
 	}
 	if workOrder.status != "released" {
-		return ManufacturingCompleteWorkOrderOutput{}, fmt.Errorf("work order #%d is %s; only released orders can complete", workOrder.number, workOrder.status)
+		return ManufacturingCompleteWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("work order #%d is %s; only released orders can complete", workOrder.number, workOrder.status))
 	}
 	remaining := workOrder.plannedQtyThousandths - workOrder.producedQtyThousandths
 	if input.QuantityThousandths > remaining {
-		return ManufacturingCompleteWorkOrderOutput{}, fmt.Errorf("completion exceeds plan: only %d thousandths remain on work order #%d", remaining, workOrder.number)
+		return ManufacturingCompleteWorkOrderOutput{}, manufacturingRefusal(fmt.Sprintf("completion exceeds plan: only %d thousandths remain on work order #%d", remaining, workOrder.number))
 	}
 	assemblySKU, err := manufacturingSkuByID(ctx, tx, orgID, workOrder.assemblyItemID)
 	if err != nil {
@@ -1056,7 +1056,7 @@ func manufacturingReverseProductionRun(ctx context.Context, tx pgx.Tx, claims au
 	}
 	rows.Close()
 	if len(runMovements) == 0 {
-		return ManufacturingReverseProductionRunOutput{}, fmt.Errorf("no production run found for %s", input.RunRef)
+		return ManufacturingReverseProductionRunOutput{}, manufacturingRefusal(fmt.Sprintf("no production run found for %s", input.RunRef))
 	}
 	// Net per item; removing produced goods must not drive stock negative.
 	netByItem := make(map[string]int64, len(runMovements))
@@ -1083,7 +1083,7 @@ func manufacturingReverseProductionRun(ctx context.Context, tx pgx.Tx, claims au
 		return ManufacturingReverseProductionRunOutput{}, err
 	}
 	if alreadyReversed {
-		return ManufacturingReverseProductionRunOutput{}, errors.New("this production run has already been reversed")
+		return ManufacturingReverseProductionRunOutput{}, manufacturingRefusal("this production run has already been reversed")
 	}
 	for _, itemID := range netItemIDs {
 		net := netByItem[itemID]
@@ -1095,7 +1095,7 @@ func manufacturingReverseProductionRun(ctx context.Context, tx pgx.Tx, claims au
 			return ManufacturingReverseProductionRunOutput{}, err
 		}
 		if net > onHand {
-			return ManufacturingReverseProductionRunOutput{}, errors.New("cannot reverse: produced units have already been consumed or sold")
+			return ManufacturingReverseProductionRunOutput{}, manufacturingRefusal("cannot reverse: produced units have already been consumed or sold")
 		}
 	}
 	restored := []ManufacturingConsumedComponent{}
@@ -1135,7 +1135,7 @@ func manufacturingProduceFromBom(ctx context.Context, tx pgx.Tx, claims authbrid
 		SELECT id::text FROM items WHERE org_id = $1::uuid AND sku = $2 LIMIT 1`,
 		orgID, input.AssemblySKU).Scan(&assemblyItemID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ManufacturingProduceFromBomOutput{}, fmt.Errorf("no item with SKU %s", input.AssemblySKU)
+		return ManufacturingProduceFromBomOutput{}, manufacturingRefusal(fmt.Sprintf("no item with SKU %s", input.AssemblySKU))
 	}
 	if err != nil {
 		return ManufacturingProduceFromBomOutput{}, err

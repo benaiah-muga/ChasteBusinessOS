@@ -3921,3 +3921,17 @@ new owners and the manifest shows zero legacy runtime paths.
      `/api/capabilities/execute` with HTTP 200. No `/api/hr` or `/api/time`
      requests or browser errors occurred. Typecheck, scoped lint, and 49 HR
      tests passed. This completes item 360.
+
+364. (Complete) Route all Vite Manufacturing reads and writes through Go's
+     authenticated capability executor. Remove client legacy route selectors,
+     preserve exact scoped retry intent and validated action data across reload,
+     and return expected business refusals as recoverable client errors.
+
+365. (Runtime verified) On 2026-10-13, the authenticated Vite browser loaded
+     Manufacturing reads and saved a BOM through Go capabilities. Aborting a
+     write showed a saved retry action; replay after reload sent the same input
+     and intent. An invalid assembly returned HTTP 422, cleared the terminal
+     attempt, and allowed a corrected BOM write. No `/api/manufacturing`
+     requests or browser errors occurred. The page suite passed 24 tests,
+     focused Vite API and Go handler checks passed, along with typecheck and
+     scoped lint. This completes item 364.

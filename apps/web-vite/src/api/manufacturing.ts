@@ -283,11 +283,8 @@ export type ManufacturingActionResult = { kind: "completed" } | { kind: "pending
 export function manufacturingActionRequest(
   action: ManufacturingWriteAction,
   intentId: string,
-  useGoDefineBom: boolean,
-  useGoWorkOrder = false,
-  useGoProduction = false,
 ): { url: string; body: Record<string, unknown> } {
-  if (useGoDefineBom && action.action === "defineBom") {
+  if (action.action === "defineBom") {
     return {
       url: "/api/capabilities/execute",
       body: {
@@ -297,7 +294,7 @@ export function manufacturingActionRequest(
       },
     };
   }
-  if (useGoDefineBom && action.action === "deleteBom") {
+  if (action.action === "deleteBom") {
     return {
       url: "/api/capabilities/execute",
       body: {
@@ -307,21 +304,21 @@ export function manufacturingActionRequest(
       },
     };
   }
-  if (useGoWorkOrder && ["createWorkOrder", "releaseWorkOrder", "completeWorkOrder", "cancelWorkOrder"].includes(action.action)) {
+  if (["createWorkOrder", "releaseWorkOrder", "completeWorkOrder", "cancelWorkOrder"].includes(action.action)) {
     const { action: actionName, ...input } = action;
     return {
       url: "/api/capabilities/execute",
       body: { capabilityId: `manufacturing.${actionName}`, input, intentId },
     };
   }
-  if (useGoProduction && action.action === "produceFromBom") {
+  if (action.action === "produceFromBom") {
     const { action: _action, ...input } = action;
     return { url: "/api/capabilities/execute", body: { capabilityId: "manufacturing.produceFromBom", input, intentId } };
   }
-  if (useGoProduction && action.action === "reverseProductionRun") {
+  if (action.action === "reverseProductionRun") {
     return { url: "/api/capabilities/execute", body: { capabilityId: "manufacturing.reverseProductionRun", input: { runRef: action.runId }, intentId } };
   }
-  return { url: "/api/manufacturing", body: { ...action, intentId } };
+  throw new ManufacturingApiError(0, "This manufacturing action is not supported by Go.");
 }
 
 export class ManufacturingApiError extends Error {
@@ -331,24 +328,22 @@ export class ManufacturingApiError extends Error {
   }
 }
 
-type ManufacturingRetryScope = { actorId: string | null; organizationId: string | null };
-type ManufacturingAttempt = { storageKey: string; fingerprint: string; intentId: string };
-const workOrderActions = new Set(["createWorkOrder", "releaseWorkOrder", "completeWorkOrder", "cancelWorkOrder"]);
-const productionActions = new Set(["produceFromBom", "reverseProductionRun"]);
-const exactGoWriteActions = new Set(["defineBom", "deleteBom", ...workOrderActions, ...productionActions]);
+export type ManufacturingRetryScope = { actorId: string | null; organizationId: string | null };
+type ManufacturingAttempt = { storageKey: string; fingerprint: string; intentId: string; action: ManufacturingWriteAction };
 const manufacturingAttemptPrefix = "chaste:manufacturing-work-order-attempt:";
 
-function parseManufacturingAttempt(value: string | null): { fingerprint: string; intentId: string } | null {
+function parseManufacturingAttempt(value: string | null): { fingerprint: string; intentId: string; action: ManufacturingWriteAction } | null {
   if (value === null) return null;
   try {
     const parsed: unknown = JSON.parse(value);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("invalid saved manufacturing attempt");
-    const attempt = parsed as { fingerprint?: unknown; intentId?: unknown };
+    const attempt = parsed as { fingerprint?: unknown; intentId?: unknown; action?: unknown };
+    const action = WriteActionSchema.safeParse(attempt.action);
     if (
       typeof attempt.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(attempt.fingerprint) ||
-      typeof attempt.intentId !== "string" || !z.string().uuid().safeParse(attempt.intentId).success
+      typeof attempt.intentId !== "string" || !z.string().uuid().safeParse(attempt.intentId).success || !action.success
     ) throw new Error("invalid saved manufacturing attempt");
-    return { fingerprint: attempt.fingerprint, intentId: attempt.intentId };
+    return { fingerprint: attempt.fingerprint, intentId: attempt.intentId, action: action.data };
   } catch { throw new Error("invalid saved manufacturing attempt"); }
 }
 
@@ -371,49 +366,46 @@ async function createManufacturingAttempt(action: ManufacturingWriteAction, scop
     throw new ManufacturingApiError(0, "Manufacturing retry protection is unavailable. Check browser security settings and try again.");
   }
   const storageKey = `${manufacturingAttemptPrefix}${scopeDigest}`;
-  let stored: { fingerprint: string; intentId: string } | null;
+  let stored: { fingerprint: string; intentId: string; action: ManufacturingWriteAction } | null;
   try { stored = parseManufacturingAttempt(window.localStorage.getItem(storageKey)); }
   catch { throw new ManufacturingApiError(0, "Enable browser storage before changing manufacturing data so an uncertain action can be retried safely."); }
+  if (stored) {
+    try {
+      const savedFingerprint = await manufacturingDigest(JSON.stringify({ ...canonicalScope, action: stored.action }));
+      if (savedFingerprint !== stored.fingerprint) throw new Error("saved manufacturing attempt does not match its action");
+    } catch {
+      throw new ManufacturingApiError(0, "Saved manufacturing retry state is invalid. Do not submit another action until it is reviewed.");
+    }
+  }
   if (stored && stored.fingerprint !== fingerprint) {
     throw new ManufacturingApiError(0, "A previous manufacturing result is unresolved. Retry that exact action or check production history before changing it.");
   }
-  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
-  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+  if (stored) return { storageKey, fingerprint, intentId: stored.intentId, action: stored.action };
+  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID(), action };
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+    window.localStorage.setItem(storageKey, JSON.stringify({ action, fingerprint, intentId: attempt.intentId }));
     const persisted = parseManufacturingAttempt(window.localStorage.getItem(storageKey));
-    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
+    if (!persisted || persisted.fingerprint !== fingerprint || JSON.stringify(persisted.action) !== JSON.stringify(action)) throw new Error("saved attempt did not persist");
     return { ...attempt, intentId: persisted.intentId };
   } catch {
     throw new ManufacturingApiError(0, "Enable browser storage before changing manufacturing data so an uncertain action can be retried safely.");
   }
 }
 
-async function assertNoUnresolvedManufacturingAttempt(scope?: ManufacturingRetryScope): Promise<void> {
-  const actorId = scope?.actorId?.trim() ?? "";
-  const organizationId = scope?.organizationId?.trim() ?? "";
+export async function getPendingManufacturingAction(scope: ManufacturingRetryScope): Promise<ManufacturingWriteAction | null> {
+  const actorId = scope.actorId?.trim() ?? "";
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!actorId || !organizationId) return null;
   try {
-    if (actorId && organizationId) {
-      const scopeDigest = await manufacturingDigest(JSON.stringify({ actorId, organizationId }));
-      if (parseManufacturingAttempt(window.localStorage.getItem(`${manufacturingAttemptPrefix}${scopeDigest}`))) {
-        throw new ManufacturingApiError(0, "A previous manufacturing result is unresolved. Restore Go manufacturing writes and retry that exact action before using the legacy route.");
-      }
-      return;
-    }
-
-    let hasUnscopedMarker = false;
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      if (window.localStorage.key(index)?.startsWith(manufacturingAttemptPrefix)) {
-        hasUnscopedMarker = true;
-        break;
-      }
-    }
-    if (hasUnscopedMarker) {
-      throw new ManufacturingApiError(0, "A previous manufacturing result may be unresolved. Wait for your account and organization to load, then restore Go manufacturing writes and retry it.");
-    }
-  } catch (error) {
-    if (error instanceof ManufacturingApiError) throw error;
-    throw new ManufacturingApiError(0, "Enable browser storage before changing manufacturing data so an uncertain action cannot be routed through the legacy service.");
+    const scopeDigest = await manufacturingDigest(JSON.stringify({ actorId, organizationId }));
+    const storageKey = `${manufacturingAttemptPrefix}${scopeDigest}`;
+    const stored = parseManufacturingAttempt(window.localStorage.getItem(storageKey));
+    if (!stored) return null;
+    const fingerprint = await manufacturingDigest(JSON.stringify({ actorId, organizationId, action: stored.action }));
+    if (fingerprint !== stored.fingerprint) throw new Error("saved manufacturing attempt does not match its action");
+    return stored.action;
+  } catch {
+    throw new ManufacturingApiError(0, "Saved manufacturing retry state is invalid or unavailable. Do not submit another action until it is reviewed.");
   }
 }
 
@@ -467,27 +459,19 @@ export async function fetchManufacturingEnabled(signal?: AbortSignal): Promise<b
 }
 
 export async function fetchManufacturingReport(signal?: AbortSignal): Promise<ManufacturingReport> {
-  const useGo = typeof __GO_MANUFACTURING_PLANNING_READS__ !== "undefined" && __GO_MANUFACTURING_PLANNING_READS__;
-  const { response, body } = await request(
-    useGo ? "/api/capabilities/execute" : "/api/manufacturing",
-    useGo
-      ? { method: "POST", body: JSON.stringify({ capabilityId: "manufacturing.overviewReport", input: {}, intentId: crypto.randomUUID() }) }
-      : {},
-    signal,
-  );
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "manufacturing.overviewReport", input: {}, intentId: crypto.randomUUID() }),
+  }, signal);
   if (response.status === 202) {
     throw new ManufacturingApiError(202, "The manufacturing report unexpectedly requires approval. No result was returned.");
   }
   if (!response.ok) {
     throw new ManufacturingApiError(response.status, messageFor(response.status, body, "Could not load manufacturing records."));
   }
-  let reportBody: unknown = body;
-  if (useGo) {
-    const envelope = EnvelopeSchema.safeParse(body);
-    if (!envelope.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected response.");
-    reportBody = envelope.data.data;
-  }
-  const parsed = ManufacturingReportSchema.safeParse(reportBody);
+  const envelope = EnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected response.");
+  const parsed = ManufacturingReportSchema.safeParse(envelope.data.data);
   if (!parsed.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned data in an unexpected format.");
   return parsed.data;
 }
@@ -499,33 +483,19 @@ export async function fetchManufacturingReport(signal?: AbortSignal): Promise<Ma
 export async function submitManufacturingAction(
   action: ManufacturingWriteAction,
   signal?: AbortSignal,
-  options: { useGoDefineBom?: boolean; useGoWorkOrders?: boolean; useGoProductionActions?: boolean; retryScope?: ManufacturingRetryScope } = {},
+  options: { retryScope?: ManufacturingRetryScope } = {},
 ): Promise<ManufacturingActionResult> {
   const parsed = WriteActionSchema.safeParse(action);
   if (!parsed.success) throw new ManufacturingApiError(0, "Check the production details and try again.");
-  const configuredForGo = typeof __GO_MANUFACTURING_DEFINE_BOM_SLICE__ !== "undefined" && __GO_MANUFACTURING_DEFINE_BOM_SLICE__;
-  const useGoDefineBom = (options.useGoDefineBom ?? configuredForGo) && (parsed.data.action === "defineBom" || parsed.data.action === "deleteBom");
-  const configuredWorkOrders = typeof __GO_MANUFACTURING_WORK_ORDER_WRITES__ !== "undefined" && __GO_MANUFACTURING_WORK_ORDER_WRITES__;
-  const useGoWorkOrders = (options.useGoWorkOrders ?? configuredWorkOrders) && workOrderActions.has(parsed.data.action);
-  const configuredProductionActions = typeof __GO_MANUFACTURING_PRODUCTION_WRITES__ !== "undefined" && __GO_MANUFACTURING_PRODUCTION_WRITES__;
-  const useGoProductionActions = (options.useGoProductionActions ?? configuredProductionActions) && productionActions.has(parsed.data.action);
-  const useGoExactWrite = useGoDefineBom || useGoWorkOrders || useGoProductionActions;
-  if (!useGoExactWrite && exactGoWriteActions.has(parsed.data.action)) {
-    await assertNoUnresolvedManufacturingAttempt(options.retryScope);
-  }
-  if (useGoProductionActions && parsed.data.action === "reverseProductionRun" && !z.string().uuid().safeParse(parsed.data.runId).success) {
+  if (parsed.data.action === "reverseProductionRun" && !z.string().uuid().safeParse(parsed.data.runId).success) {
     throw new ManufacturingApiError(0, "Select a production run with a valid ID before reversing it.");
   }
-  const attempt = useGoExactWrite
-    ? await createManufacturingAttempt(parsed.data, options.retryScope ?? { actorId: null, organizationId: null })
-    : null;
-  const intentId = attempt?.intentId ?? crypto.randomUUID();
-  const route = manufacturingActionRequest(parsed.data, intentId, useGoDefineBom, useGoWorkOrders, useGoProductionActions);
+  const attempt = await createManufacturingAttempt(parsed.data, options.retryScope ?? { actorId: null, organizationId: null });
+  const route = manufacturingActionRequest(parsed.data, attempt.intentId);
   const { response, body } = await request(route.url, {
     method: "POST",
     body: JSON.stringify(route.body),
   }, signal);
-  const goResponse = useGoExactWrite;
   if (response.status === 202) {
     const pending = PendingSchema.safeParse(body);
     if (!pending.success) throw new ManufacturingApiError(202, "The manufacturing service returned an unexpected approval response.");
@@ -533,23 +503,23 @@ export async function submitManufacturingAction(
   }
   if (!response.ok) {
     const error = new ManufacturingApiError(response.status, messageFor(response.status, body, "The production action could not be completed."));
-    if (attempt && response.status >= 400 && response.status < 500 && response.status !== 404 && response.status !== 408 && response.status !== 429) clearManufacturingAttempt(attempt);
+    if (response.status >= 400 && response.status < 500 && response.status !== 404 && response.status !== 408 && response.status !== 429) clearManufacturingAttempt(attempt);
     throw error;
   }
   const envelope = EnvelopeSchema.safeParse(body);
   if (!envelope.success) {
     throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected action response.");
   }
-  if (useGoWorkOrders && !(WorkOrderOutputSchemas[parsed.data.action as keyof typeof WorkOrderOutputSchemas]?.safeParse(envelope.data.data).success ?? false)) {
+  if (parsed.data.action in WorkOrderOutputSchemas && !(WorkOrderOutputSchemas[parsed.data.action as keyof typeof WorkOrderOutputSchemas]?.safeParse(envelope.data.data).success ?? false)) {
     throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected work order response.");
   }
-  if (goResponse && useGoProductionActions && !(ProductionOutputSchemas[parsed.data.action as keyof typeof ProductionOutputSchemas]?.safeParse(envelope.data.data).success ?? false)) {
+  if (parsed.data.action in ProductionOutputSchemas && !(ProductionOutputSchemas[parsed.data.action as keyof typeof ProductionOutputSchemas]?.safeParse(envelope.data.data).success ?? false)) {
     throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected production response.");
   }
-  if (useGoDefineBom && parsed.data.action === "defineBom" && !DefineBomOutputSchema.safeParse(envelope.data.data).success) {
+  if (parsed.data.action === "defineBom" && !DefineBomOutputSchema.safeParse(envelope.data.data).success) {
     throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected BOM definition response.");
   }
-  if (useGoDefineBom && parsed.data.action === "deleteBom" && !DeleteBomOutputSchema.safeParse(envelope.data.data).success) {
+  if (parsed.data.action === "deleteBom" && !DeleteBomOutputSchema.safeParse(envelope.data.data).success) {
     throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected BOM deletion response.");
   }
   if (attempt) clearManufacturingAttempt(attempt);
@@ -567,14 +537,9 @@ async function postRead<TInput extends object, T>(
 ): Promise<T> {
   const input = inputSchema.safeParse(payload);
   if (!input.success) throw new ManufacturingApiError(0, "Check the production details and try again.");
-  const useGo = typeof __GO_MANUFACTURING_PLANNING_READS__ !== "undefined" && __GO_MANUFACTURING_PLANNING_READS__;
-  const path = useGo ? "/api/capabilities/execute" : "/api/manufacturing";
-  const requestBody = useGo
-    ? { capabilityId: `manufacturing.${action}`, input: input.data, intentId: crypto.randomUUID() }
-    : { action, ...input.data, intentId: crypto.randomUUID() };
-  const { response, body } = await request(path, {
+  const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify({ capabilityId: `manufacturing.${action}`, input: input.data, intentId: crypto.randomUUID() }),
   }, signal);
   if (response.status === 202) {
     throw new ManufacturingApiError(202, "The manufacturing planning read unexpectedly requires approval. No result was returned.");
@@ -582,7 +547,7 @@ async function postRead<TInput extends object, T>(
   if (!response.ok) throw new ManufacturingApiError(response.status, messageFor(response.status, body, fallback));
   const envelope = EnvelopeSchema.safeParse(body);
   if (!envelope.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected response.");
-  const outputSchema = useGo && action === "costPreview" && goSchema ? goSchema : schema;
+  const outputSchema = action === "costPreview" && goSchema ? goSchema : schema;
   const parsed = outputSchema.safeParse(envelope.data.data);
   if (!parsed.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned data in an unexpected format.");
   return parsed.data;

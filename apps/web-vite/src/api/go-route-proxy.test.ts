@@ -61,10 +61,6 @@ import {
   goPurchasingWorkflowReadsFromEnv,
   goPurchasingIntelReadsFromEnv,
   goPurchasingSourcingWritesFromEnv,
-  goManufacturingWorkOrderWritesFromEnv,
-  goManufacturingDefineBomSliceFromEnv,
-  goManufacturingProductionWritesFromEnv,
-  goManufacturingPlanningReadsFromEnv,
   goSalesOrderReadsFromEnv,
   goSalesOrderWritesFromEnv,
   goHrExpensesFromEnv,
@@ -719,40 +715,6 @@ describe("purchase sourcing Go selector", () => {
     expect(goPurchasingSourcingWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_SOURCING_WRITES: "1" })).toBe(true);
     expect(goPurchasingSourcingWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingSourcingWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_SOURCING_WRITES: "1" })).toBe(false);
-  });
-});
-
-describe("manufacturing work order Go selector", () => {
-  it("requires both the work order selector and session capability route", () => {
-    expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES: "1" })).toBe(true);
-    expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES: "1" })).toBe(false);
-  });
-});
-
-describe("manufacturing BOM definition Go selector", () => {
-  it("requires the BOM selector and session capability route, with selector-off rollback", () => {
-    expect(goManufacturingDefineBomSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE: "1" })).toBe(true);
-    expect(goManufacturingDefineBomSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE: "0" })).toBe(false);
-    expect(goManufacturingDefineBomSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE: "1" })).toBe(false);
-  });
-});
-
-describe("manufacturing production Go selector", () => {
-  it("requires both the production selector and session capability route", () => {
-    expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES: "1" })).toBe(true);
-    expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES: "0" })).toBe(false);
-    expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES: "1" })).toBe(false);
-  });
-});
-
-describe("manufacturing planning read Go selector", () => {
-  it("requires both planning reads and the session capability route", () => {
-    expect(goManufacturingPlanningReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_PLANNING_READS: "1" })).toBe(true);
-    expect(goManufacturingPlanningReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_PLANNING_READS: "0" })).toBe(false);
-    expect(goManufacturingPlanningReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goManufacturingPlanningReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_PLANNING_READS: "1" })).toBe(false);
   });
 });
 

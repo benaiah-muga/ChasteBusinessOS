@@ -103,6 +103,26 @@ func TestSessionCapabilityHandlerBuildsClaimsFromResolvedSession(t *testing.T) {
 	}
 }
 
+func TestSessionCapabilityHandlerMapsManufacturingDomainRefusalTo422(t *testing.T) {
+	request := directCapabilityRequest(http.MethodPost, `{"capabilityId":"manufacturing.produceFromBom","input":{"assemblySku":"MISSING","quantityThousandths":1000},"intentId":"manufacturing-domain-refusal"}`)
+
+	refusal := httptest.NewRecorder()
+	NewSessionCapabilityHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, &fakeDirectCapabilityExecutor{
+		err: capability.ManufacturingDomainError("no item with SKU MISSING"),
+	}, nil).ServeHTTP(refusal, request)
+	if refusal.Code != http.StatusUnprocessableEntity || refusal.Body.String() != "{\"error\":\"no item with SKU MISSING\"}\n" {
+		t.Fatalf("typed manufacturing refusal status=%d body=%s, want 422 with actionable error", refusal.Code, refusal.Body.String())
+	}
+
+	internal := httptest.NewRecorder()
+	NewSessionCapabilityHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, &fakeDirectCapabilityExecutor{
+		err: errors.New("database connection failed"),
+	}, nil).ServeHTTP(internal, directCapabilityRequest(http.MethodPost, `{"capabilityId":"manufacturing.produceFromBom","input":{"assemblySku":"MISSING","quantityThousandths":1000},"intentId":"manufacturing-internal-error"}`))
+	if internal.Code != http.StatusInternalServerError {
+		t.Fatalf("internal manufacturing error status=%d body=%s, want 500", internal.Code, internal.Body.String())
+	}
+}
+
 func TestSessionCapabilityHandlerDispatchesInventoryBarcodeLookupThroughExecutor(t *testing.T) {
 	identity := directTestIdentity()
 	identity.Permissions = map[string]bool{"inventory.read": true}
@@ -493,6 +513,42 @@ func TestSessionCapabilityHandlerRejectsInvalidAuthOriginAndCallerClaims(t *test
 		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"accounting.reverseEntry","input":{}}`))
 		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "credit note requires invoice workflow") {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("creator domain refusals use the Vite refusal envelope", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{err: capability.CreatorDomainError("proposal lacks valid isolated candidate evidence")}
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"creator.stageCandidate","input":{}}`))
+		var refusal struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil {
+			t.Fatalf("decode refusal: %v body=%s", err, response.Body.String())
+		}
+		if response.Code != http.StatusUnprocessableEntity || refusal.OK || refusal.Error != "proposal lacks valid isolated candidate evidence" ||
+			strings.TrimSpace(response.Body.String()) != `{"ok":false,"error":"proposal lacks valid isolated candidate evidence"}` {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("creator review conflicts use the Vite refusal envelope", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{err: capability.CreatorDomainError("conflict: proposal already decided or no longer in review")}
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"creator.reviewProposal","input":{"proposalId":"11111111-1111-4111-8111-111111111111","decision":"approved"}}`))
+		var refusal struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil {
+			t.Fatalf("decode refusal: %v body=%s", err, response.Body.String())
+		}
+		if response.Code != http.StatusUnprocessableEntity || refusal.OK || !strings.HasPrefix(refusal.Error, "conflict:") ||
+			strings.TrimSpace(response.Body.String()) != `{"ok":false,"error":"conflict: proposal already decided or no longer in review"}` {
+			t.Fatalf("status=%d refusal=%+v body=%s", response.Code, refusal, response.Body.String())
 		}
 	})
 }

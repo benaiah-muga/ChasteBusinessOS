@@ -7,6 +7,7 @@ import {
   fetchManufacturingReport,
   fetchProductionCostPreview,
   fetchProductionFeasibility,
+  getPendingManufacturingAction,
   manufacturingActionRequest,
   submitManufacturingAction,
   type ManufacturingWriteAction,
@@ -87,7 +88,7 @@ describe("manufacturing API", () => {
   });
 
   it("validates the manufacturing report payload", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(report)));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: report })));
     const result = await fetchManufacturingReport();
     expect(result.boms[0]?.assemblySku).toBe("DESK-1");
     expect(result.workOrders[0]?.status).toBe("released");
@@ -95,8 +96,7 @@ describe("manufacturing API", () => {
     expect(result.lots[0]?.balanceThousandths).toBe(8_000);
   });
 
-  it("reads the overview report through the selected Go capability with strict schema validation", async () => {
-    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+  it("reads the overview report through Go with strict schema validation", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: report }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchManufacturingReport()).resolves.toEqual(report);
@@ -108,8 +108,7 @@ describe("manufacturing API", () => {
     });
   });
 
-  it("fails closed when the selected Go manufacturing report is unavailable", async () => {
-    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+  it("fails closed when the Go manufacturing report is unavailable", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "Go unavailable" }, { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchManufacturingReport()).rejects.toThrow("Go unavailable");
@@ -117,20 +116,19 @@ describe("manufacturing API", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
   });
 
-  it("rejects extra fields in the selected Go report payload", async () => {
-    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+  it("rejects extra fields in the Go report payload", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { ...report, unexpected: true } })));
     await expect(fetchManufacturingReport()).rejects.toThrow("unexpected format");
   });
 
   it("defaults missing collections so a sparse payload still renders", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ boms: report.boms })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { boms: report.boms } })));
     const result = await fetchManufacturingReport();
     expect(result).toEqual({ boms: report.boms, assemblies: [], workOrders: [], productionRuns: [], lots: [] });
   });
 
   it("rejects a report whose shapes drifted", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ...report, workOrders: [{ ...report.workOrders[0], createdAt: "not-a-date" }] })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { ...report, workOrders: [{ ...report.workOrders[0], createdAt: "not-a-date" }] } })));
     await expect(fetchManufacturingReport()).rejects.toBeInstanceOf(ManufacturingApiError);
   });
 
@@ -164,8 +162,7 @@ describe("manufacturing API", () => {
     await expect(fetchManufacturingEnabled()).resolves.toBe(true);
   });
 
-  it("routes planning reads through the selected Go capabilities", async () => {
-    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+  it("routes planning reads through Go capabilities", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: true, data: {
         producible: true,
@@ -206,29 +203,21 @@ describe("manufacturing API", () => {
     expect(requests.every(({ body }) => typeof body.intentId === "string")).toBe(true);
   });
 
-  it("uses the explicit legacy route when the module selector is rolled back", async () => {
-    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", false);
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: {
-      producible: true,
-      lines: [],
-      totalCostMinor: 0,
-      resultingAvgFinishedUnitCostMinor: 0,
-    } }));
+  it("keeps planning reads on Go when the capability is unavailable", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "Go unavailable" }, { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchProductionCostPreview("DESK-1", 2000)).resolves.toMatchObject({ producible: true });
+    await expect(fetchProductionCostPreview("DESK-1", 2000)).rejects.toThrow("Go unavailable");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/manufacturing");
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      action: "costPreview",
-      assemblySku: "DESK-1",
-      quantityThousandths: 2000,
+      capabilityId: "manufacturing.costPreview",
+      input: { assemblySku: "DESK-1", quantityThousandths: 2000 },
       intentId: expect.any(String),
     });
   });
 
   it("validates planning read inputs before sending a request", async () => {
-    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchProductionCostPreview("  ", 1000)).rejects.toThrow("Check the production details");
@@ -241,7 +230,6 @@ describe("manufacturing API", () => {
     [{ expectedGoodThousandths: 1000, producible: true, lines: [], totalCostMinor: 0, resultingAvgFinishedUnitCostMinor: 0 }],
     [{ plannedThousandths: 1000, producible: true, lines: [], totalCostMinor: 0, resultingAvgFinishedUnitCostMinor: 0 }],
   ])("requires planned and expected-good quantities in a Go cost preview response", async (data) => {
-    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchProductionCostPreview("DESK-1", 1000)).rejects.toThrow("unexpected format");
@@ -256,7 +244,6 @@ describe("manufacturing API", () => {
     [403, { error: "manufacturing.read missing" }, "You do not have permission to use manufacturing."],
     [404, { error: "capability unavailable" }, "capability unavailable"],
   ])("fails closed on Go planning read response %i without legacy fallback", async (status, body, expected) => {
-    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
     const fetchMock = stubSequenced([Response.json(body, { status })]);
     await expect(fetchProductionCostPreview("DESK-1", 1000)).rejects.toThrow(expected);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -276,100 +263,84 @@ describe("manufacturing API", () => {
       await expect(submitManufacturingAction(
         { action: "releaseWorkOrder", workOrderId: "10000000-0000-4000-8000-000000000001" },
         undefined,
-        { useGoWorkOrders: true, retryScope: scope },
+        { retryScope: scope },
       )).rejects.toThrow("Enable browser storage before changing manufacturing data");
       expect(fetchMock).not.toHaveBeenCalled();
       expect(window.localStorage.getItem(key)).toBe(marker);
     }
   });
 
-  it("blocks selector rollback to legacy after an uncertain Go manufacturing write", async () => {
-    const scope = { actorId: "actor-1", organizationId: "org-1" };
+  it("fails closed on Go write errors without attempting a legacy write", async () => {
     const action = { action: "createWorkOrder" as const, assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000 };
-    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("network"));
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "capability unavailable" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitManufacturingAction(action, undefined, { useGoWorkOrders: true, retryScope: scope }))
-      .rejects.toBeInstanceOf(ManufacturingApiError);
-    await expect(submitManufacturingAction(action, undefined, { useGoWorkOrders: false, retryScope: scope }))
-      .rejects.toThrow("Restore Go manufacturing writes and retry that exact action");
+    await expect(submitManufacturingAction(action, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } }))
+      .rejects.toMatchObject({ status: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
-  it("blocks selector rollback after Go 404 for BOM, work-order, and production writes", async () => {
-    const actions: ManufacturingWriteAction[] = [
-      { action: "defineBom", assemblySku: "DESK-1", expectedComponents: [], components: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] },
-      { action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: 1000, yieldPctThousandths: 1_000_000 },
-      { action: "produceFromBom", assemblySku: "DESK-1", quantityThousandths: 1000 },
-    ];
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "capability unavailable" }, { status: 404 }));
-    vi.stubGlobal("fetch", fetchMock);
-    for (const [index, action] of actions.entries()) {
-      const scope = { actorId: `actor-${index}`, organizationId: `org-${index}` };
-      const goOptions = { useGoDefineBom: true, useGoWorkOrders: true, useGoProductionActions: true, retryScope: scope };
-      const legacyOptions = { useGoDefineBom: false, useGoWorkOrders: false, useGoProductionActions: false, retryScope: scope };
-      await expect(submitManufacturingAction(action, undefined, goOptions)).rejects.toMatchObject({ status: 404 });
-      await expect(submitManufacturingAction(action, undefined, legacyOptions)).rejects.toThrow("Restore Go manufacturing writes and retry that exact action");
-    }
-
-    expect(fetchMock).toHaveBeenCalledTimes(actions.length);
-    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
-  });
-
-  it("blocks legacy manufacturing writes when scope is unavailable and any Go attempt is unresolved", async () => {
-    const scope = { actorId: "actor-1", organizationId: "org-1" };
-    const action = { action: "produceFromBom" as const, assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "LOT-1" };
-    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("network"));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(submitManufacturingAction(action, undefined, { useGoProductionActions: true, retryScope: scope }))
-      .rejects.toBeInstanceOf(ManufacturingApiError);
-    await expect(submitManufacturingAction(action, undefined, { useGoProductionActions: false }))
-      .rejects.toThrow("A previous manufacturing result may be unresolved");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
   it("preserves approval-pending writes and stamps a fresh intent id", async () => {
     const fetchMock = stubSequenced([Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 })]);
-    await expect(submitManufacturingAction({ action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] })).resolves.toEqual({ kind: "pending", reason: "Owner review" });
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { action: string; intentId: string };
-    expect(body.action).toBe("deleteBom");
+    await expect(submitManufacturingAction({ action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] }, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } })).resolves.toEqual({ kind: "pending", reason: "Owner review" });
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    expect(body.capabilityId).toBe("manufacturing.deleteBom");
+    expect(body.input).toEqual({ assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] });
     expect(body.intentId).toMatch(/^[0-9a-f-]{36}$/i);
   });
 
-  it("keeps deleteBom on the legacy route only when its Go BOM selector is off", async () => {
-    const fetchMock = stubSequenced([Response.json({ ok: true, data: {} })]);
-    await expect(submitManufacturingAction({ action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] }, undefined, {
-      useGoDefineBom: false,
-    })).resolves.toEqual({ kind: "completed" });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/manufacturing");
+  it("clears an expected Go domain refusal so a corrected action can proceed", async () => {
+    const fetchMock = stubSequenced([
+      Response.json({ error: "no item with SKU MISSING" }, { status: 422 }),
+      Response.json({ ok: true, data: { workOrderId: "33333333-3333-4333-8333-333333333333", number: 10, expectedGoodThousandths: 1000 } }),
+    ]);
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    await expect(submitManufacturingAction({ action: "produceFromBom", assemblySku: "MISSING", quantityThousandths: 1000 }, undefined, options))
+      .rejects.toMatchObject({ status: 422, message: "no item with SKU MISSING" });
+    await expect(submitManufacturingAction({ action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: 1000, yieldPctThousandths: 1_000_000 }, undefined, options))
+      .resolves.toEqual({ kind: "completed" });
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string; capabilityId: string });
+    expect(bodies.map(({ capabilityId }) => capabilityId)).toEqual(["manufacturing.produceFromBom", "manufacturing.createWorkOrder"]);
+    expect(bodies[0]?.intentId).not.toBe(bodies[1]?.intentId);
   });
 
-  it("keeps defineBom on the legacy route by default", async () => {
-    const fetchMock = stubSequenced([Response.json({ ok: true, data: { componentCount: 1 } })]);
-    await expect(submitManufacturingAction({
-      action: "defineBom",
-      assemblySku: "DESK-1",
-      expectedComponents: [],
-      components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
-    })).resolves.toEqual({ kind: "completed" });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/manufacturing");
+  it("recovers the exact persisted write after reload and retries with the same intent", async () => {
+    const action = { action: "produceFromBom" as const, assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "LOT-1" };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("network"))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: {
+        runRef: "33333333-3333-4333-8333-333333333333", producedThousandths: 2000, consumedComponents: [], costRolledUpMinor: 0,
+      } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitManufacturingAction(action, undefined, options)).rejects.toBeInstanceOf(ManufacturingApiError);
+
+    const recovered = await getPendingManufacturingAction(options.retryScope);
+    expect(recovered).toEqual(action);
+    await expect(submitManufacturingAction(recovered!, undefined, options)).resolves.toEqual({ kind: "completed" });
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { input: unknown; intentId: string });
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(await getPendingManufacturingAction(options.retryScope)).toBeNull();
   });
 
-  it.each([
-    { action: { action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: 1000, yieldPctThousandths: 1_000_000 }, expectedAction: "createWorkOrder" },
-    { action: { action: "produceFromBom", assemblySku: "DESK-1", quantityThousandths: 1000 }, expectedAction: "produceFromBom" },
-  ] as const)("keeps $expectedAction on legacy when its Go selector is off", async ({ action, expectedAction }) => {
-    const fetchMock = stubSequenced([Response.json({ ok: true, data: {} })]);
-    await expect(submitManufacturingAction(action, undefined, {
-      useGoDefineBom: false,
-      useGoWorkOrders: false,
-      useGoProductionActions: false,
-      retryScope: { actorId: "actor-1", organizationId: "org-1" },
-    })).resolves.toEqual({ kind: "completed" });
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/manufacturing"]);
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ action: expectedAction });
+  it("rejects a tampered persisted action instead of reusing its intent", async () => {
+    const scope = { actorId: "actor-1", organizationId: "org-1" };
+    const intended = { action: "produceFromBom" as const, assemblySku: "DESK-1", quantityThousandths: 1000 };
+    const altered = { action: "produceFromBom" as const, assemblySku: "OTHER-1", quantityThousandths: 1000 };
+    const scopeHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(scope)));
+    const scopeDigest = Array.from(new Uint8Array(scopeHash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const fingerprintHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ ...scope, action: intended })));
+    const fingerprint = Array.from(new Uint8Array(fingerprintHash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    window.localStorage.setItem(`chaste:manufacturing-work-order-attempt:${scopeDigest}`, JSON.stringify({
+      action: altered, fingerprint, intentId: "33333333-3333-4333-8333-333333333333",
+    }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPendingManufacturingAction(scope)).rejects.toThrow("Saved manufacturing retry state is invalid");
+    await expect(submitManufacturingAction(intended, undefined, { retryScope: scope })).rejects.toThrow("Saved manufacturing retry state is invalid");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("maps all four work order actions to their Go capability envelopes", () => {
@@ -380,11 +351,10 @@ describe("manufacturing API", () => {
       [{ action: "cancelWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111" }, "manufacturing.cancelWorkOrder", { workOrderId: "11111111-1111-4111-8111-111111111111" }],
     ] as const;
     for (const [action, capabilityId, input] of cases) {
-      expect(manufacturingActionRequest(action, "intent-12345678901234567890", false, true)).toEqual({
+      expect(manufacturingActionRequest(action, "intent-12345678901234567890")).toEqual({
         url: "/api/capabilities/execute",
         body: { capabilityId, input, intentId: "intent-12345678901234567890" },
       });
-      expect(manufacturingActionRequest(action, "intent-12345678901234567890", false)).toMatchObject({ url: "/api/manufacturing" });
     }
   });
 
@@ -392,7 +362,6 @@ describe("manufacturing API", () => {
     expect(manufacturingActionRequest(
       { action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] },
       "intent-12345678901234567890",
-      true,
     )).toEqual({
       url: "/api/capabilities/execute",
       body: {
@@ -411,7 +380,6 @@ describe("manufacturing API", () => {
       components: [],
     } })]);
     await expect(submitManufacturingAction({ action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] }, undefined, {
-      useGoDefineBom: true,
       retryScope: { actorId: "actor-1", organizationId: "org-1" },
     })).resolves.toEqual({ kind: "completed" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -430,21 +398,8 @@ describe("manufacturing API", () => {
   ])("rejects an incomplete or invalid Go deleteBom inverse snapshot", async (data) => {
     const fetchMock = stubSequenced([Response.json({ ok: true, data })]);
     await expect(submitManufacturingAction({ action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] }, undefined, {
-      useGoDefineBom: true,
       retryScope: { actorId: "actor-1", organizationId: "org-1" },
     })).rejects.toThrow("unexpected BOM deletion response");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
-  });
-
-  it("keeps deleteBom pinned to Go after 404 and blocks selector rollback", async () => {
-    const fetchMock = stubSequenced([Response.json({ error: "capability unavailable" }, { status: 404 })]);
-    const action = { action: "deleteBom" as const, assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] };
-    const scope = { actorId: "actor-1", organizationId: "org-1" };
-    await expect(submitManufacturingAction(action, undefined, { useGoDefineBom: true, retryScope: scope }))
-      .rejects.toMatchObject({ status: 404 });
-    await expect(submitManufacturingAction(action, undefined, { useGoDefineBom: false, retryScope: scope }))
-      .rejects.toThrow("Restore Go manufacturing writes and retry that exact action");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
@@ -452,7 +407,6 @@ describe("manufacturing API", () => {
   it("fails closed on an unexpected Go deleteBom response without legacy fallback", async () => {
     const fetchMock = stubSequenced([Response.json({ ok: true, data: { assemblySku: "DESK-1", removedCount: "1", components: [] } })]);
     await expect(submitManufacturingAction({ action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] }, undefined, {
-      useGoDefineBom: true,
       retryScope: { actorId: "actor-1", organizationId: "org-1" },
     })).rejects.toThrow("unexpected BOM deletion response");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -463,7 +417,6 @@ describe("manufacturing API", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     await expect(submitManufacturingAction({ action: "cancelWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111" }, undefined, {
-      useGoWorkOrders: true,
       retryScope: { actorId: null, organizationId: "org-1" },
     })).rejects.toThrow("Wait for your account and organization");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -472,13 +425,13 @@ describe("manufacturing API", () => {
   it("maps BOM production and run reversal to their Go capability inputs", () => {
     expect(manufacturingActionRequest({
       action: "produceFromBom", assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "LOT-1",
-    }, "intent-12345678901234567890", false, false, true)).toEqual({
+    }, "intent-12345678901234567890")).toEqual({
       url: "/api/capabilities/execute",
       body: { capabilityId: "manufacturing.produceFromBom", input: { assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "LOT-1" }, intentId: "intent-12345678901234567890" },
     });
     expect(manufacturingActionRequest({
       action: "reverseProductionRun", runId: "33333333-3333-4333-8333-333333333333",
-    }, "intent-12345678901234567890", false, false, true)).toEqual({
+    }, "intent-12345678901234567890")).toEqual({
       url: "/api/capabilities/execute",
       body: { capabilityId: "manufacturing.reverseProductionRun", input: { runRef: "33333333-3333-4333-8333-333333333333" }, intentId: "intent-12345678901234567890" },
     });
@@ -486,7 +439,7 @@ describe("manufacturing API", () => {
 
   it("keeps BOM production identity through uncertain and pending outcomes and validates Go output", async () => {
     const action = { action: "produceFromBom" as const, assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "LOT-1" };
-    const options = { useGoProductionActions: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("network"))
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Supervisor review" }, { status: 202 }))
@@ -510,7 +463,7 @@ describe("manufacturing API", () => {
       removedProduced: [{ sku: "DESK-1", quantityThousandths: 2000 }],
     } })]);
     const action = { action: "reverseProductionRun" as const, runId: "33333333-3333-4333-8333-333333333333" };
-    const options = { useGoProductionActions: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
     await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       capabilityId: "manufacturing.reverseProductionRun", input: { runRef: action.runId },
@@ -525,7 +478,7 @@ describe("manufacturing API", () => {
 
   it("rejects malformed Go production output and keeps the unresolved retry identity", async () => {
     const action = { action: "reverseProductionRun" as const, runId: "33333333-3333-4333-8333-333333333333" };
-    const options = { useGoProductionActions: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
     const fetchMock = stubSequenced([Response.json({ ok: true, data: { reversedMovements: 3 } })]);
     await expect(submitManufacturingAction(action, undefined, options)).rejects.toThrow("unexpected production response");
     await expect(submitManufacturingAction({ action: "produceFromBom", assemblySku: "DESK-1", quantityThousandths: 1000 }, undefined, options)).rejects.toThrow("previous manufacturing result is unresolved");
@@ -548,7 +501,7 @@ describe("manufacturing API", () => {
       Response.json({ error: "capability unavailable" }, { status: 404 }),
       Response.json({ ok: true, data }),
     ]);
-    const options = { useGoProductionActions: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
 
     await expect(submitManufacturingAction(action, undefined, options)).rejects.toMatchObject({ status: 404 });
     await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
@@ -561,7 +514,7 @@ describe("manufacturing API", () => {
 
   it("retains the exact Go intent through network uncertainty and approval pending, then clears on success", async () => {
     const action = { action: "createWorkOrder" as const, assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000 };
-    const options = { useGoWorkOrders: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("network"))
       .mockResolvedValueOnce(Response.json({
@@ -611,7 +564,7 @@ describe("manufacturing API", () => {
       Response.json({ error: "capability unavailable" }, { status: 404 }),
       Response.json({ ok: true, data }),
     ]);
-    const options = { useGoWorkOrders: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
 
     await expect(submitManufacturingAction(action, undefined, options)).rejects.toMatchObject({ status: 404 });
     await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
@@ -628,7 +581,7 @@ describe("manufacturing API", () => {
       Response.json({ ok: true, data: { cancelled: true } }),
     ]);
     const action = { action: "cancelWorkOrder" as const, workOrderId: "11111111-1111-4111-8111-111111111111" };
-    const options = { useGoWorkOrders: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
     await expect(submitManufacturingAction(action, undefined, options)).rejects.toThrow("work order not found");
     await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
     const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
@@ -636,14 +589,14 @@ describe("manufacturing API", () => {
     expect(second.intentId).not.toBe(first.intentId);
   });
 
-  it("maps defineBom to the authenticated Go capability contract when opted in", () => {
+  it("maps defineBom to the authenticated Go capability contract", () => {
     const action = {
       action: "defineBom" as const,
       assemblySku: "DESK-1",
       expectedComponents: [],
       components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
     };
-    const request = manufacturingActionRequest(action, "intent-1", true);
+    const request = manufacturingActionRequest(action, "intent-1");
     expect(request).toEqual({
       url: "/api/capabilities/execute",
       body: {
@@ -661,7 +614,7 @@ describe("manufacturing API", () => {
       assemblySku: "DESK-1",
       expectedComponents: [],
       components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
-    }, undefined, { useGoDefineBom: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } })).resolves.toEqual({ kind: "completed" });
+    }, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } })).resolves.toEqual({ kind: "completed" });
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       capabilityId: "manufacturing.defineBom",
@@ -669,7 +622,7 @@ describe("manufacturing API", () => {
     });
   });
 
-  it("keeps defineBom on Go after 404 and retries with the exact scoped intent", async () => {
+  it("retries defineBom with the exact scoped intent after a Go 404", async () => {
     const fetchMock = stubSequenced([
       Response.json({ error: "capability unavailable" }, { status: 404 }),
       Response.json({ ok: true, data: { assemblyItemId: "item-1", assemblySku: "DESK-1", componentCount: 1, previousComponents: [], components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }] } }),
@@ -680,7 +633,7 @@ describe("manufacturing API", () => {
       expectedComponents: [],
       components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
     };
-    const options = { useGoDefineBom: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
     await expect(submitManufacturingAction(action, undefined, options)).rejects.toMatchObject({ status: 404 });
     await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
@@ -690,7 +643,7 @@ describe("manufacturing API", () => {
     expect(second.intentId).toBe(first.intentId);
   });
 
-  it("does not fall back to legacy when Go reports the slice disabled", async () => {
+  it("does not fall back to legacy when Go rejects BOM writes", async () => {
     const fetchMock = stubSequenced([
       Response.json({ error: "capability is disabled on this Go route" }, { status: 503 }),
     ]);
@@ -699,20 +652,23 @@ describe("manufacturing API", () => {
       assemblySku: "DESK-1",
       expectedComponents: [],
       components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
-    }, undefined, { useGoDefineBom: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } })).rejects.toThrow("capability is disabled on this Go route");
+    }, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } })).rejects.toThrow("capability is disabled on this Go route");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
-  it("falls back to a readable reason when approval carries none", async () => {
+  it("uses a readable reason when approval carries none", async () => {
     stubSequenced([Response.json({ ok: false, pendingApproval: true }, { status: 202 })]);
-    await expect(submitManufacturingAction({ action: "reverseProductionRun", runId: "run-1" })).resolves.toEqual({ kind: "pending", reason: "This action is waiting for approval." });
+    await expect(submitManufacturingAction({ action: "reverseProductionRun", runId: "33333333-3333-4333-8333-333333333333" }, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } })).resolves.toEqual({ kind: "pending", reason: "This action is waiting for approval." });
   });
 
   it("completes governed writes and reloads the caller afterwards", async () => {
-    const fetchMock = stubSequenced([Response.json({ ok: true, data: { reversed: true } })]);
-    await expect(submitManufacturingAction({ action: "produceFromBom", assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "DESK-MAY" })).resolves.toEqual({ kind: "completed" });
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ action: "produceFromBom", lotCode: "DESK-MAY" });
+    const fetchMock = stubSequenced([Response.json({ ok: true, data: {
+      runRef: "33333333-3333-4333-8333-333333333333", producedThousandths: 2000,
+      consumedComponents: [{ sku: "LEG-1", quantityThousandths: 8000 }], costRolledUpMinor: 24000,
+    } })]);
+    await expect(submitManufacturingAction({ action: "produceFromBom", assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "DESK-MAY" }, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } })).resolves.toEqual({ kind: "completed" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "manufacturing.produceFromBom", input: { lotCode: "DESK-MAY" } });
   });
 
   it("refuses write payloads that would not pass the capability contract", async () => {
@@ -732,7 +688,7 @@ describe("manufacturing API", () => {
     const fetchMock = stubSequenced([Response.json({ ok: true, data: {
       workOrderId: "33333333-3333-4333-8333-333333333333", number: 10, expectedGoodThousandths: 2_147_483_647,
     } })]);
-    const options = { useGoWorkOrders: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
     await expect(submitManufacturingAction({
       action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: 2_147_483_647, yieldPctThousandths: 1_000_000,
     }, undefined, options)).resolves.toEqual({ kind: "completed" });
@@ -744,7 +700,7 @@ describe("manufacturing API", () => {
 
   it("reports governed write failures with the server message", async () => {
     stubSequenced([Response.json({ ok: false, error: "DESK-1 has no bill of materials" }, { status: 422 })]);
-    await expect(submitManufacturingAction({ action: "releaseWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111" })).rejects.toThrow("DESK-1 has no bill of materials");
+    await expect(submitManufacturingAction({ action: "releaseWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111" }, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } })).rejects.toThrow("DESK-1 has no bill of materials");
   });
 
   it("reads cost previews, feasibility, and BOM reports through the read envelope", async () => {
@@ -782,7 +738,6 @@ describe("manufacturing API", () => {
   });
 
   it("sends planning reads to the Go capability with a fresh intent id", async () => {
-    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
     const fetchMock = stubSequenced([Response.json({ ok: true, data: {
       producible: true,
       plannedThousandths: 1000,
@@ -809,7 +764,7 @@ describe("manufacturing API", () => {
   it("maps unreachable services to a retryable message", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network")));
     await expect(fetchManufacturingReport()).rejects.toThrow("Could not reach the manufacturing service");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(report)));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: report })));
     await expect(fetchManufacturingReport()).resolves.toBeTruthy();
   });
 });

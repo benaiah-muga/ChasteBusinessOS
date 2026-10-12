@@ -29,6 +29,16 @@ type ManufacturingBomComponentInput struct {
 	ScrapPctThousandths int64  `json:"scrapPctThousandths"`
 }
 
+// ManufacturingDomainError marks an expected manufacturing workflow refusal.
+// HTTP adapters map it to a client error so callers can correct the action.
+type ManufacturingDomainError string
+
+func (e ManufacturingDomainError) Error() string { return string(e) }
+
+func manufacturingRefusal(message string) error {
+	return ManufacturingDomainError(message)
+}
+
 type ManufacturingDefineBomInput struct {
 	AssemblySKU        string                           `json:"assemblySku"`
 	ExpectedComponents []ManufacturingBomComponentInput `json:"expectedComponents"`
@@ -381,7 +391,7 @@ func manufacturingItemIDBySKU(ctx context.Context, tx pgx.Tx, orgID, sku string)
 	var itemID string
 	err := tx.QueryRow(ctx, `SELECT id::text FROM items WHERE org_id=$1::uuid AND sku=$2 LIMIT 1`, orgID, sku).Scan(&itemID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("no item with SKU %s", sku)
+		return "", manufacturingRefusal(fmt.Sprintf("no item with SKU %s", sku))
 	}
 	return itemID, err
 }
@@ -445,12 +455,12 @@ func manufacturingDefineBom(ctx context.Context, tx pgx.Tx, claims authbridge.Ca
 		return ManufacturingDefineBomOutput{}, err
 	}
 	if !sameManufacturingBomComponents(previousComponents, input.ExpectedComponents) {
-		return ManufacturingDefineBomOutput{}, errors.New("bill of materials changed since it was read; define was not applied")
+		return ManufacturingDefineBomOutput{}, manufacturingRefusal("bill of materials changed since it was read; define was not applied")
 	}
 	resolved := map[string]string{}
 	for _, component := range input.Components {
 		if component.SKU == input.AssemblySKU {
-			return ManufacturingDefineBomOutput{}, errors.New("an assembly cannot contain itself")
+			return ManufacturingDefineBomOutput{}, manufacturingRefusal("an assembly cannot contain itself")
 		}
 		componentID, err := manufacturingItemIDBySKU(ctx, tx, claims.OrganizationID, component.SKU)
 		if err != nil {
@@ -474,7 +484,7 @@ func manufacturingDefineBom(ctx context.Context, tx pgx.Tx, claims authbridge.Ca
 		return ManufacturingDefineBomOutput{}, err
 	}
 	if _, err := manufacturingExplodeBom(allEdges, assemblyID, 1000); err != nil {
-		return ManufacturingDefineBomOutput{}, fmt.Errorf("rejected: %s", err.Error())
+		return ManufacturingDefineBomOutput{}, manufacturingRefusal(fmt.Sprintf("rejected: %s", err.Error()))
 	}
 	resultingComponents, err := manufacturingBomComponentSnapshot(ctx, tx, claims.OrganizationID, assemblyID)
 	if err != nil {
@@ -499,12 +509,12 @@ func manufacturingRestoreBom(ctx context.Context, tx pgx.Tx, claims authbridge.C
 		return ManufacturingRestoreBomOutput{}, err
 	}
 	if !sameManufacturingBomComponents(previousComponents, input.ExpectedComponents) {
-		return ManufacturingRestoreBomOutput{}, errors.New("bill of materials changed since it was read; restore was not applied")
+		return ManufacturingRestoreBomOutput{}, manufacturingRefusal("bill of materials changed since it was read; restore was not applied")
 	}
 	resolved := map[string]string{}
 	for _, component := range input.Components {
 		if component.SKU == input.AssemblySKU {
-			return ManufacturingRestoreBomOutput{}, errors.New("an assembly cannot contain itself")
+			return ManufacturingRestoreBomOutput{}, manufacturingRefusal("an assembly cannot contain itself")
 		}
 		componentID, err := manufacturingItemIDBySKU(ctx, tx, claims.OrganizationID, component.SKU)
 		if err != nil {
@@ -528,7 +538,7 @@ func manufacturingRestoreBom(ctx context.Context, tx pgx.Tx, claims authbridge.C
 		return ManufacturingRestoreBomOutput{}, err
 	}
 	if _, err := manufacturingExplodeBom(allEdges, assemblyID, 1000); err != nil {
-		return ManufacturingRestoreBomOutput{}, fmt.Errorf("rejected: %s", err.Error())
+		return ManufacturingRestoreBomOutput{}, manufacturingRefusal(fmt.Sprintf("rejected: %s", err.Error()))
 	}
 	resultingComponents, err := manufacturingBomComponentSnapshot(ctx, tx, claims.OrganizationID, assemblyID)
 	if err != nil {
@@ -553,17 +563,17 @@ func manufacturingDeleteBom(ctx context.Context, tx pgx.Tx, claims authbridge.Ca
 		return ManufacturingDeleteBomOutput{}, err
 	}
 	if !sameManufacturingBomComponents(currentComponents, input.ExpectedComponents) {
-		return ManufacturingDeleteBomOutput{}, errors.New("bill of materials changed since it was read; delete was not applied")
+		return ManufacturingDeleteBomOutput{}, manufacturingRefusal("bill of materials changed since it was read; delete was not applied")
 	}
 	if len(currentComponents) == 0 {
-		return ManufacturingDeleteBomOutput{}, fmt.Errorf("%s has no bill of materials", input.AssemblySKU)
+		return ManufacturingDeleteBomOutput{}, manufacturingRefusal(fmt.Sprintf("%s has no bill of materials", input.AssemblySKU))
 	}
 	deleted, err := tx.Exec(ctx, `DELETE FROM bom_lines WHERE org_id=$1::uuid AND assembly_item_id=$2::uuid`, claims.OrganizationID, assemblyID)
 	if err != nil {
 		return ManufacturingDeleteBomOutput{}, err
 	}
 	if deleted.RowsAffected() != int64(len(currentComponents)) {
-		return ManufacturingDeleteBomOutput{}, errors.New("bill of materials changed during delete")
+		return ManufacturingDeleteBomOutput{}, manufacturingRefusal("bill of materials changed during delete")
 	}
 	out := ManufacturingDeleteBomOutput{
 		AssemblySKU: input.AssemblySKU, RemovedCount: len(currentComponents),

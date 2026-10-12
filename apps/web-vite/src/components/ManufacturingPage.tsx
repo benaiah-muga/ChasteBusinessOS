@@ -6,6 +6,7 @@ import {
   fetchManufacturingBomReport,
   fetchManufacturingEnabled,
   fetchManufacturingLotTrace,
+  getPendingManufacturingAction,
   fetchManufacturingReport,
   fetchProductionCostPreview,
   fetchProductionFeasibility,
@@ -259,6 +260,7 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [pendingManufacturingAction, setPendingManufacturingAction] = useState<ManufacturingWriteAction | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useTabParam();
@@ -319,6 +321,7 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
     setLoadedScopeKey(null);
     setState({ status: "loading" });
     setNotice(null);
+    setPendingManufacturingAction(null);
     setRefreshError(null);
     setBusy(false);
     setBomAssemblySku("");
@@ -338,6 +341,18 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
     setWoCompletion({});
     setReverseRunId("");
     setLotTrace(null);
+    if (actorId && organizationId) {
+      const requestGeneration = scopeGeneration.current;
+      void getPendingManufacturingAction({ actorId, organizationId })
+        .then((action) => {
+          if (requestGeneration === scopeGeneration.current) setPendingManufacturingAction(action);
+        })
+        .catch((error: unknown) => {
+          if (requestGeneration === scopeGeneration.current) {
+            setNotice({ tone: "error", text: errorText(error, "Saved manufacturing retry state could not be read safely.") });
+          }
+        });
+    }
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
@@ -366,12 +381,21 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
         setNotice({ tone: "pending", text: `${label} requires approval. ${result.reason}` });
         return false;
       }
+      setPendingManufacturingAction(null);
       setNotice({ tone: "success", text: `${label} done.` });
       await refresh(requestGeneration);
       return true;
     } catch (error) {
       if (requestGeneration !== scopeGeneration.current) return false;
       setNotice({ tone: "error", text: errorText(error, `${label} failed. Try again.`) });
+      if (error instanceof ManufacturingApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
+        setPendingManufacturingAction(null);
+      } else {
+        try {
+          const action = await getPendingManufacturingAction({ actorId, organizationId });
+          if (requestGeneration === scopeGeneration.current) setPendingManufacturingAction(action);
+        } catch { /* The attempt stays blocked when its persisted retry state cannot be verified. */ }
+      }
       return false;
     } finally {
       if (requestGeneration === scopeGeneration.current) setBusy(false);
@@ -604,6 +628,12 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
         </p>
       )}
       {refreshError && <p style={{ ...styles.notice, ...styles.noticeError }} role="alert">{refreshError}</p>}
+      {pendingManufacturingAction && (
+        <section style={{ ...styles.notice, ...styles.noticePending }} aria-label="Unresolved manufacturing action">
+          <span>An earlier manufacturing action has an uncertain result. Retry the exact saved action to reconcile it before making another change.</span>
+          <button type="button" style={styles.button} disabled={busy} onClick={() => void run(pendingManufacturingAction, "Previous manufacturing action")}>Retry saved action</button>
+        </section>
+      )}
 
       {tab === "overview" && report && (
         <ManufacturingOverview

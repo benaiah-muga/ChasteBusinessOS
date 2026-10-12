@@ -243,6 +243,19 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": domainError.Error()})
 				return
 			}
+			var manufacturingError capability.ManufacturingDomainError
+			if errors.As(err, &manufacturingError) {
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": manufacturingError.Error()})
+				return
+			}
+			var creatorError capability.CreatorDomainError
+			if errors.As(err, &creatorError) {
+				writeJSON(w, http.StatusUnprocessableEntity, struct {
+					OK    bool   `json:"ok"`
+					Error string `json:"error"`
+				}{OK: false, Error: creatorError.Error()})
+				return
+			}
 			if h.logger != nil {
 				h.logger.Error("Go direct capability execution failed", "capabilityId", body.CapabilityID, "error", err)
 			}

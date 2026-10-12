@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Manufacturing reads and writes now use authenticated Go capabilities,
+  including BOMs, work orders, production, and lot trace. The Vite adapters no
+  longer select the legacy manufacturing endpoint. Uncertain writes persist
+  their validated action and exact intent for replay after reload, and
+  expected business refusals return a recoverable client error.
 - Vite CRM now reads deals, customers, follow-up tasks, saved views, and
   customer timelines through authenticated Go capabilities. Go resolves the
   session and organization scope, and invalid or unavailable responses fail
