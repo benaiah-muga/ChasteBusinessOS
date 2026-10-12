@@ -1097,6 +1097,22 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "GET", href)).toBe(false);
   });
 
+  it("routes uploaded document content GETs to Go without a legacy selector", () => {
+    const flags = goRouteProxyFlagsFromEnv({});
+    const contentPath = "/api/go/documents/aaaaaaaa-0000-4000-8000-000000000001/content";
+    expect(isGoRouteRequest(flags, "GET", contentPath)).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", `${contentPath}?download=1`)).toBe(true);
+    for (const [method, path] of [
+      ["HEAD", contentPath],
+      ["POST", contentPath],
+      ["GET", "/api/go/documents/not-a-uuid/content"],
+      ["GET", `${contentPath}/extra`],
+      ["GET", "/api/go/documents/aaaaaaaa-0000-4000-8000-000000000001/content/"],
+    ]) {
+      expect(isGoRouteRequest(flags, method, path)).toBe(false);
+    }
+  });
+
   it("routes only exact approvals GET and POST requests to Go by default with independent rollbacks", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(defaults.approvalsRead).toBe(true);
@@ -1299,6 +1315,36 @@ describe("Vite Go route proxy selection", () => {
       range: "bytes=0-31",
       ifRange: '"attachment-etag"',
     });
+  });
+
+  it("proxies uploaded document content directly to Go, never the legacy API", async () => {
+    const go = requestRecorder("go");
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
+
+    const legacy = requestRecorder("legacy");
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
+
+    const vite = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({}), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+      },
+    });
+    await vite.listen();
+    runningServers.push({ close: () => vite.close() });
+    const address = vite.httpServer?.address() as AddressInfo;
+    const href = "/api/go/documents/aaaaaaaa-0000-4000-8000-000000000001/content";
+    const cookie = "better-auth.session_token=verified-session";
+    const response = await fetch(`http://127.0.0.1:${address.port}${href}`, { headers: { cookie } });
+
+    expect(await response.json()).toMatchObject({ target: "go", method: "GET", url: href, cookie });
   });
 
   it("routes onboarding reads and writes when the explicit selector is enabled", () => {

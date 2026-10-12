@@ -401,6 +401,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   const attachmentID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+  if (method === "GET" && new RegExp(`^/api/go/documents/${attachmentID}/content(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.documentsEditorWorkspace && ["POST", "DELETE"].includes(method ?? "") && new RegExp(`^/api/docs/${attachmentID}/workspace$`, "i").test(path)) return true;
   if (flags.messagingPresence && ["GET", "POST"].includes(method ?? "") && new RegExp(`^/api/conversations/${attachmentID}/presence(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.messageAttachmentDownloads && method === "GET" && new RegExp(`^/api/message-attachments/${attachmentID}(?:\\?.*)?$`, "i").test(path)) return true;

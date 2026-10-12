@@ -2,6 +2,7 @@ package capability
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -146,6 +147,44 @@ func TestHarnessApproveCompositionCapabilityContract(t *testing.T) {
 	}
 }
 
+func TestHarnessListCompositionsCapabilityContract(t *testing.T) {
+	if harnessListCompositionsCapabilityID != "harness.listCompositions" {
+		t.Errorf("capability id = %q", harnessListCompositionsCapabilityID)
+	}
+	spec, present := harnessCapabilitySpecEntries()[harnessListCompositionsCapabilityID]
+	if !present {
+		t.Fatal("harness.listCompositions is missing from the harness capability specs")
+	}
+	if spec.module != "settings" || spec.permission != "harness.approve" || spec.risk != "read" || !spec.humanOnly {
+		t.Errorf("spec=%+v, want human-only settings read protected by harness.approve", spec)
+	}
+	entry := readMigrationManifest(t, harnessListCompositionsCapabilityID)
+	if entry["module"] != spec.module || entry["permission"] != spec.permission || entry["risk"] != spec.risk {
+		t.Errorf("spec=%+v disagrees with the migration manifest entry %v", spec, entry)
+	}
+	if _, err := parseHarnessInput(harnessListCompositionsCapabilityID, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("parse empty input: %v", err)
+	}
+	for _, raw := range []string{`{"includeValues":true}`, `[]`, `null`} {
+		if _, err := parseHarnessInput(harnessListCompositionsCapabilityID, json.RawMessage(raw)); err == nil {
+			t.Errorf("accepted non-empty or non-object input %s", raw)
+		}
+	}
+}
+
+func TestHarnessListCompositionsIsRegisteredAtProcessInit(t *testing.T) {
+	spec, exists := capabilitySpecs[harnessListCompositionsCapabilityID]
+	if !exists {
+		t.Fatal("harness.listCompositions is missing from capabilitySpecs after package initialization")
+	}
+	if !supportedCapability(harnessListCompositionsCapabilityID) {
+		t.Fatal("harness.listCompositions is not exposed by supportedCapability")
+	}
+	if spec.module != "settings" || spec.permission != "harness.approve" || spec.risk != "read" || !spec.humanOnly {
+		t.Fatalf("registered spec = %+v", spec)
+	}
+}
+
 // ── Input parser parity ──
 
 func TestHarnessApproveCompositionInputParserParity(t *testing.T) {
@@ -208,6 +247,19 @@ func TestHarnessApproveCompositionOutputMatchesManifest(t *testing.T) {
 	}
 	if decoded.Status != "approved" || decoded.CompositionID != harnessTestCompositionID || decoded.CompositionDigest != digest {
 		t.Errorf("round trip = %+v", decoded)
+	}
+}
+
+func TestHarnessListCompositionsOutputMatchesManifest(t *testing.T) {
+	encoded := assertManifestOutput(t, harnessListCompositionsCapabilityID, HarnessListCompositionsOutput{
+		Compositions: []HarnessCompositionListItem{},
+	})
+	var decoded HarnessListCompositionsOutput
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Compositions == nil || len(decoded.Compositions) != 0 {
+		t.Errorf("round trip = %+v, want an explicit empty list", decoded)
 	}
 }
 
@@ -386,6 +438,30 @@ func TestGoHarnessApproveCompositionIsOrgScopedAndFailClosed(t *testing.T) {
 		t.Errorf("output = %+v", approved)
 	}
 
+	listed, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (HarnessListCompositionsOutput, error) {
+		return harnessListCompositions(fx.ctx, tx, fx.orgID)
+	})
+	if err != nil {
+		t.Fatalf("list compositions: %v", err)
+	}
+	if len(listed.Compositions) != 1 || listed.Compositions[0].ID != compositionID {
+		t.Fatalf("list output = %+v, want only this organization's composition", listed)
+	}
+	inspection := listed.Compositions[0].Inspection
+	if inspection.Profile.ID != "erp-prod" || inspection.ProfileDigest != profileDigest || inspection.CompositionDigest != compositionDigest {
+		t.Errorf("inspection identity = %+v", inspection)
+	}
+	if len(inspection.Patches) != 1 || strings.Join(inspection.Patches[0].ConfigKeys, ",") != "label,retention" {
+		t.Errorf("patch inspection = %+v", inspection.Patches)
+	}
+	encodedInspection, err := json.Marshal(inspection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encodedInspection), `"values"`) || strings.Contains(string(encodedInspection), `"days"`) {
+		t.Errorf("inspection leaked patch values: %s", encodedInspection)
+	}
+
 	// A digest for a different composition is refused even though the row exists.
 	wrongDigest := strings.Repeat("d", 64)
 	_, err = dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (HarnessApproveCompositionOutput, error) {
@@ -427,5 +503,47 @@ func TestGoHarnessApproveCompositionIsOrgScopedAndFailClosed(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "not found for organization") {
 		t.Errorf("cross-tenant approve: err=%v", err)
+	}
+}
+
+func TestGoHarnessListCompositionsUsesSettingsModuleAndExistingOperatorPermissions(t *testing.T) {
+	fx := newExecutorFixture(t)
+	profileDigest, compositionDigest := harnessTestDigests(t, harnessTestProfile, harnessTestBundles, harnessTestPatches)
+	var compositionID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO harness_compositions (org_id, profile_id, profile_version, environment, profile_digest, composition_digest, profile, bundles, patches)
+		VALUES ($1::uuid, 'erp-prod', '1.0.0', 'erp-prod', $2, $3, $4::jsonb, $5::jsonb, $6::jsonb)
+		RETURNING id::text`,
+		fx.orgID, profileDigest, compositionDigest, harnessTestProfile, harnessTestBundles, harnessTestPatches).Scan(&compositionID); err != nil {
+		t.Fatalf("seed composition: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(fx.ctx, `DELETE FROM harness_compositions WHERE id=$1::uuid`, compositionID); err != nil {
+			t.Errorf("delete harness composition fixture: %v", err)
+		}
+	})
+	fx.setModuleList(`[]`)
+
+	input := json.RawMessage(`{}`)
+	for index, permission := range []string{"harness.approve", "iam.admin"} {
+		if _, err := fx.owner.Exec(fx.ctx, `
+			INSERT INTO role_permissions (role_id, permission_key, org_id)
+			VALUES ($1::uuid, $2, $3::uuid) ON CONFLICT DO NOTHING`, fx.roleID, permission, fx.orgID); err != nil {
+			t.Fatalf("grant %s: %v", permission, err)
+		}
+		claims := fx.humanClaims(input, fmt.Sprintf("harness-list-compositions-%d", index))
+		claims.CapabilityID = harnessListCompositionsCapabilityID
+		claims.Permissions = []string{permission}
+		result, err := fx.executor.Execute(fx.ctx, claims, harnessListCompositionsCapabilityID, input)
+		if err != nil || !result.OK {
+			t.Fatalf("list with %s and enabled_modules=[]: result=%+v err=%v", permission, result, err)
+		}
+		var output HarnessListCompositionsOutput
+		if err := json.Unmarshal(result.Data, &output); err != nil {
+			t.Fatalf("decode list output with %s: %v", permission, err)
+		}
+		if len(output.Compositions) != 1 || output.Compositions[0].ID != compositionID {
+			t.Errorf("list with %s = %+v, want the seeded org composition", permission, output)
+		}
 	}
 }

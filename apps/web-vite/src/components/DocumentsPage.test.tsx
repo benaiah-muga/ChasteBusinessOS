@@ -53,7 +53,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Documents" })).not.toBeNull();
     expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
     expect(screen.getByText("Invoice number: 42")).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe("/api/documents/doc-1/content");
+    expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe("/api/go/documents/doc-1/content");
     expect(fetchMock).toHaveBeenCalledWith("/api/documents?id=doc-1&preview=1", expect.any(Object));
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search documents" }), { target: { value: "warehouse" } });
@@ -63,7 +63,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByText("Text extraction is in progress.")).not.toBeNull();
   });
 
-  it("shows the library and preview detail from Go while keeping uploaded content links unchanged", async () => {
+  it("shows the library and preview from Go with uploaded content links owned by the Go route", async () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const goRow = { ...rows[0]!, id: goDocumentId };
     const goDocument = {
@@ -86,7 +86,7 @@ describe("Vite documents page", () => {
 
     expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
     expect(screen.getByText("Invoice number: 42")).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe(`/api/documents/${goDocumentId}/content`);
+    expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe(`/api/go/documents/${goDocumentId}/content`);
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(2);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/documents")).toBe(false);
   });

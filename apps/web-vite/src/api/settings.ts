@@ -455,8 +455,27 @@ const CompositionsReadSchema = z.object({
 export type CompositionInspection = z.infer<typeof CompositionInspectionSchema>;
 export type CompositionRow = z.infer<typeof CompositionsReadSchema>["compositions"][number];
 
-export function fetchCompositions(signal?: AbortSignal): Promise<CompositionRow[]> {
-  return read("/api/harness/compositions", CompositionsReadSchema, {}, signal).then((data) => data.compositions);
+const HarnessListCapabilityEnvelopeSchema = z.object({
+  ok: z.boolean(),
+  data: z.unknown().optional(),
+  error: z.string().optional(),
+}).strict();
+
+export async function fetchCompositions(signal?: AbortSignal): Promise<CompositionRow[]> {
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({ capabilityId: "harness.listCompositions", input: {}, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (!response.ok) throw new SettingsApiError(response.status, errorMessage(response.status, body));
+  const envelope = HarnessListCapabilityEnvelopeSchema.safeParse(body);
+  if (!envelope.success || !envelope.data.ok || envelope.data.data === undefined) {
+    const message = envelope.success ? envelope.data.error : undefined;
+    throw new SettingsApiError(response.status, message ?? "The Go harness service returned an unexpected response.");
+  }
+  const parsed = CompositionsReadSchema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new SettingsApiError(response.status, "The Go harness service returned data in an unexpected format.");
+  return parsed.data.compositions;
 }
 
 /* ------------------------------------------------------------ agent soul -- */

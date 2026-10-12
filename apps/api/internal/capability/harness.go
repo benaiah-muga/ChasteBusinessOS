@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -24,6 +25,7 @@ import (
 // the creator capability.
 
 const harnessApproveCompositionCapabilityID = "harness.approveComposition"
+const harnessListCompositionsCapabilityID = "harness.listCompositions"
 
 var (
 	harnessProfileIDPattern   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
@@ -42,6 +44,43 @@ type HarnessApproveCompositionOutput struct {
 	CompositionID     string `json:"compositionId"`
 	CompositionDigest string `json:"compositionDigest"`
 	Status            string `json:"status"`
+}
+
+type HarnessListCompositionsInput struct{}
+
+type HarnessCompositionInspection struct {
+	Profile struct {
+		ID          string `json:"id"`
+		Version     string `json:"version"`
+		Environment string `json:"environment"`
+	} `json:"profile"`
+	ProfileDigest     string                            `json:"profileDigest"`
+	CompositionDigest string                            `json:"compositionDigest"`
+	Bundles           []HarnessCompositionBundleInspect `json:"bundles"`
+	Patches           []HarnessCompositionPatchInspect  `json:"patches"`
+}
+
+type HarnessCompositionBundleInspect struct {
+	ID                string   `json:"id"`
+	Version           string   `json:"version"`
+	ServiceIDs        []string `json:"serviceIds"`
+	RequiredBundleIDs []string `json:"requiredBundleIds,omitempty"`
+}
+
+type HarnessCompositionPatchInspect struct {
+	ID         string   `json:"id"`
+	Version    string   `json:"version"`
+	ConfigKeys []string `json:"configKeys"`
+}
+
+type HarnessCompositionListItem struct {
+	ID         string                       `json:"id"`
+	CreatedAt  string                       `json:"createdAt"`
+	Inspection HarnessCompositionInspection `json:"inspection"`
+}
+
+type HarnessListCompositionsOutput struct {
+	Compositions []HarnessCompositionListItem `json:"compositions"`
 }
 
 // ── Stored composition shapes (mirror of @chaste/harness schemas) ──
@@ -426,10 +465,20 @@ func ParseHarnessApproveCompositionInput(raw json.RawMessage) (HarnessApproveCom
 }
 
 func parseHarnessInput(capabilityID string, raw json.RawMessage) (any, error) {
-	if capabilityID != harnessApproveCompositionCapabilityID {
-		return nil, errors.New("unsupported harness capability")
+	if capabilityID == harnessListCompositionsCapabilityID {
+		fields, err := decodeJSONObject(raw)
+		if err != nil {
+			return nil, err
+		}
+		if len(fields) != 0 {
+			return nil, errors.New("harness.listCompositions input must be empty")
+		}
+		return HarnessListCompositionsInput{}, nil
 	}
-	return ParseHarnessApproveCompositionInput(raw)
+	if capabilityID == harnessApproveCompositionCapabilityID {
+		return ParseHarnessApproveCompositionInput(raw)
+	}
+	return nil, errors.New("unsupported harness capability")
 }
 
 // ── Handler ──
@@ -462,11 +511,87 @@ func harnessApproveComposition(ctx context.Context, tx pgx.Tx, orgID string, inp
 	}, nil
 }
 
+func harnessListCompositions(ctx context.Context, tx pgx.Tx, orgID string) (HarnessListCompositionsOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, created_at, profile_digest, composition_digest, profile, bundles, patches
+		FROM harness_compositions
+		WHERE org_id=$1::uuid
+		ORDER BY created_at DESC
+		LIMIT 50`, orgID)
+	if err != nil {
+		return HarnessListCompositionsOutput{}, err
+	}
+	defer rows.Close()
+
+	output := HarnessListCompositionsOutput{Compositions: make([]HarnessCompositionListItem, 0)}
+	for rows.Next() {
+		var id, profileDigest, compositionDigest string
+		var createdAt time.Time
+		var profileJSON, bundlesJSON, patchesJSON []byte
+		if err := rows.Scan(&id, &createdAt, &profileDigest, &compositionDigest, &profileJSON, &bundlesJSON, &patchesJSON); err != nil {
+			return HarnessListCompositionsOutput{}, err
+		}
+		if err := harnessAssertPersistedIdentity(id, profileDigest, compositionDigest, profileJSON, bundlesJSON, patchesJSON); err != nil {
+			return HarnessListCompositionsOutput{}, err
+		}
+		profile, err := harnessParseProfile(profileJSON)
+		if err != nil {
+			return HarnessListCompositionsOutput{}, err
+		}
+		bundles, err := harnessParseBundles(bundlesJSON)
+		if err != nil {
+			return HarnessListCompositionsOutput{}, err
+		}
+		patches, err := harnessParsePatches(patchesJSON)
+		if err != nil {
+			return HarnessListCompositionsOutput{}, err
+		}
+
+		inspection := HarnessCompositionInspection{
+			ProfileDigest:     profileDigest,
+			CompositionDigest: compositionDigest,
+			Bundles:           make([]HarnessCompositionBundleInspect, 0, len(bundles)),
+			Patches:           make([]HarnessCompositionPatchInspect, 0, len(patches)),
+		}
+		inspection.Profile.ID = profile.ID
+		inspection.Profile.Version = profile.Version
+		inspection.Profile.Environment = profile.Environment
+		for _, bundle := range bundles {
+			serviceIDs := append([]string(nil), bundle.ServiceIDs...)
+			sort.Strings(serviceIDs)
+			item := HarnessCompositionBundleInspect{ID: bundle.ID, Version: bundle.Version, ServiceIDs: serviceIDs}
+			if bundle.RequiredBundleIDs != nil {
+				item.RequiredBundleIDs = append([]string(nil), (*bundle.RequiredBundleIDs)...)
+				sort.Strings(item.RequiredBundleIDs)
+			}
+			inspection.Bundles = append(inspection.Bundles, item)
+		}
+		sort.Slice(inspection.Bundles, func(i, j int) bool { return inspection.Bundles[i].ID < inspection.Bundles[j].ID })
+		for _, patch := range patches {
+			keys := make([]string, 0, len(patch.Values))
+			for key := range patch.Values {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			inspection.Patches = append(inspection.Patches, HarnessCompositionPatchInspect{ID: patch.ID, Version: patch.Version, ConfigKeys: keys})
+		}
+		sort.Slice(inspection.Patches, func(i, j int) bool { return inspection.Patches[i].ID < inspection.Patches[j].ID })
+		output.Compositions = append(output.Compositions, HarnessCompositionListItem{
+			ID: id, CreatedAt: createdAt.UTC().Format(time.RFC3339Nano), Inspection: inspection,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return HarnessListCompositionsOutput{}, err
+	}
+	return output, nil
+}
+
 // ── Registry wiring ──
 
 func harnessCapabilitySpecEntries() map[string]capabilitySpec {
 	return map[string]capabilitySpec{
 		harnessApproveCompositionCapabilityID: {module: "harness", permission: "harness.approve", risk: "identity"},
+		harnessListCompositionsCapabilityID:   {module: "settings", permission: "harness.approve", risk: "read", humanOnly: true},
 	}
 }
 

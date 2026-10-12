@@ -82,7 +82,7 @@ function DocumentDetails({ state, selected }: { state: DetailState; selected: Do
       )}
 
       {document.mimeType && document.sizeBytes !== null && (
-        <a className="documents-file-link" href={`/api/documents/${encodeURIComponent(document.id)}/content`} target="_blank" rel="noreferrer">
+        <a className="documents-file-link" href={`/api/go/documents/${encodeURIComponent(document.id)}/content`} target="_blank" rel="noreferrer">
           Open uploaded file <span aria-hidden="true">↗</span>
         </a>
       )}

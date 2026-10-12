@@ -428,6 +428,7 @@ func init() {
 			inverseFields:       spec.InverseFields,
 		}
 	}
+	RegisterHarnessCapabilities()
 }
 
 func supportedCapability(capabilityID string) bool {
@@ -546,7 +547,7 @@ func supportedCapability(capabilityID string) bool {
 		projectRestoreCapabilityID, deleteProjectTaskCapabilityID, restoreProjectTaskCapabilityID, restoreProjectTaskPlacementCapabilityID, restoreProjectTaskAssigneeCapabilityID,
 		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID,
 		scimProvisionUserCapabilityID, SCIMTokenCreateCapabilityID, SCIMTokenRevokeCapabilityID,
-		settingsConfigureAiProviderCapabilityID, settingsRestoreAiProviderCapabilityID, harnessApproveCompositionCapabilityID:
+		settingsConfigureAiProviderCapabilityID, settingsRestoreAiProviderCapabilityID, harnessApproveCompositionCapabilityID, harnessListCompositionsCapabilityID:
 		return true
 	default:
 		return false
@@ -1416,7 +1417,7 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case harnessApproveCompositionCapabilityID:
+		case harnessApproveCompositionCapabilityID, harnessListCompositionsCapabilityID:
 			parsed, err := parseHarnessInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -1453,7 +1454,8 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 		}
-		if !legacyMarketplaceHumanAccess && !legacyNotificationHumanAccess && !permissions["*"] && !permissions[spec.permission] {
+		legacyHarnessAdminInspection := !system && !externalSCIM && capabilityID == harnessListCompositionsCapabilityID && claims.ActorType == "human" && permissions["iam.admin"]
+		if !legacyMarketplaceHumanAccess && !legacyNotificationHumanAccess && !legacyHarnessAdminInspection && !permissions["*"] && !permissions[spec.permission] {
 			return Result{OK: false, Error: "forbidden: missing permission: " + spec.permission}, nil
 		}
 
@@ -1729,6 +1731,12 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case HarnessApproveCompositionInput:
 			output, err := harnessApproveComposition(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case HarnessListCompositionsInput:
+			output, err := harnessListCompositions(ctx, tx, claims.OrganizationID)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3670,7 +3678,7 @@ func canonicalInputHash(input any) (string, error) {
 		SupportUpdateTicketInput, SupportSuggestCategoryInput, SupportCreateCannedResponseInput,
 		SupportCreateKbArticleInput,
 		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput,
-		SettingsConfigureAiProviderInput, SettingsRestoreAiProviderInput, HarnessApproveCompositionInput,
+		SettingsConfigureAiProviderInput, SettingsRestoreAiProviderInput, HarnessApproveCompositionInput, HarnessListCompositionsInput,
 		DocumentsInput,
 		MessagingSendMessageInput, MessagingListConversationsInput, MessagingReadMessagesInput, MessagingSearchMessagesInput,
 		notificationReceiptInput, notificationRestoreReceiptInput,

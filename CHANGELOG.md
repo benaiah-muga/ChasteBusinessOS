@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite document file downloads now use a direct Go route. Go verifies the
+  signed session, active organization, `documents.read` permission, and module
+  access before returning bounded file bytes with safe download headers.
+- Vite Settings runtime composition history now uses the authenticated
+  `harness.listCompositions` capability. Go verifies organization scope and
+  persisted digests, limits access to authorized human operators, and returns
+  composition metadata without patch values.
 - Vite Manufacturing reads and writes now use authenticated Go capabilities,
   including BOMs, work orders, production, and lot trace. The Vite adapters no
   longer select the legacy manufacturing endpoint. Uncertain writes persist
@@ -33,6 +40,11 @@ The full v1 changelog is preserved at the bottom of this file.
   customer timelines through authenticated Go capabilities. Go resolves the
   session and organization scope, and invalid or unavailable responses fail
   closed without a legacy read fallback.
+- Vite CRM follow-up drafts now use an authenticated Go route. Go reads customer
+  activity through `crm.customerTimeline`, applies CRM permission, organization,
+  DNC, source, and rate-limit checks, then generates drafts with the configured
+  workspace provider or the user's connected coding plan. The Vite client has
+  no legacy CRM draft fallback.
 - Vite Sales now creates and lists quotes, accepts sent quotes into invoices,
   and shows Go-backed customers and deals. Quote writes use authenticated Go
   capabilities with actor/workspace-scoped exact retry intents, including

@@ -81,6 +81,89 @@
       }
     },
     {
+      "id": "harness.listCompositions",
+      "title": "List harness compositions",
+      "intent": "Inspect an organization's immutable harness compositions and their safe profile, bundle, and configuration key metadata.",
+      "module": "settings",
+      "risk": "read",
+      "permission": "harness.approve",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "compositions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "createdAt": { "type": "string", "format": "date-time" },
+                "inspection": {
+                  "type": "object",
+                  "properties": {
+                    "profile": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string" },
+                        "version": { "type": "string" },
+                        "environment": { "type": "string" }
+                      },
+                      "required": ["id", "version", "environment"],
+                      "additionalProperties": false
+                    },
+                    "profileDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                    "compositionDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                    "bundles": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "version": { "type": "string" },
+                          "serviceIds": { "type": "array", "items": { "type": "string" } },
+                          "requiredBundleIds": { "type": "array", "items": { "type": "string" } }
+                        },
+                        "required": ["id", "version", "serviceIds"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "patches": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "version": { "type": "string" },
+                          "configKeys": { "type": "array", "items": { "type": "string" } }
+                        },
+                        "required": ["id", "version", "configKeys"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["profile", "profileDigest", "compositionDigest", "bundles", "patches"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["id", "createdAt", "inspection"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["compositions"],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "crm.reapplyLeadConversion",
       "title": "Reapply lead conversion",
       "intent": "Restore the exact lead conversion from its unchanged undo receipt, recreating the customer when required.",

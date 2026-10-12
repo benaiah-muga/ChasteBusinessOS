@@ -232,6 +232,22 @@ describe("Vite settings API", () => {
       .rejects.toMatchObject({ status: 422, message: "identity approval required" });
   });
 
+  it("routes runtime inspection through the Go capability and validates its output", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { compositions: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchCompositions()).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      body: expect.stringContaining('"capabilityId":"harness.listCompositions"'),
+    }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { compositions: [{ id: "tampered" }] } })));
+    await expect(fetchCompositions()).rejects.toMatchObject({
+      message: "The Go harness service returned data in an unexpected format.",
+    });
+  });
+
   it("validates the runtime inspection permission message", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "requires harness.approve permission" }, { status: 403 })));
     await expect(fetchCompositions()).rejects.toMatchObject({

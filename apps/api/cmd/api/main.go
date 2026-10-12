@@ -283,6 +283,12 @@ func run(logger *slog.Logger) error {
 		messageAttachmentDownloadRoute = httpapi.NewMessageAttachmentDownloadHandler(pool, resolver, logger)
 		logger.Info("Go message attachment download route mounted", "path", "GET /api/message-attachments/{id}")
 	}
+	documentContentDownloadResolver, documentContentDownloadResolverErr := getSessionResolver()
+	if documentContentDownloadResolverErr != nil {
+		return documentContentDownloadResolverErr
+	}
+	documentContentDownloadRoute := httpapi.NewDocumentContentDownloadHandler(pool, documentContentDownloadResolver, logger)
+	logger.Info("Go document content download route mounted", "path", "GET /api/go/documents/{id}/content")
 	var supportChannelsRoute http.Handler
 	if goSupportChannelsRouteEnabledFromEnv(os.Getenv("GO_SUPPORT_CHANNELS_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
@@ -801,6 +807,7 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoSupportCustomersRoute(apiHandler, supportCustomersRoute)
 	apiHandler = httpapi.MountGoAIConfigRoute(apiHandler, aiConfigRoute)
 	apiHandler = httpapi.MountGoDocumentsEditorWorkspaceRoute(apiHandler, documentsEditorWorkspaceRoute)
+	apiHandler = httpapi.MountGoDocumentContentDownloadRoute(apiHandler, documentContentDownloadRoute)
 	apiHandler = httpapi.MountGoMessagingPresenceRoute(apiHandler, messagingPresenceRoute)
 	apiMux := http.NewServeMux()
 	apiMux.Handle("/api/email", emailRoute)

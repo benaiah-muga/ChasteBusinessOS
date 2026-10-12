@@ -351,6 +351,19 @@ func MountGoMessageAttachmentDownloadRoute(base, route http.Handler) http.Handle
 	return mux
 }
 
+// MountGoDocumentContentDownloadRoute owns uploaded document binary reads.
+func MountGoDocumentContentDownloadRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/go/documents/{id}/content", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoPOSReadRoute mounts only the POS collection GET. Actions remain with
 // the existing owner until their write routes pass their own migration gate.
 func MountGoPOSReadRoute(base, route http.Handler) http.Handler {

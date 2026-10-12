@@ -325,8 +325,9 @@ describe("Vite settings page", () => {
 
   it("shows runtime compositions as metadata only and explains a refused inspection", async () => {
     routedFetch({
-      "/api/harness/compositions": () => jsonResponse({
-        compositions: [{
+      "/api/capabilities/execute": () => jsonResponse({
+        ok: true,
+        data: { compositions: [{
           id: "cmp-1",
           createdAt: new Date().toISOString(),
           inspection: {
@@ -336,7 +337,7 @@ describe("Vite settings page", () => {
             bundles: [{ id: "core", version: "1.2.0", serviceIds: ["api", "worker"] }],
             patches: [{ id: "billing", version: "0.4.0", configKeys: ["LEDGER_URL"] }],
           },
-        }],
+        }] },
       }),
     });
     render(<SettingsPage />);

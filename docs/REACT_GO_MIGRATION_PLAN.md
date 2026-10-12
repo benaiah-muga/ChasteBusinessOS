@@ -632,6 +632,13 @@ new owners and the manifest shows zero legacy runtime paths.
      Focused API and component tests pass. Item 185 routes the Vite list reads
      directly to Go. CRM mutations and other legacy routes remain to be cut
      over; authenticated browser proof remains open.
+     Vite AI follow-up drafting now posts to the session-authenticated Go
+     `/api/crm/follow-up-draft` route with no legacy fallback. Go verifies the
+     active organization and `crm.read`, rejects do-not-contact customers,
+     obtains source records through `crm.customerTimeline`, enforces the
+     existing eight-drafts-per-minute limit, and uses the configured workspace
+     provider or connected personal coding plan. Focused Go/Vite tests cover
+     route ownership, authorization, source filtering, and response validation.
 26. (Done) Add an opt-in Go read for the approvals inbox and recent history
     behind `GO_APPROVALS_READ`. Bind the complete TypeScript capability
     permission map to the signed request, and recheck the verified session,
@@ -3974,3 +3981,33 @@ new owners and the manifest shows zero legacy runtime paths.
      the repository-root configuration. No `/api/purchasing` request was made
      during the proof. Typecheck, focused lint, and the 252 purchasing and
      proxy tests passed. This completes item 370.
+
+372. (Complete) Serve Vite document file downloads from the Go API at
+     `/api/go/documents/{id}/content`. Resolve the signed session, verify the
+     active organization, `documents.read` permission, and Documents module,
+     then read the file through an organization scoped transaction. Validate
+     stored content and return bounded file bytes with safe download headers.
+
+373. (Runtime verified) On 2026-10-13, the authenticated Vite browser uploaded
+     a synthetic PDF, opened its document detail, and fetched the file from
+     `/api/go/documents/{id}/content` with HTTP 200. The response was a bounded
+     attachment with `application/octet-stream`, no-store and sandbox headers.
+     The response length matched its `Content-Length`, and the browser reported
+     no page errors. Go tests cover authorization, module state, response
+     metadata, and organization isolation; Vite tests cover direct Go routing.
+     Independent review found no security or correctness blocker. This
+     completes item 372.
+
+374. (Complete) Move Vite Settings runtime composition history to the
+     authenticated Go `harness.listCompositions` capability. Scope reads to
+     the active organization, verify persisted composition digests, and return
+     safe metadata without patch values to authorized human operators.
+
+375. (Runtime verified) On 2026-10-13, the authenticated Vite Settings Runtime
+     tab loaded its empty state through `harness.listCompositions` with HTTP
+     200. No legacy `/api/harness/compositions` request was made and the
+     browser reported no page errors. The Go startup registry regression and
+     executor tests passed, including explicit empty-module lists for both
+     supported permissions, along with 46 Vite Settings tests. Independent
+     review approved the permission and module-gate behavior. This completes
+     item 374.
