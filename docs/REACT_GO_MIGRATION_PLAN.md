@@ -1648,17 +1648,15 @@ new owners and the manifest shows zero legacy runtime paths.
      actor/org-scoped intent; other Go failures do not fall back. Focused Go
      parser/dispatch and Vite API/UI tests pass; authenticated browser proof
      remains open.
-162. (Implemented; local Go/Vite default-on) Route only Vite purchase order
-     creation through Go's session-authenticated `purchasing.createPurchaseOrder` capability when
-     `CHASTE_GO_PURCHASING_CREATE_ORDER=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the selector to `0` to restore
-     `/api/purchasing`; a missing capability route falls back with the same
-     intent. Scope persisted retry identity to the active actor and
-     organization, preserve it for the exact draft while approval is pending or
-     the result is uncertain, and clear it on success or terminal 4xx. Keep the
-     draft on pending or failed responses, validate positive safe-integer
-     quantities and valid non-negative prices, and preserve other purchasing
-     actions. Focused Vite checks pass; browser proof remains open.
+162. (Complete) Route Vite purchase order creation through Go's
+     session-authenticated `purchasing.createPurchaseOrder` capability with no
+     legacy fallback or selector. Scope retry identity to the active actor and
+     organization, serialize marker creation and clearing across tabs with Web
+     Locks, and fail closed if Web Locks are unavailable. Preserve exact-draft
+     intent across pending or uncertain outcomes, validate positive safe
+     integer quantities, non-negative prices, and the positive safe-integer
+     Go result. Focused Vite tests cover concurrent retries and fail-closed
+     behavior; authenticated browser proof is recorded in item 342.
 163. (Implemented; local Go/Vite default-on) Route Vite receiving-desk
      submissions through Go's session-authenticated `purchasing.receiveGoods` capability when
      `CHASTE_GO_PURCHASING_RECEIVE_GOODS=1` and
@@ -3767,3 +3765,12 @@ new owners and the manifest shows zero legacy runtime paths.
      scan and item creation are recorded in proof 339. The legacy workspace
      link was absent, no legacy inventory request occurred, and the browser
      error log was empty. This completes item 340.
+
+342. (Runtime verified) On 2026-10-12, authenticated Vite created synthetic
+     purchase order 1 for `Go Proof Supplier 20261012` and received its two
+     `MIG-PROOF-20261012` units. Both create and receive writes used
+     `POST /api/capabilities/execute` and returned HTTP 200. The order showed
+     Received, and `/purchasing/receiving` displayed receipt 1 with two units
+     accepted, zero rejected, and zero outstanding. No legacy purchasing
+     request occurred and the browser error log was empty. This completes item
+     162 and extends the receiving runtime proof in item 338.

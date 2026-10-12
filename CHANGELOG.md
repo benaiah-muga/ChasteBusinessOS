@@ -20,6 +20,11 @@ The full v1 changelog is preserved at the bottom of this file.
   from Go, and records receipts through Go's governed capability route. The
   page requires authenticated actor and organization scope and fails closed if
   Go is unavailable.
+- Vite purchase order creation now always uses Go's session-authenticated
+  `purchasing.createPurchaseOrder` capability. Go errors fail closed without a
+  legacy fallback, concurrent exact-draft retries share one actor and
+  organization scoped intent, and responses require a valid purchase order
+  number.
 - Vite team invitation links now preview and accept invitations through Go.
   Acceptance requires a verified signed-in account with the invited email,
   and updates membership, role, and invitation status atomically.

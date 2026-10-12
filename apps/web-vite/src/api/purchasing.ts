@@ -193,6 +193,10 @@ const CreatePurchaseOrderSchema = z.object({
   lines: z.array(PurchaseOrderLineInputSchema).min(1),
 }).strict();
 
+const CreatePurchaseOrderOutputSchema = z.object({
+  poNumber: z.number().int().safe().positive(),
+}).strict();
+
 const ReceiveGoodsSchema = z.object({
   action: z.literal("receiveGoods"),
   poNumber: z.number().int().safe().positive(),
@@ -644,8 +648,6 @@ export async function createPurchasingOrder(
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = CreatePurchaseOrderSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the purchasing details and try again.");
-  const useGo = typeof __GO_PURCHASING_CREATE_ORDER__ !== "undefined" && __GO_PURCHASING_CREATE_ORDER__;
-  if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "raising the purchase order", signal);
   if (!retryScope?.actorId?.trim() || !retryScope.organizationId?.trim()) {
     throw new PurchasingApiError(0, "Wait for your account and organization to finish loading before creating a purchase order.");
   }
@@ -667,12 +669,12 @@ export async function createPurchasingOrder(
       }),
     }, "raising the purchase order", signal);
 
-    const outcome = parsePurchasingActionOutcome(response, body, OpaqueOutputSchema, "raising the purchase order");
-    if (outcome.kind === "completed") clearPurchaseOrderAttempt(attempt);
+    const outcome = parsePurchasingActionOutcome(response, body, CreatePurchaseOrderOutputSchema, "raising the purchase order");
+    if (outcome.kind === "completed") await clearPurchaseOrderAttempt(attempt);
     return outcome;
   } catch (error) {
     if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
-      clearPurchaseOrderAttempt(attempt);
+      await clearPurchaseOrderAttempt(attempt);
     }
     throw error;
   }
@@ -696,25 +698,40 @@ async function createPurchaseOrderAttempt(
   }
 
   const storageKey = `${purchaseOrderActiveAttemptPrefix}${scopeDigest}`;
-  let stored: { fingerprint: string; intentId: string } | null;
-  try {
-    stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
-  } catch {
-    throw new PurchasingApiError(0, "Enable browser storage before creating a purchase order so an uncertain submission can be retried safely.");
-  }
-  if (stored && stored.fingerprint !== fingerprint) {
-    throw new PurchasingApiError(0, "A previous purchase order result is unresolved. Retry the exact draft or check purchase orders before starting another one.");
-  }
-  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+  return withPurchaseOrderMarkerLock(storageKey, async () => {
+    let stored: { fingerprint: string; intentId: string } | null;
+    try {
+      stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+    } catch {
+      throw new PurchasingApiError(0, "Enable browser storage before creating a purchase order so an uncertain submission can be retried safely.");
+    }
+    if (stored && stored.fingerprint !== fingerprint) {
+      throw new PurchasingApiError(0, "A previous purchase order result is unresolved. Retry the exact draft or check purchase orders before starting another one.");
+    }
+    if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
 
-  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+    const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+      const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+      if (!persisted || persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId) throw new Error("saved attempt did not persist");
+      return { ...attempt, intentId: persisted.intentId };
+    } catch {
+      throw new PurchasingApiError(0, "Enable browser storage before creating a purchase order so an uncertain submission can be retried safely.");
+    }
+  });
+}
+
+async function withPurchaseOrderMarkerLock<T>(storageKey: string, operation: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!locks) {
+    throw new PurchasingApiError(0, "Safe purchase order retry protection is unavailable in this browser. Use a browser with Web Locks support before creating a purchase order.");
+  }
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
-    const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
-    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
-    return { ...attempt, intentId: persisted.intentId };
-  } catch {
-    throw new PurchasingApiError(0, "Enable browser storage before creating a purchase order so an uncertain submission can be retried safely.");
+    return await locks.request(`chaste:purchasing-create-po-marker-lock:${storageKey}`, { mode: "exclusive" }, operation);
+  } catch (error) {
+    if (error instanceof PurchasingApiError) throw error;
+    throw new PurchasingApiError(0, "Could not safely coordinate the purchase order retry marker across browser tabs. Close other Purchasing tabs and try again.");
   }
 }
 
@@ -726,15 +743,17 @@ function parsePurchaseOrderAttempt(raw: string | null): { fingerprint: string; i
   return attempt.data;
 }
 
-function clearPurchaseOrderAttempt(attempt: PurchaseOrderAttempt): void {
-  try {
-    const stored = parsePurchaseOrderAttempt(window.localStorage.getItem(attempt.storageKey));
-    if (stored?.fingerprint === attempt.fingerprint && stored.intentId === attempt.intentId) {
-      window.localStorage.removeItem(attempt.storageKey);
+async function clearPurchaseOrderAttempt(attempt: PurchaseOrderAttempt): Promise<void> {
+  await withPurchaseOrderMarkerLock(attempt.storageKey, async () => {
+    try {
+      const stored = parsePurchaseOrderAttempt(window.localStorage.getItem(attempt.storageKey));
+      if (stored?.fingerprint === attempt.fingerprint && stored.intentId === attempt.intentId) {
+        window.localStorage.removeItem(attempt.storageKey);
+      }
+    } catch {
+      throw new PurchasingApiError(0, "The purchase order result was received, but its retry marker could not be cleared. Retry the exact draft safely or reload before creating another order.");
     }
-  } catch {
-    // A saved marker cannot change the server result, so resolution continues.
-  }
+  });
 }
 
 async function digestHex(value: string): Promise<string> {
