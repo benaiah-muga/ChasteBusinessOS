@@ -375,6 +375,9 @@ The full v1 changelog is preserved at the bottom of this file.
   decisions now use Go capabilities when `CHASTE_GO_HR_TIME=1`. The report and
   pending queue use separate capabilities so decisions retain their entry IDs
   and employee details.
+- Vite Payroll report reads and draft creation now use Go capabilities when
+  `CHASTE_GO_HR_PAYROLL=1`. The draft is generated from the active employees'
+  current salary, tax, and approved unpaid leave data.
 - Vite Accounting overview reads now always use the session-authenticated Go
   `accounting.overview` capability.
   Go entry debit aggregates are validated as safe integer minor units, and

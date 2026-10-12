@@ -2160,7 +2160,7 @@ new owners and the manifest shows zero legacy runtime paths.
      instructed it through Go, then reversed the unconfirmed run. Every write
      returned HTTP 200; the reversed status and restored bill balance persisted
      after reload. No legacy payment-run POST or browser error occurred.
-199. (Vite/Go implementation complete; browser proof pending) Route only the
+199. (Vite/Go implementation and authenticated browser proof complete) Route only the
      Vite Payroll tab's run report and draft creation through
      Go's `hr.report` and `hr.createPayrollRun` capabilities behind paired
      `CHASTE_GO_HR_PAYROLL=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`
@@ -2173,7 +2173,11 @@ new owners and the manifest shows zero legacy runtime paths.
      reservations prevent cross-tab intent races, stale responses cannot clear
      a newer draft, and browsers without Web Locks fail closed. Vite API/page/
      proxy tests, typecheck, lint, and Go payroll contract tests pass.
-     Authenticated browser proof remains open.
+     Authenticated Vite browser proof created an October 2026 payroll draft
+     through `hr.createPayrollRun`, with one employee, UGX 1,000 gross, UGX 100
+     tax, and UGX 900 net. The draft remained visible after reload. The Go
+     report and draft requests returned HTTP 200; no legacy HR POST or browser
+     error occurred.
 200. (Vite/Go implementation complete; browser proof pending) Route only the
      Vite Hiring tab's report, opening creation, applicant creation, and
      applicant stage changes through Go's `hr.report`,
