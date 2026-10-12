@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   MessagingApiError,
@@ -1252,7 +1252,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     pinThreadToEnd(threadRef.current);
   }, [messages]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!activeId) {
       draftOwnerRef.current = null;
       setDraft("");

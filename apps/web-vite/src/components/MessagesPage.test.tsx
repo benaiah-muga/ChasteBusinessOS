@@ -1206,6 +1206,7 @@ it("sends page presence heartbeats and typing updates through the selected Go se
     render(<MessagesPage />);
 
     const composer = (await screen.findByLabelText("Message general")) as HTMLTextAreaElement;
+    await screen.findByText("Morning all", {}, { timeout: 5_000 });
     fireEvent.change(composer, { target: { value: "@Gra", selectionStart: 4 } });
     const option = await screen.findByRole("option", { name: /@Grace/ });
     fireEvent.click(option);
@@ -1472,6 +1473,7 @@ it("sends page presence heartbeats and typing updates through the selected Go se
     render(<MessagesPage />);
 
     const composer = await screen.findByLabelText("Message general");
+    await screen.findByText("Morning all", {}, { timeout: 5_000 });
     fireEvent.change(composer, { target: { value: "Keep this draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
