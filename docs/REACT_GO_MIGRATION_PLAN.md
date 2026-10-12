@@ -2691,13 +2691,17 @@ new owners and the manifest shows zero legacy runtime paths.
      `messaging.archiveConversation`; both requests returned HTTP 200 and the
      active/archived counts updated after each action. The channel ended in
      Active, with no browser errors. See proof 327.
-239. (Vite implementation complete; browser proof pending) Route leave-
+239. (Complete) Route leave-
      conversation actions through the session-authenticated
      `messaging.leaveConversation` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Retain unresolved action and
      intent across reloads and selector rollback, atomically remove membership
      in Go, and set `CHASTE_GO_MESSAGING_CONVERSATION_LEAVE=0` for rollback of
-     new actions.
+     new actions. On 2026-10-12, authenticated Vite `/messages` created a
+     synthetic channel and left it through the Go capability route; the
+     capability request returned HTTP 200 and the active conversation count
+     returned to zero. No legacy leave request occurred, and the browser error
+     log was empty. See proof 329.
 240. (Vite implementation complete; browser proof pending) Route add-member
      actions through the session-authenticated `messaging.addMember`
      capability when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the
@@ -3637,3 +3641,11 @@ new owners and the manifest shows zero legacy runtime paths.
      returned HTTP 200, and `SMTP Proof User` appeared in both suggestion
      surfaces. No legacy people-list request occurred, and the browser error
      log was empty. This completes item 219.
+
+329. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` left the
+     synthetic channel `Go Leave Proof 20261012` through the Go
+     `messaging.leaveConversation` capability. The capability request returned
+     HTTP 200, and the active conversation count returned to zero. No legacy
+     leave request occurred, and the browser error log was empty. This proof
+     covers the confirmed leave flow; retry and selector-rollback behavior were
+     not exercised. This completes item 239.
