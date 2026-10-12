@@ -161,6 +161,28 @@ func TestSessionCapabilityHandlerLimitsLargeBodiesToMessageUploads(t *testing.T)
 	})
 }
 
+func TestSessionCapabilityHandlerAllowsFiveMegabyteDocumentUpload(t *testing.T) {
+	fileBase64 := strings.Repeat("A", 4*((5<<20+2)/3))
+	input := `{"title":"Upload","fileBase64":"` + fileBase64 + `","mimeType":"application/pdf"}`
+	body := `{"capabilityId":"` + documentsCreateCapabilityID + `","input":` + input + `,"intentId":"document-upload-intent"}`
+	identity := directTestIdentity()
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"documentId":"44444444-4444-4444-8444-444444444444"}`)}}
+	response := httptest.NewRecorder()
+	NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+	if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != documentsCreateCapabilityID {
+		t.Fatalf("status=%d calls=%d capability=%q body=%q", response.Code, executor.calls, executor.capID, response.Body.String())
+	}
+
+	oversizedInput := `{"title":"Upload","fileBase64":"` + strings.Repeat("A", documentsUploadBodyLimit) + `","mimeType":"application/pdf"}`
+	oversizedBody := `{"capabilityId":"` + documentsCreateCapabilityID + `","input":` + oversizedInput + `,"intentId":"oversized-document-upload-intent"}`
+	response = httptest.NewRecorder()
+	NewSessionCapabilityHandler(resolver, &fakeDirectCapabilityExecutor{}, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, oversizedBody))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%q, want oversized document capability body rejected", response.Code, response.Body.String())
+	}
+}
+
 func TestSessionCapabilityHandlerRateLimitsInventoryImportsPerOrganization(t *testing.T) {
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	limiter := newInventoryImportRateLimiter(func() time.Time { return now })

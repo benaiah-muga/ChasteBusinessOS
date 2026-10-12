@@ -3,6 +3,7 @@ import {
   DEFAULT_PAGE_SETTINGS,
   DocumentsEditorApiError,
   buildDocxBytes,
+  createAuthoredDocumentDraft,
   createDocumentTemplate,
   documentHtmlToJson,
   documentJsonToHtml,
@@ -79,7 +80,16 @@ function bodyOf(call: RecordedCall): Record<string, unknown> {
   return JSON.parse(String(call.init.body ?? "{}")) as Record<string, unknown>;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  window.localStorage.clear();
+  vi.unstubAllGlobals();
+});
+
+const templateScope = { actorId: "actor-1", organizationId: "org-1" };
+
+function stubWebLocks() {
+  vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+}
 
 describe("editor route matching", () => {
   it("reads the document id out of the dynamic path and refuses everything else", () => {
@@ -246,6 +256,49 @@ describe("authored document reads", () => {
 
 });
 
+describe("authored document creation", () => {
+  it("creates a minimal draft through Go and validates its UUID response", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft(templateScope)).resolves.toEqual({ kind: "completed", data: { documentId: goAuthoredDocument.id } });
+    expect(calls).toHaveLength(1);
+    const sent = bodyOf(calls[0]!);
+    expect(sent).toMatchObject({
+      capabilityId: "documents.createDoc",
+      input: {
+        title: "Untitled document",
+        content: { type: "doc", content: [{ type: "paragraph" }] },
+        html: "<p></p>",
+        pageSettings: DEFAULT_PAGE_SETTINGS,
+      },
+      intentId: expect.any(String),
+    });
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(calls[0]?.init.credentials).toBe("same-origin");
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("reuses the same scoped intent after an uncertain response and blocks malformed UUID output", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(createAuthoredDocumentDraft(templateScope)).rejects.toMatchObject({ status: 0 });
+    const first = bodyOf(calls[0]!);
+    const otherScope = { actorId: "actor-2", organizationId: "org-1" };
+    const { calls: otherCalls } = recorder(() => Response.json({ ok: true, data: { documentId: "not-a-uuid" } }));
+    await expect(createAuthoredDocumentDraft(otherScope)).rejects.toMatchObject({ status: 200 });
+    expect(bodyOf(otherCalls[0]!).intentId).not.toBe(first.intentId);
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft(templateScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(first.intentId);
+  });
+
+  it("fails closed when scope or retry locking is unavailable", async () => {
+    await expect(createAuthoredDocumentDraft({ actorId: null, organizationId: "org-1" })).rejects.toMatchObject({ status: 0 });
+    vi.stubGlobal("navigator", { ...navigator, locks: undefined });
+    await expect(createAuthoredDocumentDraft(templateScope)).rejects.toMatchObject({ status: 0 });
+  });
+});
+
 describe("draft workspace ticks", () => {
   it("stamps an intent id and sends the draft with its known revision", async () => {
     const { calls } = recorder(() => Response.json({ lock: { heldBy: "Ada", mine: true }, savedRev: 4, draft: null, others: [] }));
@@ -325,7 +378,10 @@ describe("governed writes", () => {
   });
 
   it("preserves the approval-pending envelope instead of calling it success or failure", async () => {
-    const { calls } = recorder(() => Response.json({ pendingApproval: true, hint: "This change waits for approval in the Approvals inbox." }, { status: 202 }));
+    stubWebLocks();
+    const { calls } = recorder((call) => call.url === "/api/capabilities/execute"
+      ? Response.json({ ok: false, pendingApproval: true, reason: "Template approval required", approvalId: "6f1b2c3d-0000-4000-8000-000000000003" }, { status: 202 })
+      : Response.json({ pendingApproval: true, hint: "This change waits for approval in the Approvals inbox." }, { status: 202 }));
 
     const published = await publishDocumentVersion("doc-1", {
       title: "Service quote",
@@ -339,33 +395,68 @@ describe("governed writes", () => {
     expect(restored.kind).toBe("pending");
     const renamed = await updateDocumentMetadata("doc-1", { title: "Renamed" });
     expect(renamed.kind).toBe("pending");
-    const templated = await createDocumentTemplate("Quote", authoredDocument.content);
-    expect(templated.kind).toBe("pending");
+    const templated = await createDocumentTemplate("Quote", authoredDocument.content, templateScope);
+    expect(templated).toEqual({ kind: "pending", hint: "Template approval required" });
+    expect(window.localStorage.length).toBe(1);
 
-    expect(calls.map((call) => bodyOf(call).action)).toEqual(["publish", "restore", "updateMetadata", "createTemplate"]);
+    expect(calls.slice(0, 3).map((call) => bodyOf(call).action)).toEqual(["publish", "restore", "updateMetadata"]);
+    expect(bodyOf(calls[3]!).capabilityId).toBe("documents.createTemplate");
+    const intentId = bodyOf(calls[3]!).intentId;
+
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: [] } }));
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(intentId);
+    expect(window.localStorage.length).toBe(0);
   });
 
   it("restores, renames and stores templates with their own intent identities", async () => {
+    stubWebLocks();
     const { calls } = recorder((_call) => {
-      const action = bodyOf(calls[calls.length - 1]!).action;
+      const sent = bodyOf(calls[calls.length - 1]!);
+      const action = sent.action;
       if (action === "restore") return Response.json({ version: 4 });
-      if (action === "createTemplate") return Response.json({ templateId: "tpl-1", placeholders: ["customer.name"] });
+      if (sent.capabilityId === "documents.createTemplate") return Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: ["customer.name"] } });
       return Response.json({ documentId: "doc-1", previous: { title: "Old", folder: null, linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: null } });
     });
 
     await expect(restoreDocumentVersion("doc-1", 2)).resolves.toEqual({ kind: "completed", data: { version: 4 } });
-    await expect(createDocumentTemplate("Quote", authoredDocument.content)).resolves.toEqual({
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).resolves.toEqual({
       kind: "completed",
-      data: { templateId: "tpl-1", placeholders: ["customer.name"] },
+      data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: ["customer.name"] },
     });
     await expect(updateDocumentMetadata("doc-1", { title: "Renamed" })).resolves.toMatchObject({ kind: "completed", data: { documentId: "doc-1", previous: { title: "Old" } } });
 
     expect(calls[0]?.url).toBe("/api/docs/doc-1");
-    expect(calls[1]?.url).toBe("/api/docs");
-    expect(bodyOf(calls[1]!)).toMatchObject({ action: "createTemplate", name: "Quote" });
+    expect(calls[1]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.createTemplate", input: { name: "Quote" } });
     expect(bodyOf(calls[2]!)).toMatchObject({ action: "updateMetadata", title: "Renamed" });
     const identities = calls.map((call) => bodyOf(call).intentId);
     expect(new Set(identities).size).toBe(3);
+  });
+
+  it("reuses a scoped template intent after network uncertainty and blocks changed details", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).rejects.toMatchObject({ status: 0 });
+    const first = bodyOf(calls[0]!);
+    await expect(createDocumentTemplate("Different", authoredDocument.content, templateScope)).rejects.toThrow("Retry its exact saved details");
+    expect(calls).toHaveLength(1);
+
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: [] } }));
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).resolves.toMatchObject({ kind: "completed" });
+    const retry = bodyOf(retryCalls[0]!);
+    expect(retry.intentId).toBe(first.intentId);
+    expect(retry.capabilityId).toBe("documents.createTemplate");
+  });
+
+  it("fails closed when template output is malformed and requires the same intent to retry", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => Response.json({ ok: true, data: { templateId: "tpl-1", placeholders: [] } }));
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).rejects.toMatchObject({ status: 200 });
+    const intentId = bodyOf(calls[0]!).intentId;
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: [] } }));
+    await createDocumentTemplate("Quote", authoredDocument.content, templateScope);
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(intentId);
   });
 
   it("turns a refused governed write into a readable error", async () => {

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DocumentsApiError, fetchDocumentDetail, fetchDocuments, fetchDocumentsEnabled, type DocumentDetail, type DocumentRow } from "../api/documents";
-import { legacyUrl } from "../legacy";
+import { authClient } from "../api/auth";
+import { fetchOrganizations } from "../api/organizations";
+import { createAuthoredDocumentDraft, DocumentsEditorApiError } from "../api/documents-editor";
+import { createIngestedDocument, DocumentsIngestApiError } from "../api/documents-ingest";
+import { navigate } from "../navigation";
 import "./documents-page.css";
 
 type ListState =
@@ -100,6 +104,16 @@ export function DocumentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [retry, setRetry] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [ingestMode, setIngestMode] = useState<"text" | "file" | null>(null);
+  const [ingestTitle, setIngestTitle] = useState("");
+  const [ingestFolder, setIngestFolder] = useState("");
+  const [ingestText, setIngestText] = useState("");
+  const [ingestFile, setIngestFile] = useState<File | null>(null);
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestError, setIngestError] = useState<string | null>(null);
+  const [ingestSuccess, setIngestSuccess] = useState(false);
   const detailRequestId = useRef(0);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -150,6 +164,68 @@ export function DocumentsPage() {
   }, [documents, query]);
   const selected = documents.find((document) => document.id === selectedId) ?? null;
 
+  const createDraft = async () => {
+    if (creating) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const session = await authClient.getSession();
+      const actorId = session.data?.user.id;
+      if (session.error || !actorId) throw new DocumentsEditorApiError(401, "Sign in again before creating a document.");
+      const organizations = await fetchOrganizations();
+      if (!organizations.activeOrgId || !organizations.orgs.some((organization) => organization.id === organizations.activeOrgId)) {
+        throw new DocumentsEditorApiError(0, "Choose an active workspace before creating a document.");
+      }
+      const outcome = await createAuthoredDocumentDraft({ actorId, organizationId: organizations.activeOrgId });
+      if (outcome.kind === "pending") {
+        setCreateError(outcome.hint);
+        return;
+      }
+      navigate(`/documents/editor/${encodeURIComponent(outcome.data.documentId)}`);
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : "Could not create the document. Try again.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const submitIngest = async () => {
+    if (ingesting || !ingestMode) return;
+    setIngesting(true);
+    setIngestError(null);
+    setIngestSuccess(false);
+    try {
+      const session = await authClient.getSession();
+      const actorId = session.data?.user.id;
+      if (session.error || !actorId) throw new DocumentsIngestApiError(401, "Sign in again before adding a document.");
+      const organizations = await fetchOrganizations();
+      if (!organizations.activeOrgId || !organizations.orgs.some((organization) => organization.id === organizations.activeOrgId)) {
+        throw new DocumentsIngestApiError(0, "Choose an active workspace before adding a document.");
+      }
+      const input = ingestMode === "file"
+        ? ingestFile ? { title: ingestTitle, folder: ingestFolder, file: ingestFile } : null
+        : { title: ingestTitle, folder: ingestFolder, text: ingestText };
+      if (!input) throw new DocumentsIngestApiError(400, "Choose a PDF or image file before uploading.");
+      const outcome = await createIngestedDocument(input, { actorId, organizationId: organizations.activeOrgId });
+      if (outcome.kind === "pending") {
+        setIngestError(outcome.hint);
+        return;
+      }
+      setIngestMode(null);
+      setIngestTitle("");
+      setIngestFolder("");
+      setIngestText("");
+      setIngestFile(null);
+      setRetry((current) => current + 1);
+      setSelectedId(outcome.documentId);
+      setIngestSuccess(true);
+    } catch (error) {
+      setIngestError(error instanceof Error ? error.message : "The document could not be added. Try again.");
+    } finally {
+      setIngesting(false);
+    }
+  };
+
   return (
     <main className="documents-page">
       <header className="documents-page-header">
@@ -158,8 +234,49 @@ export function DocumentsPage() {
           <h1>Documents</h1>
           <p>Browse uploaded records and review extracted text and processing status.</p>
         </div>
-        <a className="documents-full-workspace" href={legacyUrl("/documents")}>Open full documents workspace</a>
+        <div className="documents-header-actions">
+          <button className="documents-secondary-action" type="button" onClick={() => { setIngestMode((current) => current ? null : "text"); setIngestError(null); setIngestSuccess(false); }}>
+            {ingestMode ? "Close form" : "Add a document"}
+          </button>
+          <button className="documents-full-workspace" type="button" onClick={() => void createDraft()} disabled={creating}>
+            {creating ? "Creating draft…" : "New draft"}
+          </button>
+        </div>
       </header>
+
+      {createError && <p className="documents-error" role="alert">{createError}</p>}
+      {ingestSuccess && <p className="documents-ingest-success" role="status">Document added to the records library.</p>}
+
+      {ingestMode && (
+        <section className="documents-ingest-form" aria-labelledby="documents-ingest-title">
+          <div className="documents-ingest-heading">
+            <div><p className="documents-eyebrow">Add to records</p><h2 id="documents-ingest-title">Add a document</h2></div>
+            <div className="documents-ingest-modes" role="group" aria-label="Document source">
+              <button type="button" aria-pressed={ingestMode === "text"} onClick={() => { setIngestMode("text"); setIngestError(null); setIngestSuccess(false); }}>Paste text</button>
+              <button type="button" aria-pressed={ingestMode === "file"} onClick={() => { setIngestMode("file"); setIngestError(null); setIngestSuccess(false); }}>Upload PDF or image</button>
+            </div>
+          </div>
+          <div className="documents-ingest-fields">
+            <label>Title<input value={ingestTitle} maxLength={200} onChange={(event) => setIngestTitle(event.currentTarget.value)} placeholder="Supplier invoice #42" /></label>
+            <label>Folder (optional)<input value={ingestFolder} maxLength={300} onChange={(event) => setIngestFolder(event.currentTarget.value)} placeholder="Finance / Payables" /></label>
+            {ingestMode === "text" ? (
+              <label className="documents-ingest-wide">Text<textarea value={ingestText} maxLength={100_000} rows={6} onChange={(event) => setIngestText(event.currentTarget.value)} placeholder="Paste document text here" /></label>
+            ) : (
+              <label className="documents-ingest-wide">PDF or image, up to 5 MB
+                <input aria-label="Upload document file" type="file" accept="image/*,.pdf" onChange={(event) => setIngestFile(event.currentTarget.files?.[0] ?? null)} />
+                {ingestFile && <span>{ingestFile.name} ({formatSize(ingestFile.size)})</span>}
+              </label>
+            )}
+          </div>
+          {ingestError && <p className="documents-ingest-error" role="alert">{ingestError}</p>}
+          <div className="documents-ingest-actions">
+            <span>Text is limited to 100,000 characters. Uploads are limited to 5 MB.</span>
+            <button type="button" className="documents-primary-link" onClick={() => void submitIngest()} disabled={ingesting}>
+              {ingesting ? "Adding…" : ingestMode === "file" ? "Upload document" : "Add text"}
+            </button>
+          </div>
+        </section>
+      )}
 
       {state.status === "loading" && <p className="documents-loading" role="status">Loading documents…</p>}
       {state.status === "disabled" && (
@@ -183,8 +300,16 @@ export function DocumentsPage() {
         <section className="documents-empty" aria-live="polite">
           <span aria-hidden="true">▤</span>
           <h2>No documents yet</h2>
-          <p>Upload a PDF or image, or add text in the full documents workspace.</p>
-          <a className="documents-primary-link" href={legacyUrl("/documents?tab=write")}>Add a document</a>
+          <p>Upload a PDF or image, paste text into the records library, or start an editable draft.</p>
+          <button className="documents-primary-link" type="button" onClick={() => { setIngestMode("text"); setIngestError(null); setIngestSuccess(false); }}>
+            Add text to records
+          </button>
+          <button className="documents-secondary-action" type="button" onClick={() => { setIngestMode("file"); setIngestError(null); setIngestSuccess(false); }}>
+            Upload a PDF or image
+          </button>
+          <button className="documents-secondary-action" type="button" onClick={() => void createDraft()} disabled={creating}>
+            {creating ? "Creating draft…" : "Create editable draft"}
+          </button>
         </section>
       )}
 

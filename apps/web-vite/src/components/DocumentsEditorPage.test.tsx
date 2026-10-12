@@ -62,12 +62,14 @@ function editorFetch(override?: (call: RecordedCall) => Response | null) {
         createdAt: "2026-09-28T09:30:00.000Z",
       } });
     }
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.createTemplate") {
+      return Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: ["customer.name"] } });
+    }
     if (call.body?.action === "updateMetadata") {
       return Response.json({ documentId: DOCUMENT_ID, previous: { title: "Service quote", folder: "Sales", linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: "Deal: Ada" } });
     }
     if (call.url === `/api/docs/${DOCUMENT_ID}`) return Response.json({ version: 3 });
     if (call.url === "/api/docs/assist") return Response.json({ ok: true, text: "Tighter copy." });
-    if (call.url === "/api/docs") return Response.json({ templateId: "tpl-1", placeholders: ["customer.name"] });
     return Response.json({ error: "unexpected" }, { status: 500 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -97,6 +99,7 @@ const BOOT = { timeout: 15_000 };
 
 beforeEach(() => {
   window.history.replaceState(null, "", `/documents/editor/${DOCUMENT_ID}`);
+  vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
 });
 
 afterEach(() => {
@@ -137,7 +140,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
 
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
     const preview = screen.getByLabelText("Live document preview");
@@ -232,7 +235,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
@@ -257,7 +260,7 @@ describe("authored document editor", () => {
     fireEvent.change(await screen.findByLabelText("Template name", undefined, BOOT), { target: { value: "Quote" } });
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save template" }));
     expect(await screen.findByText('Template "Quote" saved.', undefined, BOOT)).not.toBeNull();
-    expect(calls.find((call) => call.body?.action === "createTemplate")?.body).toMatchObject({ name: "Quote" });
+    expect(calls.find((call) => call.body?.capabilityId === "documents.createTemplate")?.body).toMatchObject({ capabilityId: "documents.createTemplate", input: { name: "Quote" } });
   }, TIMEOUT);
 
   it("renames through the governed metadata route and shows the new title", async () => {

@@ -3,9 +3,9 @@ import { z } from "zod";
 /**
  * Client for the authored-document editor surface: the one document read,
  * the draft workspace (autosave, presence, soft lock), governed writes
- * (publish, restore, rename, save as template) and the read-shaped AI
- * assist calls. Editor detail and authored-version reads can use the signed
- * Go capability route; workspace, collaboration and writes keep their routes.
+ * (publish, restore, rename), Go capability writes (save as template), and
+ * read-shaped AI assist calls. Editor detail and authored-version reads use
+ * the signed Go capability route; workspace and collaboration keep their routes.
  *
  * Document content crosses this boundary in two forms: the ProseMirror JSON
  * tree the editor works in, and the HTML that tree renders to. Every HTML
@@ -122,10 +122,16 @@ export type WorkspaceTick = {
 
 const PublishedVersionSchema = z.object({ version: z.number().int().positive() }).strict();
 const TemplateCreatedSchema = z.object({
-  templateId: z.string().min(1),
-  placeholders: z.array(z.string()).optional(),
+  templateId: z.string().uuid(),
+  placeholders: z.array(z.string()),
 }).strict();
 export type TemplateCreated = z.infer<typeof TemplateCreatedSchema>;
+const AuthoredDocumentCreatedSchema = z.object({ documentId: z.string().uuid() }).strict();
+const TemplateRetryMarkerSchema = z.object({
+  version: z.literal(1),
+  intentId: z.string().uuid(),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+}).strict();
 const MetadataPreviousSchema = z.object({
   title: z.string(),
   folder: z.string().nullable(),
@@ -137,14 +143,23 @@ const MetadataUpdatedSchema = z.object({
   documentId: z.string().min(1),
   previous: MetadataPreviousSchema.optional(),
 }).strict();
-const PendingApprovalSchema = z.object({
+const LegacyPendingApprovalSchema = z.object({
   pendingApproval: z.literal(true),
   hint: z.string().optional(),
 }).strict();
+const GoPendingApprovalSchema = z.object({
+  ok: z.literal(false),
+  pendingApproval: z.literal(true),
+  reason: z.string().min(1),
+  approvalId: z.string().uuid().optional(),
+}).strict();
+const PendingApprovalSchema = z.union([LegacyPendingApprovalSchema, GoPendingApprovalSchema]);
 const AssistTextSchema = z.object({ ok: z.literal(true).optional(), text: z.string() }).strict();
 export type AssistText = z.infer<typeof AssistTextSchema>;
 
 export type GovernedOutcome<T> = { kind: "completed"; data: T } | { kind: "pending"; hint: string };
+
+export type DocumentsEditorRetryScope = { actorId: string | null; organizationId: string | null };
 
 export class DocumentsEditorApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -233,13 +248,17 @@ function governed<T>(url: string, body: Record<string, unknown>, schema: z.ZodTy
   return post(url, body, signal).then(({ status, body: raw }) => {
     if (status === 202) {
       const pending = raw as z.infer<typeof PendingApprovalSchema>;
-      return { kind: "pending", hint: pending.hint ?? "This change waits for approval in the Approvals inbox." };
+      return { kind: "pending", hint: pendingApprovalHint(pending) };
     }
     if (status < 200 || status >= 300) throw new DocumentsEditorApiError(status, messageFor(status, raw));
     const parsed = schema.safeParse(raw);
     if (!parsed.success) throw new DocumentsEditorApiError(status, "The document service returned an unexpected action response.");
     return { kind: "completed", data: parsed.data };
   });
+}
+
+function pendingApprovalHint(pending: z.infer<typeof PendingApprovalSchema>): string {
+  return ("reason" in pending ? pending.reason : pending.hint) ?? "This change waits for approval in the Approvals inbox.";
 }
 
 const documentPath = (id: string): string => `/api/docs/${encodeURIComponent(id)}`;
@@ -350,9 +369,158 @@ export function updateDocumentMetadata(
 export function createDocumentTemplate(
   name: string,
   content: Record<string, unknown>,
+  scope: DocumentsEditorRetryScope,
   signal?: AbortSignal,
 ): Promise<GovernedOutcome<TemplateCreated>> {
-  return governed("/api/docs", { action: "createTemplate", name, content }, TemplateCreatedSchema, signal);
+  return createDocumentTemplateInGo(name, content, scope, signal);
+}
+
+export function createAuthoredDocumentDraft(
+  scope: DocumentsEditorRetryScope,
+): Promise<GovernedOutcome<z.infer<typeof AuthoredDocumentCreatedSchema>>> {
+  return createAuthoredDocumentDraftInGo(scope);
+}
+
+const templateRetryPrefix = "chaste:documents-template:v1:";
+const authoredDocumentRetryPrefix = "chaste:authored-document-create:v1:";
+
+async function digest(value: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function templateRetryScope(scope: DocumentsEditorRetryScope): { actorId: string; organizationId: string } {
+  const actorId = scope.actorId?.trim() ?? "";
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!actorId || !organizationId || actorId.length > 255 || organizationId.length > 255) {
+    throw new DocumentsEditorApiError(0, "Wait for your account and organization to finish loading before creating or saving documents.");
+  }
+  return { actorId, organizationId };
+}
+
+function parseTemplateRetryMarker(raw: string | null): z.infer<typeof TemplateRetryMarkerSchema> | null {
+  if (raw === null) return null;
+  let value: unknown;
+  try { value = JSON.parse(raw); }
+  catch { throw new DocumentsEditorApiError(0, "A saved template retry marker is invalid. Verify the template before trying again."); }
+  const parsed = TemplateRetryMarkerSchema.safeParse(value);
+  if (!parsed.success) throw new DocumentsEditorApiError(0, "A saved template retry marker is invalid. Verify the template before trying again.");
+  return parsed.data;
+}
+
+async function createDocumentTemplateInGo(
+  name: string,
+  content: Record<string, unknown>,
+  scope: DocumentsEditorRetryScope,
+  signal?: AbortSignal,
+): Promise<GovernedOutcome<TemplateCreated>> {
+  const normalizedName = name.trim();
+  if (!normalizedName || normalizedName.length > 120 || !content || typeof content !== "object" || Array.isArray(content)) {
+    throw new DocumentsEditorApiError(400, "Enter a valid template name and document content.");
+  }
+  const { actorId, organizationId } = templateRetryScope(scope);
+  const locks = navigator.locks;
+  if (!locks) throw new DocumentsEditorApiError(0, "Template retry protection is unavailable in this browser.");
+
+  return locks.request(`chaste:documents-template:${actorId}:${organizationId}`, { mode: "exclusive" }, async () => {
+    const fingerprint = await digest(JSON.stringify({ capabilityId: "documents.createTemplate", name: normalizedName, content }));
+    const scopeHash = await digest(`${actorId}:${organizationId}`);
+    const storageKey = `${templateRetryPrefix}${scopeHash}`;
+    let marker: z.infer<typeof TemplateRetryMarkerSchema> | null;
+    try { marker = parseTemplateRetryMarker(window.localStorage.getItem(storageKey)); }
+    catch (error) { if (error instanceof DocumentsEditorApiError) throw error; throw new DocumentsEditorApiError(0, "Template retry protection could not be read. Enable browser storage before saving."); }
+    if (marker && marker.fingerprint !== fingerprint) {
+      throw new DocumentsEditorApiError(0, "A previous template save is unresolved. Retry its exact saved details before changing anything else.");
+    }
+    marker ??= { version: 1, intentId: crypto.randomUUID(), fingerprint };
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(marker));
+      if (parseTemplateRetryMarker(window.localStorage.getItem(storageKey))?.intentId !== marker.intentId) throw new Error("marker did not persist");
+    } catch {
+      throw new DocumentsEditorApiError(0, "Template retry protection could not be saved. Enable browser storage before continuing.");
+    }
+
+    const { status, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({ capabilityId: "documents.createTemplate", input: { name: normalizedName, content }, intentId: marker.intentId }),
+    }, signal);
+    if (status === 202) {
+      const pending = GoPendingApprovalSchema.safeParse(body);
+      if (!pending.success) throw new DocumentsEditorApiError(status, "The document service returned an unexpected approval response.");
+      return { kind: "pending", hint: pending.data.reason };
+    }
+    if (status < 200 || status >= 300) {
+      if (status >= 400 && status < 500 && status !== 408 && status !== 425 && status !== 429) {
+        try { window.localStorage.removeItem(storageKey); }
+        catch { throw new DocumentsEditorApiError(0, "The template was refused, but its retry marker could not be cleared. Retry the same action after checking the template list."); }
+      }
+      throw new DocumentsEditorApiError(status, messageFor(status, body));
+    }
+    const envelope = CapabilitySuccessSchema.safeParse(body);
+    const parsed = envelope.success ? TemplateCreatedSchema.safeParse(envelope.data.data) : null;
+    if (!parsed?.success) throw new DocumentsEditorApiError(status, "The document service returned data in an unexpected format.");
+    try { window.localStorage.removeItem(storageKey); }
+    catch { throw new DocumentsEditorApiError(0, "The template was saved, but retry protection could not be cleared. Retry the same details to confirm it safely."); }
+    return { kind: "completed", data: parsed.data };
+  });
+}
+
+async function createAuthoredDocumentDraftInGo(
+  scope: DocumentsEditorRetryScope,
+): Promise<GovernedOutcome<z.infer<typeof AuthoredDocumentCreatedSchema>>> {
+  const { actorId, organizationId } = templateRetryScope(scope);
+  const locks = navigator.locks;
+  if (!locks) throw new DocumentsEditorApiError(0, "Document creation retry protection is unavailable in this browser.");
+
+  const input = {
+    title: "Untitled document",
+    content: { type: "doc", content: [{ type: "paragraph" }] },
+    html: "<p></p>",
+    pageSettings: DEFAULT_PAGE_SETTINGS,
+  };
+  return locks.request(`chaste:authored-document-create:${actorId}:${organizationId}`, { mode: "exclusive" }, async () => {
+    const fingerprint = await digest(JSON.stringify({ capabilityId: "documents.createDoc", input }));
+    const scopeHash = await digest(`${actorId}:${organizationId}`);
+    const storageKey = `${authoredDocumentRetryPrefix}${scopeHash}`;
+    let marker: z.infer<typeof TemplateRetryMarkerSchema> | null;
+    try { marker = parseTemplateRetryMarker(window.localStorage.getItem(storageKey)); }
+    catch (error) { if (error instanceof DocumentsEditorApiError) throw error; throw new DocumentsEditorApiError(0, "Document creation retry protection could not be read. Enable browser storage before continuing."); }
+    if (marker && marker.fingerprint !== fingerprint) {
+      throw new DocumentsEditorApiError(0, "A previous document creation is unresolved. Retry it or check the document list before creating another.");
+    }
+    marker ??= { version: 1, intentId: crypto.randomUUID(), fingerprint };
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(marker));
+      if (parseTemplateRetryMarker(window.localStorage.getItem(storageKey))?.intentId !== marker.intentId) throw new Error("marker did not persist");
+    } catch {
+      throw new DocumentsEditorApiError(0, "Document creation retry protection could not be saved. Enable browser storage before continuing.");
+    }
+
+    const { status, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({ capabilityId: "documents.createDoc", input, intentId: marker.intentId }),
+    });
+    if (status === 202) {
+      const pending = GoPendingApprovalSchema.safeParse(body);
+      if (!pending.success) throw new DocumentsEditorApiError(status, "The document service returned an unexpected approval response.");
+      return { kind: "pending", hint: pending.data.reason };
+    }
+    if (status < 200 || status >= 300) {
+      if (status >= 400 && status < 500 && status !== 408 && status !== 425 && status !== 429) {
+        try { window.localStorage.removeItem(storageKey); }
+        catch { throw new DocumentsEditorApiError(0, "Document creation was refused, but its retry marker could not be cleared. Check the document list before retrying."); }
+      }
+      throw new DocumentsEditorApiError(status, messageFor(status, body));
+    }
+    const envelope = CapabilitySuccessSchema.safeParse(body);
+    const parsed = envelope.success ? AuthoredDocumentCreatedSchema.safeParse(envelope.data.data) : null;
+    if (!parsed?.success) throw new DocumentsEditorApiError(status, "The document service returned data in an unexpected format.");
+    try { window.localStorage.removeItem(storageKey); }
+    catch { throw new DocumentsEditorApiError(0, "The document was created, but retry protection could not be cleared. Retry the same action to confirm it safely."); }
+    return { kind: "completed", data: parsed.data };
+  });
 }
 
 export async function requestAssist(body: Record<string, unknown>, signal?: AbortSignal): Promise<AssistText> {

@@ -543,7 +543,7 @@ function AssistPanel({ handle, documentId }: { handle: SurfaceHandle | null; doc
   );
 }
 
-export function DocumentsEditorPage({ documentId }: { documentId?: string }) {
+export function DocumentsEditorPage({ documentId, actorId = null, organizationId = null }: { documentId?: string; actorId?: string | null; organizationId?: string | null }) {
   const resolvedId = documentId ?? documentsEditorIdFromPath(window.location.pathname);
   const [retry, setRetry] = useState(0);
   const [boot, setBoot] = useState<BootState>({ status: "loading" });
@@ -837,7 +837,7 @@ export function DocumentsEditorPage({ documentId }: { documentId?: string }) {
     if (!name || !resolvedId) return;
     setBusy(true);
     try {
-      const outcome = await createDocumentTemplate(name, contentRef.current);
+      const outcome = await createDocumentTemplate(name, contentRef.current, { actorId, organizationId });
       setNotice(outcome.kind === "pending"
         ? { tone: "pending", text: `Template "${name}" was proposed and waits for approval.` }
         : { tone: "success", text: `Template "${name}" saved.` });

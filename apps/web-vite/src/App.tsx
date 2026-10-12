@@ -307,7 +307,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                                             : proposalsPage
                                                               ? <ProposalsPage key={organizationRevision} />
                                                               : documentsEditorPage
-                                                                ? <DocumentsEditorPage key={organizationRevision} documentId={pathname.split("/").pop()} />
+                                                                ? <DocumentsEditorPage key={organizationRevision} documentId={pathname.split("/").pop()} actorId={currentUserId} organizationId={activeOrgId} />
                                                                 : posPage
                                                                 ? activeOrgId
                                                                   ? <PosPage key={`${organizationRevision}:${auth.user.id}:${activeOrgId}`} baseCurrency={baseCurrency} actorId={auth.user.id} organizationId={activeOrgId} />

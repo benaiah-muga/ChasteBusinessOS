@@ -164,7 +164,7 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	if body.CapabilityID != messagingUploadCapabilityID && len(bodyBytes) > sessionCapabilityBodyLimit {
+	if int64(len(bodyBytes)) > capabilityBodyLimitFor(body.CapabilityID) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}

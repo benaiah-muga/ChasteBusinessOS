@@ -3836,3 +3836,18 @@ new owners and the manifest shows zero legacy runtime paths.
      returned HTTP 200 and the article appeared in the library. The browser
      made no legacy `POST /api/support` request and reported no page error.
      This completes item 350.
+
+352. (Complete) Complete Vite Documents write paths through Go: create an
+     authored draft, save a document template, ingest pasted text, and upload
+     PDF or image files. Bound uploads to 5 MiB at both the browser and Go
+     capability body boundary, and keep ordinary Go capability requests at
+     64 KiB.
+
+353. (Runtime verified) On 2026-10-13, authenticated Vite `/documents` added
+     a synthetic text record and a 128 KiB PDF through Go's
+     `documents.createDocument` capability (HTTP 200). The record list and
+     detail reflected both writes. The same browser session created a draft,
+     opened its Vite editor, and saved a template through Go (HTTP 200). No
+     browser console or page errors occurred. Go tests verified that 5 MiB
+     document payloads pass and oversized document payloads fail, while other
+     capabilities retain the 64 KiB limit. This completes item 352.

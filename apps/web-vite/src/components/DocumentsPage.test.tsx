@@ -137,6 +137,93 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "No documents yet" })).not.toBeNull();
   });
 
+  it("creates an authored draft through Go and opens the Vite editor", async () => {
+    vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/documents") return Response.json({ documents: [], vendors: [] });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", email: "ada@example.test" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z" } });
+      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
+      if (url === "/api/capabilities/execute") {
+        const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        expect(request.capabilityId).toBe("documents.createDoc");
+        expect(request.input.title).toBe("Untitled document");
+        expect(request.intentId).toBeTruthy();
+        return Response.json({ ok: true, data: { documentId: goDocumentId } });
+      }
+      return Response.json({ error: "unexpected request" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    const create = await screen.findByRole("button", { name: "Create editable draft" });
+    fireEvent.click(create);
+    await waitFor(() => expect(window.location.pathname).toBe(`/documents/editor/${goDocumentId}`));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes(":3001"))).toBe(false);
+  });
+
+  it("adds pasted text through documents.createDocument with the active account scope", async () => {
+    vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/documents") return Response.json({ documents: [], vendors: [] });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", email: "ada@example.test" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z" } });
+      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
+      if (url === "/api/capabilities/execute") {
+        const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        expect(request.capabilityId).toBe("documents.createDocument");
+        expect(request.input).toEqual({ title: "Supplier invoice #42", folder: "Finance", text: "Invoice due Friday" });
+        expect(request.intentId).toBeTruthy();
+        return Response.json({ ok: true, data: { documentId: goDocumentId } });
+      }
+      return Response.json({ error: "unexpected request" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add a document" }));
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Supplier invoice #42" } });
+    fireEvent.change(screen.getByLabelText("Folder (optional)"), { target: { value: "Finance" } });
+    fireEvent.change(screen.getByLabelText("Text"), { target: { value: "Invoice due Friday" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add text" }));
+
+    expect(await screen.findByRole("status")).not.toBeNull();
+    expect(screen.getByText("Document added to the records library.")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes(":3001"))).toBe(false);
+  });
+
+  it("uploads PDFs through Go and reports approval without claiming the upload completed", async () => {
+    vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/documents") return Response.json({ documents: [], vendors: [] });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", email: "ada@example.test" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z" } });
+      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
+      if (url === "/api/capabilities/execute") {
+        const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+        expect(request.capabilityId).toBe("documents.createDocument");
+        expect(request.input).toMatchObject({ title: "April bill", mimeType: "application/pdf", fileBase64: btoa("%PDF-1.7 test") });
+        return Response.json({ ok: false, pendingApproval: true, reason: "Upload needs approval", approvalId: goDocumentId }, { status: 202 });
+      }
+      return Response.json({ error: "unexpected request" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add a document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload PDF or image" }));
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "April bill" } });
+    const file = new File(["%PDF-1.7 test"], "bill.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText("Upload document file"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload document" }));
+
+    expect(await screen.findByText("Upload needs approval")).not.toBeNull();
+    expect(screen.queryByText("Document added to the records library.")).toBeNull();
+  });
+
   it("surfaces permission errors and allows retry", async () => {
     let listAttempt = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {

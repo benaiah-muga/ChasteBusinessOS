@@ -247,6 +247,53 @@ func TestGoCapabilityHandlerUsesSignedCapabilityForUploadBodyLimit(t *testing.T)
 	})
 }
 
+func TestGoCapabilityHandlerAllowsFiveMegabyteDocumentUpload(t *testing.T) {
+	fileBase64 := strings.Repeat("A", 4*((5<<20+2)/3))
+	input := `{"title":"Upload","fileBase64":"` + fileBase64 + `","mimeType":"application/pdf"}`
+	claims := validCapabilityClaims(t, input)
+	claims.CapabilityID = documentsCreateCapabilityID
+	hash, err := capability.InputHash(json.RawMessage(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims.InputSHA256 = hash
+	body := `{"capabilityId":"` + documentsCreateCapabilityID + `","input":` + input + `}`
+	executor := &fakeCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"documentId":"44444444-4444-4444-8444-444444444444"}`)}}
+	request := httptest.NewRequest(http.MethodPost, "/__go/capability/execute", strings.NewReader(body))
+	request.Header.Set(sessionAssertionHeader, signedCapabilityAssertion(t, claims))
+	response := httptest.NewRecorder()
+	NewGoCapabilityHandler(assertionSecret, executor, nil).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != documentsCreateCapabilityID {
+		t.Fatalf("status=%d calls=%d capability=%q body=%q", response.Code, executor.calls, executor.capID, response.Body.String())
+	}
+
+	oversizedInput := `{"title":"Upload","fileBase64":"` + strings.Repeat("A", documentsUploadBodyLimit) + `","mimeType":"application/pdf"}`
+	claims = validCapabilityClaims(t, oversizedInput)
+	claims.CapabilityID = documentsCreateCapabilityID
+	hash, err = capability.InputHash(json.RawMessage(oversizedInput))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims.InputSHA256 = hash
+	oversizedBody := `{"capabilityId":"` + documentsCreateCapabilityID + `","input":` + oversizedInput + `}`
+	request = httptest.NewRequest(http.MethodPost, "/__go/capability/execute", strings.NewReader(oversizedBody))
+	request.Header.Set(sessionAssertionHeader, signedCapabilityAssertion(t, claims))
+	response = httptest.NewRecorder()
+	NewGoCapabilityHandler(assertionSecret, &fakeCapabilityExecutor{}, nil).ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%q, want oversized documents upload rejected", response.Code, response.Body.String())
+	}
+
+	claims.CapabilityID = "crm.createCustomer"
+	request = httptest.NewRequest(http.MethodPost, "/__go/capability/execute", strings.NewReader(body))
+	request.Header.Set(sessionAssertionHeader, signedCapabilityAssertion(t, claims))
+	response = httptest.NewRecorder()
+	NewGoCapabilityHandler(assertionSecret, &fakeCapabilityExecutor{}, nil).ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%q, want ordinary capability body rejected", response.Code, response.Body.String())
+	}
+}
+
 func TestGoCapabilityHandlerMapsPendingApprovalToExistingResponse(t *testing.T) {
 	executor := &fakeCapabilityExecutor{result: capability.Result{
 		OK:                false,

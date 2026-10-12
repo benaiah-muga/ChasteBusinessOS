@@ -16,10 +16,15 @@ import (
 
 const capabilityBodyLimit = 64 << 10
 const messagingUploadBodyLimit = 7_000_000 + capabilityBodyLimit
+const documentsUploadBodyLimit = 7_000_000 + capabilityBodyLimit
 const messagingUploadCapabilityID = "messaging.uploadMessageAttachment"
+const documentsCreateCapabilityID = "documents.createDocument"
 
 func capabilityBodyLimitFor(capabilityID string) int64 {
-	if capabilityID == messagingUploadCapabilityID {
+	if capabilityID == messagingUploadCapabilityID || capabilityID == documentsCreateCapabilityID {
+		if capabilityID == documentsCreateCapabilityID {
+			return documentsUploadBodyLimit
+		}
 		return messagingUploadBodyLimit
 	}
 	return capabilityBodyLimit

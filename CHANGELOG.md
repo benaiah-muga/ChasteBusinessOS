@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Documents now creates editable drafts, saves templates, and ingests
+  pasted text or PDF/image records through authenticated Go capabilities. The
+  browser checks upload size, MIME type, text length, scope, and exact retry
+  intent; Go allows uploads up to 5 MB and keeps other capability requests at
+  the 64 KiB body limit. The page no longer links to the legacy documents app.
 - Vite Support knowledge-base article creation now uses Go's authenticated
   `support.createKbArticle` capability with an actor- and organization-scoped
   retry intent. The generic legacy action helper rejects article creation.
