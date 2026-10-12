@@ -2419,13 +2419,16 @@ new owners and the manifest shows zero legacy runtime paths.
      authenticated browser loaded the UGX aging buckets and zero outstanding
      total through Go; the capability returned HTTP 200, no legacy purchasing
      read request occurred, and browser errors were empty.
-214. (Implemented; default-on) Route Vite analytics discovery, previews, and
+214. (Done; default-on) Route Vite analytics discovery, previews, and
      report generation through the existing Go Analytics session handler.
      Exact GET and POST method selectors default to Go and can be set to `0`
      for explicit legacy rollback. Preserve report JSON input/output, dataset
      read and `analytics.report` permissions, and HTML download behavior.
-     Exact method and route tests cover enabled and disabled paths; browser
-     proof remains open.
+     Exact method and route tests cover enabled and disabled paths. The
+     authenticated browser loaded discovery data, previewed Revenue by month,
+     generated the report through Go, and downloaded the HTML output. The GET
+     discovery, preview, and POST report requests returned HTTP 200; no legacy
+     reports request or browser errors occurred.
 215. (Implemented; Go route ownership verified) Route exact Vite `GET
      /api/inventory` requests, including `?sku=...` history queries, to Go
      unconditionally. The Go reader preserves the catalog and `{ movements }`
