@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite CRM now reads deals, customers, follow-up tasks, saved views, and
+  customer timelines through authenticated Go capabilities. Go resolves the
+  session and organization scope, and invalid or unavailable responses fail
+  closed without a legacy read fallback.
 - Vite Sales now creates and lists quotes, accepts sent quotes into invoices,
   and shows Go-backed customers and deals. Quote writes use authenticated Go
   capabilities with actor/workspace-scoped exact retry intents, including

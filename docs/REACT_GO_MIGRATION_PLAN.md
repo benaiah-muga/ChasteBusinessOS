@@ -3893,6 +3893,24 @@ new owners and the manifest shows zero legacy runtime paths.
      browser error log was empty; 14 Settings tests, Vite typecheck, focused
      lint, and diff checks passed. This completes item 358.
 
+362. (Complete) Move Vite CRM reads for deals, customers, follow-up tasks,
+     saved views, and customer timelines to Go's authenticated capability
+     executor. Validate capability envelopes and returned data, use the
+     existing session and organization scope, and fail closed without legacy
+     API fallbacks.
+
+363. (Runtime verified) On 2026-10-13, the authenticated Vite CRM page loaded
+     `crm.listDeals`, `crm.listCustomerCollection`, `crm.listTasks`, and
+     `crm.listCustomerViews` through `/api/capabilities/execute`, all with
+     HTTP 200. The customer directory showed the existing synthetic Sales
+     customer; pipeline and task views rendered their empty states, and the
+     saved-view selector showed no saved views in this workspace. Opening the
+     customer's history called `crm.customerTimeline` with HTTP 200 and showed
+     its accepted Quote #1 and sent Invoice #1. No legacy CRM read requests or
+     browser page errors occurred. The API and page tests (109 total), Vite
+     typecheck, focused ESLint, and diff checks passed. This completes item
+     362.
+
 360. (Complete) Route Vite HR reports, employee actions, time data, and expenses
      directly through authenticated Go capabilities. Remove the HR and time
      legacy API fallbacks from the Vite adapters.

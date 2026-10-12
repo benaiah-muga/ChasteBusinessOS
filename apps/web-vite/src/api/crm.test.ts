@@ -32,71 +32,74 @@ function stubCrmDealStageLocks() {
 describe("CRM API client", () => {
   beforeEach(() => { stubCrmDealStageLocks(); });
 
-  it("reads and validates deals directly from the Go CRM endpoint with the same-origin session", async () => {
+  it("reads and validates deals through the authenticated Go capability route", async () => {
     const deal = { id: dealId, title: "Renewal", stage: "proposal", valueMinor: 250000, note: null, customerId, customerName: "Northwind", updatedAt: "2026-09-29T12:00:00.000Z" };
-    const fetchMock = vi.fn(async () => Response.json({ deals: [deal] }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { deals: [deal] } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchCrmDeals()).resolves.toEqual([deal]);
-    expect(fetchMock).toHaveBeenCalledWith("/api/crm?deals=1", expect.objectContaining({ credentials: "same-origin", headers: { accept: "application/json" }, signal: expect.any(AbortSignal) }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json", "content-type": "application/json" }, signal: expect.any(AbortSignal),
+      body: expect.stringContaining("crm.listDeals"),
+    }));
 
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ deals: [{ id: dealId }] })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deals: [{ id: dealId }] } })));
     await expect(fetchCrmDeals()).rejects.toBeInstanceOf(CrmApiError);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deals: [{ ...deal, valueMinor: Number.MAX_SAFE_INTEGER + 1 }] } })));
+    await expect(fetchCrmDeals()).rejects.toThrow("unexpected format");
   });
 
-  it("uses the direct Go CRM read selectors for customers, tasks, and saved views", async () => {
+  it("uses Go capabilities for customer collection, tasks, and saved views", async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({ customers: [{ id: customerId, name: "Northwind" }] }))
-      .mockResolvedValueOnce(Response.json({ tasks: [{ id: dealId, title: "Call Northwind" }] }))
-      .mockResolvedValueOnce(Response.json({ tasks: [{ id: dealId, title: "Call Northwind" }] }))
-      .mockResolvedValueOnce(Response.json({ views: [{ id: dealId, name: "Active", filters: { status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" } }] }));
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { customers: [{ id: customerId, name: "Northwind" }] } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { tasks: [{ id: dealId, title: "Call Northwind" }] } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { tasks: [{ id: dealId, title: "Call Northwind" }] } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { views: [{ id: dealId, name: "Active", filters: { status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" } }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchCrmCustomers()).resolves.toHaveLength(1);
     await expect(fetchCrmTasks()).resolves.toHaveLength(1);
     await expect(fetchCrmTasks(undefined, { openOnly: true })).resolves.toHaveLength(1);
     await expect(fetchCrmViews()).resolves.toHaveLength(1);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/customers",
-      "/api/crm?tasks=1",
-      "/api/crm?tasks=1&open=1",
-      "/api/crm?views=1",
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+      expect.objectContaining({ capabilityId: "crm.listCustomerCollection", input: {}, intentId: expect.any(String) }),
+      expect.objectContaining({ capabilityId: "crm.listTasks", input: {}, intentId: expect.any(String) }),
+      expect.objectContaining({ capabilityId: "crm.listTasks", input: { openOnly: true }, intentId: expect.any(String) }),
+      expect.objectContaining({ capabilityId: "crm.listCustomerViews", input: {}, intentId: expect.any(String) }),
     ]);
     for (const [, init] of fetchMock.mock.calls) expect(init?.credentials).toBe("same-origin");
   });
 
-  it("keeps the stable customer directory URL when Go CRM reads are rolled back", async () => {
+  it("does not fall back to the legacy customer endpoint when Go CRM reads are disabled", async () => {
     vi.stubGlobal("__GO_CRM_READS__", false);
-    const fetchMock = vi.fn(async () => Response.json({ customers: [{ id: customerId, name: "Northwind" }] }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { customers: [{ id: customerId, name: "Northwind" }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchCrmCustomers()).resolves.toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledWith("/api/customers", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
-  it("restores the legacy deals, customers, and views URLs when Go CRM reads are disabled", async () => {
+  it("keeps all CRM collection reads on Go when the old selector is disabled", async () => {
     vi.stubGlobal("__GO_CRM_READS__", false);
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({ deals: [{ id: dealId, title: "Renewal", stage: "proposal", valueMinor: 250000, updatedAt: "2026-09-29T12:00:00.000Z" }] }))
-      .mockResolvedValueOnce(Response.json({ customers: [{ id: customerId, name: "Northwind" }] }))
-      .mockResolvedValueOnce(Response.json({ views: [{ id: dealId, name: "Active", filters: { status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" } }] }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({}))
+      .mockImplementationOnce(async () => Response.json({ ok: true, data: { deals: [{ id: dealId, title: "Renewal", stage: "proposal", valueMinor: 250000, updatedAt: "2026-09-29T12:00:00.000Z" }] } }))
+      .mockImplementationOnce(async () => Response.json({ ok: true, data: { customers: [{ id: customerId, name: "Northwind" }] } }))
+      .mockImplementationOnce(async () => Response.json({ ok: true, data: { views: [{ id: dealId, name: "Active", filters: { status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" } }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchCrmDeals()).resolves.toHaveLength(1);
     await expect(fetchCrmCustomers()).resolves.toHaveLength(1);
     await expect(fetchCrmViews()).resolves.toHaveLength(1);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/deals",
-      "/api/customers",
-      "/api/crm/views",
-    ]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(Array(3).fill("/api/capabilities/execute"));
   });
 
   it("encodes the customer timeline identifier and validates the timeline result", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ entries: [{ kind: "invoice", date: "2026-09-29T12:00:00.000Z", refId: dealId, summary: "Invoice #1" }] }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { entries: [{ kind: "invoice", date: "2026-09-29T12:00:00.000Z", refId: dealId, summary: "Invoice #1" }] } }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchCrmTimeline(customerId)).resolves.toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledWith(`/api/crm?timeline=${customerId}`, expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.customerTimeline", input: { customerId }, intentId: expect.any(String) });
     await expect(fetchCrmTimeline("bad-id")).rejects.toMatchObject({ name: "CrmApiError" });
   });
 

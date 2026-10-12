@@ -22,7 +22,7 @@ export const CrmDealSchema = z.object({
   id: uuid,
   title: z.string(),
   stage,
-  valueMinor: z.number().int(),
+  valueMinor: z.number().int().safe(),
   note: z.string().nullable().optional(),
   customerId: uuid.nullable().optional(),
   customerName: z.string().nullable().optional(),
@@ -46,12 +46,12 @@ export const CrmCustomerSchema = z.object({
   updatedAt: z.string().optional(),
   tags: z.array(z.string()).optional(),
   notes: z.string().nullable().optional(),
-  nextStep: z.object({ kind: z.enum(["invoice", "quote", "task"]), summary: z.string(), refId: z.string(), amountMinor: z.number().optional() }).nullable().optional(),
+  nextStep: z.object({ kind: z.enum(["invoice", "quote", "task"]), summary: z.string(), refId: z.string(), amountMinor: z.number().int().safe().optional() }).nullable().optional(),
   lastActivityAt: z.string().optional(),
   deactivatedAt: z.string().nullable().optional(),
   mergedRecords: z.array(z.object({ id: uuid, name: z.string(), mergedAt: z.string().nullable() })).optional(),
-  purchaseCount: z.number().optional(),
-  lifetimeSpendMinor: z.number().optional(),
+  purchaseCount: z.number().int().safe().nonnegative().optional(),
+  lifetimeSpendMinor: z.number().int().safe().nonnegative().optional(),
 }).passthrough();
 export type CrmCustomer = z.infer<typeof CrmCustomerSchema>;
 
@@ -153,39 +153,50 @@ async function get<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal):
   return parsed.data;
 }
 
+async function executeCrmRead<T>(
+  capabilityId: "crm.listDeals" | "crm.listCustomerCollection" | "crm.listTasks" | "crm.customerTimeline" | "crm.listCustomerViews",
+  input: Record<string, unknown>,
+  schema: z.ZodType<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
+  if (response.status !== 200) throw new CrmApiError(response.status, "The Go CRM service returned an unexpected response.");
+  const envelope = z.object({ ok: z.literal(true), data: z.unknown() }).strict().safeParse(body);
+  if (!envelope.success) throw new CrmApiError(response.status, "The Go CRM service returned an unexpected response.");
+  const parsed = schema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new CrmApiError(response.status, "The Go CRM service returned data in an unexpected format.");
+  return parsed.data;
+}
+
 export async function fetchCrmDeals(signal?: AbortSignal): Promise<CrmDeal[]> {
-  const path = crmReadsUseGo() ? "/api/crm?deals=1" : "/api/deals";
-  const result = await get(path, z.object({ deals: z.array(CrmDealSchema) }), signal);
+  const result = await executeCrmRead("crm.listDeals", {}, z.object({ deals: z.array(CrmDealSchema).max(200) }).strict(), signal);
   return result.deals;
 }
 
 export async function fetchCrmCustomers(signal?: AbortSignal): Promise<CrmCustomer[]> {
-  const result = await get("/api/customers", z.object({ customers: z.array(CrmCustomerSchema) }), signal);
+  const result = await executeCrmRead("crm.listCustomerCollection", {}, z.object({ customers: z.array(CrmCustomerSchema).max(500) }).strict(), signal);
   return result.customers;
 }
 
 export async function fetchCrmTimeline(customerId: string, signal?: AbortSignal): Promise<CrmTimelineEntry[]> {
   if (!uuid.safeParse(customerId).success) throw new CrmApiError(0, "Choose a valid customer to view history.");
-  const query = new URLSearchParams({ timeline: customerId });
-  const result = await get(`/api/crm?${query}`, z.object({ entries: z.array(CrmTimelineEntrySchema) }), signal);
+  const result = await executeCrmRead("crm.customerTimeline", { customerId }, z.object({ entries: z.array(CrmTimelineEntrySchema) }).strict(), signal);
   return result.entries;
 }
 
 export async function fetchCrmTasks(signal?: AbortSignal, options: { openOnly?: boolean } = {}): Promise<CrmTask[]> {
-  const query = new URLSearchParams({ tasks: "1" });
-  if (options.openOnly) query.set("open", "1");
-  const result = await get(`/api/crm?${query}`, z.object({ tasks: z.array(CrmTaskSchema) }), signal);
+  const result = await executeCrmRead("crm.listTasks", options.openOnly ? { openOnly: true } : {}, z.object({ tasks: z.array(CrmTaskSchema).max(200) }).strict(), signal);
   return result.tasks;
 }
 
 export async function fetchCrmViews(signal?: AbortSignal): Promise<SavedCustomerView[]> {
-  const path = crmReadsUseGo() ? "/api/crm?views=1" : "/api/crm/views";
-  const result = await get(path, z.object({ views: z.array(SavedCustomerViewSchema) }), signal);
+  const result = await executeCrmRead("crm.listCustomerViews", {}, z.object({ views: z.array(SavedCustomerViewSchema) }).strict(), signal);
   return result.views;
-}
-
-function crmReadsUseGo(): boolean {
-  return typeof __GO_CRM_READS__ === "undefined" || __GO_CRM_READS__;
 }
 
 export type CrmActionOutcome<T = Record<string, unknown>> =

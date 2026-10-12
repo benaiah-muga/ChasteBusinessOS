@@ -10,6 +10,27 @@ const conversionIntentId = "f1f60a51-6a9d-41f9-94a7-b1bf73c8a0b2";
 const isDealsRead = (path: string): boolean => path === "/api/deals" || path === "/api/crm?deals=1";
 const isCustomersRead = (path: string): boolean => path === "/api/customers" || path === "/api/crm?customers=1";
 const isCustomerViewsRead = (path: string): boolean => path === "/api/crm/views" || path === "/api/crm?views=1";
+type CrmFetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+function routeGoCrmReadsToFixtures(fetchMock: CrmFetchMock): CrmFetchMock {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) !== "/api/capabilities/execute") return fetchMock(input, init);
+    let body: { capabilityId?: string; input?: { openOnly?: boolean; customerId?: string } };
+    try { body = JSON.parse(String(init?.body)) as typeof body; }
+    catch { return fetchMock(input, init); }
+    const readPath = body.capabilityId === "crm.listDeals" ? "/api/crm?deals=1"
+      : body.capabilityId === "crm.listCustomerCollection" ? "/api/customers"
+        : body.capabilityId === "crm.listTasks" ? `/api/crm?tasks=1${body.input?.openOnly ? "&open=1" : ""}`
+          : body.capabilityId === "crm.listCustomerViews" ? "/api/crm?views=1"
+            : body.capabilityId === "crm.customerTimeline" && body.input?.customerId
+              ? `/api/crm?timeline=${encodeURIComponent(body.input.customerId)}`
+              : null;
+    if (!readPath) return fetchMock(input, init);
+    const fixtureResponse = await fetchMock(readPath, { method: "GET", credentials: "same-origin", headers: { accept: "application/json" }, signal: init?.signal });
+    if (!fixtureResponse.ok) return fixtureResponse;
+    return Response.json({ ok: true, data: await fixtureResponse.json() }, { status: fixtureResponse.status });
+  });
+}
 
 function customer(name = "Northwind") {
   return { id: customerId, name, email: "contact@northwind.test", phone: null, preferredContactMethod: "email", doNotContact: false, ownerUserId: null, ownerName: null, tags: ["renewal"], notes: "Priority account", nextStep: null, lastActivityAt: "2026-09-28T12:00:00.000Z", deactivatedAt: null };
@@ -45,6 +66,26 @@ afterEach(() => {
 });
 
 describe("Vite CRM page", () => {
+  it("loads customer, deal, task, and saved-view collections directly through Go capabilities", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+      const output = body.capabilityId === "crm.listCustomerCollection" ? { customers: [] }
+        : body.capabilityId === "crm.listDeals" ? { deals: [] }
+          : body.capabilityId === "crm.listTasks" ? { tasks: [] }
+            : body.capabilityId === "crm.listCustomerViews" ? { views: [] }
+              : null;
+      return output ? Response.json({ ok: true, data: output }) : new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body))).map((body) => body.capabilityId).sort()).toEqual([
+      "crm.listCustomerCollection", "crm.listCustomerViews", "crm.listDeals", "crm.listTasks",
+    ]);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
   it("enables Go-backed customer creation for opaque Better Auth user IDs", async () => {
     vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -55,7 +96,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId="a5zVJvRUGPkJNBQMEuSH_CkoB7ubSjXd" organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -77,7 +118,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -101,7 +142,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={null} organizationId={null} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -135,7 +176,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -185,7 +226,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/capabilities/execute") return createResponse;
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -222,7 +263,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
@@ -264,7 +305,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
@@ -319,7 +360,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
@@ -350,7 +391,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={null} organizationId={null} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
@@ -375,7 +416,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/capabilities/execute") return createResponse;
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
@@ -417,7 +458,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: savedViews });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -448,7 +489,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     await screen.findByRole("combobox", { name: "Saved customer views" });
@@ -486,7 +527,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     await screen.findByRole("combobox", { name: "Saved customer views" });
@@ -524,7 +565,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/deals" && init?.method === "POST") return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
@@ -553,7 +594,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/capabilities/execute") return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
@@ -597,7 +638,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
@@ -656,7 +697,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { taskId } });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
@@ -700,7 +741,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { taskId: "44444444-4444-4444-8444-444444444444" } });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
@@ -749,7 +790,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -791,7 +832,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     let view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -850,7 +891,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -894,7 +935,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/capabilities/execute") return updateResponse;
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
@@ -937,7 +978,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -987,7 +1028,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1022,7 +1063,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1067,7 +1108,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/team") return Response.json({ members: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
@@ -1101,7 +1142,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
@@ -1134,7 +1175,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
@@ -1183,7 +1224,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
@@ -1222,7 +1263,7 @@ describe("Vite CRM page", () => {
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: (blob: Blob) => { downloadedBlob = blob; return "blob:customers"; } });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     try {
       render(<CRMPage />);
       fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1261,7 +1302,7 @@ describe("Vite CRM page", () => {
       ] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1297,7 +1338,7 @@ describe("Vite CRM page", () => {
       if (path === `/api/crm?timeline=${customerId}`) return pendingTimeline;
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1327,7 +1368,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
@@ -1355,7 +1396,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
@@ -1392,7 +1433,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const firstMount = render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
@@ -1436,7 +1477,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage access denied."); });
@@ -1459,7 +1500,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
@@ -1483,7 +1524,7 @@ describe("Vite CRM page", () => {
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage />);
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     fireEvent.change(screen.getByLabelText("Search deals"), { target: { value: "missing" } });
@@ -1516,7 +1557,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ draft: "Hello Northwind, can we review invoice 7?", sources: [{ kind: "invoice", date: "2026-09-20T12:00:00.000Z", refId: dealId, summary: "Invoice #7 is awaiting payment" }, { kind: "task", date: "2026-09-21T12:00:00.000Z", refId: taskId, summary: "Schedule Northwind review" }] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={dealId} organizationId={customerId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Customers/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
@@ -1544,7 +1585,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ draft: "Unexpected draft", sources: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1576,7 +1617,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/import" && init?.method === "POST") return Response.json({ inserted: 45, skippedDuplicates: 0, createdIds: [] });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={dealId} organizationId={customerId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Customers/ }));
     fireEvent.click(screen.getByRole("button", { name: "Import CSV" }));
@@ -1657,7 +1698,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1721,7 +1762,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: mergeResult });
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const { unmount } = render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1771,7 +1812,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1817,7 +1858,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const { unmount } = render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1877,7 +1918,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     const firstView = render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1927,7 +1968,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
@@ -1970,7 +2011,7 @@ describe("Vite CRM page", () => {
       }
       return new Response(null, { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
