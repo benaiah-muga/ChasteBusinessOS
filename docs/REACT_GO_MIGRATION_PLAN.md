@@ -2727,13 +2727,16 @@ new owners and the manifest shows zero legacy runtime paths.
      request returned HTTP 200 and the active conversation count returned to
      zero. No legacy delete request occurred, and the browser error log was
      empty. See proof 330.
-242. (Go/Vite implementation complete; browser proof pending) Route Vite
+242. (Complete) Route Vite
      Accounting invoice list reads through the session-authenticated
      `accounting.listInvoices` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the Go envelope
      and invoice rows, including safe integer `creditedMinor`, preserve the
      legacy route shape for explicit rollback, and fail closed on selected Go
-     errors.
+     errors. On 2026-10-12, authenticated Vite `/accounting/invoices` loaded
+     the empty-state page through `accounting.listInvoices`; with the Go read
+     gate enabled, the capability returned HTTP 200. No legacy `/api/accounting`
+     request occurred, and the browser error log was empty. See proof 332.
 243. (Vite implementation complete; browser proof pending) Route Vite
      Accounting payment-reminder drafts through the session-
      authenticated `accounting.buildReminders` capability when
@@ -3677,3 +3680,11 @@ new owners and the manifest shows zero legacy runtime paths.
      attachment-delete request occurred, and the browser error log was empty.
      The test send was intentionally intercepted and did not create a message.
      This completes item 232.
+
+332. (Runtime verified) On 2026-10-12, authenticated Vite
+     `/accounting/invoices` loaded its empty state through the Go
+     `accounting.listInvoices` capability. The captured request body was
+     `{"capabilityId":"accounting.listInvoices","input":{}}`; Go returned
+     HTTP 200. `GO_ACCOUNTING_INVOICE_READS=1` was enabled locally, no legacy
+     `/api/accounting` request occurred, and the browser error log was empty.
+     This completes item 242.
