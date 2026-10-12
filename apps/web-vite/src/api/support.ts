@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { normalizeRetryActorId } from "./retry-scope";
+import { submitCrmCustomerCreate, type CrmTaskRetryScope } from "./crm";
 
 const uuid = z.string().uuid();
 
@@ -776,8 +777,8 @@ export async function submitSupportCannedResponse(
 
 const CustomerCreateSchema = z.object({
   action: z.literal("create"),
-  name: z.string().min(1).max(120),
-  email: z.string().email().optional(),
+  name: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().optional(),
 }).strict();
 const CustomerCreateOutputSchema = z.object({ customerId: uuid, duplicateWarning: z.string().nullable() }).strict();
 
@@ -785,19 +786,29 @@ export type SupportCustomerCreated = z.infer<typeof CustomerCreateOutputSchema>;
 
 export async function createSupportCustomer(
   input: { name: string; email?: string },
-  intentId: string = crypto.randomUUID(),
+  retryScope: CrmTaskRetryScope,
   signal?: AbortSignal,
 ): Promise<SupportActionOutcome<SupportCustomerCreated>> {
   const parsedInput = CustomerCreateSchema.safeParse({ action: "create", ...input });
   if (!parsedInput.success) throw new SupportApiError(0, "A customer name is required.");
+  if (typeof __GO_CRM_CUSTOMER_CREATE__ === "undefined" || !__GO_CRM_CUSTOMER_CREATE__) {
+    throw new SupportApiError(503, "Go customer creation is not enabled for this Vite deployment. Ask an operator to enable the Go CRM customer-create route.");
+  }
 
-  const { response, body } = await request("/api/customers", { method: "POST", body: JSON.stringify({ ...parsedInput.data, intentId }) }, signal);
-  if (response.status === 202) return pendingOutcome(body, "Creating this customer is waiting for approval in the Approvals inbox.");
-  if (PendingEnvelopeSchema.safeParse(body).success) return pendingOutcome(body, "Creating this customer is waiting for approval in the Approvals inbox.");
-  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
-  const envelope = SuccessEnvelopeSchema.safeParse(body);
-  const output = CustomerCreateOutputSchema.safeParse(envelope.success ? envelope.data.data : body);
-  if (!output.success) throw new SupportApiError(response.status, "The customer service returned an unexpected creation result.");
+  const outcome = await submitCrmCustomerCreate({
+    name: parsedInput.data.name,
+    ...(parsedInput.data.email ? { email: parsedInput.data.email } : {}),
+    preferredContactMethod: "email",
+    doNotContact: false,
+  }, signal, true, retryScope);
+  if (outcome.kind === "pending") {
+    return pendingOutcome({ ok: false, pendingApproval: true, reason: outcome.reason }, "Creating this customer is waiting for approval in the Approvals inbox.");
+  }
+  const output = CustomerCreateOutputSchema.safeParse({
+    customerId: outcome.data.customerId,
+    duplicateWarning: outcome.data.duplicateWarning ?? null,
+  });
+  if (!output.success) throw new SupportApiError(200, "The customer service returned an unexpected creation result.");
   return { kind: "completed", data: output.data };
 }
 

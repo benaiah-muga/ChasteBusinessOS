@@ -106,7 +106,6 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
   const [customerOptions, setCustomerOptions] = useState<SupportCustomerOption[]>([]);
   const [newCustomerId, setNewCustomerId] = useState("");
   const [quickCustomer, setQuickCustomer] = useState({ open: false, name: "", email: "" });
-  const quickCustomerIntent = useRef({ signature: "", id: crypto.randomUUID() });
   const [showTicket, setShowTicket] = useState(false);
   const [members, setMembers] = useState<SupportTeamMember[]>([]);
   const [membersError, setMembersError] = useState<string | null>(null);
@@ -434,14 +433,10 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
     const name = quickCustomer.name.trim();
     if (!name) return;
     const email = quickCustomer.email.trim();
-    const signature = JSON.stringify([name, email]);
-    if (quickCustomerIntent.current.signature !== signature) {
-      quickCustomerIntent.current = { signature, id: crypto.randomUUID() };
-    }
     setBusy(true);
     setNotice(null);
     try {
-      const outcome = await createSupportCustomer({ name, ...(email ? { email } : {}) }, quickCustomerIntent.current.id);
+      const outcome = await createSupportCustomer({ name, ...(email ? { email } : {}) }, retryScope);
       if (outcome.kind === "pending") {
         setNotice({ tone: "pending", text: outcome.reason });
         return;
@@ -450,7 +445,6 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       setCustomerOptions((options) => [...options, created]);
       setNewCustomerId(created.id);
       setQuickCustomer({ open: false, name: "", email: "" });
-      quickCustomerIntent.current = { signature: "", id: crypto.randomUUID() };
       if (outcome.data.duplicateWarning) setNotice({ tone: "success", text: `Customer created. ${outcome.data.duplicateWarning}` });
     } catch (error) {
       setNotice({ tone: "error", text: friendlyError(error) });

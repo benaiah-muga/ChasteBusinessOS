@@ -115,6 +115,37 @@ describe("Vite support page", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/support", expect.objectContaining({ credentials: "same-origin" }));
   }, SLOW);
 
+  it("quick-creates a conversation customer through the Go CRM capability with organization-scoped retry", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const organizationId = "66666666-6666-4666-8666-666666666666";
+    const { calls } = supportFetch({
+      execute: (payload) => payload.capabilityId === "crm.createCustomer"
+        ? Response.json({ ok: true, data: { customerId, duplicateWarning: null } })
+        : Response.json({ ok: true, data: {} }),
+    });
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+
+    await openTab(/^Inbox/);
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    await screen.findByRole("dialog", { name: "New support conversation" });
+    fireEvent.click(screen.getByRole("button", { name: "+ New customer" }));
+    fireEvent.change(screen.getByLabelText("New customer name"), { target: { value: "Grace Hopper" } });
+    fireEvent.change(screen.getByLabelText("New customer email"), { target: { value: "grace@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save and use" }));
+
+    await waitFor(() => expect((screen.getByLabelText("Customer") as HTMLSelectElement).value).toBe(customerId));
+    expect(calls).toContainEqual({
+      path: "/api/capabilities/execute",
+      payload: expect.objectContaining({
+        capabilityId: "crm.createCustomer",
+        input: { name: "Grace Hopper", email: "grace@example.test", preferredContactMethod: "email", doNotContact: false },
+        intentId: expect.any(String),
+      }),
+    });
+    expect(calls.map((call) => call.path)).not.toContain("/api/customers");
+  }, SLOW);
+
   it("loads the inbox and selected thread from Go capabilities without legacy reads", async () => {
     vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
     const { fetchMock, calls } = supportFetch({

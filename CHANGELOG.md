@@ -33,6 +33,9 @@ The full v1 changelog is preserved at the bottom of this file.
   derives the actor and organization from the verified session or bearer token.
   Invoice lookup is organization scoped, invoice links use the governed share
   capability, and a failed SMTP send revokes its new link when possible.
+- Vite Support quick-create now uses Go's `crm.createCustomer` capability with
+  actor- and organization-scoped retry protection, and fails closed when the
+  Go customer-create route is disabled.
 
 - Marketing segment lifetime spend thresholds now use PostgreSQL `bigint`, so
   valid minor-unit amounts above the old 32-bit limit persist without a 500.

@@ -360,27 +360,61 @@ describe("governed support writes", () => {
     expect(bodies[1]).toMatchObject({ intentId: "intent-for-the-ticket" });
   });
 
-  it("carries an intent identity when the customer service creates a record", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const payload = JSON.parse(String(init?.body)) as { action: string; name: string; intentId: string };
-      expect(payload).toMatchObject({ action: "create", name: "Grace Hopper" });
-      expect(payload.intentId).toEqual(expect.any(String));
-      return jsonResponse({ ok: true, data: { customerId, duplicateWarning: null } });
-    });
+  const retryScope = {
+    actorId: "55555555-5555-4555-8555-555555555555",
+    organizationId: "66666666-6666-4666-8666-666666666666",
+  };
+
+  it("uses the Go CRM capability and keeps its idempotency intent after an uncertain response", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { customerId, duplicateWarning: null } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const outcome = await createSupportCustomer({ name: "Grace Hopper" });
+    await expect(createSupportCustomer({ name: "Grace Hopper", email: "grace@example.test" }, retryScope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    const outcome = await createSupportCustomer({ name: "Grace Hopper", email: "grace@example.test" }, retryScope);
 
     expect(outcome).toEqual({ kind: "completed", data: { customerId, duplicateWarning: null } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(first).toMatchObject({
+      capabilityId: "crm.createCustomer",
+      input: { name: "Grace Hopper", email: "grace@example.test", preferredContactMethod: "email", doNotContact: false },
+      intentId: expect.any(String),
+    });
+    expect(second.intentId).toBe(first.intentId);
+    expect(fetchMock.mock.calls.map(([path]) => path)).not.toContain("/api/customers");
+  });
+
+  it("validates quick-created customer details before sending a capability request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createSupportCustomer({ name: "  " }, retryScope)).rejects.toMatchObject({ name: "SupportApiError" });
+    await expect(createSupportCustomer({ name: "Grace Hopper", email: "bad" }, retryScope)).rejects.toMatchObject({ name: "SupportApiError" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("keeps a pending customer creation visible as pending", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: false, pendingApproval: true, reason: "Creating customers needs approval." }, 202)));
 
-    await expect(createSupportCustomer({ name: "Grace Hopper" })).resolves.toEqual({
+    await expect(createSupportCustomer({ name: "Grace Hopper" }, retryScope)).resolves.toEqual({
       kind: "pending",
       reason: "Creating customers needs approval.",
     });
+  });
+
+  it("fails closed when the Go customer-create route is disabled", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createSupportCustomer({ name: "Grace Hopper" }, retryScope)).rejects.toMatchObject({ status: 503 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

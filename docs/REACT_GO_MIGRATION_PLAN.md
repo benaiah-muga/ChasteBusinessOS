@@ -3345,3 +3345,29 @@ new owners and the manifest shows zero legacy runtime paths.
      errors. Full workspace verification passed: typecheck, lint, all
      workspace tests, Go verification and vet, and generated route ownership
      checks.
+
+303. (Runtime verified) An authenticated `agent-browser` session on 2026-10-12
+     loaded Vite `/messages` on port 3300 against Go on port 18084, with Next
+     stopped. It created a non-agent channel, sent a message, saw it in the
+     refreshed thread, and completed reaction and pin actions. Go capability
+     requests and presence GET/POST returned HTTP 200; the browser reported no
+     errors. The first send attempt targeted an AI-enabled channel and stayed on
+     the existing route, so this proof does not cover agent-enabled sends,
+     attachments, or conversation lifecycle actions. Keep `/messages` legacy-
+     owned until those remaining parity and browser gates pass.
+
+304. (Focused browser verified) On 2026-10-12, an authenticated Vite Support
+     session opened the new-conversation customer picker and created `Support
+     Proof Customer` through Go's `crm.createCustomer` capability. The request
+     to `/api/capabilities/execute` returned HTTP 200, the customer appeared in
+     the picker, and no legacy `/api/customers` request was made. The write
+     uses the CRM actor and organization retry scope and fails closed when the
+     Go customer-create selector is disabled. This verifies Support quick-
+     create only; it does not complete browser proof for Support inbox,
+     selected-thread, library, conversation-write, or ticket routes in items
+     246-250. The first proof run also exposed a missing Vite notifications
+     selector: its GET fell through to the stopped Next app and returned 502.
+     Restarting Vite with `CHASTE_GO_NOTIFICATIONS_ROUTE=1` routed the request
+     to Go, confirmed by Go's unauthenticated 401 response. An authenticated
+     notifications browser response was not recaptured after that selector
+     correction.
