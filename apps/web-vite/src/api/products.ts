@@ -54,7 +54,42 @@ const ArchiveSchema = z.object({ action: z.literal("archiveItem"), sku: z.string
 const AdjustSchema = z.object({ action: z.literal("adjustStock"), sku: z.string().trim().min(1), quantityDelta: z.number().int().positive().safe(), note: z.string().trim().min(3) }).strict();
 const ActionSchema = z.discriminatedUnion("action", [CreateSchema, UpdateSchema, ArchiveSchema, AdjustSchema]);
 const PendingSchema = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string(), approvalId: z.string().optional() }).strict();
-const SuccessSchema = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).strict();
+const ProductActionEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const ProductUpdatePriorSchema = z.object({
+  sku: z.string().min(1),
+  name: z.string(),
+  salePriceMinor: z.number().int().nonnegative().safe(),
+  imageUrl: z.string().nullable(),
+  tags: z.array(z.string()),
+  barcode: z.string().nullable(),
+  unitLabel: z.string().optional(),
+}).passthrough();
+const ProductActionOutputSchemas = {
+  createItem: z.object({ itemId: z.string().uuid() }).strict(),
+  updateItem: z.object({ sku: z.string().min(1), prior: ProductUpdatePriorSchema }).strict(),
+  archiveItem: z.object({ sku: z.string().min(1), archived: z.boolean() }).strict(),
+  adjustStock: z.object({ onHandThousandths: z.number().int().nonnegative().safe() }).strict(),
+} satisfies Record<ProductAction["action"], z.ZodTypeAny>;
+
+function productActionOutputMatches(action: ProductAction, value: unknown): boolean {
+  switch (action.action) {
+    case "createItem":
+      return ProductActionOutputSchemas.createItem.safeParse(value).success;
+    case "updateItem": {
+      const output = ProductActionOutputSchemas.updateItem.safeParse(value);
+      return output.success
+        && output.data.sku === action.sku
+        && output.data.prior.sku === action.sku
+        && (action.unitLabel === undefined || output.data.prior.unitLabel !== undefined);
+    }
+    case "archiveItem": {
+      const output = ProductActionOutputSchemas.archiveItem.safeParse(value);
+      return output.success && output.data.sku === action.sku && output.data.archived === action.archive;
+    }
+    case "adjustStock":
+      return ProductActionOutputSchemas.adjustStock.safeParse(value).success;
+  }
+}
 const ErrorSchema = z.object({ error: z.string() }).passthrough();
 const ImportRowSchema = z.object({ row: z.number().int().positive(), field: z.string().optional(), message: z.string() }).strict();
 const ImportResultSchema = z.object({
@@ -88,7 +123,8 @@ export type ProductAction = z.infer<typeof ActionSchema>;
 export type ProductActionResult = { kind: "completed" } | { kind: "pending"; reason: string };
 export type ProductImportRow = { rowNumber: number; name: string; sku?: string; type: "goods" | "service"; unit?: string; salePrice: string; salePriceMinor?: number; barcode?: string; tags: string[] };
 export type ProductImportResult = z.infer<typeof ImportResultSchema>;
-export type ProductImportRetryScope = { actorId: string | null; organizationId: string | null };
+export type ProductRetryScope = { actorId: string | null; organizationId: string | null };
+export type ProductImportRetryScope = ProductRetryScope;
 export type ProductImportRecovery = {
   result: ProductImportResult;
   activeIds: string[];
@@ -104,8 +140,7 @@ export class ProductsApiError extends Error {
 
 type ProductCapabilityID = "inventory.createItem" | "inventory.updateItem" | "inventory.archiveItem" | "inventory.adjustStock";
 
-export function productActionRequest(action: ProductAction, intentId: string, useGo: boolean): { url: string; body: Record<string, unknown> } {
-  if (!useGo) return { url: "/api/inventory", body: { ...action, intentId } };
+export function productActionRequest(action: ProductAction, intentId: string): { url: string; body: Record<string, unknown> } {
   const { action: operation, ...input } = action;
   const capabilityByAction: Record<ProductAction["action"], ProductCapabilityID> = {
     createItem: "inventory.createItem",
@@ -251,6 +286,7 @@ function clearLegacyProductIntent(operation: "import" | "undo", fingerprint: str
 
 const productGoRetryPrefix = "chaste:products:go:v1:";
 const ProductImportAttemptSchema = z.object({ fingerprint: z.string().regex(/^[0-9a-f]{64}$/i), intentId: z.string().uuid(), input: z.unknown() }).strict();
+const ProductActionAttemptSchema = ProductImportAttemptSchema.extend({ input: ActionSchema });
 const ProductImportRecoverySchema = z.object({
   result: ImportResultSchema,
   activeIds: z.array(z.string().uuid()),
@@ -258,7 +294,7 @@ const ProductImportRecoverySchema = z.object({
 }).strict();
 const ProductImportRecoveriesSchema = z.array(ProductImportRecoverySchema).max(5000);
 
-async function productScopeKeys(scope?: ProductImportRetryScope): Promise<{ scopeKey: string; operationKey: (operation: "import" | "undo" | "restore") => string; recoveryKey: string }> {
+async function productScopeKeys(scope?: ProductRetryScope): Promise<{ scopeKey: string; operationKey: (operation: "import" | "undo" | "restore" | "action") => string; recoveryKey: string }> {
   const actorId = normalizeRetryActorId(scope?.actorId) ?? "";
   const organizationId = scope?.organizationId?.trim() ?? "";
   if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
@@ -322,6 +358,14 @@ async function stableGoProductIntentId(
       throw new ProductsApiError(0, "Product import retry protection is unavailable. Verify the catalog before retrying.");
     }
   }
+  try {
+    if (sessionStorage.getItem(keys.operationKey("action"))) {
+      throw new ProductsApiError(0, "A product action is unresolved for this account and organization. Retry its exact saved details first.");
+    }
+  } catch (error) {
+    if (error instanceof ProductsApiError) throw error;
+    throw new ProductsApiError(0, "Product import retry protection is unavailable. Verify the catalog before importing.");
+  }
   const id = crypto.randomUUID();
   try {
     sessionStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: id, input }));
@@ -329,6 +373,72 @@ async function stableGoProductIntentId(
     throw new ProductsApiError(0, "Product import retry protection is unavailable. Enable session storage before importing.");
   }
   return { id, fingerprint, keys };
+}
+
+async function stableProductActionIntent(
+  action: ProductAction,
+  scope: ProductRetryScope,
+): Promise<{ intentId: string; keys: Awaited<ReturnType<typeof productScopeKeys>> }> {
+  const keys = await productScopeKeys(scope);
+  const serializedInput = JSON.stringify({ input: action, scope: keys.scopeKey });
+  let fingerprint: string;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(serializedInput));
+    fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    throw new ProductsApiError(0, "Product action retry protection is unavailable. Enable secure browser storage before continuing.");
+  }
+  const storageKey = keys.operationKey("action");
+  let previous: string | null;
+  try {
+    previous = sessionStorage.getItem(storageKey);
+  } catch {
+    throw new ProductsApiError(0, "Product action retry protection is unavailable. Enable session storage before continuing.");
+  }
+  if (previous) {
+    let parsedValue: unknown;
+    try {
+      parsedValue = JSON.parse(previous);
+    } catch {
+      throw new ProductsApiError(0, "A saved product action retry marker is malformed. Verify the catalog before retrying.");
+    }
+    const parsed = ProductActionAttemptSchema.safeParse(parsedValue);
+    if (!parsed.success) throw new ProductsApiError(0, "A saved product action retry marker is malformed. Verify the catalog before retrying.");
+    if (parsed.data.fingerprint !== fingerprint) {
+      throw new ProductsApiError(0, "A product action is unresolved for this account and organization. Retry its exact saved details first.");
+    }
+    return { intentId: parsed.data.intentId, keys };
+  }
+  for (const operation of ["import", "undo", "restore"] as const) {
+    try {
+      if (sessionStorage.getItem(keys.operationKey(operation))) {
+        throw new ProductsApiError(0, "A product import action is unresolved for this account and organization. Retry that exact action first.");
+      }
+    } catch (error) {
+      if (error instanceof ProductsApiError) throw error;
+      throw new ProductsApiError(0, "Product action retry protection is unavailable. Verify the catalog before continuing.");
+    }
+  }
+  const intentId = crypto.randomUUID();
+  const record = { fingerprint, intentId, input: action };
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify(record));
+    const saved = ProductActionAttemptSchema.safeParse(JSON.parse(sessionStorage.getItem(storageKey) ?? "null"));
+    if (!saved.success || saved.data.intentId !== intentId || saved.data.fingerprint !== fingerprint) throw new Error("retry marker verification failed");
+  } catch {
+    throw new ProductsApiError(0, "Product action retry protection could not be verified. Enable session storage before continuing.");
+  }
+  return { intentId, keys };
+}
+
+function clearProductActionIntent(keys: Awaited<ReturnType<typeof productScopeKeys>>, intentId: string): void {
+  const storageKey = keys.operationKey("action");
+  try {
+    const parsed = ProductActionAttemptSchema.safeParse(JSON.parse(sessionStorage.getItem(storageKey) ?? "null"));
+    if (parsed.success && parsed.data.intentId === intentId) sessionStorage.removeItem(storageKey);
+  } catch {
+    return;
+  }
 }
 
 function clearGoProductIntent(keys: Awaited<ReturnType<typeof productScopeKeys>>, operation: "import" | "undo" | "restore", intentId: string): void {
@@ -411,6 +521,9 @@ async function assertNoUnresolvedGoProductIntent(scope?: ProductImportRetryScope
         throw new ProductsApiError(0, "A saved product import retry marker is malformed. Verify the catalog before retrying.");
       }
       throw new ProductsApiError(0, "A product import action is unresolved for this account and organization. Retry that exact action first.");
+    }
+    if (sessionStorage.getItem(keys.operationKey("action"))) {
+      throw new ProductsApiError(0, "A product action is unresolved for this account and organization. Retry its exact saved details first.");
     }
   } catch (error) {
     if (error instanceof ProductsApiError) throw error;
@@ -509,10 +622,11 @@ export async function fetchProducts(signal?: AbortSignal): Promise<{ items: Prod
   return catalog.data;
 }
 
-export async function submitProductAction(action: ProductAction, signal?: AbortSignal): Promise<ProductActionResult> {
+export async function submitProductAction(action: ProductAction, retryScope: ProductRetryScope, signal?: AbortSignal): Promise<ProductActionResult> {
   const parsed = ActionSchema.safeParse(action);
   if (!parsed.success) throw new ProductsApiError(0, "Check the product details and try again.");
-  const request = productActionRequest(parsed.data, crypto.randomUUID(), useGoInventoryItemSlice());
+  const attempt = await stableProductActionIntent(parsed.data, retryScope);
+  const request = productActionRequest(parsed.data, attempt.intentId);
   let response: Response;
   try {
     response = await fetch(request.url, {
@@ -531,11 +645,15 @@ export async function submitProductAction(action: ProductAction, signal?: AbortS
   }
   if (!response.ok) {
     const error = ErrorSchema.safeParse(body);
+    if (isDefinitiveNoEffectGoRejection(response.status)) clearProductActionIntent(attempt.keys, attempt.intentId);
     throw new ProductsApiError(response.status, error.success ? error.data.error : "The product action could not be completed.");
   }
-  if (response.status !== 200 || !SuccessSchema.safeParse(body).success) {
+  const envelope = ProductActionEnvelopeSchema.safeParse(body);
+  const outputMatchesRequest = envelope.success && productActionOutputMatches(parsed.data, envelope.data.data);
+  if (response.status !== 200 || !outputMatchesRequest) {
     throw new ProductsApiError(response.status, "The inventory service returned an unexpected action response.");
   }
+  clearProductActionIntent(attempt.keys, attempt.intentId);
   return { kind: "completed" };
 }
 

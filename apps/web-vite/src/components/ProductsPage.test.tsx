@@ -91,7 +91,7 @@ describe("ProductsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add service" }));
     await waitFor(() => expect(api.submitProductAction).toHaveBeenCalledWith(expect.objectContaining({
       action: "createItem", sku: "CONSULT-HR", name: "Consultation", kind: "service", unitLabel: "hour", salePriceMinor: 7550,
-    })));
+    }), { actorId: null, organizationId: null }));
   });
 
   it("prefills the create form with inventory module defaults", async () => {
@@ -115,10 +115,10 @@ describe("ProductsPage", () => {
     expect(screen.getByRole("dialog", { name: "Edit MUG-1" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Cup" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(api.submitProductAction).toHaveBeenCalledWith(expect.objectContaining({ action: "updateItem", sku: "MUG-1", name: "Cup" })));
+    await waitFor(() => expect(api.submitProductAction).toHaveBeenCalledWith(expect.objectContaining({ action: "updateItem", sku: "MUG-1", name: "Cup" }), { actorId: null, organizationId: null }));
     const row = screen.getByRole("row", { name: /MUG-1/ });
     fireEvent.click(within(row).getByRole("button", { name: "Archive" }));
-    await waitFor(() => expect(api.submitProductAction).toHaveBeenCalledWith({ action: "archiveItem", sku: "MUG-1", archive: true }));
+    await waitFor(() => expect(api.submitProductAction).toHaveBeenCalledWith({ action: "archiveItem", sku: "MUG-1", archive: true }, { actorId: null, organizationId: null }));
   });
 
   it("keeps the create form and reports approval pending", async () => {

@@ -51,9 +51,9 @@ describe("products API", () => {
   it("preserves pending approval and sends governed action intent IDs", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true, reason: "Owner review", approvalId: "approval-123" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(submitProductAction({ action: "archiveItem", sku: "MUG-1", archive: true })).resolves.toEqual({ kind: "pending", reason: "Owner review" });
-    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { action: string; intentId: string };
-    expect(request.action).toBe("archiveItem");
+    await expect(submitProductAction({ action: "archiveItem", sku: "MUG-1", archive: true }, retryScope)).resolves.toEqual({ kind: "pending", reason: "Owner review" });
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; intentId: string };
+    expect(request.capabilityId).toBe("inventory.archiveItem");
     expect(request.intentId).toMatch(/^[0-9a-f-]{36}$/i);
   });
 
@@ -61,20 +61,59 @@ describe("products API", () => {
     [{ action: "createItem", sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", salePriceMinor: 500, reorderPointThousandths: 0, tags: [] }, "inventory.createItem"],
     [{ action: "updateItem", sku: "MUG-1", name: "Mug Pro", salePriceMinor: 600, barcode: null, imageUrl: null, tags: [] }, "inventory.updateItem"],
     [{ action: "archiveItem", sku: "MUG-1", archive: true }, "inventory.archiveItem"],
+    [{ action: "adjustStock", sku: "MUG-1", quantityDelta: 1000, note: "Count correction" }, "inventory.adjustStock"],
   ];
 
+  it("requires a verified actor and organization before submitting an uncertain write", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitProductAction({ action: "archiveItem", sku: "MUG-1", archive: true }, { actorId: null, organizationId: null }))
+      .rejects.toThrow("finish loading");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reuses the exact scoped product write intent after network failure and retains pending intent", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("network lost"))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", archived: true } }));
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
+    vi.stubGlobal("fetch", fetchMock);
+    const action: ProductAction = { action: "archiveItem", sku: "MUG-1", archive: true };
+
+    await expect(submitProductAction(action, retryScope)).rejects.toBeInstanceOf(ProductsApiError);
+    await expect(submitProductAction(action, retryScope)).resolves.toEqual({ kind: "pending", reason: "Owner review" });
+    const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(second.intentId).toBe(first.intentId);
+    await expect(submitProductAction(action, retryScope)).resolves.toEqual({ kind: "completed" });
+    const third = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as { intentId: string };
+    expect(third.intentId).toBe(first.intentId);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(Array(3).fill("/api/capabilities/execute"));
+  });
+
+  it("blocks a different product write until an unresolved intent is retried exactly", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network lost"));
+    vi.stubGlobal("fetch", fetchMock);
+    const first: ProductAction = { action: "archiveItem", sku: "MUG-1", archive: true };
+    await expect(submitProductAction(first, retryScope)).rejects.toBeInstanceOf(ProductsApiError);
+    await expect(submitProductAction({ action: "archiveItem", sku: "CUP-2", archive: true }, retryScope))
+      .rejects.toThrow(/unresolved for this account and organization/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it.each(goProductActions)("routes supported product action %s through the session capability proxy", (action, capabilityId) => {
-    const request = productActionRequest(action, "intent-12345678901234567890", true);
+    const request = productActionRequest(action, "intent-12345678901234567890");
     expect(request.url).toBe("/api/capabilities/execute");
     expect(request.body).toMatchObject({ capabilityId, intentId: "intent-12345678901234567890" });
     expect(request.body).not.toHaveProperty("action");
   });
 
-  it("keeps product actions on the legacy inventory route while the Go slice is disabled", () => {
+  it("keeps product writes on the Go capability route regardless of the read slice selector", () => {
     const action = { action: "archiveItem", sku: "MUG-1", archive: true } as const;
-    expect(productActionRequest(action, "intent-12345678901234567890", false)).toEqual({
-      url: "/api/inventory",
-      body: { ...action, intentId: "intent-12345678901234567890" },
+    expect(productActionRequest(action, "intent-12345678901234567890")).toEqual({
+      url: "/api/capabilities/execute",
+      body: { capabilityId: "inventory.archiveItem", input: { sku: "MUG-1", archive: true }, intentId: "intent-12345678901234567890" },
     });
   });
 
@@ -289,8 +328,56 @@ describe("products API", () => {
 
   it("rejects malformed successful payloads and invalid action inputs", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true })));
-    await expect(submitProductAction({ action: "archiveItem", sku: "MUG-1", archive: true })).rejects.toBeInstanceOf(ProductsApiError);
-    await expect(submitProductAction({ action: "createItem", sku: "", name: "", kind: "goods", unitLabel: "unit", salePriceMinor: 0, reorderPointThousandths: 0, tags: [] })).rejects.toThrow("Check the product details");
+    await expect(submitProductAction({ action: "archiveItem", sku: "MUG-1", archive: true }, retryScope)).rejects.toBeInstanceOf(ProductsApiError);
+    await expect(submitProductAction({ action: "createItem", sku: "", name: "", kind: "goods", unitLabel: "unit", salePriceMinor: 0, reorderPointThousandths: 0, tags: [] }, retryScope)).rejects.toThrow("Check the product details");
+  });
+
+  const validProductActionOutputs: Array<[ProductAction, unknown]> = [
+    [{ action: "createItem", sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", salePriceMinor: 500, reorderPointThousandths: 0, tags: [] }, { itemId: "10000000-0000-4000-8000-000000000001" }],
+    [{ action: "updateItem", sku: "MUG-1", name: "Mug Pro", salePriceMinor: 600, barcode: null, imageUrl: null, tags: [] }, { sku: "MUG-1", prior: { sku: "MUG-1", name: "Mug", salePriceMinor: 500, imageUrl: null, tags: ["Kitchen"], barcode: "123456" } }],
+    [{ action: "archiveItem", sku: "MUG-1", archive: true }, { sku: "MUG-1", archived: true }],
+    [{ action: "adjustStock", sku: "MUG-1", quantityDelta: 1000, note: "Count correction" }, { onHandThousandths: 1000 }],
+  ];
+  it.each(validProductActionOutputs)("validates capability output before clearing the retry marker for %s", async (action, validOutput) => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: {} }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: validOutput }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitProductAction(action, retryScope)).rejects.toThrow("unexpected action response");
+    await expect(submitProductAction(action, retryScope)).resolves.toEqual({ kind: "completed" });
+    const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(second.intentId).toBe(first.intentId);
+
+    const nextAction: ProductAction = { action: "archiveItem", sku: "CUP-2", archive: true };
+    fetchMock.mockResolvedValueOnce(Response.json({ ok: true, data: { sku: nextAction.sku, archived: true } }));
+    await expect(submitProductAction(nextAction, retryScope)).resolves.toEqual({ kind: "completed" });
+    const third = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as { intentId: string };
+    expect(third.intentId).not.toBe(first.intentId);
+  });
+
+  it("requires every patched prior field, including unitLabel when it was patched", async () => {
+    const action: ProductAction = {
+      action: "updateItem", sku: "MUG-1", name: "Mug Pro", unitLabel: "case", salePriceMinor: 600,
+      barcode: null, imageUrl: null, tags: [],
+    };
+    const priorWithoutUnit = { sku: "MUG-1", name: "Mug", salePriceMinor: 500, imageUrl: null, tags: ["Kitchen"], barcode: "123456" };
+    const priorWithUnit = { ...priorWithoutUnit, unitLabel: "unit" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", prior: { sku: "MUG-1" } } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", prior: priorWithoutUnit } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", prior: { ...priorWithUnit, salePriceMinor: "500" } } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", prior: priorWithUnit } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitProductAction(action, retryScope)).rejects.toThrow("unexpected action response");
+    await expect(submitProductAction(action, retryScope)).rejects.toThrow("unexpected action response");
+    await expect(submitProductAction(action, retryScope)).rejects.toThrow("unexpected action response");
+    await expect(submitProductAction(action, retryScope)).resolves.toEqual({ kind: "completed" });
+    const intentIds = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).intentId as string);
+    expect(intentIds).toHaveLength(4);
+    expect(new Set(intentIds).size).toBe(1);
   });
 
   it("uses the governed batch import and supports approval aware undo", async () => {

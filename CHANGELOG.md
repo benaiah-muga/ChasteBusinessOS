@@ -28,6 +28,9 @@ The full v1 changelog is preserved at the bottom of this file.
   legacy fallback, concurrent exact-draft retries share one actor and
   organization scoped intent, and responses require a valid purchase order
   number.
+- Vite Products & Services create, edit, archive, and stock-adjustment writes
+  now use Go's session-authenticated capabilities with actor and organization
+  scoped retry intents and strict output validation.
 - Vite Manufacturing BOM definition and deletion now use Go capabilities with
   exact before-and-after component snapshots. Guarded inverses refuse stale
   changes, and selected Go failures do not retry through the legacy route.

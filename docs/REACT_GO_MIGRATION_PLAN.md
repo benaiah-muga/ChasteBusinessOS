@@ -3797,3 +3797,16 @@ new owners and the manifest shows zero legacy runtime paths.
      reservation release through Go (HTTP 200). No legacy `POST /api/inventory`
      request occurred, and the browser error log was empty. This completes
      item 344.
+
+346. (Complete) Route Vite Products & Services item creation, editing,
+     archiving, and stock adjustments through Go's authenticated capability
+     endpoint. Require active actor and organization scope, preserve exact
+     actor/org-scoped retry intents, validate action-specific results before
+     reporting success, and fail closed without a legacy inventory write.
+     Authenticated browser proof is recorded in item 347.
+
+347. (Runtime verified) On 2026-10-13, authenticated Vite `/products` edited
+     a synthetic item through `POST /api/capabilities/execute` (HTTP 200), and
+     the updated name appeared in the catalog. No legacy `POST /api/inventory`
+     request occurred and the browser error log was empty. This completes
+     item 346.

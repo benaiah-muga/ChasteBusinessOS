@@ -205,7 +205,7 @@ export function ProductsPage({ baseCurrency = "USD", actorId = null, organizatio
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitProductAction(action);
+      const result = await submitProductAction(action, retryScope);
       if (result.kind === "pending") {
         setNotice({ kind: "pending", text: `${label} requires approval. ${result.reason}` });
         return false;
