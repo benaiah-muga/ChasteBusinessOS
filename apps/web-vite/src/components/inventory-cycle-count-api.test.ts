@@ -47,14 +47,14 @@ describe("inventory cycle count API", () => {
     await expect(submitInventoryCycleCountAction({ action: "postCycleCount", countId: "count-1" }, undefined, true, retryScope)).rejects.toThrow("unexpected action response");
   });
 
-  it("returns a matched barcode item or an explicit null", async () => {
+  it("returns a matched barcode item or an explicit null through Go", async () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { item: { sku: "MUG-1", name: "Ceramic mug", tags: [] } } }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(lookupInventoryBarcode("MUG-CODE")).resolves.toEqual({ sku: "MUG-1", name: "Ceramic mug" });
-    expect(fetchMock).toHaveBeenCalledWith("/api/inventory", expect.objectContaining({ body: JSON.stringify({ action: "lookupByBarcode", barcode: "MUG-CODE" }) }));
+    await expect(lookupInventoryBarcode("MUG-CODE", undefined, true)).resolves.toEqual({ sku: "MUG-1", name: "Ceramic mug" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ body: JSON.stringify({ capabilityId: "inventory.lookupByBarcode", input: { barcode: "MUG-CODE" } }) }));
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { item: null } })));
-    await expect(lookupInventoryBarcode("UNKNOWN-CODE")).resolves.toBeNull();
+    await expect(lookupInventoryBarcode("UNKNOWN-CODE", undefined, true)).resolves.toBeNull();
   });
 
   it("persists the same Go intent across a timeout and module reload", async () => {

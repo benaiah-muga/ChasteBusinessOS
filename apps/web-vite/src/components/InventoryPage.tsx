@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryCycleCount, type InventoryItem, type InventoryLocation, type InventoryLot, type InventoryReservation, type InventoryTransfer } from "../api/inventory";
-import { legacyUrl } from "../legacy";
 import { InventoryCycleCountPanel } from "./InventoryCycleCountPanel";
 import { InventoryItemActions } from "./InventoryItemActions";
 import { InventoryLocationsReservationsPanel } from "./InventoryLocationsReservationsPanel";
@@ -146,9 +145,8 @@ export function InventoryPage({
         <div>
           <p className="inventory-eyebrow">Operations</p>
           <h1>Inventory</h1>
-          <p>Track stock, manage items, record counts, and move inventory between locations. Use the full workspace for advanced inventory controls.</p>
+          <p>Track stock, manage items, record counts, and move inventory between locations.</p>
         </div>
-        <a className="inventory-full-workspace" href={legacyUrl("/inventory")}>Open full inventory workspace</a>
       </header>
 
       {state.status === "loading" && <p className="inventory-loading" role="status">Loading stock levels…</p>}

@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Inventory no longer links users to the legacy inventory workspace.
+  Stock, item actions, counts, locations, reservations, transfers, and movement
+  history remain available on the Vite route.
+- Vite Purchasing receiving now loads module status, orders, and receipt history
+  from Go, and records receipts through Go's governed capability route. The
+  page requires authenticated actor and organization scope and fails closed if
+  Go is unavailable.
 - Vite team invitation links now preview and accept invitations through Go.
   Acceptance requires a verified signed-in account with the invited email,
   and updates membership, role, and invitation status atomically.
@@ -46,6 +53,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite CRM customer-directory reads now use Go's session-authenticated
   `GET /api/customers` route, with the existing restricted customer projection
   retained for POS-only users.
+- Vite cycle-count barcode lookup now uses Go's governed
+  `inventory.lookupByBarcode` capability and fails closed when the Go route is
+  disabled or unavailable.
 
 - Marketing segment lifetime spend thresholds now use PostgreSQL `bigint`, so
   valid minor-unit amounts above the old 32-bit limit persist without a 500.

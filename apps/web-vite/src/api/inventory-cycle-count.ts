@@ -329,10 +329,13 @@ export async function lookupInventoryBarcode(
   useGoOverride?: boolean,
 ): Promise<{ sku: string; name: string } | null> {
   const useGo = useGoOverride ?? (typeof __GO_INVENTORY_BARCODE_LOOKUP__ !== "undefined" && __GO_INVENTORY_BARCODE_LOOKUP__);
-  const request = useGo
-    ? { path: "/api/capabilities/execute", input: { capabilityId: "inventory.lookupByBarcode", input: { barcode } } }
-    : { path: "/api/inventory", input: { action: "lookupByBarcode", barcode } };
-  const body = await postInventory(request.path, request.input, signal);
+  if (!useGo) {
+    throw new InventoryCycleCountApiError(503, "Go barcode lookup is not enabled. Ask an administrator to enable the inventory capability route.");
+  }
+  const body = await postInventory("/api/capabilities/execute", {
+    capabilityId: "inventory.lookupByBarcode",
+    input: { barcode },
+  }, signal);
   if (!body.response.ok || body.response.status !== 200) {
     throw new InventoryCycleCountApiError(body.response.status, errorMessage(body.data));
   }

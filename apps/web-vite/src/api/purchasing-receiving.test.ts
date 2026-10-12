@@ -89,12 +89,13 @@ describe("receiving module gate and order lookup", () => {
   it("confirms Purchasing is on before loading orders", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json(switchboard))
-      .mockResolvedValueOnce(Response.json({ baseCurrency: "USD", orders: [order] }));
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { baseCurrency: "USD", orders: [order] } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchReceivingEnabled()).resolves.toBe(true);
     await expect(fetchReceivingOrders()).resolves.toEqual({ baseCurrency: "USD", orders: [order] });
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/purchasing"]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
+    expect(postedBody(fetchMock.mock.calls[1]!)).toMatchObject({ capabilityId: "purchasing.listWorkspace", input: {} });
     expect(fetchMock.mock.calls.every(([, init]) => init?.credentials === "same-origin" && init.cache === "no-store")).toBe(true);
   });
 
@@ -112,33 +113,29 @@ describe("receiving module gate and order lookup", () => {
     });
   });
 
-  it("rejects orders that do not match the receipt line contract", async () => {
+  it("rejects Go orders that do not match the receipt line contract", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
-      baseCurrency: "USD",
-      orders: [{ ...order, lines: [{ lineNumber: 1 }] }],
+      ok: true,
+      data: { baseCurrency: "USD", orders: [{ ...order, lines: [{ lineNumber: 1 }] }] },
     })));
     await expect(fetchReceivingOrders()).rejects.toMatchObject({
       status: 200,
-      message: "The Purchasing service returned purchase orders in an unexpected format.",
+      message: "The Go Purchasing service returned purchase orders in an unexpected format.",
     });
+  });
+
+  it("does not accept a legacy order payload when the Go capability route is unavailable", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ baseCurrency: "USD", orders: [order] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReceivingOrders()).rejects.toBeInstanceOf(ReceivingApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
   });
 });
 
 describe("receiving detail rollup", () => {
-  it("posts the legacy receiptDetail action and returns the aggregated per-line rollup", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: detail }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(fetchReceivingDetail(42)).resolves.toEqual(detail);
-    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ action: "receiptDetail", poNumber: 42 }),
-      headers: { accept: "application/json", "content-type": "application/json" },
-    }));
-  });
-
   it("routes receipt history through purchasing.listReceipts and preserves the detail shape", async () => {
-    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: detail }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -154,7 +151,6 @@ describe("receiving detail rollup", () => {
   });
 
   it.each([0, -1, 1.5, 2_147_483_648, Number.NaN])("rejects invalid purchase order number %s before dispatch", async (poNumber) => {
-    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -169,7 +165,6 @@ describe("receiving detail rollup", () => {
     [404, { error: "capability unavailable" }],
     [200, { ok: true, data: { ...detail, unexpected: true } }],
   ])("fails closed on selected Go receipt history response %i", async (status, body) => {
-    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
     const fetchMock = vi.fn().mockResolvedValue(Response.json(body, { status }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -212,7 +207,6 @@ describe("recording a receipt", () => {
   it("requires actor and organization scope before a Go receipt request", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
 
     await expect(submitReceiveGoods(action, undefined, { actorId: "actor-1", organizationId: null }))
       .rejects.toMatchObject({ status: 0, message: expect.stringContaining("organization") });
@@ -220,7 +214,6 @@ describe("recording a receipt", () => {
   });
 
   it("routes through Go with the capability envelope and reuses its scoped intent while pending or uncertain", async () => {
-    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("connection lost"))
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Overreceipt needs approval." }, { status: 202 }))
@@ -249,7 +242,6 @@ describe("recording a receipt", () => {
 
   it("reserves one receipt intent across concurrent tabs", async () => {
     const lockRequest = stubReceivingLocks();
-    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
     const responses: Array<(response: Response) => void> = [];
     const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => responses.push(resolve)));
     vi.stubGlobal("fetch", fetchMock);
@@ -266,7 +258,6 @@ describe("recording a receipt", () => {
   });
 
   it("keeps a receipt on Go after a missing capability response and retries the same intent", async () => {
-    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { received: true, fullyReceived: false, receiptNumber: 3 } }));
@@ -281,7 +272,6 @@ describe("recording a receipt", () => {
   });
 
   it("requires the Go success envelope and keeps a malformed result retryable", async () => {
-    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ received: true, fullyReceived: false, receiptNumber: 3 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { received: true, fullyReceived: false, receiptNumber: 3 } }));
@@ -294,7 +284,6 @@ describe("recording a receipt", () => {
   });
 
   it("rejects Go-incompatible quantities, totals, reasons, and authority values before requests", async () => {
-    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const tooLarge = 2_147_483_648;
@@ -312,17 +301,20 @@ describe("recording a receipt", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("stamps an intentId and returns the receipt result", async () => {
+  it("requires retry scope and posts a Go capability envelope", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { received: true, fullyReceived: true, receiptNumber: 2 } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitReceiveGoods(action)).resolves.toEqual({
+    await expect(submitReceiveGoods(action, undefined, retryScope)).resolves.toEqual({
       kind: "completed",
       data: { received: true, fullyReceived: true, receiptNumber: 2 },
     });
     const body = postedBody(fetchMock.mock.calls[0]!);
+    expect(body).toMatchObject({
+      capabilityId: "purchasing.receiveGoods",
+      input: { poNumber: 42, lines: [{ lineNumber: 1, quantity: 1500, rejected: 500, rejectionNote: "Torn stitching" }] },
+    });
     expect(body.intentId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(body.lines).toEqual([{ lineNumber: 1, quantity: 1500, rejected: 500, rejectionNote: "Torn stitching" }]);
   });
 
   it("carries the authority gate through unchanged", async () => {
@@ -333,10 +325,10 @@ describe("recording a receipt", () => {
       ...action,
       overreceiptTolerancePct: 10,
       authorityReason: "site manager approved in writing",
-    });
+    }, undefined, retryScope);
     expect(postedBody(fetchMock.mock.calls[0]!)).toMatchObject({
-      overreceiptTolerancePct: 10,
-      authorityReason: "site manager approved in writing",
+      capabilityId: "purchasing.receiveGoods",
+      input: { overreceiptTolerancePct: 10, authorityReason: "site manager approved in writing" },
     });
   });
 
@@ -346,7 +338,7 @@ describe("recording a receipt", () => {
       { status: 202 },
     )));
 
-    await expect(submitReceiveGoods({ ...action, overreceiptTolerancePct: 10, authorityReason: "site manager approved" })).resolves.toEqual({
+    await expect(submitReceiveGoods({ ...action, overreceiptTolerancePct: 10, authorityReason: "site manager approved" }, undefined, retryScope)).resolves.toEqual({
       kind: "pending",
       reason: "Overreceipt needs a second approver.",
     });
@@ -354,7 +346,7 @@ describe("recording a receipt", () => {
 
   it("explains a 202 with no reason using the receiving wording", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ pendingApproval: true }, { status: 202 })));
-    await expect(submitReceiveGoods(action)).resolves.toEqual({
+    await expect(submitReceiveGoods(action, undefined, retryScope)).resolves.toEqual({
       kind: "pending",
       reason: "This receiving action is gated; it completes once someone approves it.",
     });
@@ -379,7 +371,7 @@ describe("recording a receipt", () => {
 
   it("rejects a completed result that is not a receipt", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { received: false, receiptNumber: 2 } })));
-    await expect(submitReceiveGoods(action)).rejects.toMatchObject({
+    await expect(submitReceiveGoods(action, undefined, retryScope)).rejects.toMatchObject({
       status: 200,
       message: "The Purchasing service returned an unexpected receipt result.",
     });
@@ -390,7 +382,7 @@ describe("recording a receipt", () => {
       { error: "overreceipt needs explicit authority" },
       { status: 422 },
     )));
-    await expect(submitReceiveGoods({ ...action, overreceiptTolerancePct: 5, authorityReason: "site manager approved" })).rejects.toMatchObject({
+    await expect(submitReceiveGoods({ ...action, overreceiptTolerancePct: 5, authorityReason: "site manager approved" }, undefined, retryScope)).rejects.toMatchObject({
       status: 422,
       message: "overreceipt needs explicit authority",
     });

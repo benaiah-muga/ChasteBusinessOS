@@ -538,6 +538,18 @@
       "path": "/widget/[token]",
       "owner": "vite",
       "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/inventory",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/purchasing/receiving",
+      "owner": "vite",
+      "parity": "verified"
     }
   ],
   "goRoutes": [

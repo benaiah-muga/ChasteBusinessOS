@@ -1627,15 +1627,15 @@ new owners and the manifest shows zero legacy runtime paths.
      Go validates their length. Other inventory actions and page ownership
      remain unchanged. Focused Vite and Go tests pass; browser proof remains
      open.
-160. (Implemented) Route Vite cycle-count barcode lookup through Go's session-authenticated
-     `inventory.lookupByBarcode` capability when
-     `CHASTE_GO_INVENTORY_BARCODE_LOOKUP=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the barcode selector to `0`
-     to use the legacy `/api/inventory` action; a missing Go capability route
-     falls back automatically. Preserve the `{ sku, name } | null` result and
-     existing error behavior. Other cycle-count actions remain unchanged.
-     Focused Go and Vite tests, Vite typecheck, and focused lint pass; browser
-     proof remains open.
+160. (Complete; authenticated browser proof recorded in item 339) Route Vite cycle-count barcode
+     lookup through Go's session-authenticated `inventory.lookupByBarcode`
+     capability whenever `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The selector
+     defaults on and setting `CHASTE_GO_INVENTORY_BARCODE_LOOKUP=0` disables
+     the lookup with a clear error; disabled or unavailable Go never falls
+     back to `/api/inventory`. Preserve the `{ sku, name } | null` result.
+     Focused Go and Vite tests pass. Authenticated Vite browser proof used a
+     synthetic stocked item and found it by scanning its barcode through Go;
+     see item 339.
 161. (Implemented) Route only Vite CRM deal stage changes through Go's session-authenticated
      `crm.moveDealStage` capability when `CHASTE_GO_CRM_DEAL_STAGE_MOVE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the selector to `0` to restore
@@ -2544,18 +2544,17 @@ new owners and the manifest shows zero legacy runtime paths.
      route-less sale markers as Go-pinned, matching their historical writer.
      Fail closed on present malformed retry markers, with a visible recovery
      message and no Go or legacy request.
-224. (Implemented; default-on in `.env.example`) Route only Vite
-     receiving-desk receipt history through Go's
-     session-authenticated `purchasing.listReceipts` capability behind paired
-     `CHASTE_GO_PURCHASING_RECEIPT_HISTORY_READS=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Enable the read selector
-     by default in `.env.example`; set it to `0` for legacy rollback. Validate
-     the positive Go-range purchase order number and strict capability envelope
-     and output, preserve the existing `{receipts, orderLines}` page shape, and
-     fail closed on selected Go errors. Keep order listing and receipt
-     submission unchanged. Focused Vite API, proxy, and page tests cover the
-     read path; the existing Go receipt integration test proves permission and
-     tenant behavior.
+224. (Complete) Route Vite `/purchasing/receiving`
+     through Go for module status, order listing, receipt history, and receipt
+     submission. Use the Go `/api/modules` route plus the session-authenticated
+     `purchasing.listWorkspace`, `purchasing.listReceipts`, and
+     `purchasing.receiveGoods` capabilities. Remove selector-based legacy
+     fallbacks; validate capability envelopes and outputs, preserve the
+     existing receiving page data shape, and require actor and organization
+     scope with exact intent reuse for uncertain writes. Vite API tests verify
+     all three Go capability calls and reject legacy-shaped responses. Existing
+     Go receipt executor tests cover permission, tenant scope, governed writes,
+     and receipt results. Authenticated browser proof is recorded in item 338.
 225. (Implemented; default-on) Route only Vite BOM definition through Go's
      authenticated `manufacturing.defineBom` capability when
      `CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE=1` and
@@ -3740,3 +3739,31 @@ new owners and the manifest shows zero legacy runtime paths.
      member list with the invited role. No legacy invite route or browser
      error occurred. This completes the invitation acceptance proof for item
      148.
+
+338. (Runtime verified) On 2026-10-12, authenticated Vite
+     `/purchasing/receiving` loaded the receiving empty state. Go `GET
+     /api/modules` and `POST /api/capabilities/execute` returned HTTP 200. No
+     legacy `/api/purchasing` request occurred, and the browser error log was
+     empty after reload. This completes item 224.
+
+339. (Runtime verified) On 2026-10-12, authenticated Vite Inventory created
+     synthetic item `MIG-PROOF-20261012` with barcode `MIGBAR-20261012` and
+     opening stock through Go, then scanned that barcode in the cycle-count
+     picker. The item was selected, Go returned HTTP 200 through
+     `POST /api/capabilities/execute`, and no legacy `POST /api/inventory`
+     lookup occurred. The browser error log was empty. This completes item 160.
+
+340. (Complete; authenticated browser proof recorded in item 341) The Vite
+     Inventory page no longer links to the legacy `/inventory` workspace. The
+     existing page provides its stock report, item actions, cycle counts,
+     locations, reservations, transfers, barcode lookup, lots, and movement
+     history in Vite. Authenticated browser proof confirms the stock report and
+     cycle-count creation use Go without legacy inventory requests.
+
+341. (Runtime verified) On 2026-10-12, authenticated Vite `/inventory`
+     loaded the synthetic stock report from `GET /api/inventory` (HTTP 200),
+     showed the item created in proof 339, and created a synthetic cycle-count
+     sheet through `POST /api/capabilities/execute` (HTTP 200). The barcode
+     scan and item creation are recorded in proof 339. The legacy workspace
+     link was absent, no legacy inventory request occurred, and the browser
+     error log was empty. This completes item 340.

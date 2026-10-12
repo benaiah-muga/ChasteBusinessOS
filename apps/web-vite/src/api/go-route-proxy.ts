@@ -85,7 +85,7 @@ export function goInventoryLocationReservationWritesFromEnv(env: Record<string, 
 }
 
 export function goInventoryBarcodeLookupFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_INVENTORY_BARCODE_LOOKUP === "1";
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_INVENTORY_BARCODE_LOOKUP !== "0";
 }
 
 export function goCrmDealStageMoveFromEnv(env: Record<string, string | undefined>): boolean {

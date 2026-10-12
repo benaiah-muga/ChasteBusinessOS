@@ -155,9 +155,10 @@ describe("inventory location and reservation Go selector", () => {
 });
 
 describe("inventory barcode lookup Go selector", () => {
-  it("requires both the barcode selector and session capability route", () => {
+  it("uses Go by default when the session capability route is enabled", () => {
     expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_INVENTORY_BARCODE_LOOKUP: "1" })).toBe(true);
-    expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_INVENTORY_BARCODE_LOOKUP: "0" })).toBe(false);
     expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_INVENTORY_BARCODE_LOOKUP: "1" })).toBe(false);
   });
 });

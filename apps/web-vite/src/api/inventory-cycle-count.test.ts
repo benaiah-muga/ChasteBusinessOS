@@ -10,14 +10,12 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("inventory barcode lookup", () => {
-  it("uses the legacy inventory action when Go is disabled", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true, data: { item: { sku: "SKU-1", name: "Widget" } } }));
+  it("fails closed without sending a legacy request when Go is disabled", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(lookupInventoryBarcode("12345", undefined, false)).resolves.toEqual({ sku: "SKU-1", name: "Widget" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/inventory");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ action: "lookupByBarcode", barcode: "12345" });
+    await expect(lookupInventoryBarcode("12345", undefined, false)).rejects.toThrow("Go barcode lookup is not enabled");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses the Go capability and preserves the not-found null result", async () => {
@@ -33,7 +31,7 @@ describe("inventory barcode lookup", () => {
     });
   });
 
-  it("does not fall back to the legacy action when the Go capability route is missing", async () => {
+  it("does not fall back to a legacy action when the Go capability route fails", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: "not found" }, 404));
     vi.stubGlobal("fetch", fetchMock);
 

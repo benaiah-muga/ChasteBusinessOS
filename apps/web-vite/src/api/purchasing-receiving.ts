@@ -29,6 +29,11 @@ const ReceivingOrdersResponseSchema = z.object({
   orders: z.array(ReceivingOrderSchema),
 });
 
+const GoReceivingOrdersEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: ReceivingOrdersResponseSchema,
+});
+
 const ReceiptLineSchema = z.object({
   position: z.number().int().safe().positive(),
   description: z.string(),
@@ -189,13 +194,16 @@ export async function fetchReceivingEnabled(signal?: AbortSignal): Promise<boole
 }
 
 export async function fetchReceivingOrders(signal?: AbortSignal): Promise<{ baseCurrency: string; orders: ReceivingOrder[] }> {
-  const { body } = await request("/api/purchasing", {
-    method: "GET",
-    headers: { accept: "application/json" },
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ capabilityId: "purchasing.listWorkspace", input: {}, intentId: crypto.randomUUID() }),
   }, "load purchase orders", signal);
-  const parsed = ReceivingOrdersResponseSchema.safeParse(body);
-  if (!parsed.success) throw new ReceivingApiError(200, "The Purchasing service returned purchase orders in an unexpected format.");
-  return parsed.data;
+  const parsed = GoReceivingOrdersEnvelopeSchema.safeParse(body);
+  if (response.status !== 200 || !parsed.success) {
+    throw new ReceivingApiError(response.status, "The Go Purchasing service returned purchase orders in an unexpected format.");
+  }
+  return parsed.data.data;
 }
 
 export async function fetchReceivingDetail(poNumber: number, signal?: AbortSignal): Promise<ReceivingDetail> {
@@ -203,15 +211,10 @@ export async function fetchReceivingDetail(poNumber: number, signal?: AbortSigna
   if (!parsedPONumber.success) {
     throw new ReceivingApiError(0, "Enter a valid purchase order number before loading receipt history.");
   }
-  const useGo = typeof __GO_PURCHASING_RECEIPT_HISTORY_READS__ !== "undefined" && __GO_PURCHASING_RECEIPT_HISTORY_READS__;
-  const path = useGo ? "/api/capabilities/execute" : "/api/purchasing";
-  const payload = useGo
-    ? { capabilityId: "purchasing.listReceipts", input: { poNumber: parsedPONumber.data }, intentId: crypto.randomUUID() }
-    : { action: "receiptDetail", poNumber: parsedPONumber.data };
-  const { body } = await request(path, {
+  const { body } = await request("/api/capabilities/execute", {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ capabilityId: "purchasing.listReceipts", input: { poNumber: parsedPONumber.data }, intentId: crypto.randomUUID() }),
   }, "load receipt history", signal);
   const parsed = ReceiptDetailSchema.safeParse(body);
   if (!parsed.success) throw new ReceivingApiError(200, "The Purchasing service returned receipt history in an unexpected format.");
@@ -226,15 +229,6 @@ export async function submitReceiveGoods(
   const parsedAction = ReceiveGoodsSchema.safeParse(action);
   if (!parsedAction.success) throw new ReceivingApiError(0, "Check what arrived on each line and try again.");
 
-  const useGo = typeof __GO_PURCHASING_RECEIVE_GOODS__ !== "undefined" && __GO_PURCHASING_RECEIVE_GOODS__;
-  if (!useGo) {
-    const { response, body } = await request("/api/purchasing", {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ ...parsedAction.data, intentId: crypto.randomUUID() }),
-    }, "record the receipt", signal);
-    return parseLegacyReceiveGoodsOutcome(response, body);
-  }
   if (!retryScope?.actorId?.trim() || !retryScope.organizationId?.trim()) {
     throw new ReceivingApiError(0, "Wait for your account and organization to finish loading before recording a delivery.");
   }
@@ -362,14 +356,5 @@ function parseGoReceiveGoodsOutcome(response: Response, body: unknown): Receivin
   if (!response.ok || !envelope.success) throw new ReceivingApiError(response.status, "The Purchasing service returned an unexpected receipt result.");
   const output = ReceiveGoodsOutputSchema.safeParse(envelope.data.data);
   if (!output.success) throw new ReceivingApiError(response.status, "The Purchasing service returned an unexpected receipt result.");
-  return { kind: "completed", data: output.data };
-}
-
-function parseLegacyReceiveGoodsOutcome(response: Response, body: unknown): ReceivingActionOutcome {
-  const pending = parsePendingReceiveGoodsOutcome(response, body);
-  if (pending) return pending;
-  const envelope = SuccessEnvelopeSchema.safeParse(body);
-  const output = ReceiveGoodsOutputSchema.safeParse(envelope.success ? envelope.data.data : body);
-  if (!response.ok || !output.success) throw new ReceivingApiError(response.status, "The Purchasing service returned an unexpected receipt result.");
   return { kind: "completed", data: output.data };
 }

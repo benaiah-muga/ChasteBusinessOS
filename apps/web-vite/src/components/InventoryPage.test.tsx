@@ -99,7 +99,7 @@ describe("Vite inventory page", () => {
     expect(screen.getByText("1.5 units")).not.toBeNull();
     expect(screen.getByText("No expiry date")).not.toBeNull();
     expect(screen.getByText("Not provided")).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
+    expect(screen.queryByRole("link", { name: /inventory workspace/i })).toBeNull();
   });
 
   it("shows read-only stock locations with their codes and names", async () => {
@@ -120,7 +120,7 @@ describe("Vite inventory page", () => {
     expect(screen.getByRole("cell", { name: "Main warehouse" })).not.toBeNull();
     expect(screen.getByRole("rowheader", { name: "SHOP" })).not.toBeNull();
     expect(screen.getByRole("cell", { name: "Retail shop" })).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
+    expect(screen.queryByRole("link", { name: /inventory workspace/i })).toBeNull();
   });
 
   it("shows cycle count history and governed count actions", async () => {
