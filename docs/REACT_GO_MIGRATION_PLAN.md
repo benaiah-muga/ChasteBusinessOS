@@ -3258,3 +3258,16 @@ new owners and the manifest shows zero legacy runtime paths.
      one lead with a new customer and one with an existing customer, and saw
      HTTP 200 on Go capability and CRM read routes with no legacy CRM write or
      browser errors. Independent review found no remaining blocker.
+
+299. (Complete) Move Vite authored-document editor presence, autosave drafts,
+     soft locks, and release from the legacy workspace route to Go. The Go
+     route resolves the authenticated session and active organization, checks
+     request origin, and performs tenant-scoped writes through `dbx.WithOrgTx`.
+     Drafts stay outside the capability ledger in keeping with ADR 0056. Go
+     runtime-role integration proof covers heartbeat-only presence, autosave
+     revision increments, stale revision conflicts, invalid bodies,
+     cross-organization document rejection, another editor's lock, and
+     caller-only release. An independent review found no actionable issue.
+     With Next stopped, authenticated `agent-browser` opened the Vite editor,
+     received HTTP 200 from workspace POST and DELETE requests, edited and
+     reloaded the draft successfully, and reported no browser errors.

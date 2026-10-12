@@ -312,7 +312,7 @@ describe("authored document editor", () => {
     expect(calls.filter((call) => call.body?.action === "restore")[0]?.body).toMatchObject({ sourceVersion: 2 });
   }, TIMEOUT);
 
-  it("loads editor detail and version history from Go while workspace and compare stay on their owned routes", async () => {
+  it("loads editor detail and version history from Go and sends workspace ticks through the selected route", async () => {
     vi.stubGlobal("__GO_DOCUMENTS_EDITOR_READS__", true);
     vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
     const documentId = "6f1b2c3d-0000-4000-8000-000000000001";

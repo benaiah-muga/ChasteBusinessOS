@@ -40,6 +40,7 @@ import {
   goDocumentsIngestedReadsFromEnv,
   goDocumentsVersionReadsFromEnv,
   goDocumentsEditorReadsFromEnv,
+  goDocumentsEditorWorkspaceFromEnv,
   goMessagingConversationListFromEnv,
   goMessagingConversationCreateFromEnv,
   goMessagingConversationUpdateFromEnv,
@@ -444,6 +445,32 @@ describe("authored document editor Go selector", () => {
     expect(goDocumentsEditorReadsFromEnv({ ...enabled, CHASTE_GO_DOCUMENTS_EDITOR_READS: "0" })).toBe(false);
     expect(goDocumentsEditorReadsFromEnv({ ...enabled, CHASTE_GO_DOCUMENTS_VERSION_READS: "0" })).toBe(false);
     expect(goDocumentsEditorReadsFromEnv({ ...enabled, CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
+  });
+});
+
+describe("authored document editor workspace Go selector", () => {
+  it("requires both the workspace selector and session capability route", () => {
+    expect(goDocumentsEditorWorkspaceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "1" })).toBe(true);
+    expect(goDocumentsEditorWorkspaceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goDocumentsEditorWorkspaceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "0" })).toBe(false);
+    expect(goDocumentsEditorWorkspaceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "1" })).toBe(false);
+  });
+
+  it("selects only exact document UUID workspace POST and DELETE requests", () => {
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "1" });
+    const path = `/api/docs/${documentId}/workspace`;
+    expect(isGoRouteRequest(enabled, "POST", path)).toBe(true);
+    expect(isGoRouteRequest(enabled, "DELETE", path)).toBe(true);
+    for (const [method, url] of [
+      ["GET", path], ["PUT", path], ["POST", `${path}/`], ["POST", `${path}?draft=1`],
+      ["POST", "/api/docs/not-a-uuid/workspace"], ["POST", `/api/docs/${documentId}/versions`],
+    ]) {
+      expect(isGoRouteRequest(enabled, method, url)).toBe(false);
+    }
+    const rollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "0" });
+    expect(isGoRouteRequest(rollback, "POST", path)).toBe(false);
+    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "DELETE", path)).toBe(false);
   });
 });
 
@@ -1113,6 +1140,66 @@ describe("Vite Go route proxy selection", () => {
       body: JSON.stringify({ decision: "reject" }),
     });
     expect(await fallback.json()).toMatchObject({ target: "legacy", method: "POST", url: "/api/approvals?id=approval-id" });
+  });
+
+  it("sends exact authored-document workspace POST and DELETE requests to Go before the legacy API proxy", async () => {
+    const go = requestRecorder("go");
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
+
+    const legacy = requestRecorder("legacy");
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
+
+    const vite = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({
+        CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1",
+        CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "1",
+      }), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+      },
+    });
+    await vite.listen();
+    runningServers.push({ close: () => vite.close() });
+    const address = vite.httpServer?.address() as AddressInfo;
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    const path = `/api/docs/${documentId}/workspace`;
+    const cookie = "auth.session=verified-browser-session; chaste.active-org=organization-id";
+    const tick = JSON.stringify({
+      content: { type: "doc", content: [] },
+      pageSettings: { size: "A4", orientation: "portrait", margin: "normal" },
+      rev: 3,
+      intentId: "workspace-tick-id",
+    });
+
+    const save = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      method: "POST",
+      headers: { cookie, origin: `http://127.0.0.1:${address.port}`, "content-type": "application/json" },
+      body: tick,
+    });
+    expect(await save.json()).toMatchObject({ target: "go", method: "POST", url: path, cookie, origin: `http://127.0.0.1:${address.port}`, body: tick });
+
+    const release = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      method: "DELETE",
+      headers: { cookie, origin: `http://127.0.0.1:${address.port}` },
+    });
+    expect(await release.json()).toMatchObject({ target: "go", method: "DELETE", url: path, cookie, origin: `http://127.0.0.1:${address.port}` });
+
+    const unsupported = await fetch(`http://127.0.0.1:${address.port}/api/docs/not-a-uuid/workspace`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: tick,
+    });
+    expect(await unsupported.json()).toMatchObject({ target: "legacy", method: "POST", url: "/api/docs/not-a-uuid/workspace" });
+
+    const unsupportedMethod = await fetch(`http://127.0.0.1:${address.port}${path}`, { headers: { cookie } });
+    expect(await unsupportedMethod.json()).toMatchObject({ target: "legacy", method: "GET", url: path });
   });
 
   it("preserves the attachment href, session identity, and range headers when proxying to Go", async () => {

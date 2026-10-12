@@ -358,6 +358,13 @@ as well as the version-read selector above. Go then supplies both `getDoc` and
 for version rows while Go supplies the primary body. A selected Go detail error
 fails closed; workspace, presence, autosave, collaboration, and writes keep
 their existing routes.
+The editor's presence, autosave draft, and soft-lock session endpoint is
+available in Go at `POST` and `DELETE /api/docs/:id/workspace`. It writes the
+RLS-guarded `doc_presence` and `doc_drafts` tables directly as specified by
+ADR 0056, without adding autosave traffic to the capability ledger. The API
+mounts this endpoint by default when `GO_DOCUMENTS_EDITOR_WORKSPACE` is unset;
+set it to `0` to roll back to the legacy route. Browser writes require the
+authenticated Go session and same-origin checks.
 `GO_DOCUMENTS_VERSION_READS=1` opts authored document version history and
 single-version reads on `GET /api/docs/:id` into the signed Go
 `documents.listDocVersions` and `documents.getDocVersion` capabilities. It

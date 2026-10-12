@@ -15,6 +15,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 - Go authored-document creation now persists default A4 portrait page settings
   when callers omit the optional page settings object.
+- Vite document editor presence, autosave drafts, and editing locks now use
+  the authenticated Go workspace endpoint, with same-origin checks and
+  organization-scoped RLS writes.
 - Vite Documents now handles Go list results with omitted empty arrays as an
   empty library while continuing to validate every returned document row.
 

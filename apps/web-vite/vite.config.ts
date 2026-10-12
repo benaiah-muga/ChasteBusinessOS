@@ -188,8 +188,8 @@ export default defineConfig(({ mode }) => {
       port: 3000,
       strictPort: true,
       proxy: {
-        // The catch-all keeps explicit rollback routes available while the
-        // onboarding selector sends its session-authenticated methods to Go.
+        // goRouteProxy intercepts selector-owned routes, including document
+        // workspace ticks; this catch-all remains available for rollback.
         "/api/health": {
           target: goApiOrigin,
         },

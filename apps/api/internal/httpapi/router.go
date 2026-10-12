@@ -214,6 +214,21 @@ func MountGoAIConfigRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoDocumentsEditorWorkspaceRoute owns the authored-document draft,
+// presence, and editing-lock endpoint when supplied by server configuration.
+func MountGoDocumentsEditorWorkspaceRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/docs/{id}/workspace", route)
+	mux.Handle("DELETE /api/docs/{id}/workspace", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoPolicySessionRoute mounts only the Vite Settings policy collection.
 // Other methods and nested paths continue to the base handler.
 func MountGoPolicySessionRoute(base, route http.Handler) http.Handler {

@@ -88,6 +88,10 @@ func goAIConfigRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goDocumentsEditorWorkspaceEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goPolicyRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -220,6 +224,15 @@ func run(logger *slog.Logger) error {
 		}
 		aiConfigRoute = httpapi.NewAIConfigSessionHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
 		logger.Info("Go AI config route mounted", "path", "/api/ai-config")
+	}
+	var documentsEditorWorkspaceRoute http.Handler
+	if goDocumentsEditorWorkspaceEnabledFromEnv(os.Getenv("GO_DOCUMENTS_EDITOR_WORKSPACE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		documentsEditorWorkspaceRoute = httpapi.NewDocumentsEditorWorkspaceHandler(pool, resolver, logger, trustedProxyCIDRs)
+		logger.Info("Go authored document workspace route mounted", "path", "/api/docs/{id}/workspace")
 	}
 	var portalInvoiceRoute http.Handler
 	if goPortalInvoiceRouteEnabledFromEnv(os.Getenv("GO_PORTAL_INVOICE_ROUTE")) {
@@ -749,6 +762,7 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoPolicySessionRoute(apiHandler, policyRoute)
 	apiHandler = httpapi.MountGoSupportCustomersRoute(apiHandler, supportCustomersRoute)
 	apiHandler = httpapi.MountGoAIConfigRoute(apiHandler, aiConfigRoute)
+	apiHandler = httpapi.MountGoDocumentsEditorWorkspaceRoute(apiHandler, documentsEditorWorkspaceRoute)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,
