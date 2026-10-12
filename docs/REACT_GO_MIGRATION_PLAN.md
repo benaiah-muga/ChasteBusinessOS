@@ -2752,7 +2752,7 @@ new owners and the manifest shows zero legacy runtime paths.
      organization isolation, report fields, and limits. The focused Vite API
      and route-selector suite passed all 205 tests; Vite typecheck and lint
      passed. `graft build` completed. Independent review found no actionable
-     issues. (Go/Vite implementation complete; browser proof open)
+     issues. (Complete; authenticated browser proof recorded in item 271)
 
 253. Route the Vite Marketing overview read through the new
      `marketing.overviewSnapshot` Go capability by default whenever the
@@ -2939,7 +2939,8 @@ new owners and the manifest shows zero legacy runtime paths.
      Go manufacturing planning reads enabled. The overview report capability
      returned HTTP 200, and the BOM, Produce, Work orders, and Runs & lots
      sections rendered their empty-state forms. No browser page errors were
-     reported.
+     reported. This browser run completes item 252's overview-report proof;
+     it does not complete the broader `/manufacturing` route ownership gate.
 
 272. (Implemented and database-tested) Expose the existing Go
      `documents.listDocuments` capability to routine agents as
