@@ -2607,13 +2607,18 @@ new owners and the manifest shows zero legacy runtime paths.
      Serialize deletion with concurrent message sends by locking the row and
      rechecking that it is still pending and owned by the actor. Keep the
      attachment in the draft and show an error when selected Go deletion fails.
-233. (Vite implementation complete; browser proof pending) Route Vite message
+233. (Complete) Route Vite message
      reactions and pins through the session-authenticated
      `messaging.setMessageReaction` and `messaging.setMessagePin` capabilities
      when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep separate explicit
      rollbacks with `CHASTE_GO_MESSAGING_REACTIONS=0` and
      `CHASTE_GO_MESSAGING_PINS=0`; validate the exact output and requested
-     state before refreshing the thread.
+     state before refreshing the thread. On 2026-10-12, authenticated Vite
+     `/messages` applied a heart reaction and pinned the synthetic message
+     through `messaging.setMessageReaction` and `messaging.setMessagePin`;
+     both returned HTTP 200, and the reaction and pinned marker appeared in
+     the thread. No legacy reaction or pin request occurred, and the browser
+     error log was empty. See proof 321.
 234. (Vite implementation complete; browser proof pending) Route Vite typing
      and online presence heartbeats through the session-authenticated
      `messaging.updateConversationPresence` capability when
@@ -3535,3 +3540,11 @@ new owners and the manifest shows zero legacy runtime paths.
      message appeared in the refreshed thread. No legacy message-send or
      thread-read request occurred, and the browser error log was empty. This
      completes item 147.
+
+321. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` applied
+     a heart reaction to and pinned the synthetic message
+     `Go thread send and read proof 20261012`. The Go
+     `messaging.setMessageReaction` and `messaging.setMessagePin` capability
+     requests both returned HTTP 200, and the refreshed thread displayed the
+     reaction and pinned marker. No legacy reaction or pin request occurred,
+     and the browser error log was empty. This completes item 233.
