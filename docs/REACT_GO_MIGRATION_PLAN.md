@@ -2010,7 +2010,7 @@ new owners and the manifest shows zero legacy runtime paths.
      capability route, then confirmed the Approved state after reload. Both
      writes returned HTTP 200; no legacy `/api/hr` request or browser error
      occurred.
-191. (Vite/Go implementation complete; browser proof pending) Route only Vite invoice `recordPayment` writes through Go's
+191. (Vite/Go implementation verified: DB-backed Go test and authenticated browser proof pass) Route only Vite invoice `recordPayment` writes through Go's
      session-authenticated `accounting.recordPayment` capability behind paired
      `CHASTE_GO_ACCOUNTING_RECORD_PAYMENT=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the payment selector
@@ -2022,8 +2022,11 @@ new owners and the manifest shows zero legacy runtime paths.
      executor integration test remains the contract proof. Atomic browser-wide
      reservations prevent cross-tab intent races, and browsers without Web
      Locks fail closed. Vite API/page/proxy tests, typecheck, lint, and the Go
-     payment executor integration test pass. Authenticated browser proof
-     remains open.
+     payment executor integration test pass. Authenticated Vite browser proof
+     recorded a synthetic UGX 10,000 invoice payment through Go and confirmed
+     the invoice remained paid with a zero balance after reload. The payment
+     write returned HTTP 200 from `/api/capabilities/execute`; no legacy
+     accounting request or browser error occurred.
 192. (Vite/Go implementation complete; browser proof pending) Route only Vite `createInvoice` writes through Go's session-authenticated
      `accounting.createInvoice` capability behind paired
      `CHASTE_GO_ACCOUNTING_CREATE_INVOICE=1` and
