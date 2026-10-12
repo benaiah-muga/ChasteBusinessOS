@@ -2573,12 +2573,15 @@ new owners and the manifest shows zero legacy runtime paths.
      returned HTTP 200, the channel remained visible after page reload, no
      legacy conversation-list request occurred, and the browser error log was
      empty. See proof 318.
-227. (Go/Vite implementation complete; browser proof pending) Route initial and
+227. (Complete) Route initial and
      refreshed Vite Messaging threads through the session-authenticated
      `messaging.readMessages` capability. Return the latest 60-message window
      in display order with the current full thread contract, reader and pin
      state, and older-page cursor. Search-jump and older-page requests stay on
      their current routes; file downloads use the direct Go route in item 228.
+     Proof 320 confirmed that the selected thread loaded through Go after send
+     and after a full page reload, and rendered the message without browser
+     errors.
 228. (Go/Vite implementation complete; browser proof pending) Serve Vite
      Messaging attachment downloads directly from Go while preserving the
      existing href. Go checks verified session, `messaging.read`, same-org
