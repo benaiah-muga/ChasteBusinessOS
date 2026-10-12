@@ -1487,7 +1487,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Vite shell loaded the feed and rendered the unread notification, then
      opening it submitted a read receipt. Both Go-backed requests returned 200,
      the unread badge cleared, and the browser reported no console errors.
-147. (Implemented; Vite sends use Go by default) Promote eligible conversation
+147. (Complete) Promote eligible conversation
      sends through the existing session-authenticated `/api/capabilities/execute`
      route to `messaging.sendMessage`. Go rechecks conversation membership and
      attachment ownership under organization RLS, records mentions in the same
@@ -1497,7 +1497,11 @@ new owners and the manifest shows zero legacy runtime paths.
      messages stay on legacy until Go workmate replies are supported. The
      Vite flag is enabled by default and remains paired with the Go session
      capability route. Focused Vite API and Messages page tests plus Go
-     capability tests pass; authenticated browser proof remains open.
+     capability tests pass. On 2026-10-12, authenticated Vite `/messages`
+     sent a user message in a non-agent synthetic channel through Go's
+     `messaging.sendMessage` capability with HTTP 200, then rendered the
+     refreshed thread; no legacy send request occurred and the browser error
+     log was empty. See proof 320.
 148. (Implemented; Go route ownership verified) Enable the Vite `/team` page's
      session-authenticated `GET` and governed `POST /api/team` routes by
      default in both runtimes. Roll back either method independently by
@@ -3519,3 +3523,12 @@ new owners and the manifest shows zero legacy runtime paths.
      200; Go then refreshed the conversation list and read the selected thread.
      No legacy conversation-create request occurred, and the browser error log
      was empty. This completes item 236.
+
+320. (Runtime verified) On 2026-10-12, authenticated Vite `/messages` sent
+     `Go thread send and read proof 20261012` in the non-agent channel
+     `Go Thread Proof 20261012` through the Go `messaging.sendMessage`
+     capability, which returned HTTP 200. Go's `messaging.readMessages`
+     capability returned HTTP 200 after send and after a full page reload; the
+     message appeared in the refreshed thread. No legacy message-send or
+     thread-read request occurred, and the browser error log was empty. This
+     completes item 147.
