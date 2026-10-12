@@ -2695,7 +2695,7 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the response,
      fail closed on selected Go errors, and set
      `CHASTE_GO_SUPPORT_LIBRARY_READS=0` for explicit legacy rollback.
-248. (Vite implementation complete; browser proof pending) Route Vite Support
+248. (Complete; authenticated browser proof passed) Route Vite Support
      canned-response saves through the session-authenticated
      `support.createCannedResponse` capability when
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Persist the exact input and
@@ -3403,3 +3403,10 @@ new owners and the manifest shows zero legacy runtime paths.
      HTTP 200, both lists rendered their empty states, no legacy Support API
      request occurred, and the browser reported no errors. This completes
      item 247.
+
+308. (Runtime verified) On 2026-10-12, the authenticated Vite Support session
+     saved a canned response from Library through the Go
+     `support.createCannedResponse` capability. The capability request returned
+     HTTP 200, the exact shortcut, title, and body appeared in the refreshed
+     library, no legacy Support write request occurred, and the browser
+     reported no page errors. This completes item 248.
