@@ -132,7 +132,13 @@ function purchasingFetch(overrides: Overrides = {}) {
 function postedActions(fetchMock: { mock: { calls: unknown[][] } }, action: string): Record<string, unknown>[] {
   return fetchMock.mock.calls
     .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST" && Boolean((init as RequestInit).body))
-    .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
+    .map(([, init]) => {
+      const body = JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>;
+      if (typeof body.capabilityId === "string" && typeof body.input === "object" && body.input !== null) {
+        return { ...(body.input as Record<string, unknown>), action: body.capabilityId.split(".").at(-1), intentId: body.intentId };
+      }
+      return body;
+    })
     .filter((body) => body.action === action);
 }
 
@@ -145,6 +151,8 @@ function postsTo(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, 
       ? { ...(body.input as Record<string, unknown>), action: "createVendor", intentId: body.intentId }
       : body.capabilityId === "purchasing.createPurchaseOrder"
         ? { ...(body.input as Record<string, unknown>), action: "createPurchaseOrder", intentId: body.intentId }
+        : body.capabilityId === "purchasing.receiveGoods"
+          ? { ...(body.input as Record<string, unknown>), action: "receiveGoods", intentId: body.intentId }
         : body);
 }
 
@@ -1176,7 +1184,7 @@ describe("PurchasingPage", () => {
       }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="actor-test" organizationId="org-test" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
@@ -1335,21 +1343,17 @@ describe("PurchasingReceivingPage", () => {
     return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json(switchboard);
-      if (url === "/api/purchasing" && (init?.method ?? "GET") === "GET") return Response.json(receivingOrders);
       if (url === "/api/capabilities/execute" && init?.method === "POST") {
         const body = JSON.parse(String(init.body ?? "{}")) as { capabilityId?: string; input?: Record<string, unknown>; intentId?: string };
+        if (body.capabilityId === "purchasing.listWorkspace") return Response.json({ ok: true, data: receivingOrders });
         if (body.capabilityId === "purchasing.listReceipts" && body.input) {
           return resolve(receiptHistory ? receiptHistory(body.input) : { ok: true, data: latestRollup });
         }
         if (body.capabilityId !== "purchasing.receiveGoods" || !body.input) throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
-        return resolve(post ? post({ ...body.input, action: "receiveGoods", intentId: body.intentId }) : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 4 } });
-      }
-      if (url === "/api/purchasing") {
-        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-        if (body.action === "receiptDetail") return Response.json({ ok: true, data: latestRollup });
-        const response = resolve(post ? post(body) : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 4 } });
-        if (body.action === "receiveGoods" && response.status !== 202 && Array.isArray(body.lines)) {
-          const acceptedByLine = new Map((body.lines as Array<{ lineNumber: number; quantity: number }>).map((line) => [line.lineNumber, line.quantity]));
+        const response = resolve(post ? post({ ...body.input, action: "receiveGoods", intentId: body.intentId }) : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 4 } });
+        if (response.status !== 202 && Array.isArray(body.input.lines)) {
+          const lines = body.input.lines as Array<{ lineNumber: number; quantity: number }>;
+          const acceptedByLine = new Map(lines.map((line) => [line.lineNumber, line.quantity]));
           latestRollup = {
             ...rollup,
             orderLines: rollup.orderLines.map((line) => ({
@@ -1367,7 +1371,7 @@ describe("PurchasingReceivingPage", () => {
 
   async function openOrder(fetchMock: ReturnType<typeof receivingFetch>, scope?: { actorId: string; organizationId: string }) {
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingReceivingPage actorId={scope?.actorId} organizationId={scope?.organizationId} />);
+    render(<PurchasingReceivingPage actorId={scope?.actorId ?? "actor-test"} organizationId={scope?.organizationId ?? "org-test"} />);
     fireEvent.change(await screen.findByLabelText("PO number"), { target: { value: "42" } });
     fireEvent.click(screen.getByRole("button", { name: "Open order" }));
     await screen.findByRole("heading", { name: /PO 42/ });
@@ -1384,12 +1388,12 @@ describe("PurchasingReceivingPage", () => {
     expect(screen.getByRole("heading", { name: "No receipts yet" })).toBeTruthy();
   });
 
-  it("loads receipt history from Go while keeping the order list on its existing read", async () => {
-    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
+  it("loads purchase orders and receipt history from Go without legacy requests", async () => {
     const fetchMock = receivingFetch();
     await openOrder(fetchMock);
 
     expect(await screen.findByRole("heading", { name: "No receipts yet" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Purchasing" }).getAttribute("href")).toBe("/purchasing");
     const goHistory = fetchMock.mock.calls.find(([input, init]) => input === "/api/capabilities/execute"
       && JSON.parse(String(init?.body ?? "{}")).capabilityId === "purchasing.listReceipts");
     expect(goHistory).toBeDefined();
@@ -1397,18 +1401,17 @@ describe("PurchasingReceivingPage", () => {
       capabilityId: "purchasing.listReceipts",
       input: { poNumber: 42 },
     });
-    expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/purchasing" && init?.method === "POST")).toBe(false);
-    expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/purchasing" && init?.method === "GET")).toBe(true);
+    expect(fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute")).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input]) => input === "/api/purchasing")).toBe(false);
   });
 
   it("shows a selected Go receipt history error without retrying the legacy detail action", async () => {
-    vi.stubGlobal("__GO_PURCHASING_RECEIPT_HISTORY_READS__", true);
     const fetchMock = receivingFetch(undefined, () => Response.json({ error: "receipt history unavailable" }, { status: 404 }));
     await openOrder(fetchMock);
 
     expect(await screen.findByText("receipt history unavailable")).toBeTruthy();
-    expect(fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute")).toHaveLength(1);
-    expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/purchasing" && init?.method === "POST")).toBe(false);
+    expect(fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute")).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input]) => input === "/api/purchasing")).toBe(false);
   });
 
   it("refuses to send a receipt with nothing entered", async () => {
@@ -1489,7 +1492,8 @@ describe("PurchasingReceivingPage", () => {
     expect((screen.getByLabelText("accepted on line 1") as HTMLInputElement).value).toBe("500");
     const capabilityPosts = () => fetchMock.mock.calls
       .filter(([url, init]) => String(url) === "/api/capabilities/execute" && (init as RequestInit | undefined)?.method === "POST")
-      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
+      .filter((body) => body.capabilityId === "purchasing.receiveGoods");
     const first = capabilityPosts()[0]!;
     expect(first).toMatchObject({
       capabilityId: "purchasing.receiveGoods",

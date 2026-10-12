@@ -65,11 +65,14 @@ function stubPurchasing(receiptsFor42: unknown = firstReceiptResponse) {
     if (url === "/api/modules") {
       return Response.json({ catalog: [{ id: "purchasing" }], enabledModules: ["purchasing"] });
     }
-    if (url === "/api/purchasing" && init?.method !== "POST") return Response.json(ordersResponse);
-    if (url === "/api/purchasing" && init?.method === "POST") {
-      const body = JSON.parse(String(init.body)) as { poNumber: number };
-      if (body.poNumber === 42) return Response.json(receiptsFor42);
-      return Response.json({ ok: true, data: { receipts: [], orderLines: [] } });
+    if (url === "/api/capabilities/execute") {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: { poNumber?: number } };
+      if (body.capabilityId === "purchasing.listWorkspace") return Response.json({ ok: true, data: ordersResponse });
+      if (body.capabilityId === "purchasing.listReceipts") {
+        return body.input.poNumber === 42
+          ? Response.json(receiptsFor42)
+          : Response.json({ ok: true, data: { receipts: [], orderLines: [] } });
+      }
     }
     return Response.json({ error: "not found" }, { status: 404 });
   });
@@ -86,7 +89,7 @@ describe("PurchasingReceiptsPage", () => {
     expect(await screen.findByRole("heading", { name: "Receipt #7" })).toBeTruthy();
     expect(screen.getByText("Torn stitching")).toBeTruthy();
     expect(screen.getByText("One carton damaged")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open full receiving workspace" }).getAttribute("href")).toContain("/purchasing/receiving");
+    expect(screen.getByRole("link", { name: "Open full receiving workspace" }).getAttribute("href")).toBe("/purchasing/receiving");
 
     const orderSummary = screen.getByRole("table", { name: "Quantities received, rejected, returned, and remaining for each order line" });
     expect(within(orderSummary).getByText("2.500")).toBeTruthy();
@@ -94,10 +97,11 @@ describe("PurchasingReceiptsPage", () => {
     expect(within(orderSummary).getByText("0.500")).toBeTruthy();
     expect(screen.getByText((_, element) => element?.tagName === "P" && element.textContent?.includes("$125.00") === true)).toBeTruthy();
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ action: "receiptDetail", poNumber: 42 }),
+      body: expect.stringContaining('"capabilityId":"purchasing.listReceipts"'),
     })));
+    expect(fetchMock.mock.calls.every(([url]) => String(url) !== "/api/purchasing")).toBe(true);
   });
 
   it("loads receipt history for the newly selected purchase order", async () => {
@@ -107,10 +111,11 @@ describe("PurchasingReceiptsPage", () => {
     await screen.findByRole("heading", { name: "Receipt #7" });
     fireEvent.change(screen.getByRole("combobox", { name: "Purchase order" }), { target: { value: "41" } });
     expect(await screen.findByRole("heading", { name: "No receipts recorded for this purchase order" })).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ action: "receiptDetail", poNumber: 41 }),
-    }));
+    expect(screen.getByRole("link", { name: "Receive a delivery" }).getAttribute("href")).toBe("/purchasing/receiving");
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/capabilities/execute"
+      && JSON.parse(String(init?.body)).capabilityId === "purchasing.listReceipts"
+      && JSON.parse(String(init?.body)).input.poNumber === 41)).toBe(true);
+    expect(fetchMock.mock.calls.every(([url]) => String(url) !== "/api/purchasing")).toBe(true);
   });
 
   it("keeps pre-receipt stock movement totals visible when no receipt documents exist", async () => {
@@ -151,7 +156,7 @@ describe("PurchasingReceiptsPage", () => {
   it("reports empty purchase order history without making a receipt request", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ catalog: [{ id: "purchasing" }], enabledModules: ["purchasing"] }))
-      .mockResolvedValueOnce(Response.json({ baseCurrency: "USD", orders: [] }));
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { baseCurrency: "USD", orders: [] } }));
     vi.stubGlobal("fetch", fetchMock);
     render(<PurchasingReceiptsPage />);
 
@@ -163,7 +168,10 @@ describe("PurchasingReceiptsPage", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "purchasing" }], enabledModules: ["purchasing"] });
-      if (url === "/api/purchasing" && init?.method !== "POST") return Response.json(ordersResponse);
+      if (url === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (body.capabilityId === "purchasing.listWorkspace") return Response.json({ ok: true, data: ordersResponse });
+      }
       return Response.json({ error: "unauthorized" }, { status: 401 });
     });
     vi.stubGlobal("fetch", fetchMock);

@@ -52,12 +52,9 @@ const OrderLineSchema = z.object({
   remainingThousandths: NonnegativeSafeIntegerSchema,
 }).strict();
 
-const ReceiptsResponseSchema = z.object({
-  ok: z.literal(true),
-  data: z.object({
-    receipts: z.array(ReceiptSchema),
-    orderLines: z.array(OrderLineSchema),
-  }).strict(),
+const ReceiptsOutputSchema = z.object({
+  receipts: z.array(ReceiptSchema),
+  orderLines: z.array(OrderLineSchema),
 }).strict();
 
 const ModuleSwitchboardSchema = z.object({
@@ -65,6 +62,7 @@ const ModuleSwitchboardSchema = z.object({
   enabledModules: z.array(z.string().min(1)),
 });
 
+const GoCapabilityEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
 const ErrorSchema = z.object({ error: z.string().optional(), message: z.string().optional() });
 
 export type PurchasingReceipt = z.infer<typeof ReceiptSchema>;
@@ -107,6 +105,27 @@ async function fetchJson(path: string, init: RequestInit, signal?: AbortSignal):
   return { response, body: await response.json().catch(() => null) };
 }
 
+async function executePurchasingRead(
+  capabilityId: "purchasing.listWorkspace" | "purchasing.listReceipts",
+  input: Record<string, unknown>,
+  context: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const { response, body } = await fetchJson("/api/capabilities/execute", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (!response.ok) {
+    throw new PurchasingReceiptsApiError(response.status, readError(response.status, body, context));
+  }
+  const envelope = GoCapabilityEnvelopeSchema.safeParse(body);
+  if (response.status !== 200 || !envelope.success) {
+    throw new PurchasingReceiptsApiError(response.status, `The Go Purchasing service returned ${context} in an unexpected format.`);
+  }
+  return envelope.data.data;
+}
+
 export async function fetchPurchasingReceiptsEnabled(signal?: AbortSignal): Promise<boolean> {
   const { response, body } = await fetchJson("/api/modules", {
     headers: { accept: "application/json" },
@@ -126,16 +145,10 @@ export async function fetchPurchasingReceiptsEnabled(signal?: AbortSignal): Prom
 }
 
 export async function fetchPurchasingOrders(signal?: AbortSignal): Promise<{ baseCurrency: string; orders: PurchasingReceiptOrder[] }> {
-  const { response, body } = await fetchJson("/api/purchasing", {
-    method: "GET",
-    headers: { accept: "application/json" },
-  }, signal);
-  if (!response.ok) {
-    throw new PurchasingReceiptsApiError(response.status, readError(response.status, body, "purchase orders"));
-  }
+  const body = await executePurchasingRead("purchasing.listWorkspace", {}, "purchase orders", signal);
   const parsed = PurchaseOrdersResponseSchema.safeParse(body);
   if (!parsed.success) {
-    throw new PurchasingReceiptsApiError(response.status, "The purchasing service returned purchase orders in an unexpected format.");
+    throw new PurchasingReceiptsApiError(200, "The Go Purchasing service returned purchase orders in an unexpected format.");
   }
   return parsed.data;
 }
@@ -144,17 +157,13 @@ export async function fetchPurchaseOrderReceipts(poNumber: number, signal?: Abor
   receipts: PurchasingReceipt[];
   orderLines: PurchasingReceiptOrderLine[];
 }> {
-  const { response, body } = await fetchJson("/api/purchasing", {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ action: "receiptDetail", poNumber }),
-  }, signal);
-  if (!response.ok) {
-    throw new PurchasingReceiptsApiError(response.status, readError(response.status, body, "receipt history"));
+  if (!Number.isSafeInteger(poNumber) || poNumber <= 0) {
+    throw new PurchasingReceiptsApiError(400, "Choose a valid purchase order to view receipt history.");
   }
-  const parsed = ReceiptsResponseSchema.safeParse(body);
+  const body = await executePurchasingRead("purchasing.listReceipts", { poNumber }, "receipt history", signal);
+  const parsed = ReceiptsOutputSchema.safeParse(body);
   if (!parsed.success) {
-    throw new PurchasingReceiptsApiError(response.status, "The purchasing service returned receipt history in an unexpected format.");
+    throw new PurchasingReceiptsApiError(200, "The Go Purchasing service returned receipt history in an unexpected format.");
   }
-  return parsed.data.data;
+  return parsed.data;
 }

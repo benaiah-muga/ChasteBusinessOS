@@ -39,7 +39,6 @@ import {
   type PurchasingWorkspace,
 } from "../api/purchasing";
 import { submitReceiveGoods } from "../api/purchasing-receiving";
-import { legacyUrl } from "../legacy";
 import "./PurchasingPage.css";
 
 type Tab = "overview" | "requests" | "orders" | "bills" | "vendors" | "intel";
@@ -536,7 +535,7 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
             <h1>Purchasing</h1>
             <p>Vendors, purchase orders, receipts, bills, and payments, with three-way matching throughout.</p>
           </div>
-          <a className="purchasing-legacy-link" href={legacyUrl("/purchasing")}>Open full workspace</a>
+          <a className="purchasing-legacy-link" href="/purchasing">Open full workspace</a>
         </header>
         <section className="purchasing-error" role="alert" aria-labelledby="purchasing-load-error">
           <div>
@@ -577,14 +576,14 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
           <h1>Purchasing</h1>
           <p>Vendors, purchase orders, receipts, bills, and payments, with three-way matching throughout. Every write goes through the governed capability kernel, so anything above your authority waits in the Approvals inbox.</p>
         </div>
-        <a className="purchasing-legacy-link" href={legacyUrl("/purchasing")}>Open full workspace</a>
+        <a className="purchasing-legacy-link" href="/purchasing">Open full workspace</a>
       </header>
 
       <nav className="purchasing-subnav" aria-label="Purchasing reports">
-        <a className="purchasing-subnav-link" href={legacyUrl("/purchasing/payment-runs")}>Payment runs</a>
-        <a className="purchasing-subnav-link" href={legacyUrl("/purchasing/ap-aging")}>Payables aging</a>
-        <a className="purchasing-subnav-link" href={legacyUrl("/purchasing/receipts")}>Receipt history</a>
-        <a className="purchasing-subnav-link" href={legacyUrl("/purchasing/receiving")}>Receiving desk</a>
+        <a className="purchasing-subnav-link" href="/purchasing/payment-runs">Payment runs</a>
+        <a className="purchasing-subnav-link" href="/purchasing/ap-aging">Payables aging</a>
+        <a className="purchasing-subnav-link" href="/purchasing/receipts">Receipt history</a>
+        <a className="purchasing-subnav-link" href="/purchasing/receiving">Receiving desk</a>
       </nav>
 
       <nav className="purchasing-tabs" role="tablist" aria-label="Purchasing sections">
@@ -1707,7 +1706,7 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
                     >
                       Record receipt
                     </button>
-                    <a className="purchasing-link" href={legacyUrl(`/purchasing/receiving?poNumber=${order.number}`)}>
+                    <a className="purchasing-link" href={`/purchasing/receiving?poNumber=${order.number}`}>
                       Open the receiving desk
                     </a>
                   </>
@@ -1928,7 +1927,7 @@ function BillsTab({ bills, vendors, taxCodes, currency, outstanding, busy, form,
             <span>Total outstanding</span>
             <strong>{formatMoney(outstanding, currency)}</strong>
           </div>
-          <a className="purchasing-link" href={legacyUrl("/purchasing/ap-aging")}>Open the full aging report</a>
+          <a className="purchasing-link" href="/purchasing/ap-aging">Open the full aging report</a>
         </div>
       </section>
 
@@ -1939,7 +1938,7 @@ function BillsTab({ bills, vendors, taxCodes, currency, outstanding, busy, form,
         <p className="purchasing-card-hint">
           Grouped payments and their approvals live in the payment runs report.
         </p>
-        <a className="purchasing-link" href={legacyUrl("/purchasing/payment-runs")}>Open payment runs</a>
+        <a className="purchasing-link" href="/purchasing/payment-runs">Open payment runs</a>
       </section>
 
       {bills.length === 0 ? (
@@ -2142,7 +2141,7 @@ function VendorsTab({ vendors, orders, bills, currency, busy, form, setForm, sel
                             </p>
                           ))}
                           <p>
-                            <a className="purchasing-link" href={legacyUrl(`/purchasing/receiving${open[0] ? `?poNumber=${open[0].number}` : ""}`)}>
+                            <a className="purchasing-link" href={`/purchasing/receiving${open[0] ? `?poNumber=${open[0].number}` : ""}`}>
                               Receive against {open[0] ? `PO ${open[0].number}` : "an order"}
                             </a>
                           </p>

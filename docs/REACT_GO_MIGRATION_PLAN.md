@@ -3949,3 +3949,15 @@ new owners and the manifest shows zero legacy runtime paths.
      error log was empty. The Vite proposal suite, typecheck, scoped lint, and
      database-backed Go capability and HTTP tests passed. This completes item
      366.
+
+368. (Complete) Move the Vite receipt history page and Receiving desk order
+     and history reads to Go's authenticated Purchasing capabilities. Remove
+     obsolete receipt-read selectors and route Purchasing cross-links to the
+     active Vite pages.
+
+369. (Runtime verified) On 2026-10-13, the authenticated Vite receipt history
+     page showed its empty state using Go capability reads with HTTP 200, with
+     no `/api/purchasing` requests or browser errors. The Receiving desk and
+     Purchasing links now stay under Vite routes. Receipt, Receiving desk, and
+     proxy suites passed (252 tests), Vite typecheck and scoped lint passed.
+     This completes item 368.

@@ -11,7 +11,6 @@ import {
   type ReceivingOrderLineRollup,
   type ReceiveGoodsAction,
 } from "../api/purchasing-receiving";
-import { legacyUrl } from "../legacy";
 import "./PurchasingReceivingPage.css";
 
 type LoadState =
@@ -331,7 +330,7 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
             <h1>Receiving desk</h1>
             <p>Record what arrived against a purchase order, line by line, with three-way matching kept truthful.</p>
           </div>
-          <a className="purchasing-receiving-legacy-link" href={legacyUrl("/purchasing")}>Open Purchasing</a>
+          <a className="purchasing-receiving-legacy-link" href="/purchasing">Open Purchasing</a>
         </header>
         <section className="purchasing-receiving-error" role="alert" aria-labelledby="purchasing-receiving-load-error">
           <div>
@@ -357,7 +356,7 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
           <h1>Receiving desk</h1>
           <p>Find the order on the delivery note, enter what arrived on each line, and finish with what was added, refused, and still expected.</p>
         </div>
-        <a className="purchasing-receiving-legacy-link" href={legacyUrl("/purchasing")}>Open Purchasing</a>
+        <a className="purchasing-receiving-legacy-link" href="/purchasing">Open Purchasing</a>
       </header>
 
       {notice && (

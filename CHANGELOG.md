@@ -23,6 +23,9 @@ The full v1 changelog is preserved at the bottom of this file.
   capabilities. Human review uses organization scoped permissions and
   compare-and-set state changes; release domain refusals retain their typed
   client errors.
+- Vite Purchasing receipt history and the Receiving desk now load orders and
+  receipt details through Go capabilities. Purchasing navigation stays on
+  Vite routes, with no legacy Purchasing requests or links.
 - Vite CRM now reads deals, customers, follow-up tasks, saved views, and
   customer timelines through authenticated Go capabilities. Go resolves the
   session and organization scope, and invalid or unavailable responses fail

@@ -44,30 +44,37 @@ const receiptData = {
 };
 
 describe("purchasing receipts API", () => {
-  it("validates the switchboard and returns the existing Purchasing GET orders", async () => {
+  it("validates the switchboard and loads orders through the Go workspace capability", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ catalog: [{ id: "purchasing" }], enabledModules: ["purchasing"] }))
-      .mockResolvedValueOnce(Response.json({ baseCurrency: "USD", orders: [order] }));
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { baseCurrency: "USD", orders: [order] } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchPurchasingReceiptsEnabled()).resolves.toBe(true);
     await expect(fetchPurchasingOrders()).resolves.toEqual({ baseCurrency: "USD", orders: [order] });
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/purchasing"]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
+    const capabilityRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as Record<string, unknown>;
+    expect(capabilityRequest).toMatchObject({ capabilityId: "purchasing.listWorkspace", input: {} });
+    expect(capabilityRequest.intentId).toEqual(expect.any(String));
     expect(fetchMock.mock.calls.every(([, init]) => init?.credentials === "same-origin" && init.cache === "no-store")).toBe(true);
   });
 
-  it("posts the legacy receipt-detail action and validates accepted, rejected, returned, and outstanding quantities", async () => {
+  it("loads receipt detail through Go and validates accepted, rejected, returned, and outstanding quantities", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: receiptData }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchPurchaseOrderReceipts(42)).resolves.toEqual(receiptData);
-    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ action: "receiptDetail", poNumber: 42 }),
+      body: expect.any(String),
       headers: { accept: "application/json", "content-type": "application/json" },
       credentials: "same-origin",
       cache: "no-store",
     }));
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(request).toMatchObject({ capabilityId: "purchasing.listReceipts", input: { poNumber: 42 } });
+    expect(request.intentId).toEqual(expect.any(String));
+    expect(fetchMock.mock.calls.every(([url]) => url !== "/api/purchasing")).toBe(true);
   });
 
   it("rejects malformed receipt payloads and keeps authorization errors actionable", async () => {
@@ -76,11 +83,18 @@ describe("purchasing receipts API", () => {
     await expect(fetchPurchaseOrderReceipts(42)).rejects.toMatchObject({
       name: "PurchasingReceiptsApiError",
       status: 200,
-      message: "The purchasing service returned receipt history in an unexpected format.",
+      message: "The Go Purchasing service returned receipt history in an unexpected format.",
     });
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "unauthorized" }, { status: 401 })));
     await expect(fetchPurchaseOrderReceipts(42)).rejects.toBeInstanceOf(PurchasingReceiptsApiError);
     await expect(fetchPurchaseOrderReceipts(42)).rejects.toMatchObject({ status: 401, message: "Your session has expired. Sign in again to view purchase receipts." });
+  });
+
+  it("rejects invalid purchase-order numbers before requesting Go", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchPurchaseOrderReceipts(0)).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

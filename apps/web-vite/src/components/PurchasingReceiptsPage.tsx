@@ -9,7 +9,6 @@ import {
   type PurchasingReceiptOrder,
   type PurchasingReceiptOrderLine,
 } from "../api/purchasing-receipts";
-import { legacyUrl } from "../legacy";
 import "./purchasing-receipts-page.css";
 
 type OrdersState =
@@ -138,7 +137,7 @@ export function PurchasingReceiptsPage({ baseCurrency = null }: { baseCurrency?:
           <h1>Purchase receipt history</h1>
           <p>Review accepted, rejected, and returned quantities recorded against each purchase order. Receive deliveries in the full workspace.</p>
         </div>
-        <a className="purchasing-receipts-full-workspace" href={legacyUrl("/purchasing/receiving")}>Open full receiving workspace</a>
+        <a className="purchasing-receipts-full-workspace" href="/purchasing/receiving">Open full receiving workspace</a>
       </header>
 
       {ordersState.status === "loading" && <p className="purchasing-receipts-message" role="status">Loading purchase orders…</p>}
@@ -211,7 +210,7 @@ export function PurchasingReceiptsPage({ baseCurrency = null }: { baseCurrency?:
             <section className="purchasing-receipts-message" role="status">
               <h2>No receipts recorded for this purchase order</h2>
               <p>Receipt entries will appear here after deliveries are recorded.</p>
-              <a href={legacyUrl("/purchasing/receiving")}>Receive a delivery</a>
+              <a href="/purchasing/receiving">Receive a delivery</a>
             </section>
           )}
 
