@@ -79,6 +79,16 @@ describe("documents API client", () => {
     expect(request).toMatchObject({ capabilityId: "documents.listIngestedDocuments", input: {}, intentId: expect.any(String) });
   });
 
+  it("treats omitted Go list arrays as empty in an empty workspace", async () => {
+    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchDocuments()).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
+
   it("loads preview detail through Go without requesting suggestions or content", async () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { document: goDetail } }));

@@ -13,6 +13,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Documents now handles Go list results with omitted empty arrays as an
+  empty library while continuing to validate every returned document row.
+
 - Marketing segment lifetime spend thresholds now use PostgreSQL `bigint`, so
   valid minor-unit amounts above the old 32-bit limit persist without a 500.
 

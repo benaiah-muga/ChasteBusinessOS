@@ -31,8 +31,8 @@ const DocumentDetailResponseSchema = z.object({
 });
 const CapabilitySuccessSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
 const GoDocumentListOutputSchema = z.object({
-  documents: z.array(DocumentRowSchema.extend({ id: z.string().uuid() }).strict()),
-  vendors: z.array(z.object({ id: z.string(), name: z.string() }).strict()),
+  documents: z.array(DocumentRowSchema.extend({ id: z.string().uuid() }).strict()).default([]),
+  vendors: z.array(z.object({ id: z.string(), name: z.string() }).strict()).default([]),
 }).strict();
 const GoDocumentDetailOutputSchema = z.object({
   document: z.object({

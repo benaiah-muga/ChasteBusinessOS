@@ -2440,7 +2440,7 @@ new owners and the manifest shows zero legacy runtime paths.
      browser reads loaded the inventory catalog and timber movement history
      through Go with HTTP 200, preserved the UGX display, and had no browser
      errors.
-216. (Implemented, default-on) Route the Vite Documents library list and preview detail
+216. (Done, default-on) Route the Vite Documents library list and preview detail
      through `documents.listIngestedDocuments` using inputs `{}` and
      `{id, preview:true}`. Gate the Vite selector on the session capability
      route and enforce default-on `GO_DOCUMENT_INGESTED_READS=1` in Go for
@@ -2449,7 +2449,11 @@ new owners and the manifest shows zero legacy runtime paths.
      Strictly validate the success envelope and list/detail outputs, preserving
      organization-scoped permission checks, order, preview redaction, and the
      existing content link and editor routes. Selected-Go errors fail closed.
-     Focused Go/Vite tests pass; browser proof remains open.
+     Focused Vite tests pass. Authenticated browser proof loaded the empty
+     library and a synthetic document with its preview through Go. Both read
+     capability requests returned HTTP 200, no legacy `/api/documents` request
+     or browser errors occurred. The empty response omits zero-length arrays;
+     Vite now defaults those validated fields to empty lists.
 217. (Implemented; default-on in `.env.example`) Route only Vite Purchasing requests and RFQs through the
      direct session-authenticated `purchasing.listPurchaseWorkflow` capability
      behind paired `CHASTE_GO_PURCHASING_WORKFLOW_READS=1` and
