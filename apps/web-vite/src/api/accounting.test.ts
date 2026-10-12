@@ -21,6 +21,7 @@ import {
   readPendingAccountingCreditNote,
   readPendingAccountingReverseEntry,
   readPendingAccountingBankReconciliationWrite,
+  readPendingAccountingCloseYear,
   submitAccountingAction,
 } from "./accounting";
 
@@ -823,12 +824,57 @@ describe("accounting API: governed writes", () => {
     });
   });
 
-  it("rejects a 202 that is missing its pending marker", async () => {
+  it("rejects a 202 that is missing its Go year-end pending marker", async () => {
+    stubPaymentLocks();
     stubFetch(() => Response.json({ ok: true, data: {} }, { status: 202 }));
-    await expect(submitAccountingAction("/api/accounting", { action: "closeYear", year: 2025 })).rejects.toMatchObject({
+    await expect(submitAccountingAction("/api/accounting", { action: "closeYear", year: 2025 }, undefined, paymentRetryScope)).rejects.toMatchObject({
       status: 202,
-      message: "This action is waiting for approval but the Accounting service returned an invalid approval response.",
+      message: "The Go Accounting service returned an invalid year-end approval response.",
     });
+  });
+
+  it("routes year-end close through Go and validates its result", async () => {
+    stubPaymentLocks();
+    const output = {
+      closingEntryId: "11111111-1111-4111-8111-111111111111",
+      replacedEntryId: null,
+      netIncomeMinor: -1_250,
+      retainedEarningsMinor: 1_250,
+    };
+    const mock = stubFetch(() => Response.json({ ok: true, data: output }));
+    await expect(submitAccountingAction("/api/accounting", { action: "closeYear", year: 2025 }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      body: expect.stringContaining('"capabilityId":"accounting.closeYear"'),
+    }));
+    expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.closeYear",
+      input: { year: 2025 },
+      intentId: expect.any(String),
+    });
+    await expect(readPendingAccountingCloseYear(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("retains a pending year-end close and only retries the exact scoped year", async () => {
+    stubPaymentLocks();
+    const mock = stubFetch(() => Response.json({ pendingApproval: true, reason: "Controller review." }, { status: 202 }));
+    const action = { action: "closeYear", year: 2025 };
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "pending", reason: "Controller review." });
+    await expect(readPendingAccountingCloseYear(paymentRetryScope)).resolves.toBe(2025);
+    await expect(submitAccountingAction("/api/accounting", { ...action, year: 2024 }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed on invalid year-end-close inputs and malformed Go output", async () => {
+    stubPaymentLocks();
+    const mock = stubFetch(() => Response.json({ ok: true, data: { closingEntryId: "not-a-uuid" } }));
+    await expect(submitAccountingAction("/api/accounting", { action: "closeYear", year: 1999 }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 400 });
+    expect(mock).not.toHaveBeenCalled();
+    await expect(submitAccountingAction("/api/accounting", { action: "closeYear", year: 2025 }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingAccountingCloseYear(paymentRetryScope)).resolves.toBe(2025);
+    expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
   it("turns a rejected write into a readable failure", async () => {

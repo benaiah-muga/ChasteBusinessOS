@@ -23,6 +23,7 @@ import {
   readPendingAccountingCreditNote,
   readPendingAccountingReverseEntry,
   readPendingAccountingBankReconciliationWrite,
+  readPendingAccountingCloseYear,
   submitAccountingAction,
   type AccountingAging,
   type AccountingBill,
@@ -45,7 +46,6 @@ import {
   type AccountingStatement,
   type AccountingTaxCode,
 } from "../api/accounting";
-import { legacyUrl } from "../legacy";
 import {
   goPurchasingFinanceWritesUseGo,
   payPurchasingBill,
@@ -364,6 +364,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
   const [pendingCreditNote, setPendingCreditNote] = useState<AccountingCreditNoteAction | null>(null);
   const [pendingReverseEntry, setPendingReverseEntry] = useState<AccountingReverseEntryAction | null>(null);
   const [pendingBankReconciliationWrite, setPendingBankReconciliationWrite] = useState<AccountingBankReconciliationWriteAction | null>(null);
+  const [pendingCloseYear, setPendingCloseYear] = useState<number | null>(null);
   const [pendingPurchasingBillPayment, setPendingPurchasingBillPayment] = useState<Awaited<ReturnType<typeof readPendingPurchasingBillPayment>>>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentRetryScope: AccountingPaymentRetryScope = { actorId, organizationId };
@@ -420,6 +421,19 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       if (active && goAccountingRecordPaymentUseGo()) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved invoice payment." });
       }
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    let active = true;
+    void readPendingAccountingCloseYear(paymentRetryScope).then((year) => {
+      if (!active) return;
+      setPendingCloseYear(year);
+      if (year !== null) setNotice({ tone: "pending", text: `Year-end close ${year} is unresolved. Retry that exact year to recover its result.` });
+    }).catch((error) => {
+      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved year-end close." });
     });
     return () => { active = false; };
   }, [actorId, organizationId]);
@@ -532,6 +546,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       payload: Record<string, unknown>,
       label: string,
     ): Promise<boolean> => {
+      const isCloseYear = path === "/api/accounting" && payload.action === "closeYear";
       const isRecordPayment = path === "/api/accounting" && payload.action === "recordPayment";
       const goRecordPayment = isRecordPayment && goAccountingRecordPaymentUseGo();
       const isCreateInvoice = path === "/api/accounting" && payload.action === "createInvoice";
@@ -556,6 +571,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : { kind: "completed" };
         } else {
           outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
+        }
+        if (isCloseYear) {
+          setPendingCloseYear(outcome.kind === "pending" ? await readPendingAccountingCloseYear(paymentRetryScope) : null);
         }
         if (goRecordPayment) {
           setPendingRecordPayment(outcome.kind === "pending"
@@ -595,8 +613,17 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : { tone: "success", text: `${label} done.` },
         );
         void load();
-        return !((goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry || goBankReconciliationWrite || goPurchasingBillPayment) && outcome.kind === "pending");
+        return !((isCloseYear || goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry || goBankReconciliationWrite || goPurchasingBillPayment) && outcome.kind === "pending");
       } catch (error) {
+        if (isCloseYear) {
+          try { setPendingCloseYear(await readPendingAccountingCloseYear(paymentRetryScope)); }
+          catch (pendingError) {
+            setPendingCloseYear(pendingError instanceof AccountingApiError && pendingError.requestMayHaveReachedServer
+              && Number.isSafeInteger(payload.year)
+              ? payload.year as number
+              : null);
+          }
+        }
         if (goRecordPayment) {
           try { setPendingRecordPayment(await readPendingAccountingRecordPayment(paymentRetryScope)); }
           catch { setPendingRecordPayment(payload as unknown as AccountingRecordPaymentAction); }
@@ -658,7 +685,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
         </div>
         <a
           className="accounting-button accounting-button-secondary"
-          href={legacyUrl("/accounting?tab=invoices")}
+          href="/accounting/invoices"
         >
           Open invoices workspace
         </a>
@@ -858,6 +885,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             <PeriodsSection
               closedPeriods={state.data.closedPeriods}
               busy={busy}
+              pendingCloseYear={pendingCloseYear}
               onCloseYear={(year) =>
                 runAction("/api/accounting", { action: "closeYear", year }, `Year-end close ${year}`)
               }
@@ -2600,11 +2628,13 @@ function ReportsSection({
 function PeriodsSection({
   closedPeriods,
   busy,
+  pendingCloseYear,
   onCloseYear,
   onReopen,
 }: {
   closedPeriods: Awaited<ReturnType<typeof fetchAccountingOverview>>["closedPeriods"];
   busy: boolean;
+  pendingCloseYear: number | null;
   onCloseYear: (year: number) => Promise<boolean>;
   onReopen: (year: number, month: number) => Promise<boolean>;
 }) {
@@ -2612,6 +2642,13 @@ function PeriodsSection({
   const [closeTarget, setCloseTarget] = useState<number | null>(null);
   const [reopenTarget, setReopenTarget] = useState<{ year: number; month: number } | null>(null);
   const closeYear = Number(yearInput);
+
+  useEffect(() => {
+    if (pendingCloseYear !== null) {
+      setYearInput(String(pendingCloseYear));
+      setCloseTarget(pendingCloseYear);
+    }
+  }, [pendingCloseYear]);
 
   return (
     <section className="accounting-stack accounting-narrow">
@@ -2663,6 +2700,7 @@ function PeriodsSection({
               inputMode="numeric"
               value={yearInput}
               onChange={(event) => setYearInput(event.target.value)}
+              readOnly={pendingCloseYear !== null}
             />
           </label>
           <button
@@ -2671,7 +2709,7 @@ function PeriodsSection({
             disabled={busy || !yearInput || !Number.isSafeInteger(closeYear)}
             onClick={() => setCloseTarget(closeYear)}
           >
-            Close year, roll retained earnings
+            {pendingCloseYear !== null ? "Retry unresolved year-end close" : "Close year, roll retained earnings"}
           </button>
         </div>
       </div>

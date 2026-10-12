@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { AccountingInvoicesApiError, fetchAccountingEnabled, fetchAccountingInvoices, type AccountingInvoice } from "../api/accounting-invoices";
-import { legacyUrl } from "../legacy";
 import "./accounting-invoices-page.css";
 
 type PageState =
@@ -75,7 +74,7 @@ export function AccountingInvoicesPage() {
           <h1>Accounting invoices</h1>
           <p>Review issued invoices and outstanding balances. Create, edit, and record payments in the full Accounting workspace.</p>
         </div>
-        <a className="accounting-invoices-full-workspace" href={legacyUrl("/accounting?tab=invoices")}>Open full Accounting workspace</a>
+        <a className="accounting-invoices-full-workspace" href="/accounting?tab=receivables">Open full Accounting workspace</a>
       </header>
 
       {state.status === "loading" && <p className="accounting-invoices-message" role="status">Loading invoices…</p>}

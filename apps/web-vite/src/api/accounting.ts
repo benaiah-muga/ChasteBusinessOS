@@ -423,6 +423,22 @@ const StoredReverseEntrySchema = z.object({
 }).strict();
 const ReverseEntryOutputSchema = z.object({ reversalEntryId: z.string().uuid() }).strict();
 const REVERSE_ENTRY_ATTEMPT_PREFIX = "chaste:accounting:reverse-entry:go:attempt:v1:";
+const CloseYearActionSchema = z.object({
+  action: z.literal("closeYear"),
+  year: z.number().int().safe().min(2000).max(2100),
+}).strict();
+const StoredCloseYearSchema = z.object({
+  action: CloseYearActionSchema,
+  intentId: z.string().uuid(),
+  fingerprint: z.string().length(64),
+}).strict();
+const CloseYearOutputSchema = z.object({
+  closingEntryId: z.string().uuid(),
+  replacedEntryId: z.string().uuid().nullable(),
+  netIncomeMinor: minor,
+  retainedEarningsMinor: minor,
+}).strict();
+const CLOSE_YEAR_ATTEMPT_PREFIX = "chaste:accounting:close-year:go:attempt:v1:";
 const MatchBankTransactionActionSchema = z.object({
   action: z.literal("matchBankTransaction"),
   transactionId: z.string().uuid(),
@@ -537,6 +553,16 @@ export async function readPendingAccountingBankReconciliationWrite(scope: Accoun
   catch { throw new AccountingApiError(0, "Enable browser storage to recover an unresolved bank reconciliation action.", true); }
   if (raw === null) return null;
   return parseStoredBankReconciliationWrite(raw).action;
+}
+
+export async function readPendingAccountingCloseYear(scope: AccountingPaymentRetryScope): Promise<number | null> {
+  const { scopeHash } = await accountingPaymentScope(scope);
+  const storageKey = `${CLOSE_YEAR_ATTEMPT_PREFIX}${scopeHash}`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new AccountingApiError(0, "Enable browser storage to recover an unresolved year-end close.", true); }
+  if (raw === null) return null;
+  return parseStoredCloseYear(raw).action.year;
 }
 
 export async function readPendingAccountingReverseEntry(scope: AccountingPaymentRetryScope): Promise<AccountingReverseEntryAction | null> {
@@ -885,6 +911,12 @@ export async function submitAccountingAction(
   signal?: AbortSignal,
   retryScope?: AccountingPaymentRetryScope,
 ): Promise<AccountingActionOutcome> {
+  if (path === "/api/accounting" && payload.action === "closeYear") {
+    const action = CloseYearActionSchema.safeParse(payload);
+    if (!action.success) throw new AccountingApiError(400, "Choose a valid fiscal year before closing the books.");
+    const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
+    return submitGoAccountingCloseYear(action.data, scoped, signal);
+  }
   if (path === "/api/banking" && (payload.action === "matchBankTransaction" || payload.action === "unmatchBankTransaction")) {
     const action = BankReconciliationWriteActionSchema.safeParse(payload);
     if (!action.success) throw new AccountingApiError(400, "Enter a valid bank reconciliation action before submitting.");
@@ -939,6 +971,43 @@ export async function submitAccountingAction(
   if (!response.ok) throw new AccountingApiError(response.status, errorMessage(response.status, body, "complete this accounting action"));
   const envelope = EnvelopeSchema.safeParse(body);
   if (!envelope.success) throw new AccountingApiError(response.status, "The Accounting service returned an unexpected action response.");
+  return { kind: "completed" };
+}
+
+async function submitGoAccountingCloseYear(
+  action: z.infer<typeof CloseYearActionSchema>,
+  scope: { actorId: string; organizationId: string; scopeHash: string },
+  signal?: AbortSignal,
+): Promise<AccountingActionOutcome> {
+  const attempt = await accountingCloseYearAttempt(action, scope.scopeHash);
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await getJson("/api/capabilities/execute", {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({ capabilityId: "accounting.closeYear", input: { year: action.year }, intentId: attempt.intentId }),
+    }, signal));
+  } catch (error) {
+    if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
+    throw new AccountingApiError(0, "The Go Accounting service could not confirm this year-end close. Retry the same year to recover its result.", true);
+  }
+  if (response.status === 202) {
+    const pending = PendingSchema.safeParse(body);
+    if (!pending.success) throw new AccountingApiError(202, "The Go Accounting service returned an invalid year-end approval response.", true);
+    return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This year-end close is waiting for approval." };
+  }
+  if (!response.ok) {
+    const uncertain = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
+    if (!uncertain) await clearAccountingCloseYearAttempt(attempt.storageKey);
+    throw new AccountingApiError(response.status, errorMessage(response.status, body, "close this fiscal year"), uncertain);
+  }
+  const envelope = EnvelopeSchema.safeParse(body);
+  const output = envelope.success ? CloseYearOutputSchema.safeParse(envelope.data.data) : null;
+  if (response.status !== 200 || !output?.success) {
+    throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected year-end close response.", true);
+  }
+  await clearAccountingCloseYearAttempt(attempt.storageKey);
   return { kind: "completed" };
 }
 
@@ -1325,6 +1394,35 @@ async function accountingBankReconciliationWriteAttempt(action: AccountingBankRe
   );
 }
 
+async function accountingCloseYearAttempt(action: z.infer<typeof CloseYearActionSchema>, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
+  const storageKey = `${CLOSE_YEAR_ATTEMPT_PREFIX}${scopeHash}`;
+  const fingerprint = await accountingPaymentFingerprint(action);
+  return withAccountingReservationLock(
+    storageKey,
+    "This browser cannot safely reserve a year-end close. Open Accounting in a browser with Web Locks enabled before closing the books.",
+    "The browser could not reserve this year-end close safely. Retry after closing other Accounting tabs.",
+    async () => {
+      let raw: string | null;
+      try { raw = window.localStorage.getItem(storageKey); }
+      catch { throw new AccountingApiError(0, "Enable browser storage before closing the books so this year can be retried safely."); }
+      if (raw !== null) {
+        const stored = parseStoredCloseYear(raw);
+        if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous year-end close is unresolved. Retry that exact year before closing another year.", true);
+        return { storageKey, intentId: stored.intentId };
+      }
+      const stored = { action, intentId: crypto.randomUUID(), fingerprint };
+      const serialized = JSON.stringify(stored);
+      try {
+        window.localStorage.setItem(storageKey, serialized);
+        if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("year-end close retry marker did not persist");
+      } catch {
+        throw new AccountingApiError(0, "Enable browser storage before closing the books so this year can be retried safely.");
+      }
+      return { storageKey, intentId: stored.intentId };
+    },
+  );
+}
+
 async function accountingPaymentFingerprint(action: unknown): Promise<string> {
   try {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(action)));
@@ -1379,6 +1477,15 @@ function parseStoredBankReconciliationWrite(raw: string): z.infer<typeof StoredB
   return parsed.data;
 }
 
+function parseStoredCloseYear(raw: string): z.infer<typeof StoredCloseYearSchema> {
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new AccountingApiError(0, "An unresolved year-end close marker is malformed. Contact an administrator before retrying.", true); }
+  const parsed = StoredCloseYearSchema.safeParse(decoded);
+  if (!parsed.success) throw new AccountingApiError(0, "An unresolved year-end close marker is malformed. Contact an administrator before retrying.", true);
+  return parsed.data;
+}
+
 async function clearAccountingRecordPaymentAttempt(storageKey: string): Promise<void> {
   try { window.localStorage.removeItem(storageKey); }
   catch { throw new AccountingApiError(0, "The payment completed, but its retry marker could not be cleared. Reload before recording another payment.", true); }
@@ -1402,6 +1509,11 @@ async function clearAccountingReverseEntryAttempt(storageKey: string): Promise<v
 async function clearAccountingBankReconciliationWriteAttempt(storageKey: string): Promise<void> {
   try { window.localStorage.removeItem(storageKey); }
   catch { throw new AccountingApiError(0, "The reconciliation action completed, but its retry marker could not be cleared. Reload before changing another match.", true); }
+}
+
+async function clearAccountingCloseYearAttempt(storageKey: string): Promise<void> {
+  try { window.localStorage.removeItem(storageKey); }
+  catch { throw new AccountingApiError(0, "The year-end close completed, but its retry marker could not be cleared. Reload before closing another year.", true); }
 }
 
 export async function emailInvoice(invoiceNumber: number, to: string, signal?: AbortSignal): Promise<{ urlPath: string | null }> {

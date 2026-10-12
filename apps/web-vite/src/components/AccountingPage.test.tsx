@@ -372,6 +372,7 @@ describe("tab deep-linking", () => {
     render(<AccountingPage />);
 
     expect(await screen.findByRole("table", { name: "Vendor bills" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open invoices workspace" }).getAttribute("href")).toBe("/accounting/invoices");
     expect(window.location.search).toBe("?tab=payables");
   });
 

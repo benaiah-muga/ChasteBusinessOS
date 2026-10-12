@@ -42,7 +42,7 @@ describe("Vite Accounting invoices preview", () => {
     expect(screen.getByText("Partially Paid")).not.toBeNull();
     expect(screen.getAllByText(/UGX/)).toHaveLength(3);
     expect(screen.getByText((value) => value.includes("100,000"))).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open full Accounting workspace" }).getAttribute("href")).toContain("/accounting?tab=invoices");
+    expect(screen.getByRole("link", { name: "Open full Accounting workspace" }).getAttribute("href")).toBe("/accounting?tab=receivables");
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",

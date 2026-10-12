@@ -13,6 +13,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Accounting year-end close now uses Go's authenticated
+  `accounting.closeYear` capability with an actor- and organization-scoped
+  exact retry intent. Invoice workspace links stay on the Vite route.
 - Vite Inventory no longer links users to the legacy inventory workspace.
   Stock, item actions, counts, locations, reservations, transfers, and movement
   history remain available on the Vite route.

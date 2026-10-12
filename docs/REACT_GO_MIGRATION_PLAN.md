@@ -3810,3 +3810,18 @@ new owners and the manifest shows zero legacy runtime paths.
      the updated name appeared in the catalog. No legacy `POST /api/inventory`
      request occurred and the browser error log was empty. This completes
      item 346.
+
+348. (Complete) Route Vite Accounting year-end close through Go's authenticated
+     `accounting.closeYear` capability with active actor and organization
+     scope, an exact retry intent, and strict result validation. Keep invoice
+     workspace links on the Vite route.
+
+349. (Runtime verified) On 2026-10-13, authenticated Vite `/accounting?tab=periods`
+     submitted the synthetic workspace's 2026 close through
+     `POST /api/capabilities/execute`. Go returned its expected no-activity
+     refusal (HTTP 500); Vite retained the exact retry marker. The invoice
+     workspace link opened Vite `/accounting/invoices` and loaded its empty
+     state. No legacy invoice route was opened. This verifies Go routing,
+     refusal handling, retry behavior, and Vite navigation; a successful close
+     still requires a workspace with income or expense activity. This completes
+     item 348.
