@@ -11,12 +11,15 @@ import {
   goSupportInboxReadsUseGo,
   goSupportLibraryReadsUseGo,
   goSupportCannedResponseWriteUseGo,
+  goSupportKbArticleWriteUseGo,
   goSupportConversationWritesUseGo,
   readPendingSupportCannedResponse,
+  readPendingSupportKbArticle,
   readPendingSupportConversationWrite,
   supportWriteActionFromPending,
   submitSupportConversationAction,
   submitSupportCannedResponse,
+  submitSupportKbArticle,
   submitSupportAction,
   SupportApiError,
   SupportWriteActionSchema,
@@ -296,6 +299,17 @@ describe("governed support writes", () => {
     });
   });
 
+  it("rejects unscoped knowledge article writes before they can reach the legacy route", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { articleId: crypto.randomUUID() } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportAction({ action: "createKbArticle", title: "Returns", body: "Policy" })).rejects.toMatchObject({
+      status: 503,
+      message: "Knowledge articles must be saved through the scoped Go capability.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("fails closed on malformed Go category suggestions", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { category: "billing", draft: false } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -514,6 +528,60 @@ describe("Go canned-response write", () => {
     await expect(submitSupportCannedResponse(action, scope)).resolves.toMatchObject({ kind: "completed" });
     const retryPayload = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
     expect(retryPayload.intentId).toBe(firstPayload.intentId);
+  });
+});
+
+describe("Go knowledge article write", () => {
+  const scope = {
+    actorId: "55555555-5555-4555-8555-555555555555",
+    organizationId: "66666666-6666-4666-8666-666666666666",
+  };
+  const action = { action: "createKbArticle" as const, title: "Returns", body: "Policy", isPublic: false };
+
+  it("uses the Go capability with exact scoped intent and validates its UUID output", async () => {
+    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { articleId: conversationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(goSupportKbArticleWriteUseGo()).toBe(true);
+    await expect(submitSupportKbArticle(action, scope)).resolves.toEqual({ kind: "completed", data: { articleId: conversationId } });
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", cache: "no-store" }));
+    expect(payload).toMatchObject({ capabilityId: "support.createKbArticle", input: { title: "Returns", body: "Policy", isPublic: false } });
+    expect(payload.intentId).toEqual(expect.any(String));
+    expect(readPendingSupportKbArticle(scope)).toBeNull();
+  });
+
+  it("keeps exact details and intent after uncertain responses, pending approval, malformed success, and rollback", async () => {
+    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ error: "unexpected request" }, 500))
+      .mockResolvedValueOnce(jsonResponse({ error: "temporarily unavailable" }, 503))
+      .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Needs approval." }, 202))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { articleId: "not-a-uuid" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportKbArticle(action, scope)).rejects.toMatchObject({ status: 503 });
+    const pending = readPendingSupportKbArticle(scope);
+    expect(pending).toEqual({ title: "Returns", body: "Policy", isPublic: false });
+    await expect(submitSupportKbArticle({ ...action, body: "Changed" }, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("exact saved details") });
+    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", false);
+    await expect(submitSupportKbArticle(action, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("unresolved") });
+    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", true);
+    await expect(submitSupportKbArticle(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitSupportKbArticle(action, scope)).rejects.toMatchObject({ status: 200, message: expect.stringContaining("unexpected article result") });
+    const payloads = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string });
+    expect(payloads).toHaveLength(3);
+    expect(new Set(payloads.map((payload) => payload.intentId))).toEqual(new Set([payloads[0]?.intentId]));
+    expect(readPendingSupportKbArticle(scope)).toEqual(pending);
+  });
+
+  it("never falls back to the legacy route when the Go selector is disabled", async () => {
+    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", false);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportKbArticle(action, scope)).rejects.toMatchObject({ status: 503 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

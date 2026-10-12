@@ -550,13 +550,16 @@ describe("Vite support page", () => {
     expect((screen.getByLabelText("Canned shortcut") as HTMLInputElement).value).toBe("");
   }, SLOW);
 
-  it("saves support articles as internal unless staff explicitly publish them", async () => {
-    let createPayload: Record<string, unknown> | undefined;
+  it("saves support articles through Go as internal unless staff explicitly publish them", async () => {
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const organizationId = "66666666-6666-4666-8666-666666666666";
+    let createPayload: { capabilityId?: string; input?: Record<string, unknown> } | undefined;
+    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (init?.method === "POST") {
-        createPayload = JSON.parse(String(init.body)) as Record<string, unknown>;
-        return Response.json({ ok: true, data: { articleId: "article-1" } });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        createPayload = JSON.parse(String(init.body)) as { capabilityId?: string; input?: Record<string, unknown> };
+        return Response.json({ ok: true, data: { articleId: conversationId } });
       }
       if (path === "/api/modules") return moduleSwitchboard();
       if (path === "/api/support?library=1") return Response.json({ canned: [], articles: [] });
@@ -565,13 +568,17 @@ describe("Vite support page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SupportPage />);
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
     fireEvent.click(await screen.findByRole("button", { name: "Library" }));
     fireEvent.change(screen.getByLabelText("Article title"), { target: { value: "Return policy" } });
     fireEvent.change(screen.getByLabelText("Article body"), { target: { value: "Keep this article private until approved." } });
     expect(screen.getByRole("checkbox", { name: "Make this article available to public support replies" })).toHaveProperty("checked", false);
     fireEvent.click(screen.getByRole("button", { name: "Save internal article" }));
 
-    await waitFor(() => expect(createPayload).toMatchObject({ action: "createKbArticle", isPublic: false }));
+    await waitFor(() => expect(createPayload).toMatchObject({
+      capabilityId: "support.createKbArticle",
+      input: { title: "Return policy", body: "Keep this article private until approved.", isPublic: false },
+    }));
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/support" && init?.method === "POST")).toBe(false);
   }, SLOW);
 });

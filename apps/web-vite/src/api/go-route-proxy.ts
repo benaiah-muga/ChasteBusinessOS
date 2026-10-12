@@ -254,6 +254,10 @@ export function goSupportCannedResponseWriteFromEnv(env: Record<string, string |
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE !== "0";
 }
 
+export function goSupportKbArticleWriteFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_SUPPORT_KB_ARTICLE_WRITE !== "0";
+}
+
 export function goSupportConversationWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_SUPPORT_CONVERSATION_WRITES !== "0";
 }

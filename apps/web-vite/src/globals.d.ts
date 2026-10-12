@@ -35,6 +35,7 @@ declare const __GO_ACCOUNTING_CASH_BASIS__: boolean;
 declare const __GO_SUPPORT_INBOX_READS__: boolean;
 declare const __GO_SUPPORT_LIBRARY_READS__: boolean;
 declare const __GO_SUPPORT_CANNED_RESPONSE_WRITE__: boolean;
+declare const __GO_SUPPORT_KB_ARTICLE_WRITE__: boolean;
 declare const __GO_SUPPORT_CONVERSATION_WRITES__: boolean;
 declare const __GO_SUPPORT_TICKET_WRITES__: boolean;
 declare const __GO_BANK_RECONCILIATION_WRITES__: boolean;

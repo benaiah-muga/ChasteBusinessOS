@@ -3825,3 +3825,14 @@ new owners and the manifest shows zero legacy runtime paths.
      refusal handling, retry behavior, and Vite navigation; a successful close
      still requires a workspace with income or expense activity. This completes
      item 348.
+
+350. (Complete) Route Vite Support knowledge-base article creation through
+     Go's authenticated `support.createKbArticle` capability with active actor
+     and organization scope, exact retry protection, strict result validation,
+     and no article-write fallback to the legacy endpoint.
+
+351. (Runtime verified) On 2026-10-13, authenticated Vite Support created a
+     synthetic internal knowledge-base article. Go capability execution
+     returned HTTP 200 and the article appeared in the library. The browser
+     made no legacy `POST /api/support` request and reported no page error.
+     This completes item 350.

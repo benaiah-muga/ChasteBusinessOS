@@ -13,6 +13,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Support knowledge-base article creation now uses Go's authenticated
+  `support.createKbArticle` capability with an actor- and organization-scoped
+  retry intent. The generic legacy action helper rejects article creation.
 - Vite Accounting year-end close now uses Go's authenticated
   `accounting.closeYear` capability with an actor- and organization-scoped
   exact retry intent. Invoice workspace links stay on the Vite route.

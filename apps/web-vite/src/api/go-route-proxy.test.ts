@@ -10,6 +10,7 @@ import {
   goSupportInboxReadsFromEnv,
   goSupportLibraryReadsFromEnv,
   goSupportCannedResponseWriteFromEnv,
+  goSupportKbArticleWriteFromEnv,
   goSupportConversationWritesFromEnv,
   goSupportTicketWritesFromEnv,
   goPosCloseSessionSliceFromEnv,
@@ -642,6 +643,14 @@ describe("Support canned-response write Go selector", () => {
     expect(goSupportCannedResponseWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportCannedResponseWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE: "0" })).toBe(false);
     expect(goSupportCannedResponseWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE: "1" })).toBe(false);
+  });
+});
+
+describe("Support knowledge article Go selector", () => {
+  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+    expect(goSupportKbArticleWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goSupportKbArticleWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_KB_ARTICLE_WRITE: "0" })).toBe(false);
+    expect(goSupportKbArticleWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_KB_ARTICLE_WRITE: "1" })).toBe(false);
   });
 });
 

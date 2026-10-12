@@ -23,9 +23,12 @@ import {
   goSupportCannedResponseWriteUseGo,
   readPendingSupportConversationWrite,
   readPendingSupportCannedResponse,
+  readPendingSupportKbArticle,
   supportWriteActionFromPending,
   supportPendingWriteUsesGo,
   submitSupportCannedResponse,
+  submitSupportKbArticle,
+  goSupportKbArticleWriteUseGo,
   submitSupportAction,
   submitSupportConversationAction,
   updateSupportChannels,
@@ -932,6 +935,24 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
     }
   }, [actorId, onNotice, organizationId]);
 
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    try {
+      const pending = readPendingSupportKbArticle({ actorId, organizationId });
+      if (pending) {
+        setArticleForm({ title: pending.title, body: pending.body, category: pending.category ?? "", isPublic: pending.isPublic });
+        onNotice({
+          tone: "pending",
+          text: goSupportKbArticleWriteUseGo()
+            ? "An unresolved Go article save was restored. Save these exact details to retry it."
+            : "An unresolved Go article save was restored. Re-enable Go article writes and retry these exact details.",
+        });
+      }
+    } catch (error) {
+      onNotice({ tone: "error", text: friendlyError(error) });
+    }
+  }, [actorId, onNotice, organizationId]);
+
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const result = await fetchSupportLibrary(signal);
@@ -953,6 +974,8 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
     try {
       const outcome = action.action === "createCannedResponse"
         ? await submitSupportCannedResponse(action, retryScope)
+        : action.action === "createKbArticle"
+          ? await submitSupportKbArticle(action, retryScope)
         : await submitSupportAction(action, crypto.randomUUID());
       if (outcome.kind === "pending") {
         onNotice({ tone: "pending", text: outcome.reason });
@@ -968,6 +991,19 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
           if (pending && JSON.stringify(pending) !== JSON.stringify(submitted)) {
             setCannedForm(pending);
             onNotice({ tone: "pending", text: "A previous Go canned-response save is unresolved. Its exact saved details were restored; retry them before making changes." });
+            return;
+          }
+        } catch {
+          // Keep the original action error visible when retry state cannot be read.
+        }
+      }
+      if (action.action === "createKbArticle") {
+        try {
+          const pending = readPendingSupportKbArticle(retryScope);
+          const submitted = { title: action.title, body: action.body, ...(action.category !== undefined ? { category: action.category } : {}), isPublic: action.isPublic ?? false };
+          if (pending && JSON.stringify(pending) !== JSON.stringify(submitted)) {
+            setArticleForm({ title: pending.title, body: pending.body, category: pending.category ?? "", isPublic: pending.isPublic });
+            onNotice({ tone: "pending", text: "A previous Go article save is unresolved. Its exact saved details were restored; retry them before making changes." });
             return;
           }
         } catch {

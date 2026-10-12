@@ -129,6 +129,10 @@ export function goSupportCannedResponseWriteUseGo(): boolean {
   return typeof __GO_SUPPORT_CANNED_RESPONSE_WRITE__ !== "undefined" && __GO_SUPPORT_CANNED_RESPONSE_WRITE__;
 }
 
+export function goSupportKbArticleWriteUseGo(): boolean {
+  return typeof __GO_SUPPORT_KB_ARTICLE_WRITE__ !== "undefined" && __GO_SUPPORT_KB_ARTICLE_WRITE__;
+}
+
 export function goSupportConversationWritesUseGo(): boolean {
   return typeof __GO_SUPPORT_CONVERSATION_WRITES__ !== "undefined" && __GO_SUPPORT_CONVERSATION_WRITES__;
 }
@@ -152,6 +156,92 @@ const CannedResponseRetryRecordSchema = z.object({
   fingerprint: z.string().min(1),
 }).strict();
 const CANNED_RESPONSE_RETRY_PREFIX = "chaste.support.canned-response-intent.v1:";
+const KbArticleWriteInputSchema = z.object({
+  title: z.string().min(1).max(200),
+  body: z.string().min(1).max(20_000),
+  category: z.string().max(40).optional(),
+  isPublic: z.boolean(),
+}).strict();
+const KbArticleRetryRecordSchema = z.object({
+  version: z.literal(1),
+  intentId: uuid,
+  input: KbArticleWriteInputSchema,
+  fingerprint: z.string().min(1),
+}).strict();
+const KB_ARTICLE_RETRY_PREFIX = "chaste.support.kb-article-intent.v1:";
+
+function kbArticleRetryStorageKey(scope: SupportCannedResponseRetryScope): string {
+  const actorId = normalizeRetryActorId(scope.actorId);
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!actorId || !uuid.safeParse(organizationId).success) {
+    throw new SupportApiError(0, "Wait for your account and organization to finish loading before saving an article.");
+  }
+  return `${KB_ARTICLE_RETRY_PREFIX}${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}`;
+}
+
+function kbArticleFingerprint(input: z.infer<typeof KbArticleWriteInputSchema>): string {
+  return JSON.stringify(input);
+}
+
+function readKbArticleRetryRecord(storageKey: string): z.infer<typeof KbArticleRetryRecordSchema> | null {
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "Article retry protection is unavailable. Enable browser storage before saving.");
+  }
+  if (raw === null) return null;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw);
+  } catch {
+    throw new SupportApiError(0, "A saved article retry record is unreadable. Verify the library before trying again.");
+  }
+  const parsed = KbArticleRetryRecordSchema.safeParse(decoded);
+  if (!parsed.success || parsed.data.fingerprint !== kbArticleFingerprint(parsed.data.input)) {
+    throw new SupportApiError(0, "A saved article retry record is invalid. Verify the library before trying again.");
+  }
+  return parsed.data;
+}
+
+export function readPendingSupportKbArticle(scope: SupportCannedResponseRetryScope): z.infer<typeof KbArticleWriteInputSchema> | null {
+  return readKbArticleRetryRecord(kbArticleRetryStorageKey(scope))?.input ?? null;
+}
+
+async function createKbArticleAttempt(
+  input: z.infer<typeof KbArticleWriteInputSchema>,
+  scope: SupportCannedResponseRetryScope,
+): Promise<{ storageKey: string; record: z.infer<typeof KbArticleRetryRecordSchema> }> {
+  const storageKey = kbArticleRetryStorageKey(scope);
+  const fingerprint = kbArticleFingerprint(input);
+  const existing = readKbArticleRetryRecord(storageKey);
+  if (existing) {
+    if (existing.fingerprint !== fingerprint) {
+      throw new SupportApiError(0, "A previous article save is unresolved. Retry its exact saved details before changing them.");
+    }
+    return { storageKey, record: existing };
+  }
+  const record = { version: 1 as const, intentId: crypto.randomUUID(), input, fingerprint };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(record));
+  } catch {
+    throw new SupportApiError(0, "Article retry protection could not be saved. Enable browser storage before continuing.");
+  }
+  const saved = readKbArticleRetryRecord(storageKey);
+  if (!saved || saved.intentId !== record.intentId || saved.fingerprint !== fingerprint) {
+    throw new SupportApiError(0, "Article retry protection could not be verified. Check browser storage and try again.");
+  }
+  return { storageKey, record: saved };
+}
+
+async function clearKbArticleAttempt(storageKey: string, intentId: string): Promise<void> {
+  if (readKbArticleRetryRecord(storageKey)?.intentId !== intentId) return;
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "The article was saved, but its retry record could not be cleared. Retry the same details to confirm the result.");
+  }
+}
 
 function cannedResponseRetryStorageKey(scope: SupportCannedResponseRetryScope): string {
   const actorId = normalizeRetryActorId(scope.actorId);
@@ -472,6 +562,9 @@ export async function submitSupportAction<Action extends SupportWriteAction>(
   const parsedAction = SupportWriteActionSchema.safeParse(action);
   if (!parsedAction.success) throw new SupportApiError(0, "The support action contains invalid details.");
   if (intentId !== undefined && !intentId.trim()) throw new SupportApiError(0, "The support action needs an intent identity. Try again.");
+  if (parsedAction.data.action === "createKbArticle") {
+    throw new SupportApiError(503, "Knowledge articles must be saved through the scoped Go capability.");
+  }
 
   if (parsedAction.data.action === "suggestCategory") {
     const output = await readGoSupportCapability(
@@ -773,6 +866,51 @@ export async function submitSupportCannedResponse(
   }
   await clearSupportCannedResponseAttempt(attempt.storageKey, attempt.record.intentId);
   return { kind: "completed", data: output.data };
+}
+
+export async function submitSupportKbArticle(
+  action: Extract<SupportWriteAction, { action: "createKbArticle" }>,
+  scope: SupportCannedResponseRetryScope,
+  signal?: AbortSignal,
+): Promise<SupportActionOutcome<SupportActionOutput<Extract<SupportWriteAction, { action: "createKbArticle" }>>>> {
+  const parsed = CreateKbArticleInputSchema.safeParse(action);
+  if (!parsed.success) throw new SupportApiError(0, "The knowledge article contains invalid details.");
+  const { action: _action, ...rawInput } = parsed.data;
+  const input = KbArticleWriteInputSchema.parse({ ...rawInput, isPublic: rawInput.isPublic ?? false });
+  const storageKey = kbArticleRetryStorageKey(scope);
+  if (!goSupportKbArticleWriteUseGo()) {
+    if (readKbArticleRetryRecord(storageKey)) {
+      throw new SupportApiError(0, "A Go article save is unresolved. Restore Go article writes and retry those exact details before changing anything.");
+    }
+    throw new SupportApiError(503, "Go article writes are unavailable. The legacy article route is disabled.");
+  }
+
+  const attempt = await createKbArticleAttempt(input, scope);
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({ capabilityId: "support.createKbArticle", input: attempt.record.input, intentId: attempt.record.intentId }),
+    }, signal));
+  } catch {
+    throw new SupportApiError(0, "The Go support service could not confirm this article save. Retry the exact saved details to recover its result.");
+  }
+  if (response.status === 202 || PendingEnvelopeSchema.safeParse(body).success) return pendingOutcome(body, DEFAULT_PENDING_REASON);
+  if (!response.ok) {
+    if (response.status >= 400 && response.status < 500 && response.status !== 404 && response.status !== 408 && response.status !== 422 && response.status !== 429) {
+      await clearKbArticleAttempt(attempt.storageKey, attempt.record.intentId);
+    }
+    throw new SupportApiError(response.status, messageFor(response.status, body));
+  }
+  const envelope = GoCapabilityEnvelopeSchema.safeParse(body);
+  const output = envelope.success ? z.object({ articleId: uuid }).strict().safeParse(envelope.data.data) : null;
+  if (response.status !== 200 || !output?.success) {
+    throw new SupportApiError(response.status, "The Go support service returned an unexpected article result.");
+  }
+  await clearKbArticleAttempt(attempt.storageKey, attempt.record.intentId);
+  return { kind: "completed", data: { articleId: output.data.articleId } };
 }
 
 const CustomerCreateSchema = z.object({
