@@ -23,6 +23,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Messaging presence GET now reads through Go; typing heartbeat POST uses
   the Go session route and delegates to the governed capability executor,
   retaining its intent receipts, inverses, permissions, and module gate.
+- Vite Messaging global search now uses Go's session-authenticated
+  `messaging.searchMessages` capability with organization and conversation
+  membership scoping, literal wildcard handling, and fail-closed errors.
 
 - Marketing segment lifetime spend thresholds now use PostgreSQL `bigint`, so
   valid minor-unit amounts above the old 32-bit limit persist without a 500.

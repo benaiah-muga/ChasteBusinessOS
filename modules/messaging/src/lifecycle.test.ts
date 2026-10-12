@@ -565,4 +565,65 @@ describe("messaging collaboration features", () => {
     expect(upload).toMatchObject({ ok: false });
     expect(reaction).toMatchObject({ ok: false });
   });
+
+  it("searches literal message text only in visible conversations and returns bounded snippets", async () => {
+    const visible = await makeChannel("search-visible", creatorId);
+    await run("messaging.addMember", ctx(creatorId, ["messaging.write"]), { conversationId: visible, userId: memberId });
+    const privateChannel = await makeChannel("search-private", creatorId);
+    const deletedChannel = await makeChannel("search-deleted", creatorId);
+    const createdAt = new Date("2026-10-01T12:00:00.000Z");
+    const longBody = `${"a".repeat(80)}Needle${"z".repeat(110)}`;
+    const searchMessageIdPrefix = crypto.randomUUID().slice(0, 24);
+    const [longMessage] = await db.db.insert(messages).values({
+      id: `${searchMessageIdPrefix}000000000001`, orgId, conversationId: visible, senderType: "human", senderUserId: creatorId, body: longBody, createdAt,
+    }).returning({ id: messages.id });
+    const [tieMessage] = await db.db.insert(messages).values({
+      id: `${searchMessageIdPrefix}000000000002`, orgId, conversationId: visible, senderType: "human", senderUserId: creatorId, body: "needle second", createdAt,
+    }).returning({ id: messages.id });
+    await db.db.insert(messages).values([
+      { orgId, conversationId: visible, senderType: "human", senderUserId: creatorId, body: "literal %_ token", createdAt: new Date(createdAt.getTime() + 1000) },
+      { orgId, conversationId: visible, senderType: "human", senderUserId: creatorId, body: "unrelated wildcard match", createdAt: new Date(createdAt.getTime() + 2000) },
+      { orgId, conversationId: privateChannel, senderType: "human", senderUserId: creatorId, body: "needle private", createdAt: new Date(createdAt.getTime() + 3000) },
+    ]);
+    const [deletedMessage] = await db.db.insert(messages).values({
+      orgId, conversationId: visible, senderType: "human", senderUserId: creatorId, body: "needle deleted", createdAt: new Date(createdAt.getTime() + 4000),
+    }).returning({ id: messages.id });
+    await db.db.update(messages).set({ deletedAt: new Date() }).where(eq(messages.id, deletedMessage!.id));
+    await db.db.insert(messages).values({
+      orgId, conversationId: deletedChannel, senderType: "human", senderUserId: creatorId, body: "needle deleted conversation", createdAt: new Date(createdAt.getTime() + 5000),
+    });
+    await db.db.update(conversations).set({ deletedAt: new Date() }).where(eq(conversations.id, deletedChannel));
+
+    const needle = (await run("messaging.searchMessages", ctx(memberId, ["messaging.read"]), { query: "  needle  " })) as {
+      ok: true;
+      data: { results: Array<{ id: string; conversationId: string; conversationTitle: string; body: string; createdAt: string; senderType: string; senderUserId: string | null }> };
+    };
+    expect(needle.data.results).toHaveLength(2);
+    expect(needle.data.results.map((row) => row.id)).toEqual([tieMessage!.id, longMessage!.id]);
+    expect(needle.data.results[1]).toMatchObject({
+      conversationId: visible,
+      conversationTitle: "search-visible",
+      body: longBody.slice(15, 80 + "Needle".length + 95),
+      createdAt: createdAt.toISOString(),
+      senderType: "human",
+      senderUserId: creatorId,
+    });
+
+    const literalWildcards = (await run("messaging.searchMessages", ctx(memberId, ["messaging.read"]), { query: "%_" })) as {
+      ok: true;
+      data: { results: Array<{ body: string }> };
+    };
+    expect(literalWildcards.data.results.map((row) => row.body)).toEqual(["literal %_ token"]);
+
+    await db.db.insert(messages).values(Array.from({ length: 51 }, (_, index) => ({
+      orgId, conversationId: visible, senderType: "human", senderUserId: creatorId, body: "capterm result",
+      createdAt: new Date(createdAt.getTime() + (index + 10) * 1000),
+    })));
+    const capped = (await run("messaging.searchMessages", ctx(memberId, ["messaging.read"]), { query: "capterm" })) as {
+      ok: true;
+      data: { results: Array<{ id: string; createdAt: string }> };
+    };
+    expect(capped.data.results).toHaveLength(50);
+    expect(capped.data.results[0]?.createdAt).toBe(new Date(createdAt.getTime() + 60_000).toISOString());
+  });
 });

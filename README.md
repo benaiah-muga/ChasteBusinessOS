@@ -350,8 +350,13 @@ organization-scoped transaction. POST resolves the Go session and then runs
 preserving intent receipts, inverses, permissions, and the Messaging module
 gate. Mutations require same-origin requests. Set
 `GO_MESSAGING_PRESENCE_ROUTE=0` on the API or
-`CHASTE_GO_MESSAGING_PRESENCE=0` in Vite for a legacy rollback. Conversation,
-thread, and message search reads retain their current routes.
+`CHASTE_GO_MESSAGING_PRESENCE=0` in Vite for a legacy rollback. Conversation
+and thread reads retain their current routes. Vite global message search uses
+the Go `messaging.searchMessages` capability through the authenticated session
+capability route. Go trims and bounds the query, scopes results to the active
+organization and joined conversations, excludes deleted records, escapes SQL
+wildcards, and returns the newest 50 matches with the existing snippets and
+sender metadata. A Go failure is shown in Vite without retrying through Next.
 The Vite authored-document editor can separately select Go for version history
 and archived compare previews with `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
 `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API must also set

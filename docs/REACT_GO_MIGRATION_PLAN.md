@@ -3315,3 +3315,16 @@ new owners and the manifest shows zero legacy runtime paths.
      `agent-browser` loaded Vite `/messages`; presence GET and POST returned
      HTTP 200 and the browser reported no errors. Independent review found no
      remaining actionable issue.
+
+301. (Implemented and verified) Move Vite Messaging global search from
+     legacy `GET /api/messages/search` to the Go session-authenticated
+     `messaging.searchMessages` capability. Preserve trimmed 2-100 character
+     queries, case-insensitive literal matching, wildcard escaping, membership
+     and organization scope, deleted-record exclusion, newest-first ordering,
+     the 50-result cap, snippets, and sender/conversation metadata. Vite
+     validates Go results and fails closed without retrying through Next.
+     Focused Go runtime-role integration and Vite Messaging API/page tests pass.
+     Authenticated `agent-browser` proof on 2026-10-12 created a message through
+     Go, searched it from Vite `/messages`, and opened the result. The
+     capability route returned HTTP 200, no legacy message-search request was
+     made, and the browser reported no errors.

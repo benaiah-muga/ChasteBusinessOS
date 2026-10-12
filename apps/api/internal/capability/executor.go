@@ -1736,6 +1736,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case MessagingSearchMessagesInput:
+			output, err := messagingSearchMessages(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case notificationReceiptInput:
 			output, err := markNotificationRead(ctx, tx, claims.OrganizationID, claims.Subject, parsed)
 			if err != nil {
@@ -3629,7 +3635,7 @@ func canonicalInputHash(input any) (string, error) {
 		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput,
 		SettingsConfigureAiProviderInput, SettingsRestoreAiProviderInput, HarnessApproveCompositionInput,
 		DocumentsInput,
-		MessagingSendMessageInput, MessagingListConversationsInput, MessagingReadMessagesInput,
+		MessagingSendMessageInput, MessagingListConversationsInput, MessagingReadMessagesInput, MessagingSearchMessagesInput,
 		notificationReceiptInput, notificationRestoreReceiptInput,
 		MessagingListPeopleInput, MessagingCreateConversationInput, MessagingUpdateConversationInput,
 		MessagingArchiveConversationInput, MessagingConversationIDInput, MessagingAddMemberInput,

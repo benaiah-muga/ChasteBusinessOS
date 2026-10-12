@@ -479,6 +479,74 @@ const readMessages = (deps: ModuleDeps) =>
     },
   });
 
+const searchMessages = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "messaging.searchMessages",
+    title: "Search conversation messages",
+    intent: "Find recent messages containing a phrase in conversations the current user belongs to, so they can open the relevant discussion",
+    module: "messaging",
+    risk: "read",
+    permission: "messaging.read",
+    input: z.object({ query: z.string().trim().min(2).max(100) }).strict(),
+    output: z.object({
+      results: z.array(z.object({
+        id: z.string(),
+        conversationId: z.string(),
+        conversationTitle: z.string(),
+        body: z.string(),
+        createdAt: z.string().datetime(),
+        senderType: z.string(),
+        senderUserId: z.string().nullable(),
+      }).strict()),
+    }).strict(),
+    execute: async (ctx, input) => {
+      const actorId = ctx.actor.id;
+      if (!actorId) return { results: [] };
+      const escapedQuery = input.query.replace(/[\\%_]/g, "\\$&");
+      const rows = await withOrgContext(deps.db, ctx.actor.orgId, async (tx) =>
+        tx.select({
+          id: messages.id,
+          conversationId: conversations.id,
+          conversationTitle: conversations.title,
+          body: messages.body,
+          createdAt: messages.createdAt,
+          senderType: messages.senderType,
+          senderUserId: messages.senderUserId,
+        })
+          .from(messages)
+          .innerJoin(conversations, and(
+            eq(conversations.id, messages.conversationId),
+            eq(conversations.orgId, messages.orgId),
+          ))
+          .innerJoin(conversationMembers, and(
+            eq(conversationMembers.conversationId, conversations.id),
+            eq(conversationMembers.userId, actorId),
+          ))
+          .where(and(
+            eq(messages.orgId, ctx.actor.orgId),
+            isNull(messages.deletedAt),
+            isNull(conversations.deletedAt),
+            sql`${messages.body} ILIKE ${`%${escapedQuery}%`} ESCAPE E'\\\\'`,
+          ))
+          .orderBy(desc(messages.createdAt), desc(messages.id))
+          .limit(50),
+      );
+      const needle = input.query.toLocaleLowerCase();
+      return {
+        results: rows.map((row) => {
+          const match = row.body.toLocaleLowerCase().indexOf(needle);
+          const start = Math.max(match - 65, 0);
+          const end = Math.min(match + input.query.length + 95, row.body.length);
+          return {
+            ...row,
+            body: row.body.slice(start, end),
+            createdAt: row.createdAt.toISOString(),
+          };
+        }),
+      };
+    },
+  });
+
 /**
  * Everyone (and everything) that can be @mentioned: the org's people plus
  * the agent. Feeds the composer's mention picker.
@@ -576,6 +644,7 @@ export function registerMessagingCapabilities(registry: CapabilityRegistry, deps
   registry.register(sendMessage(deps));
   registry.register(listConversations(deps));
   registry.register(readMessages(deps));
+  registry.register(searchMessages(deps));
   registry.register(listPeople(deps));
   registry.register(createConversation(deps));
   registry.register(updateConversation(deps));

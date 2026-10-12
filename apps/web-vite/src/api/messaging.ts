@@ -932,8 +932,22 @@ async function updateConversationThroughGo(
 }
 
 export async function searchMessages(query: string, signal?: AbortSignal): Promise<MessageSearchResult[]> {
-  const result = await getJson(`/api/messages/search?q=${encodeURIComponent(query)}`, "message search results", SearchResponseSchema, signal);
-  return result.results;
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length < 2) return [];
+  const { response, body } = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      capabilityId: "messaging.searchMessages",
+      input: { query: normalizedQuery },
+      intentId: newIntentId(),
+    }),
+  }, "message search results", signal);
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "message search results"));
+  const envelope = GoCapabilityEnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new MessagingApiError(response.status, "The messaging service returned message search results in an unexpected format.");
+  const result = SearchResponseSchema.safeParse(envelope.data.data);
+  if (!result.success) throw new MessagingApiError(response.status, "The messaging service returned message search results in an unexpected format.");
+  return result.data.results;
 }
 
 function editMessageLegacy(messageId: string, body: string, signal?: AbortSignal): Promise<MessagingOutcome<{ ok: true }>> {

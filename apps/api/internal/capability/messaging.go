@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -18,6 +19,7 @@ const (
 	messagingSendMessageCapabilityID             = "messaging.sendMessage"
 	messagingListConversationsCapabilityID       = "messaging.listConversations"
 	messagingReadMessagesCapabilityID            = "messaging.readMessages"
+	messagingSearchMessagesCapabilityID          = "messaging.searchMessages"
 	messagingListPeopleCapabilityID              = "messaging.listPeople"
 	messagingCreateConversationCapabilityID      = "messaging.createConversation"
 	messagingUpdateConversationCapabilityID      = "messaging.updateConversation"
@@ -55,6 +57,7 @@ const (
 	messagingConversationListLimit  = 100
 	messagingPeopleListLimit        = 50
 	messagingReadMessagesDefLimit   = 60
+	messagingSearchMessagesLimit    = 50
 	messagingListItemLimitMax       = 100
 	messagingTypingWindow           = 8 * time.Second
 	messagingWorkmateID             = "workmate"
@@ -97,6 +100,7 @@ var messagingCapabilitySpecs = map[string]MessagingCapabilitySpec{
 	messagingSendMessageCapabilityID:            {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingDeleteMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
 	messagingListConversationsCapabilityID:      {Module: "messaging", Permission: "messaging.read", Risk: "read"},
 	messagingReadMessagesCapabilityID:           {Module: "messaging", Permission: "messaging.read", Risk: "read"},
+	messagingSearchMessagesCapabilityID:         {Module: "messaging", Permission: "messaging.read", Risk: "read"},
 	messagingListPeopleCapabilityID:             {Module: "messaging", Permission: "messaging.read", Risk: "read"},
 	messagingCreateConversationCapabilityID:     {Module: "messaging", Permission: "messaging.write", Risk: "write"},
 	messagingUpdateConversationCapabilityID:     {Module: "messaging", Permission: "messaging.write", Risk: "write"},
@@ -176,6 +180,24 @@ type MessagingReadMessagesInput struct {
 	Limit          int64   `json:"limit"`
 	Before         *string `json:"before,omitempty"`
 	Around         *string `json:"around,omitempty"`
+}
+
+type MessagingSearchMessagesInput struct {
+	Query string `json:"query"`
+}
+
+type MessagingSearchResult struct {
+	ID                string  `json:"id"`
+	ConversationID    string  `json:"conversationId"`
+	ConversationTitle string  `json:"conversationTitle"`
+	Body              string  `json:"body"`
+	CreatedAt         string  `json:"createdAt"`
+	SenderType        string  `json:"senderType"`
+	SenderUserID      *string `json:"senderUserId"`
+}
+
+type MessagingSearchMessagesOutput struct {
+	Results []MessagingSearchResult `json:"results"`
 }
 
 type MessagingConversationSnapshot struct {
@@ -447,6 +469,8 @@ func parseMessagingInput(capabilityID string, raw json.RawMessage) (any, error) 
 		return parseMessagingListConversationsInput(raw)
 	case messagingReadMessagesCapabilityID:
 		return parseMessagingReadMessagesInput(raw)
+	case messagingSearchMessagesCapabilityID:
+		return parseMessagingSearchMessagesInput(raw)
 	case messagingListPeopleCapabilityID:
 		return parseMessagingListPeopleInput(raw)
 	case messagingCreateConversationCapabilityID:
@@ -486,6 +510,26 @@ func parseMessagingInput(capabilityID string, raw json.RawMessage) (any, error) 
 	default:
 		return nil, errors.New("unsupported messaging capability")
 	}
+}
+
+func parseMessagingSearchMessagesInput(raw json.RawMessage) (MessagingSearchMessagesInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return MessagingSearchMessagesInput{}, err
+	}
+	query, err := messagingRequiredString(fields, "query")
+	if err != nil {
+		return MessagingSearchMessagesInput{}, err
+	}
+	query = strings.TrimFunc(query, isJSWhitespace)
+	length := utf16Length(query)
+	if length < 2 {
+		return MessagingSearchMessagesInput{}, errors.New("query must contain at least 2 character(s)")
+	}
+	if length > messagingQueryMax {
+		return MessagingSearchMessagesInput{}, fmt.Errorf("query must be at most %d characters", messagingQueryMax)
+	}
+	return MessagingSearchMessagesInput{Query: query}, nil
 }
 
 func messagingIsNull(raw json.RawMessage) bool {
@@ -1754,6 +1798,91 @@ func messagingNormalizeMentions(raw json.RawMessage) (json.RawMessage, error) {
 		mentions = append(mentions, mention)
 	}
 	return json.Marshal(mentions)
+}
+
+func messagingSearchMessages(
+	ctx context.Context, tx pgx.Tx, orgID string, userID *string, input MessagingSearchMessagesInput,
+) (MessagingSearchMessagesOutput, error) {
+	output := MessagingSearchMessagesOutput{Results: []MessagingSearchResult{}}
+	if userID == nil || strings.TrimSpace(*userID) == "" {
+		return output, nil
+	}
+	query := strings.TrimFunc(input.Query, isJSWhitespace)
+	if utf16Length(query) < 2 || utf16Length(query) > messagingQueryMax {
+		return MessagingSearchMessagesOutput{}, errors.New("query must contain between 2 and 100 characters")
+	}
+	pattern := "%" + messagingLikeEscaper.Replace(query) + "%"
+	rows, err := tx.Query(ctx, `
+		SELECT m.id::text, c.id::text, c.title, m.body, m.created_at, m.sender_type, m.sender_user_id::text
+		FROM messages m
+		JOIN conversations c ON c.id = m.conversation_id AND c.org_id = m.org_id
+		JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = $2::uuid
+		WHERE m.org_id = $1::uuid AND c.org_id = $1::uuid
+		  AND m.deleted_at IS NULL AND c.deleted_at IS NULL
+		  AND m.body ILIKE $3 ESCAPE E'\\'
+		ORDER BY m.created_at DESC, m.id DESC
+		LIMIT $4`,
+		orgID, *userID, pattern, messagingSearchMessagesLimit,
+	)
+	if err != nil {
+		return MessagingSearchMessagesOutput{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var result MessagingSearchResult
+		var createdAt time.Time
+		if err := rows.Scan(
+			&result.ID, &result.ConversationID, &result.ConversationTitle, &result.Body,
+			&createdAt, &result.SenderType, &result.SenderUserID,
+		); err != nil {
+			return MessagingSearchMessagesOutput{}, err
+		}
+		result.Body = messagingSearchSnippet(result.Body, query)
+		result.CreatedAt = messagingFormatTime(createdAt)
+		output.Results = append(output.Results, result)
+	}
+	if err := rows.Err(); err != nil {
+		return MessagingSearchMessagesOutput{}, err
+	}
+	return output, nil
+}
+
+func messagingSearchSnippet(body, query string) string {
+	bodyUnits := utf16.Encode([]rune(body))
+	lowerBodyUnits := utf16.Encode([]rune(strings.ToLower(body)))
+	lowerQueryUnits := utf16.Encode([]rune(strings.ToLower(query)))
+	match := -1
+	for i := 0; i+len(lowerQueryUnits) <= len(lowerBodyUnits); i++ {
+		matches := true
+		for offset, unit := range lowerQueryUnits {
+			if lowerBodyUnits[i+offset] != unit {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			match = i
+			break
+		}
+	}
+	if match < 0 {
+		return body
+	}
+	start := match - 65
+	if start < 0 {
+		start = 0
+	}
+	end := match + utf16Length(query) + 95
+	if end > len(bodyUnits) {
+		end = len(bodyUnits)
+	}
+	if start > len(bodyUnits) {
+		start = len(bodyUnits)
+	}
+	if end < start {
+		end = start
+	}
+	return string(utf16.Decode(bodyUnits[start:end]))
 }
 
 func messagingListPeople(

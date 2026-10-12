@@ -1346,14 +1346,18 @@ describe("messaging API client", () => {
     expect(checkAttachmentLimits(0, [new File(["a"], "ok.txt")])).toBeNull();
   });
 
-  it("reads presence and search through their current routes and people through Go", async () => {
+  it("reads presence and searches messages through Go", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path.startsWith(`/api/conversations/${conversationId}/presence`)) {
         return Response.json({ people: [{ userId: "user-2", name: "Grace", typing: true }] });
       }
-      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { people: [{ type: "agent", id: "agent-1", name: "Chaste" }] } });
-      return Response.json({ results: [{ id: messageId, conversationId, conversationTitle: "general", body: "Morning", createdAt: "2026-10-01T09:00:00.000Z", senderType: "human", senderUserId: "user-1" }] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const request = JSON.parse(String(init.body)) as { capabilityId?: string };
+        if (request.capabilityId === "messaging.listPeople") return Response.json({ ok: true, data: { people: [{ type: "agent", id: "agent-1", name: "Chaste" }] } });
+        return Response.json({ ok: true, data: { results: [{ id: messageId, conversationId, conversationTitle: "general", body: "Morning", createdAt: "2026-10-01T09:00:00.000Z", senderType: "human", senderUserId: "user-1" }] } });
+      }
+      return Response.json({ error: "unexpected route" }, { status: 500 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1362,7 +1366,34 @@ describe("messaging API client", () => {
     await expect(searchMessages("morning")).resolves.toHaveLength(1);
     expect(lastUrl(fetchMock, 1)).toBe("/api/capabilities/execute");
     expect(lastBody(fetchMock, 1)).toMatchObject({ capabilityId: "messaging.listPeople", input: { query: "gr", limit: 30 } });
-    expect(lastUrl(fetchMock, 2)).toBe("/api/messages/search?q=morning");
+    expect(lastUrl(fetchMock, 2)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock, 2)).toMatchObject({ capabilityId: "messaging.searchMessages", input: { query: "morning" } });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not call the legacy search route for short input or retry there after a Go failure", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      void input;
+      return Response.json({ error: "Go unavailable" }, { status: 503 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(searchMessages("  a ")).resolves.toEqual([]);
+    await expect(searchMessages("  morning  ")).rejects.toMatchObject({ status: 503 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("rejects malformed Go message search results", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      void input;
+      return Response.json({ ok: true, data: { results: [{ id: "bad" }] } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(searchMessages("morning")).rejects.toBeInstanceOf(MessagingApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
   it("uses Go people lookup with the preserved initial and add-member limits", async () => {

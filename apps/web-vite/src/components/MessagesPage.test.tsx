@@ -2291,10 +2291,12 @@ it("sends page presence heartbeats and typing updates through the selected Go se
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
       if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
-      if (path.startsWith("/api/messages/search")) return Response.json({ results: [{ id: "hit-1", conversationId: channelId, conversationTitle: "general", body: "the needle", createdAt: "2026-10-01T09:00:00.000Z", senderType: "human", senderUserId: other }] });
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
         const request = JSON.parse(String(init.body)) as { capabilityId?: string; input?: Record<string, unknown> };
+        if (request.capabilityId === "messaging.searchMessages") {
+          return Response.json({ ok: true, data: { results: [{ id: "hit-1", conversationId: channelId, conversationTitle: "general", body: "the needle", createdAt: "2026-10-01T09:00:00.000Z", senderType: "human", senderUserId: other }] } });
+        }
         if (request.capabilityId === "messaging.readMessages" && request.input) {
           threadInputs.push(request.input);
           return Response.json({ ok: true, data: threadBody({ messages: [message({ id: "hit-1", body: "the needle" })] }) });

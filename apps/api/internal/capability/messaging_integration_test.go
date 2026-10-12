@@ -2276,6 +2276,13 @@ func mustMarshalJSON(t *testing.T, value any) string {
 }
 
 func TestMessagingCanonicalInputHashesAreStable(t *testing.T) {
+	search, err := parseMessagingInput(messagingSearchMessagesCapabilityID, json.RawMessage(`{"query":"needle"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := canonicalInputHash(search); err != nil {
+		t.Fatalf("canonical hash for search input: %v", err)
+	}
 	parsed, err := parseMessagingInput(messagingSendMessageCapabilityID,
 		json.RawMessage(`{"conversationId":"c","body":"hi","unknown":1}`))
 	if err != nil {
@@ -2334,5 +2341,116 @@ func TestMessagingCanonicalInputHashesAreStable(t *testing.T) {
 	if !reflect.DeepEqual(messagingCapabilitySpecs[messagingEditMessageCapabilityID].InverseFields,
 		[]string{"messageId", "body", "expectedBody", "expectedEditedAt"}) {
 		t.Fatal("editMessage inverse fields changed")
+	}
+}
+
+func TestMessagingSearchMessagesIsLiteralScopedSortedAndBounded(t *testing.T) {
+	fx := newMessagingFixture(t)
+	visible := fx.createChannel(t, fx.userID, "Visible search channel")
+	private := fx.createChannel(t, fx.colleagueID, "Private search channel")
+	deletedChannel := fx.createChannel(t, fx.userID, "Deleted search channel")
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	messageIDPrefix := executorUUID(t)[:24]
+	insert := func(id, conversationID, body string, at time.Time) {
+		t.Helper()
+		if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO messages (id, org_id, conversation_id, sender_type, sender_user_id, body, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, 'human', $4::uuid, $5, $6)`, id, fx.orgID, conversationID, fx.userID, body, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	longBody := strings.Repeat("a", 80) + "NeEdLe" + strings.Repeat("z", 110)
+	insert(messageIDPrefix+"000000000001", visible, longBody, base)
+	insert(messageIDPrefix+"000000000002", visible, "needle tie order", base)
+	insert(messageIDPrefix+"000000000003", visible, "contains literal %_ marker", base.Add(time.Second))
+	insert(messageIDPrefix+"000000000004", visible, `contains literal \% marker`, base.Add(2*time.Second))
+	insert(messageIDPrefix+"000000000005", visible, "needle soft deleted", base.Add(3*time.Second))
+	insert(messageIDPrefix+"000000000006", private, "needle private conversation", base.Add(4*time.Second))
+	insert(messageIDPrefix+"000000000007", deletedChannel, "needle deleted conversation", base.Add(5*time.Second))
+	foreignConversation := executorUUID(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO conversations (id, org_id, kind, title, created_by_user_id) VALUES ($1::uuid, $2::uuid, 'channel', 'Foreign search channel', $3::uuid)`, foreignConversation, fx.otherOrgID, fx.otherOrgUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1::uuid, $2::uuid)`, foreignConversation, fx.userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO messages (id, org_id, conversation_id, sender_type, sender_user_id, body, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, 'human', $4::uuid, 'needle foreign organization', $5)`, messageIDPrefix+"000000000008", fx.otherOrgID, foreignConversation, fx.otherOrgUser, base.Add(7*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE messages SET deleted_at=$2 WHERE id=$1::uuid`, messageIDPrefix+"000000000005", base.Add(6*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE conversations SET deleted_at=$2 WHERE id=$1::uuid`, deletedChannel, base.Add(6*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	search := func(query string) MessagingSearchMessagesOutput {
+		t.Helper()
+		output, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingSearchMessagesOutput, error) {
+			return messagingSearchMessages(fx.ctx, tx, fx.orgID, messagingUserPointer(fx.userID), MessagingSearchMessagesInput{Query: query})
+		})
+		if err != nil {
+			t.Fatalf("messagingSearchMessages(%q): %v", query, err)
+		}
+		return output
+	}
+
+	needle := search("needle")
+	if len(needle.Results) != 2 {
+		t.Fatalf("needle returned %d rows, want visible channel only with deleted rows excluded: %+v", len(needle.Results), needle.Results)
+	}
+	if needle.Results[0].ID != messageIDPrefix+"000000000002" || needle.Results[1].ID != messageIDPrefix+"000000000001" {
+		t.Fatalf("equal-timestamp ordering=%+v, want descending id", needle.Results)
+	}
+	if needle.Results[0].ConversationID != visible || needle.Results[0].ConversationTitle != "Visible search channel" || needle.Results[0].SenderType != "human" || needle.Results[0].SenderUserID == nil || *needle.Results[0].SenderUserID != fx.userID {
+		t.Fatalf("search result metadata=%+v", needle.Results[0])
+	}
+	wantSnippet := longBody[15 : 80+len("NeEdLe")+95]
+	if needle.Results[1].Body != wantSnippet {
+		t.Fatalf("snippet length=%d, body=%q, want %q", len(needle.Results[1].Body), needle.Results[1].Body, wantSnippet)
+	}
+	if needle.Results[1].CreatedAt != messagingFormatTime(base) {
+		t.Fatalf("createdAt=%q, want %q", needle.Results[1].CreatedAt, messagingFormatTime(base))
+	}
+
+	percentUnderscore := search("%_")
+	if len(percentUnderscore.Results) != 1 || percentUnderscore.Results[0].ID != messageIDPrefix+"000000000003" {
+		t.Fatalf("wildcard search=%+v, want only the literal %%_ message", percentUnderscore.Results)
+	}
+	backslashPercent := search(`\%`)
+	if len(backslashPercent.Results) != 1 || backslashPercent.Results[0].ID != messageIDPrefix+"000000000004" {
+		t.Fatalf("backslash escape search=%+v, want only the literal \\%% message", backslashPercent.Results)
+	}
+
+	for i := 0; i < 52; i++ {
+		insert(executorUUID(t), visible, "capterm result", base.Add(time.Duration(i+10)*time.Second))
+	}
+	limited := search("capterm")
+	if len(limited.Results) != messagingSearchMessagesLimit {
+		t.Fatalf("search result count=%d, want cap of %d", len(limited.Results), messagingSearchMessagesLimit)
+	}
+	if limited.Results[0].CreatedAt != messagingFormatTime(base.Add(61*time.Second)) {
+		t.Fatalf("newest bounded result at=%s, want %s", limited.Results[0].CreatedAt, messagingFormatTime(base.Add(61*time.Second)))
+	}
+	emojiBody := "x😀" + strings.Repeat("a", 70) + "needle" + strings.Repeat("z", 100)
+	insert(messageIDPrefix+"000000000009", visible, emojiBody, base.Add(70*time.Second))
+	emojiOffset := search("needle")
+	if len(emojiOffset.Results) != 3 || emojiOffset.Results[0].ID != messageIDPrefix+"000000000009" {
+		t.Fatalf("emoji-offset search=%+v, want emoji row newest", emojiOffset.Results)
+	}
+	wantEmojiSnippet := strings.Repeat("a", 65) + "needle" + strings.Repeat("z", 95)
+	if emojiOffset.Results[0].Body != wantEmojiSnippet {
+		t.Fatalf("emoji-offset snippet=%q, want %q", emojiOffset.Results[0].Body, wantEmojiSnippet)
+	}
+	emojiQuery := search("😀")
+	if len(emojiQuery.Results) != 1 || emojiQuery.Results[0].ID != messageIDPrefix+"000000000009" {
+		t.Fatalf("emoji query=%+v, want the row containing the two-unit query", emojiQuery.Results)
+	}
+	wantEmojiQuerySnippet := "x😀" + strings.Repeat("a", 70) + "needle" + strings.Repeat("z", 19)
+	if emojiQuery.Results[0].Body != wantEmojiQuerySnippet {
+		t.Fatalf("emoji-query snippet=%q, want %q", emojiQuery.Results[0].Body, wantEmojiQuerySnippet)
+	}
+	empty, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingSearchMessagesOutput, error) {
+		return messagingSearchMessages(fx.ctx, tx, fx.orgID, nil, MessagingSearchMessagesInput{Query: "needle"})
+	})
+	if err != nil || len(empty.Results) != 0 {
+		t.Fatalf("anonymous search=%+v err=%v, want empty result", empty, err)
 	}
 }
