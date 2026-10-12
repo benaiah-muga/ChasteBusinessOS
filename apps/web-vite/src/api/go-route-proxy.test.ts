@@ -573,6 +573,18 @@ describe("messaging presence Go selector", () => {
     expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_PRESENCE: "0" })).toBe(false);
     expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_PRESENCE: "1" })).toBe(false);
   });
+
+  it("routes only the exact conversation presence URL and supported GET and POST methods", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" });
+    const conversationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    expect(isGoRouteRequest(flags, "GET", `/api/conversations/${conversationId}/presence`)).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", `/api/conversations/${conversationId}/presence?refresh=1`)).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", `/api/conversations/${conversationId}/presence`)).toBe(true);
+    expect(isGoRouteRequest(flags, "DELETE", `/api/conversations/${conversationId}/presence`)).toBe(false);
+    expect(isGoRouteRequest(flags, "PUT", `/api/conversations/${conversationId}/presence`)).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/conversations/not-a-uuid/presence")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", `/api/conversations/${conversationId}/messages`)).toBe(false);
+  });
 });
 
 describe("messaging attachment upload Go selector", () => {

@@ -270,16 +270,16 @@
       "path": "/api/conversations/[id]/presence",
       "method": "GET",
       "source": "apps/web/src/app/api/conversations/[id]/presence/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/conversations/[id]/presence",
       "method": "POST",
       "source": "apps/web/src/app/api/conversations/[id]/presence/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

@@ -1103,20 +1103,17 @@ it("reports typing presence after the debounce and clears it on the mount heartb
     expect(JSON.parse(typingBodies[0]!).typing).toBe(false);
   });
 
-it("sends page presence heartbeats and typing updates through the selected Go capability", async () => {
+it("sends page presence heartbeats and typing updates through the selected Go session route", async () => {
     vi.stubGlobal("__GO_MESSAGING_PRESENCE__", true);
-    const presenceWrites: Record<string, unknown>[] = [];
+    const presenceWrites: { path: string; body: Record<string, unknown> }[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
       if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
-      if (path === "/api/capabilities/execute" && init?.method === "POST" && !isGoPeopleLookup(path, init)) {
-        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-        if (body.capabilityId === "messaging.updateConversationPresence") {
-          presenceWrites.push(body);
-          return Response.json({ ok: true, data: { previousLastSeenAt: null, previousTypingUntil: null } });
-        }
+      if (path === `/api/conversations/${channelId}/presence` && init?.method === "POST") {
+        presenceWrites.push({ path, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+        return Response.json({ ok: true, data: { previousLastSeenAt: null, previousTypingUntil: null } });
       }
       if (path.includes("/presence")) return Response.json({ people: [] });
       if (path.endsWith("/messages")) return Response.json(threadBody());
@@ -1126,11 +1123,11 @@ it("sends page presence heartbeats and typing updates through the selected Go ca
     render(<MessagesPage />);
 
     const composer = await screen.findByLabelText("Message general");
-    await waitFor(() => expect(presenceWrites.some((body) => (body.input as Record<string, unknown>).typing === false)).toBe(true));
+    await waitFor(() => expect(presenceWrites.some(({ body }) => body.typing === false)).toBe(true));
     fireEvent.change(composer, { target: { value: "typing now" } });
-    await waitFor(() => expect(presenceWrites.some((body) => (body.input as Record<string, unknown>).typing === true)).toBe(true));
-    expect(presenceWrites.every((body) => body.capabilityId === "messaging.updateConversationPresence")).toBe(true);
-    expect(presenceWrites.every((body) => body.intentId)).toBe(true);
+    await waitFor(() => expect(presenceWrites.some(({ body }) => body.typing === true)).toBe(true));
+    expect(presenceWrites.every(({ path }) => path === `/api/conversations/${channelId}/presence`)).toBe(true);
+    expect(presenceWrites.every(({ body }) => typeof body.intentId === "string" && body.intentId.length > 0)).toBe(true);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/presence") && String(path).endsWith("/presence"))).toBe(true);
   });
 

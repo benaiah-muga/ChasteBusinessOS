@@ -343,8 +343,15 @@ must be enabled with `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` and
 default; set `GO_MESSAGING_PEOPLE_READS=0` to disable it, in which case Vite
 shows the Go error without retrying through Next. Initial mention lookup
 requests 100 people; add-member search requests 30 and trims queries to 80
-characters. Conversation, thread, presence, and message search reads retain
-their current routes.
+characters. Presence GET and typing heartbeat POST use the Go route at
+`/api/conversations/:id/presence`. GET checks membership and reads in an
+organization-scoped transaction. POST resolves the Go session and then runs
+`messaging.updateConversationPresence` through the governed capability executor,
+preserving intent receipts, inverses, permissions, and the Messaging module
+gate. Mutations require same-origin requests. Set
+`GO_MESSAGING_PRESENCE_ROUTE=0` on the API or
+`CHASTE_GO_MESSAGING_PRESENCE=0` in Vite for a legacy rollback. Conversation,
+thread, and message search reads retain their current routes.
 The Vite authored-document editor can separately select Go for version history
 and archived compare previews with `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
 `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API must also set

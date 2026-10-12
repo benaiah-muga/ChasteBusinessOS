@@ -42,6 +42,7 @@ export type GoRouteProxyFlags = {
   onboarding: boolean;
   messageAttachmentDownloads: boolean;
   documentsEditorWorkspace: boolean;
+  messagingPresence: boolean;
   approvalsRead: boolean;
   approvalsDecision: boolean;
 };
@@ -393,6 +394,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     onboarding: env.CHASTE_GO_ONBOARDING_ROUTE === "1",
     messageAttachmentDownloads: goMessagingAttachmentDownloadsFromEnv(env),
     documentsEditorWorkspace: goDocumentsEditorWorkspaceFromEnv(env),
+    messagingPresence: goMessagingPresenceFromEnv(env),
     approvalsRead: env.CHASTE_GO_APPROVALS_READ_ROUTE !== "0",
     approvalsDecision: env.CHASTE_GO_APPROVALS_DECISION_ROUTE !== "0",
   };
@@ -406,6 +408,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   const attachmentID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
   if (flags.documentsEditorWorkspace && ["POST", "DELETE"].includes(method ?? "") && new RegExp(`^/api/docs/${attachmentID}/workspace$`, "i").test(path)) return true;
+  if (flags.messagingPresence && ["GET", "POST"].includes(method ?? "") && new RegExp(`^/api/conversations/${attachmentID}/presence(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.messageAttachmentDownloads && method === "GET" && new RegExp(`^/api/message-attachments/${attachmentID}(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.auth && isGoAuthRequest(path)) return true;
   const scimUserPath = /^\/api\/scim\/v2\/Users(?:\?.*)?$/;

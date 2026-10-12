@@ -229,6 +229,21 @@ func MountGoDocumentsEditorWorkspaceRoute(base, route http.Handler) http.Handler
 	return mux
 }
 
+// MountGoMessagingPresenceRoute owns the exact Vite conversation presence path.
+func MountGoMessagingPresenceRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		mux.Handle(method+" /api/conversations/{id}/presence", route)
+	}
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoPolicySessionRoute mounts only the Vite Settings policy collection.
 // Other methods and nested paths continue to the base handler.
 func MountGoPolicySessionRoute(base, route http.Handler) http.Handler {

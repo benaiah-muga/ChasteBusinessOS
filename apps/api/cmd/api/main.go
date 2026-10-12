@@ -92,6 +92,10 @@ func goDocumentsEditorWorkspaceEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goMessagingPresenceRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goPolicyRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -233,6 +237,15 @@ func run(logger *slog.Logger) error {
 		}
 		documentsEditorWorkspaceRoute = httpapi.NewDocumentsEditorWorkspaceHandler(pool, resolver, logger, trustedProxyCIDRs)
 		logger.Info("Go authored document workspace route mounted", "path", "/api/docs/{id}/workspace")
+	}
+	var messagingPresenceRoute http.Handler
+	if goMessagingPresenceRouteEnabledFromEnv(os.Getenv("GO_MESSAGING_PRESENCE_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		messagingPresenceRoute = httpapi.NewMessagingPresenceHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
+		logger.Info("Go messaging presence route mounted", "path", "/api/conversations/{id}/presence")
 	}
 	var portalInvoiceRoute http.Handler
 	if goPortalInvoiceRouteEnabledFromEnv(os.Getenv("GO_PORTAL_INVOICE_ROUTE")) {
@@ -763,6 +776,7 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoSupportCustomersRoute(apiHandler, supportCustomersRoute)
 	apiHandler = httpapi.MountGoAIConfigRoute(apiHandler, aiConfigRoute)
 	apiHandler = httpapi.MountGoDocumentsEditorWorkspaceRoute(apiHandler, documentsEditorWorkspaceRoute)
+	apiHandler = httpapi.MountGoMessagingPresenceRoute(apiHandler, messagingPresenceRoute)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,

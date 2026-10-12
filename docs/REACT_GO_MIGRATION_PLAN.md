@@ -3296,3 +3296,22 @@ new owners and the manifest shows zero legacy runtime paths.
      With Next stopped, authenticated `agent-browser` opened the Vite editor,
      received HTTP 200 from workspace POST and DELETE requests, edited and
      reloaded the draft successfully, and reported no browser errors.
+
+300. (Complete; focused Go/Vite tests, independent review, and authenticated
+     browser proof passed) Move Vite
+     Messaging presence GET and typing heartbeat POST to the Go route at
+     `/api/conversations/{id}/presence`. GET validates the session, active
+     organization, and conversation membership, then reads via
+     `dbx.WithOrgTx`. POST validates same origin and delegates to the governed
+     `messaging.updateConversationPresence` capability with the caller's intent
+     ID, preserving module, permission, audit, receipt, and inverse behavior.
+     Preserve the `people` response, 45-second online window, 8-second typing
+     window, and explicit Vite/API rollback flags. Focused Go and Vite tests
+     cover the route, intent propagation, authentication, disabled-module
+     rejection, and exact proxy match. GET remains available while Messaging is
+     disabled, matching the legacy GET route. The runtime-role integration
+     proof runs POST through the real capability executor and verifies the
+     action receipt and inverse data. With Next stopped, authenticated
+     `agent-browser` loaded Vite `/messages`; presence GET and POST returned
+     HTTP 200 and the browser reported no errors. Independent review found no
+     remaining actionable issue.

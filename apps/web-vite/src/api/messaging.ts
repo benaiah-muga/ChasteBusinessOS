@@ -565,13 +565,9 @@ export async function reportConversationPresence(conversationId: string, typing:
   if (goSelected) {
     const validatedConversationId = z.string().uuid().parse(conversationId);
     const validatedTyping = z.boolean().parse(typing);
-    const { response, body } = await send("/api/capabilities/execute", {
+    const { response, body } = await send(`/api/conversations/${encodeURIComponent(validatedConversationId)}/presence`, {
       method: "POST",
-      body: JSON.stringify({
-        capabilityId: "messaging.updateConversationPresence",
-        input: { conversationId: validatedConversationId, typing: validatedTyping },
-        intentId: newIntentId(),
-      }),
+      body: JSON.stringify({ typing: validatedTyping, intentId: newIntentId() }),
     }, "your presence", signal);
     if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "your presence"));
     if (!GoConversationPresenceEnvelopeSchema.safeParse(body).success) {

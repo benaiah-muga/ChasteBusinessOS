@@ -324,6 +324,20 @@
     },
     {
       "kind": "api",
+      "path": "/api/conversations/[id]/presence",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/presence",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
       "path": "/api/inventory",
       "method": "GET",
       "owner": "go",
