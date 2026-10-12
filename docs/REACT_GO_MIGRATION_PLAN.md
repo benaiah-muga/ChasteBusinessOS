@@ -2226,7 +2226,7 @@ new owners and the manifest shows zero legacy runtime paths.
      the synthetic vendor statement through Go with HTTP 200; its bill and
      payment rows and UGX 0 closing balance remained available after reload.
      No browser errors occurred.
-203. (Vite/Go implementation complete; browser proof pending) Route only existing Vite People employee creation through Go's
+203. (Done) Route only existing Vite People employee creation through Go's
      session-authenticated `hr.hireEmployee` capability behind paired
      `CHASTE_GO_HR_EMPLOYEE_WRITES=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Preserve salary in
@@ -2239,7 +2239,10 @@ new owners and the manifest shows zero legacy runtime paths.
      across tabs and stale responses cannot remove a newer marker. The focused
      Vite API/page/proxy suite passed (206 tests); Go parser, persistence, and
      governed executor tests passed; Vite typecheck and lint passed. Independent
-     review found no actionable issues. Browser runtime proof remains open.
+     review found no actionable issues. Authenticated browser proof created
+     Migration Hire Proof 20261012 at UGX 1,250 monthly through
+     `hr.hireEmployee` (HTTP 200). The employee remained in the directory
+     after reload; no legacy HR write or browser error occurred.
 204. (Vite/Go implementation complete; browser proof pending) Route only the existing Vite Purchasing Intel price-history and supplier-
      performance reads through `purchasing.priceHistory` and
      `purchasing.supplierPerformance` behind paired
