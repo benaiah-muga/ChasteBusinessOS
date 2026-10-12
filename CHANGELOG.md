@@ -363,6 +363,10 @@ The full v1 changelog is preserved at the bottom of this file.
   `accounting.unmatchBankTransaction` capabilities when both route selectors
   are enabled. Exact actor- and organization-scoped requests survive uncertain
   outcomes and block legacy fallback until resolved.
+- Vite Accounting Payables bill payments now use the existing Go-backed
+  Purchasing finance flow when `CHASTE_GO_PURCHASING_FINANCE_WRITES=1`. The
+  exact amount is preserved, and Go applies its `bank_transfer` default when
+  the payment method is omitted.
 - Vite Accounting overview reads now always use the session-authenticated Go
   `accounting.overview` capability.
   Go entry debit aggregates are validated as safe integer minor units, and

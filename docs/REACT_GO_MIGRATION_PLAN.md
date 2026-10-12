@@ -2101,7 +2101,7 @@ new owners and the manifest shows zero legacy runtime paths.
      again through the Go session capability endpoint. Both write types
      returned HTTP 200, the final matched state persisted after reload, and no
      legacy banking write request or browser error occurred.
-196. (Vite/Go implementation complete; browser proof pending) Route Accounting Payables `payBill` actions through the existing Vite Go
+196. (Vite/Go implementation and authenticated browser proof complete) Route Accounting Payables `payBill` actions through the existing Vite Go
      `payPurchasingBill` flow and `purchasing.payBill` capability under the
      existing `CHASTE_GO_PURCHASING_FINANCE_WRITES=1` selector. Preserve the
      exact amount and optional payment method, including the Go
@@ -2112,7 +2112,12 @@ new owners and the manifest shows zero legacy runtime paths.
      reservations are atomic across tabs, and browsers without Web Locks fail
      closed. Purchasing API tests, AccountingPage recovery, Vite typecheck/lint,
      and the Go payBill contract test pass. Keep other Accounting actions
-     unchanged. Authenticated browser proof remains open.
+     unchanged. Authenticated Vite browser proof created a synthetic UGX 100
+     bill through the Go-backed Purchasing flow, then paid it from Accounting
+     Payables. The Go request preserved the full outstanding amount, omitted
+     the optional payment method to exercise Go's `bank_transfer` default,
+     returned HTTP 200, and left the bill paid with zero outstanding after
+     reload. No legacy Accounting write request or browser error occurred.
 197. (Vite/Go implementation complete; browser proof pending) Route Vite HR
      Time report and pending-entry reads, time logging, and submitted-entry
      decisions through Go's session-authenticated
