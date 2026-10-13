@@ -102,10 +102,6 @@ export function goCrmDealCreateFromEnv(env: Record<string, string | undefined>):
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_DEAL_CREATE === "1";
 }
 
-export function goCrmTaskWritesFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_TASK_WRITES === "1";
-}
-
 export function goCrmCustomerCreateFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_CUSTOMER_CREATE === "1";
 }
@@ -313,30 +309,6 @@ export function goAccountingCreditNoteFromEnv(env: Record<string, string | undef
 
 export function goAccountingReverseEntryFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_REVERSE_ENTRY === "1";
-}
-
-export function goAccountingPeriodCloseReadsFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS === "1";
-}
-
-export function goAccountingReportsFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_REPORTS === "1";
-}
-
-export function goAccountingCustomerStatementReadsFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS === "1";
-}
-
-export function goAccountingInvoiceReadsFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_INVOICE_READS !== "0";
-}
-
-export function goAccountingPaymentRemindersFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_PAYMENT_REMINDERS !== "0";
-}
-
-export function goAccountingCashBasisFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_CASH_BASIS !== "0";
 }
 
 export function goBankReconciliationWritesFromEnv(env: Record<string, string | undefined>): boolean {

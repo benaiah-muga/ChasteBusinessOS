@@ -27,14 +27,14 @@ function readiness(year: number, month: number, tasks = [
 }
 
 function stubAccounting(taskList = readiness(2026, 8).tasks) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/modules") {
       return Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["accounting"] });
     }
-    if (url.startsWith("/api/accounting/close?")) {
-      const query = new URL(url, "http://localhost").searchParams;
-      return Response.json({ ok: true, data: readiness(Number(query.get("year")), Number(query.get("month")), taskList) });
+    if (url === "/api/capabilities/execute") {
+      const request = JSON.parse(String(init?.body)) as { input: { year: number; month: number } };
+      return Response.json({ ok: true, data: readiness(request.input.year, request.input.month, taskList) });
     }
     return Response.json({ error: "not found" }, { status: 404 });
   });
@@ -43,7 +43,7 @@ function stubAccounting(taskList = readiness(2026, 8).tasks) {
 }
 
 describe("AccountingCloseReadinessPage", () => {
-  it("loads readiness through accounting.periodCloseWorkbench when the Go selector is enabled", async () => {
+  it("loads readiness through accounting.periodCloseWorkbench", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") {
@@ -83,12 +83,12 @@ describe("AccountingCloseReadinessPage", () => {
     const workspaceLink = screen.getByRole("link", { name: "Open Accounting workspace" }) as HTMLAnchorElement;
     expect(workspaceLink.getAttribute("href")).toBe("/accounting");
     expect(new URL(workspaceLink.href).origin).toBe(window.location.origin);
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/accounting\/close\?year=\d{4}&month=\d{1,2}$/), expect.objectContaining({
-      method: "GET",
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
       credentials: "same-origin",
       cache: "no-store",
     }));
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/accounting/close"))).toBe(false);
   });
 
   it("reloads readiness when the selected period changes", async () => {
@@ -97,7 +97,8 @@ describe("AccountingCloseReadinessPage", () => {
     await screen.findByRole("heading", { name: "Not ready to close" });
 
     fireEvent.change(screen.getByLabelText("Close period"), { target: { value: "2026-07" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/accounting/close?year=2026&month=7", expect.any(Object)));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/capabilities/execute"
+      && JSON.parse(String(init?.body)).input.month === 7)).toBe(true));
     expect(await screen.findByText("July 2026")).toBeTruthy();
   });
 

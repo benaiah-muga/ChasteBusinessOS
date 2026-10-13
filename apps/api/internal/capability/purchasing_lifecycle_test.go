@@ -263,6 +263,10 @@ func TestPurchasingLifecycleBillCreditNotePostsMirrorAndCreditsBill(t *testing.T
 	taxBillID := seedLifecycleBill(t, fx, fx.orgID, vendorID, 1, "open", 10_000, 0, 0, &billEntryID)
 	seedLifecycleBillLine(t, fx, taxBillID, "Parts", 1000, 8100, 1900, &recoverableTaxCodeID)
 	seedLifecycleBillLine(t, fx, taxBillID, "Deposit", 1000, 1900, 0, nil)
+	foreignCurrencyBillID := seedLifecycleBill(t, fx, fx.orgID, vendorID, 4, "open", 2_500, 0, 0, nil)
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE vendor_bills SET currency = 'EUR' WHERE id = $1::uuid`, foreignCurrencyBillID); err != nil {
+		t.Fatal(err)
+	}
 	voidBillID := seedLifecycleBill(t, fx, fx.orgID, vendorID, 2, "void", 6_000, 0, 0, nil)
 	foreignBillID := seedLifecycleBill(t, fx, fx.otherOrgID, foreignVendorID, 90, "open", 9_000, 0, 0, nil)
 
@@ -273,6 +277,7 @@ func TestPurchasingLifecycleBillCreditNotePostsMirrorAndCreditsBill(t *testing.T
 	}{
 		{executorUUID(t), 100, "bill not found"},
 		{foreignBillID, 100, "bill not found"},
+		{foreignCurrencyBillID, 100, "foreign-currency bill credits are not supported until an exchange rate is applied"},
 		{voidBillID, 100, "bill is void; nothing to credit"},
 		{taxBillID, 10_001, "credit 10001 exceeds the open balance 10000 (total 10000 − paid 0 − credited 0)"},
 	} {

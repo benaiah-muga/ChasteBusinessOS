@@ -18,7 +18,6 @@ const invoice = {
 const switchboard = { catalog: [{ id: "accounting" }], enabledModules: ["accounting"] };
 
 function stubAccounting(invoices: unknown = [invoice]) {
-  vi.stubGlobal("__GO_ACCOUNTING_INVOICE_READS__", true);
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/modules"
     ? Response.json(switchboard)
     : Response.json({ ok: true, data: { invoices } }));
@@ -77,8 +76,7 @@ describe("Vite Accounting invoices preview", () => {
   });
 
   it("keeps the loading status visible until the Go invoice capability responds", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_INVOICE_READS__", true);
-    let resolveInvoices: ((response: Response) => void) | undefined;
+      let resolveInvoices: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn((input: RequestInfo | URL) => String(input) === "/api/modules"
       ? Promise.resolve(Response.json(switchboard))
       : new Promise<Response>((resolve) => { resolveInvoices = resolve; }));
@@ -94,8 +92,7 @@ describe("Vite Accounting invoices preview", () => {
   });
 
   it("shows permission failures and keeps a route back to the full workspace", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_INVOICE_READS__", true);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => input === "/api/modules"
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => input === "/api/modules"
       ? Response.json(switchboard)
       : Response.json({ ok: false, error: "forbidden: missing accounting.read" }, { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -108,8 +105,7 @@ describe("Vite Accounting invoices preview", () => {
   });
 
   it("offers sign-in when the protected accounting route returns unauthorized", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_INVOICE_READS__", true);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => input === "/api/modules"
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => input === "/api/modules"
       ? Response.json(switchboard)
       : Response.json({ ok: false, error: "unauthorized" }, { status: 401 }));
     vi.stubGlobal("fetch", fetchMock);

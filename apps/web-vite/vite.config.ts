@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goAccountingCashBasisFromEnv, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingCustomerStatementReadsFromEnv, goAccountingInvoiceReadsFromEnv, goAccountingPaymentRemindersFromEnv, goAccountingPeriodCloseReadsFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReportsFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmLeadConversionFromEnv, goCrmTaskWritesFromEnv, goCrmViewWritesFromEnv, goDocumentsEditorReadsFromEnv, goDocumentsIngestedReadsFromEnv, goDocumentsVersionReadsFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrPayrollFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosOpenSessionSliceFromEnv, goProjectsWritesFromEnv, goPurchasingAPAgingReadsFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingWorkflowReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderReadsFromEnv, goSalesOrderWritesFromEnv, goSessionCapabilityRouteFromEnv, goMessagingConversationListFromEnv, goMessagingConversationCreateFromEnv, goMessagingConversationUpdateFromEnv, goMessagingConversationArchiveFromEnv, goMessagingConversationLeaveFromEnv, goMessagingConversationAddMemberFromEnv, goMessagingConversationDeleteFromEnv, goMessagingThreadReadsFromEnv, goMessagingReadCursorFromEnv, goMessagingReactionsFromEnv, goMessagingPinsFromEnv, goMessagingPresenceFromEnv, goMessagingAttachmentUploadFromEnv, goMessagingAttachmentDeleteFromEnv, goMarketingCampaignWritesFromEnv, goMarketingOverviewReadsFromEnv, goSupportInboxReadsFromEnv, goSupportLibraryReadsFromEnv, goSupportCannedResponseWriteFromEnv, goSupportKbArticleWriteFromEnv, goSupportConversationWritesFromEnv, goSupportTicketWritesFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmLeadConversionFromEnv, goCrmViewWritesFromEnv, goDocumentsEditorReadsFromEnv, goDocumentsIngestedReadsFromEnv, goDocumentsVersionReadsFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrPayrollFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosOpenSessionSliceFromEnv, goProjectsWritesFromEnv, goPurchasingAPAgingReadsFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingWorkflowReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderReadsFromEnv, goSalesOrderWritesFromEnv, goSessionCapabilityRouteFromEnv, goMessagingConversationListFromEnv, goMessagingConversationCreateFromEnv, goMessagingConversationUpdateFromEnv, goMessagingConversationArchiveFromEnv, goMessagingConversationLeaveFromEnv, goMessagingConversationAddMemberFromEnv, goMessagingConversationDeleteFromEnv, goMessagingThreadReadsFromEnv, goMessagingReadCursorFromEnv, goMessagingReactionsFromEnv, goMessagingPinsFromEnv, goMessagingPresenceFromEnv, goMessagingAttachmentUploadFromEnv, goMessagingAttachmentDeleteFromEnv, goMarketingCampaignWritesFromEnv, goMarketingOverviewReadsFromEnv, goSupportInboxReadsFromEnv, goSupportLibraryReadsFromEnv, goSupportCannedResponseWriteFromEnv, goSupportKbArticleWriteFromEnv, goSupportConversationWritesFromEnv, goSupportTicketWritesFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL("../..", import.meta.url)), ["CHASTE_", "GO_"]);
@@ -18,7 +18,6 @@ export default defineConfig(({ mode }) => {
   const goCrmDealStageMove = goCrmDealStageMoveFromEnv(env);
   const goCrmLeadConversion = goCrmLeadConversionFromEnv(env);
   const goCrmDealCreate = goCrmDealCreateFromEnv(env);
-  const goCrmTaskWrites = goCrmTaskWritesFromEnv(env);
   const goCrmCustomerCreate = goCrmCustomerCreateFromEnv(env);
   const goCrmCustomerDeactivate = goCrmCustomerDeactivateFromEnv(env);
   const goCrmCustomerMerge = goCrmCustomerMergeFromEnv(env);
@@ -53,12 +52,6 @@ export default defineConfig(({ mode }) => {
   const goAccountingCreateInvoice = goAccountingCreateInvoiceFromEnv(env);
   const goAccountingCreditNote = goAccountingCreditNoteFromEnv(env);
   const goAccountingReverseEntry = goAccountingReverseEntryFromEnv(env);
-  const goAccountingPeriodCloseReads = goAccountingPeriodCloseReadsFromEnv(env);
-  const goAccountingReports = goAccountingReportsFromEnv(env);
-  const goAccountingCustomerStatementReads = goAccountingCustomerStatementReadsFromEnv(env);
-  const goAccountingInvoiceReads = goAccountingInvoiceReadsFromEnv(env);
-  const goAccountingPaymentReminders = goAccountingPaymentRemindersFromEnv(env);
-  const goAccountingCashBasis = goAccountingCashBasisFromEnv(env);
   const goSupportInboxReads = goSupportInboxReadsFromEnv(env);
   const goSupportLibraryReads = goSupportLibraryReadsFromEnv(env);
   const goSupportCannedResponseWrite = goSupportCannedResponseWriteFromEnv(env);
@@ -103,7 +96,6 @@ export default defineConfig(({ mode }) => {
       __GO_CRM_LEAD_CONVERSION__: JSON.stringify(goCrmLeadConversion),
       __GO_CRM_READS__: JSON.stringify(env.CHASTE_GO_CRM_READS !== "0"),
       __GO_CRM_DEAL_CREATE__: JSON.stringify(goCrmDealCreate),
-      __GO_CRM_TASK_WRITES__: JSON.stringify(goCrmTaskWrites),
       __GO_CRM_CUSTOMER_CREATE__: JSON.stringify(goCrmCustomerCreate),
       __GO_CRM_CUSTOMER_DEACTIVATE__: JSON.stringify(goCrmCustomerDeactivate),
       __GO_CRM_CUSTOMER_MERGE__: JSON.stringify(goCrmCustomerMerge),
@@ -138,12 +130,6 @@ export default defineConfig(({ mode }) => {
       __GO_ACCOUNTING_CREATE_INVOICE__: JSON.stringify(goAccountingCreateInvoice),
       __GO_ACCOUNTING_CREDIT_NOTE__: JSON.stringify(goAccountingCreditNote),
       __GO_ACCOUNTING_REVERSE_ENTRY__: JSON.stringify(goAccountingReverseEntry),
-      __GO_ACCOUNTING_PERIOD_CLOSE_READS__: JSON.stringify(goAccountingPeriodCloseReads),
-      __GO_ACCOUNTING_REPORTS__: JSON.stringify(goAccountingReports),
-      __GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__: JSON.stringify(goAccountingCustomerStatementReads),
-      __GO_ACCOUNTING_INVOICE_READS__: JSON.stringify(goAccountingInvoiceReads),
-      __GO_ACCOUNTING_PAYMENT_REMINDERS__: JSON.stringify(goAccountingPaymentReminders),
-      __GO_ACCOUNTING_CASH_BASIS__: JSON.stringify(goAccountingCashBasis),
       __GO_SUPPORT_INBOX_READS__: JSON.stringify(goSupportInboxReads),
       __GO_SUPPORT_LIBRARY_READS__: JSON.stringify(goSupportLibraryReads),
       __GO_SUPPORT_CANNED_RESPONSE_WRITE__: JSON.stringify(goSupportCannedResponseWrite),

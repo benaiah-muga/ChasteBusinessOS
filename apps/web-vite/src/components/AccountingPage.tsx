@@ -49,7 +49,6 @@ import {
   type AccountingTaxCode,
 } from "../api/accounting";
 import {
-  goPurchasingFinanceWritesUseGo,
   payPurchasingBill,
   readPendingPurchasingBillPayment,
   PurchasingApiError,
@@ -534,7 +533,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       setPendingPurchasingBillPayment(action);
       if (action) setNotice({ tone: "pending", text: "A bill payment is unresolved. Retry the exact payment to recover its result." });
     }).catch((error) => {
-      if (active && goPurchasingFinanceWritesUseGo()) {
+      if (active) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved bill payment." });
       }
     });
@@ -581,7 +580,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const isBankReconciliationWrite = path === "/api/banking" && (payload.action === "matchBankTransaction" || payload.action === "unmatchBankTransaction");
       const goBankReconciliationWrite = isBankReconciliationWrite && goAccountingBankReconciliationWritesUseGo();
       const isPurchasingBillPayment = path === "/api/accounting" && payload.action === "payBill";
-      const goPurchasingBillPayment = isPurchasingBillPayment && goPurchasingFinanceWritesUseGo();
+      const goPurchasingBillPayment = isPurchasingBillPayment;
       setBusy(true);
       let reversePaymentIsUnresolved = false;
       try {
@@ -826,9 +825,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               {pendingPurchasingBillPayment && <button
                 type="button"
                 className="accounting-button accounting-button-small"
-                disabled={busy || !goPurchasingFinanceWritesUseGo()}
+                disabled={busy}
                 onClick={() => void runAction("/api/accounting", { ...pendingPurchasingBillPayment }, `Payment for bill #${pendingPurchasingBillPayment.billNumber}`)}
-              >{goPurchasingFinanceWritesUseGo() ? "Retry exact bill payment" : "Enable Go Purchasing route to retry"}</button>}
+              >Retry exact bill payment</button>}
               <button
                 type="button"
                 className="accounting-notice-dismiss"

@@ -225,9 +225,48 @@ beforeEach(() => {
     if (path === "/api/purchasing/payment-runs") return Response.json({ ok: true, data: { runs: [paymentRunFixture] } });
     if (path === "/api/capabilities/execute") {
       const { capabilityId } = JSON.parse(String(init?.body)) as { capabilityId: string };
+      if (capabilityId === "accounting.listInvoices") return Response.json({ ok: true, data: { invoices: [{
+        id: "f9184ddd-a042-4e24-9fe1-553cadc44df1",
+        number: 1042,
+        customerId: "348a55cb-0d16-47e0-aee3-6e61952e05af",
+        customerName: "Acme Supplies",
+        status: "sent",
+        currency: "USD",
+        totalMinor: 15000,
+        paidMinor: 5000,
+        outstandingMinor: 10000,
+        issuedAt: "2026-09-29T09:00:00.000Z",
+        creditedMinor: 0,
+      }] } });
+      if (capabilityId === "accounting.periodCloseWorkbench") {
+        const { year, month } = JSON.parse(String(init?.body)).input as { year: number; month: number };
+        const tasks = [
+          { key: "review_journal", label: "Review journals", detail: "Review posted journals for this month.", completed: true, note: "Reviewed with controller", blocking: false, status: "complete" },
+          { key: "bank_reconciliation", label: "Reconcile bank activity", detail: "3 statement lines remain unmatched.", completed: false, note: null, blocking: true, status: "blocked" },
+          { key: "fx_revaluation", label: "Revalue foreign receivables", detail: "Open foreign receivables: EUR, KES.", completed: false, note: null, blocking: true, status: "needs_revaluation" },
+        ];
+        return Response.json({ ok: true, data: {
+          year,
+          month,
+          start: new Date(Date.UTC(year, month - 1, 1)).toISOString(),
+          end: new Date(Date.UTC(year, month, 1) - 1).toISOString(),
+          tasks,
+          blockers: tasks.filter((task) => task.blocking).map((task) => task.key),
+          readyToClose: false,
+          unmatchedLineCount: 3,
+          currenciesWithExposure: ["EUR", "KES"],
+        } });
+      }
       if (capabilityId === "hr.report") return Response.json({ ok: true, data: {
         employees: [], leave: [], runs: [], openings: [], applicants: [], attendance: [],
       } });
+      if (capabilityId === "purchasing.apAging") return Response.json({ ok: true, data: { buckets: {
+        current: 5000,
+        d30: 2000,
+        d60: 3000,
+        d90plus: 4000,
+        totalOutstanding: 14000,
+      } } });
       if (capabilityId === "purchasing.listPaymentRuns") return Response.json({ ok: true, data: { runs: [paymentRunFixture] } });
       if (capabilityId === "purchasing.listPaymentRunBills") return Response.json({ ok: true, data: { bills: [] } });
       if (capabilityId === "purchasing.listWorkspace") return Response.json({ ok: true, data: {
@@ -531,7 +570,8 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Accounting invoices" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Accounting" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("link", { name: "Open full Accounting workspace" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Open full Accounting workspace" }).getAttribute("href"))
+      .toBe("/accounting?tab=receivables");
     expect(await screen.findByText("#1042")).not.toBeNull();
   });
 
@@ -563,12 +603,13 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "Period close readiness" })).not.toBeNull();
     expect(await screen.findByRole("heading", { name: "Not ready to close" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Close readiness" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("link", { name: "Open full period close workspace" }).getAttribute("href"))
-      .toBe("http://localhost:3001/accounting/close");
+    expect(screen.getByRole("link", { name: "Open Accounting workspace" }).getAttribute("href"))
+      .toBe("/accounting");
     expect(await screen.findByText("3 statement lines remain unmatched.")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({ credentials: "same-origin" }));
-    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/accounting/close?"))).toBe(true);
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute"
+      && JSON.parse(String(init?.body)).capabilityId === "accounting.periodCloseWorkbench")).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/accounting/close"))).toBe(false);
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
@@ -588,6 +629,7 @@ describe("Vite app frame", () => {
 
   it("opens the accounts payable aging preview within the authenticated shell", async () => {
     window.history.replaceState(null, "", "/purchasing/ap-aging");
+    vi.stubGlobal("__GO_PURCHASING_AP_AGING_READS__", true);
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
@@ -595,8 +637,10 @@ describe("Vite app frame", () => {
     expect(screen.getByRole("link", { name: "Payables aging" }).getAttribute("aria-current")).toBe("page");
     expect(await screen.findByRole("heading", { name: "$140.00" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open full Purchasing workspace" }).getAttribute("href"))
-      .toBe("http://localhost:3001/purchasing?tab=bills");
-    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({ credentials: "same-origin" }));
+      .toBe("/purchasing?tab=bills");
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute"
+      && JSON.parse(String(init?.body)).capabilityId === "purchasing.apAging")).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/purchasing")).toBe(false);
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 

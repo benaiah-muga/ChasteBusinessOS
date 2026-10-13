@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchAccountingCloseEnabled,
   fetchAccountingCloseReadiness,
-  accountingPeriodCloseReadsUseGo,
   AccountingCloseApiError,
 } from "./accounting-close";
 
@@ -26,12 +25,10 @@ function closeReadiness(year: number, month: number) {
 }
 
 describe("accounting close API", () => {
-  it("uses the session capability endpoint for Go period-close reads when selected", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_PERIOD_CLOSE_READS__", true);
+  it("uses the session capability endpoint for period-close reads", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: closeReadiness(2026, 8) }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(accountingPeriodCloseReadsUseGo()).toBe(true);
     await expect(fetchAccountingCloseReadiness(2026, 8)).resolves.toEqual(closeReadiness(2026, 8));
     const [path, init] = fetchMock.mock.calls[0] ?? [];
     expect(path).toBe("/api/capabilities/execute");
@@ -45,7 +42,6 @@ describe("accounting close API", () => {
   });
 
   it("surfaces a Go 404 without falling back to legacy readiness", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_PERIOD_CLOSE_READS__", true);
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "capability not found" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -65,7 +61,7 @@ describe("accounting close API", () => {
     await expect(fetchAccountingCloseReadiness(2026, 8)).resolves.toEqual(closeReadiness(2026, 8));
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       "/api/modules",
-      "/api/accounting/close?year=2026&month=8",
+      "/api/capabilities/execute",
     ]);
     expect(fetchMock.mock.calls.every(([, init]) => init?.credentials === "same-origin" && init.cache === "no-store")).toBe(true);
   });

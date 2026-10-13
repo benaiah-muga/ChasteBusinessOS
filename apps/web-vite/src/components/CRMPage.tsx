@@ -242,6 +242,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const movingDealIds = useRef(new Set<string>());
   const customerCreateScopeRef = useRef<string | null>(null);
   const customerCreateScopeGeneration = useRef(0);
+  const taskDraftScopeRef = useRef<string | null>(null);
+  const taskDraftScopeGeneration = useRef(0);
   const dealCreateScopeRef = useRef<string | null>(null);
   const dealCreateScopeGeneration = useRef(0);
   const convertRestoreScopeIdentity = `${actorId?.trim() ?? ""}:${organizationId?.trim() ?? ""}`;
@@ -251,7 +253,6 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const profileUpdateScopeGeneration = useRef(0);
   const savedViewScopeRef = useRef<string | null>(null);
   const savedViewScopeGeneration = useRef(0);
-  const goCrmTaskWrites = typeof __GO_CRM_TASK_WRITES__ !== "undefined" && __GO_CRM_TASK_WRITES__;
   const goCrmCustomerCreate = typeof __GO_CRM_CUSTOMER_CREATE__ !== "undefined" && __GO_CRM_CUSTOMER_CREATE__;
   const goCrmCustomerImport = typeof __GO_CRM_CUSTOMER_IMPORT__ !== "undefined" && __GO_CRM_CUSTOMER_IMPORT__;
   const goCrmCustomerProfileUpdate = typeof __GO_CRM_CUSTOMER_PROFILE_UPDATE__ !== "undefined" && __GO_CRM_CUSTOMER_PROFILE_UPDATE__;
@@ -285,8 +286,12 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const customerCreateReady = Boolean(customerCreateScopeIdentity && customerCreateResolvedScope === customerCreateScopeIdentity);
   const dealCreateReady = Boolean(dealCreateScopeIdentity && dealCreateResolvedScope === dealCreateScopeIdentity);
   const taskDraftScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
-  const taskDraftReady = !goCrmTaskWrites || Boolean(taskDraftScopeIdentity && taskDraftResolvedScope === taskDraftScopeIdentity);
-  const taskDetailsReady = !goCrmTaskWrites || Boolean(taskDraftScopeIdentity && taskDetailsRecoveryScope === taskDraftScopeIdentity);
+  if (taskDraftScopeRef.current !== taskDraftScopeIdentity) {
+    taskDraftScopeRef.current = taskDraftScopeIdentity;
+    taskDraftScopeGeneration.current += 1;
+  }
+  const taskDraftReady = Boolean(taskDraftScopeIdentity && taskDraftResolvedScope === taskDraftScopeIdentity);
+  const taskDetailsReady = Boolean(taskDraftScopeIdentity && taskDetailsRecoveryScope === taskDraftScopeIdentity);
   const profileUpdateReady = !goCrmCustomerProfileUpdate || Boolean(profileUpdateScopeIdentity && profileUpdateResolvedScope === profileUpdateScopeIdentity);
   const savedViewReady = Boolean(savedViewScopeIdentity && savedViewResolvedScope === savedViewScopeIdentity);
   const lockedProfileCustomerId = profileUpdateLocked && profileUpdateAction?.name !== undefined ? profileUpdateAction.customerIds[0] : null;
@@ -469,13 +474,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }, [actorId, customers, goCrmCustomerProfileUpdate, loading, organizationId, profileUpdateResolvedScope, profileUpdateScopeIdentity]);
 
   useEffect(() => {
-    if (!goCrmTaskWrites) {
-      setTaskDraftResolvedScope(null);
-      setTaskDraftLocked(false);
-      setTaskDetailsDraft(null);
-      return;
-    }
     let active = true;
+    setSharedBusy(false);
     setTaskDraftResolvedScope(null);
     setTaskDraftLocked(false);
     setTaskDetailsDraft(null);
@@ -499,13 +499,13 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       setNotice({ tone: "error", text: friendlyError(reason) });
     });
     return () => { active = false; };
-  }, [actorId, goCrmTaskWrites, organizationId, taskDraftScopeIdentity]);
+  }, [actorId, organizationId, taskDraftScopeIdentity]);
 
   useEffect(() => {
     setTaskDetailsRecoveryScope(null);
     setTaskDetailsRetryActions({});
     setTaskDetailsDraft(null);
-    if (!goCrmTaskWrites || !actorId?.trim() || !organizationId?.trim()) return;
+    if (!actorId?.trim() || !organizationId?.trim()) return;
     let active = true;
     void readPendingCrmTaskDetailsForScope({ actorId, organizationId }).then((pending) => {
       if (!active) return;
@@ -515,7 +515,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       if (active) setNotice({ tone: "error", text: friendlyError(reason) });
     });
     return () => { active = false; };
-  }, [actorId, goCrmTaskWrites, organizationId, taskDraftScopeIdentity]);
+  }, [actorId, organizationId, taskDraftScopeIdentity]);
 
   useEffect(() => {
     let active = true;
@@ -917,15 +917,19 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!taskDraft.title.trim() || !taskDraftReady || busy) return;
+    const operationScope = taskDraftScopeIdentity;
+    const operationScopeGeneration = taskDraftScopeGeneration.current;
+    const isCurrentScope = () => Boolean(operationScope && taskDraftScopeRef.current === operationScope && taskDraftScopeGeneration.current === operationScopeGeneration);
     const action = { action: "createTask" as const, title: taskDraft.title.trim(), ...(taskDraft.dueAt ? { dueAt: new Date(`${taskDraft.dueAt}T12:00:00`).toISOString() } : {}), ...(taskDraft.assigneeUserId ? { assigneeUserId: taskDraft.assigneeUserId } : {}), ...(taskDraft.note.trim() ? { note: taskDraft.note.trim() } : {}), ...(taskDraft.customerId ? { refType: "customer", refId: taskDraft.customerId } : {}) };
     const accepted = await mutate("/api/crm", action, undefined, async () => {
       try {
-        const outcome = await submitCrmTaskMutation(action, undefined, goCrmTaskWrites, { actorId, organizationId });
+        const outcome = await submitCrmTaskMutation(action, undefined, { actorId, organizationId });
+        if (!isCurrentScope()) return outcome;
         if (outcome.kind === "pending") setTaskDraftLocked(true);
         else setTaskDraftLocked(false);
         return outcome;
       } catch (reason) {
-        if (reason instanceof Error && "status" in reason) {
+        if (isCurrentScope() && reason instanceof Error && "status" in reason) {
           const status = Number((reason as { status: unknown }).status);
           const mayHaveReached = Boolean((reason as { requestMayHaveReachedServer?: unknown }).requestMayHaveReachedServer);
           if ((mayHaveReached || status === 408 || status === 429 || status >= 500) && !(status >= 400 && status < 500 && status !== 408 && status !== 429)) setTaskDraftLocked(true);
@@ -933,11 +937,20 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
         }
         throw reason;
       }
-    });
-    if (accepted) {
+    }, isCurrentScope);
+    if (accepted && isCurrentScope()) {
       setTaskDraft({ title: "", dueAt: "", note: "", customerId: "", assigneeUserId: "" });
       setTaskDraftLocked(false);
     }
+  }
+
+  async function completeTask(taskId: string) {
+    const operationScope = taskDraftScopeIdentity;
+    const operationScopeGeneration = taskDraftScopeGeneration.current;
+    const isCurrentScope = () => Boolean(operationScope && taskDraftScopeRef.current === operationScope && taskDraftScopeGeneration.current === operationScopeGeneration);
+    await mutate("/api/crm", { action: "completeTask", taskId }, undefined,
+      () => submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, { actorId, organizationId }),
+      isCurrentScope);
   }
 
   function editTaskDetails(task: CrmTask) {
@@ -953,6 +966,9 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   async function saveTaskDetails(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!taskDetailsDraft || busy || !taskDraftReady || !taskDetailsReady) return;
+    const operationScope = taskDraftScopeIdentity;
+    const operationScopeGeneration = taskDraftScopeGeneration.current;
+    const isCurrentScope = () => Boolean(operationScope && taskDraftScopeRef.current === operationScope && taskDraftScopeGeneration.current === operationScopeGeneration);
     const task = tasks.find((entry) => entry.id === taskDetailsDraft.taskId);
     if (!task) return;
     const action: Extract<CrmTaskMutation, { action: "updateTaskDetails" }> = taskDetailsDraft.retryAction ?? {
@@ -966,14 +982,15 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       setTaskDetailsRetryActions((current) => { const next = { ...current }; delete next[action.taskId]; return next; });
     }, async () => {
       try {
-        const outcome = await submitCrmTaskMutation(action, undefined, goCrmTaskWrites, { actorId, organizationId });
-        if (outcome.kind === "pending" && goCrmTaskWrites) {
+        const outcome = await submitCrmTaskMutation(action, undefined, { actorId, organizationId });
+        if (!isCurrentScope()) return outcome;
+        if (outcome.kind === "pending") {
           setTaskDetailsRetryActions((current) => ({ ...current, [action.taskId]: action }));
           setTaskDetailsDraft((current) => current?.taskId === action.taskId ? { ...current, retryAction: action } : current);
         }
         return outcome;
       } catch (reason) {
-        if (goCrmTaskWrites && reason instanceof CrmApiError) {
+        if (isCurrentScope() && reason instanceof CrmApiError) {
           const uncertain = reason.requestMayHaveReachedServer || reason.status === 408 || reason.status === 429 || reason.status >= 500;
           setTaskDetailsRetryActions((current) => {
             if (uncertain) return { ...current, [action.taskId]: action };
@@ -983,7 +1000,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
         }
         throw reason;
       }
-    });
+    }, isCurrentScope);
   }
 
   async function refreshViews() {
@@ -1224,8 +1241,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
         <label>Note<input maxLength={2000} disabled={busy || !taskDraftReady || taskDraftLocked} value={taskDraft.note} onChange={(event) => setTaskDraft({ ...taskDraft, note: event.target.value })} /></label>
         <button disabled={busy || !taskDraftReady}>{taskDraftLocked ? "Retry task" : "Add task"}</button>
       </form>
-      {goCrmTaskWrites && !taskDraftReady && <p role="status">CRM is restoring the task draft for the active organization.</p>}
-      {goCrmTaskWrites && taskDraftLocked && <p role="status">This task attempt is pending or uncertain. Retry the same task details to resolve it.</p>}
+          {!taskDraftReady && <p role="status">CRM is restoring the task draft for the active organization.</p>}
+          {taskDraftLocked && <p role="status">This task attempt is pending or uncertain. Retry the same task details to resolve it.</p>}
       <div className="crm-task-queue-controls">
         <div role="group" aria-label="Task view">
           <button type="button" aria-pressed={taskFilter === "today"} onClick={() => setTaskFilter("today")}>Today ({dueTodayTasks.length})</button>
@@ -1237,7 +1254,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       </div>
       <ul className="crm-task-list">
         {visibleTasks.map((task) => <li id={`crm-task-${task.id}`} tabIndex={-1} className={focusedTaskId === task.id ? "crm-task-source-focused" : undefined} key={task.id}>
-          {task.doneAt ? <strong>{task.title}</strong> : <label><input type="checkbox" checked={Boolean(task.doneAt)} disabled={busy || !taskDetailsReady || Boolean(taskDetailsRetryActions[task.id])} onChange={() => void mutate("/api/crm", { action: "completeTask", taskId: task.id }, undefined, () => submitCrmTaskMutation({ action: "completeTask", taskId: task.id }, undefined, goCrmTaskWrites, { actorId, organizationId }))} /> <strong>{task.title}</strong></label>}
+          {task.doneAt ? <strong>{task.title}</strong> : <label><input type="checkbox" checked={Boolean(task.doneAt)} disabled={busy || !taskDetailsReady || Boolean(taskDetailsRetryActions[task.id])} onChange={() => void completeTask(task.id)} /> <strong>{task.title}</strong></label>}
           <span>{task.doneAt ? `Completed ${new Date(task.doneAt).toLocaleDateString()}` : task.dueAt ? new Date(task.dueAt).toLocaleDateString() : "No due date"}</span>
           <span>{task.assigneeName ?? "Unassigned"}</span>
           {!task.doneAt && task.refId && <button type="button" onClick={() => { const customer = customers.find((entry) => entry.id === task.refId); if (customer) void openProfile(customer, "activity"); }}>Open customer</button>}

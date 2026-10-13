@@ -184,6 +184,7 @@ function stubAccounting(options: StubOptions = {}) {
         return options.goOverviewResponse?.() ?? Response.json({ ok: true, data: overview });
       }
       if (capabilityId === "accounting.cashBasisReport") {
+        if (options.rejectCashBasis) throw new TypeError("Network unavailable");
         return options.goCashBasisResponse?.() ?? Response.json({ ok: true, data: {
           cashInMinor: cashBasis.cashInMinor,
           cashOutMinor: cashBasis.cashOutMinor,
@@ -218,6 +219,7 @@ function stubAccounting(options: StubOptions = {}) {
         "accounting.unrealizedFxExposure",
         "accounting.reportCurrencyMetadata",
       ].includes(capabilityId)) {
+        if (options.reportsStatus) return Response.json({ error: "reports unavailable" }, { status: options.reportsStatus });
         if (options.goReportResponse) return options.goReportResponse(capabilityId);
         if (options.goUnavailableReport === capabilityId) {
           return Response.json({ ok: false, error: "forbidden: missing accounting.read" }, { status: 422 });
@@ -290,10 +292,6 @@ function stubAccounting(options: StubOptions = {}) {
     }
     if (url === "/api/accounting" && method === "POST") {
       const action = body ? (JSON.parse(body) as { action?: string }).action : undefined;
-      if (action === "cashBasis") {
-        if (options.rejectCashBasis) throw new TypeError("Network unavailable");
-        return Response.json({ ok: true, data: cashBasis });
-      }
       if (action === "buildReminders") {
         return Response.json({ ok: true, data: { reminders: [] } });
       }
@@ -532,8 +530,8 @@ describe("AccountingPage states", () => {
 });
 
 describe("AccountingPage cash-basis summary", () => {
-  it("uses the selected Go read and keeps its extra field out of the current UI shape", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", true);
+  it("uses Go with the former selector off and keeps the extra field out of the current UI shape", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", false);
     const { calls } = stubAccounting({
       goCashBasisResponse: () => Response.json({ ok: true, data: {
         cashInMinor: 5_500,
@@ -556,8 +554,8 @@ describe("AccountingPage cash-basis summary", () => {
     expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("cashBasis"))).toBe(false);
   });
 
-  it("keeps the books visible when the selected Go cash-basis report fails", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", true);
+  it("keeps the books visible when the Go cash-basis report fails", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", false);
     const { calls } = stubAccounting({ goCashBasisResponse: () => Response.json({ error: "unavailable" }, { status: 503 }) });
     await renderReady();
 
@@ -568,7 +566,6 @@ describe("AccountingPage cash-basis summary", () => {
 
 describe("AccountingPage payment reminders", () => {
   it("drafts reminders through the selected Go capability", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_PAYMENT_REMINDERS__", true);
     const { calls } = stubAccounting({
       goPaymentReminderResponse: () => Response.json({ ok: true, data: { reminders: [{
         customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -603,12 +600,14 @@ describe("AccountingPage governed writes", () => {
     fireEvent.click(confirm);
 
     await waitFor(() => {
-      const write = calls.find((call) => call.body?.includes("payBill"));
+      const write = calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"purchasing.payBill"'));
       expect(write).toBeTruthy();
-      const payload = JSON.parse(write!.body!) as { intentId: string; amountMinor: number };
-      expect(payload.amountMinor).toBe(4_000);
+      const payload = JSON.parse(write!.body!) as { capabilityId: string; intentId: string; input: { amountMinor: number } };
+      expect(payload.capabilityId).toBe("purchasing.payBill");
+      expect(payload.input.amountMinor).toBe(4_000);
       expect(payload.intentId).toMatch(/^[0-9a-f-]{36}$/);
     });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("payBill"))).toBe(false);
     expect(await screen.findByText(/^Payment of \$40.00 done\.$/)).toBeTruthy();
   });
 
@@ -690,7 +689,7 @@ describe("AccountingPage governed writes", () => {
   });
 
   it("surfaces a 202 as pending approval, never as success", async () => {
-    stubAccounting({ actionResponse: () => Response.json({ pendingApproval: true, reason: "Payment above threshold" }, { status: 202 }) });
+    stubAccounting({ goPurchasingPayBillResponse: () => Response.json({ ok: false, pendingApproval: true, reason: "Payment above threshold" }, { status: 202 }) });
     await renderReady();
 
     fireEvent.click(await screen.findByRole("button", { name: "Pay" }));
@@ -704,7 +703,7 @@ describe("AccountingPage governed writes", () => {
   });
 
   it("reports a rejected write as an error with the server reason", async () => {
-    stubAccounting({ actionResponse: () => Response.json({ message: "Period is sealed" }, { status: 422 }) });
+    stubAccounting({ goPurchasingPayBillResponse: () => Response.json({ ok: false, error: "Period is sealed" }, { status: 422 }) });
     await renderReady();
 
     fireEvent.click(await screen.findByRole("button", { name: "Pay" }));
@@ -1136,7 +1135,6 @@ describe("AccountingPage tabs", () => {
   });
 
   it("loads the Reports aggregate directly from Go when selected", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
     const { calls } = stubAccounting();
     await renderReady();
 
@@ -1146,6 +1144,7 @@ describe("AccountingPage tabs", () => {
     const reportCalls = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body ?? "{}") as { capabilityId?: string });
     expect(reportCalls.map((call) => call.capabilityId).sort()).toEqual([
       "accounting.balanceSheet",
+      "accounting.cashBasisReport",
       "accounting.cashFlow",
       "accounting.incomeStatement",
       "accounting.listBankingWorkspace",
@@ -1157,7 +1156,6 @@ describe("AccountingPage tabs", () => {
   });
 
   it("surfaces Go FX permission failures instead of presenting missing report data", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
     stubAccounting({ goUnavailableReport: "accounting.unrealizedFxExposure" });
     render(<AccountingPage />);
 
@@ -1166,7 +1164,6 @@ describe("AccountingPage tabs", () => {
   });
 
   it("fails the report load on a pending required Go capability", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
     stubAccounting({
       goReportResponse: (capabilityId) => capabilityId === "accounting.incomeStatement"
         ? Response.json({ pendingApproval: true }, { status: 202 })
@@ -1198,7 +1195,7 @@ describe("AccountingPage tabs", () => {
     expect(screen.getByText(/1 foreign-currency bill is shown/)).toBeTruthy();
   });
 
-  it("fails the page when the books or reports cannot load, matching the legacy route", async () => {
+  it("fails the page when Go reports cannot load", async () => {
     stubAccounting({ reportsStatus: 500 });
     render(<AccountingPage />);
 
@@ -1425,7 +1422,6 @@ describe("AccountingPage tabs", () => {
   });
 
   it("renders the customer statement returned by Go", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__", true);
     const { calls } = stubAccounting({
       goCustomerStatementResponse: () => Response.json({ ok: true, data: { currencies: [{
         currency: "USD",
@@ -1452,7 +1448,6 @@ describe("AccountingPage tabs", () => {
   });
 
   it("clears a prior customer statement and ignores its late response after selection changes", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CUSTOMER_STATEMENT_READS__", true);
     let resolveFirstStatement!: (response: Response) => void;
     const firstStatement = new Promise<Response>((resolve) => { resolveFirstStatement = resolve; });
     let statementRequest = 0;

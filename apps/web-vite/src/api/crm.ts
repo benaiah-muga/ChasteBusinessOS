@@ -481,6 +481,7 @@ export async function readPendingCrmTaskDetailsForScope(
       const storageKey = window.localStorage.key(index);
       if (!storageKey?.startsWith(prefix)) continue;
       const taskId = storageKey.slice(prefix.length);
+      if (taskId.endsWith(":completed")) continue;
       if (!uuid.safeParse(taskId).success) throw new CrmApiError(0, "An unresolved follow-up update has an invalid task identity. Contact an administrator before continuing.");
       const raw = window.localStorage.getItem(storageKey);
       if (raw === null) throw new CrmApiError(0, "An unresolved follow-up update changed during recovery. Reload CRM before continuing.");
@@ -524,40 +525,85 @@ export async function readPendingCrmCustomerCreate(scope: CrmTaskRetryScope): Pr
 export async function submitCrmTaskMutation(
   action: CrmTaskMutation,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<{ taskId: string } | { completed: true } | { taskId: string; previous: { dueAt: string | null; assigneeUserId: string | null } }>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_TASK_WRITES__ !== "undefined" && __GO_CRM_TASK_WRITES__);
-  if (!useGo) return submitCrmAction("/api/crm", action, signal);
   if (!CrmTaskMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the task details and correct invalid values before submitting.");
   const scope = await crmTaskScope(retryScope);
-  const target = action.action === "createTask" ? "create" : action.action === "completeTask" ? `complete:${action.taskId}` : `details:${action.taskId}`;
-  const attempt = await crmTaskAttempt(action, scope, target);
+  const target = action.action === "createTask" ? "create" : action.action === "completeTask" ? "complete:" + action.taskId : "details:" + action.taskId;
   const capabilityId = action.action === "createTask" ? "crm.createTask" : action.action === "completeTask" ? "crm.completeTask" : "crm.updateTaskDetails";
   const outputSchema = action.action === "createTask" ? CreateTaskOutputSchema : action.action === "completeTask" ? CompleteTaskOutputSchema : UpdateTaskDetailsOutputSchema;
-  try {
-    const { response, body } = await request("/api/capabilities/execute", {
-      method: "POST",
-      body: JSON.stringify({ capabilityId, input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
-    }, signal);
-    if (response.status === 404) {
-      throw new CrmApiError(404, "The Go CRM task route is unavailable. Ask an administrator to check the Go task route configuration.", true);
+  return withCrmTaskWriteLock(scope.scopeHash, target, async () => {
+    const fingerprint = await crmTaskFingerprint(action);
+    const cached = readRecentCrmTaskResult(scope.scopeHash, target, fingerprint);
+    if (cached !== null) {
+      const parsed = outputSchema.safeParse(cached);
+      if (!parsed.success || (action.action === "updateTaskDetails" && (!("taskId" in parsed.data) || parsed.data.taskId !== action.taskId))) {
+        throw new CrmApiError(0, "A saved CRM task result could not be verified. Contact an administrator before retrying.");
+      }
+      return { kind: "completed", data: parsed.data };
     }
-    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
-    if (outcome.kind === "pending") return outcome;
-    const parsed = outputSchema.safeParse(outcome.data);
-    if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected task result.", true);
-    if (action.action === "updateTaskDetails" && (!("taskId" in parsed.data) || parsed.data.taskId !== action.taskId)) {
-      throw new CrmApiError(response.status, "The CRM service returned an unexpected task result.", true);
-    }
-    await clearCrmTaskAttempt(attempt.storageKey);
-    return { kind: "completed", data: parsed.data };
-  } catch (error) {
-    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
+    const attempt = await crmTaskAttempt(action, scope, target);
+    try {
+      const { response, body } = await request("/api/capabilities/execute", {
+        method: "POST",
+        headers: { "X-Organization-ID": scope.organizationId },
+        body: JSON.stringify({ capabilityId, input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
+      }, signal);
+      if (response.status === 404) throw new CrmApiError(404, "The Go CRM task route is unavailable. Ask an administrator to check the Go task route configuration.", true);
+      const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+      if (outcome.kind === "pending") return outcome;
+      const parsed = outputSchema.safeParse(outcome.data);
+      if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected task result.", true);
+      if (action.action === "updateTaskDetails" && (!("taskId" in parsed.data) || parsed.data.taskId !== action.taskId)) {
+        throw new CrmApiError(response.status, "The CRM service returned an unexpected task result.", true);
+      }
+      persistCrmTaskResult(scope.scopeHash, target, fingerprint, parsed.data);
       await clearCrmTaskAttempt(attempt.storageKey);
+      return { kind: "completed", data: parsed.data };
+    } catch (error) {
+      if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
+        await clearCrmTaskAttempt(attempt.storageKey);
+      }
+      throw error;
     }
-    throw error;
+  });
+}
+
+async function withCrmTaskWriteLock<T>(scopeHash: string, target: string, submit: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) throw new CrmApiError(0, "This browser cannot safely coordinate CRM task retries across tabs. Enable Web Locks before changing follow-up tasks.", true);
+  try {
+    return await lockManager.request("chaste:crm-task-write:" + scopeHash + ":" + target, { mode: "exclusive" }, submit);
+  } catch (error) {
+    if (error instanceof CrmApiError) throw error;
+    throw new CrmApiError(0, "The browser could not safely coordinate this CRM task across tabs. Close other CRM tabs and try again.", true);
   }
+}
+
+function readRecentCrmTaskResult(scopeHash: string, target: string, fingerprint: string): unknown | null {
+  const storageKey = CRM_TASK_INTENT_PREFIX + scopeHash + ":" + target + ":completed";
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage before changing CRM data so an uncertain result can be retried safely."); }
+  if (raw === null) return null;
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new CrmApiError(0, "A saved CRM task result is malformed. Contact an administrator before retrying."); }
+  const parsed = z.object({ fingerprint: z.string().length(64), completedAt: z.number().int().nonnegative(), data: z.unknown() }).strict().safeParse(decoded);
+  if (!parsed.success) throw new CrmApiError(0, "A saved CRM task result is malformed. Contact an administrator before retrying.");
+  const age = Date.now() - parsed.data.completedAt;
+  if (age < 0 || age > 5_000) {
+    try { window.localStorage.removeItem(storageKey); }
+    catch { throw new CrmApiError(0, "A stale CRM task result could not be cleared. Reload CRM before retrying."); }
+    return null;
+  }
+  return parsed.data.fingerprint === fingerprint ? parsed.data.data : null;
+}
+
+function persistCrmTaskResult(scopeHash: string, target: string, fingerprint: string, data: unknown): void {
+  const storageKey = CRM_TASK_INTENT_PREFIX + scopeHash + ":" + target + ":completed";
+  try { window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, completedAt: Date.now(), data })); }
+  catch { throw new CrmApiError(0, "The CRM task was saved, but its cross-tab result could not be kept. Reload CRM before retrying.", true); }
 }
 
 async function crmTaskScope(scope?: CrmTaskRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {

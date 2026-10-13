@@ -423,12 +423,6 @@ const GoBillCreditNoteOutputSchema = z.object({
   billBalanceMinor: z.number().int().safe().nonnegative(),
 }).strict();
 
-const BillCreditNoteOutputSchema = z.object({
-  entryId: z.string().min(1),
-  creditedMinor: z.number().int().safe(),
-  billBalanceMinor: z.number().int().safe(),
-}).strict();
-
 const PriceHistoryOutputSchema = z.object({ rows: z.array(PriceHistoryRowSchema) }).strict();
 const SupplierPerformanceOutputSchema = z.object({ vendors: z.array(SupplierPerformanceRowSchema) }).strict();
 /** Writes whose result the page does not read still have to come back as an object. */
@@ -634,8 +628,6 @@ export async function createPurchasingVendor(
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = CreateVendorSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the purchasing details and try again.");
-  const useGo = (typeof __GO_PURCHASING_VENDOR_SLICE__ !== "undefined" && __GO_PURCHASING_VENDOR_SLICE__) || (typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__);
-  if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "adding the vendor", signal);
   const goAction = GoCreateVendorSchema.safeParse(parsedAction.data);
   if (!goAction.success) throw new PurchasingApiError(0, "Enter a valid vendor name and email address before adding the vendor.");
   return submitPurchaseFinanceCapability(goAction.data, "purchasing.createVendor", CreateVendorOutputSchema, "adding the vendor", signal, retryScope);
@@ -1138,8 +1130,6 @@ export async function createPurchasingBill(
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = CreateBillSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the bill details and try again.");
-  const useGo = goPurchasingFinanceWritesUseGo();
-  if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "recording the bill", signal);
   const goAction = GoCreateBillSchema.safeParse(parsedAction.data);
   if (!goAction.success) throw new PurchasingApiError(0, "Check the bill quantities, prices, tax codes, and PO line references before submitting.");
   return submitPurchaseFinanceCapability(goAction.data, "purchasing.createBill", CreateBillOutputSchema, "recording the bill", signal, retryScope);
@@ -1152,8 +1142,6 @@ export async function payPurchasingBill(
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = PayBillSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the payment amount and try again.");
-  const useGo = goPurchasingFinanceWritesUseGo();
-  if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "paying the bill", signal);
   const goAction = GoPayBillSchema.safeParse(parsedAction.data);
   if (!goAction.success) throw new PurchasingApiError(0, "Enter a positive payment amount within the supported database range.");
   return submitPurchaseFinanceCapability(goAction.data, "purchasing.payBill", PayBillOutputSchema, "paying the bill", signal, retryScope);
@@ -1192,8 +1180,6 @@ export async function creditPurchasingBill(
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = BillCreditNoteSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the bill credit amount and reason, then try again.");
-  const useGo = goPurchasingFinanceWritesUseGo();
-  if (!useGo) return submit(parsedAction.data, BillCreditNoteOutputSchema, "crediting the bill", signal);
   const goAction = GoBillCreditNoteSchema.safeParse(parsedAction.data);
   if (!goAction.success) throw new PurchasingApiError(0, "Enter a valid bill, positive credit amount, and reason between 3 and 500 characters.");
   return submitPurchaseFinanceCapability(goAction.data, "purchasing.billCreditNote", GoBillCreditNoteOutputSchema, "crediting the bill", signal, retryScope);

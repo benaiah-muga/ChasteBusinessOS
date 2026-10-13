@@ -2783,11 +2783,10 @@ new owners and the manifest shows zero legacy runtime paths.
      the browser error log was empty. See proof 333.
 244. (Complete) Route Vite
      cash-basis summary reads through the session-authenticated
-     `accounting.cashBasisReport` capability when
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Strictly validate the Go response,
-     including its `accrualExpenseMinor` field, then project to the existing
-     five-field UI shape. Keep failures nullable and do not fall back after a
-     selected Go request; set `CHASTE_GO_ACCOUNTING_CASH_BASIS=0` for rollback.
+     `accounting.cashBasisReport` capability whenever the Go session capability
+     route is enabled. Strictly validate the Go response, including its
+     `accrualExpenseMinor` field, then project to the existing five-field UI
+     shape. Keep failures nullable and do not fall back to the legacy API.
      On 2026-10-12, authenticated Vite `/accounting` loaded the 2026 cash-basis
      summary through `accounting.cashBasisReport`; Go returned HTTP 200 with
      the expected zero-valued summary, and the page rendered its overview. No

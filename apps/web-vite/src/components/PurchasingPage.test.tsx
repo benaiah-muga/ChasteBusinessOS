@@ -1247,7 +1247,7 @@ describe("PurchasingPage", () => {
   it("sends the PO line reference once three-way matching is satisfied", async () => {
     const fetchMock = purchasingFetch();
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="actor-bill-entry" organizationId="org-bill-entry" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
@@ -1260,11 +1260,14 @@ describe("PurchasingPage", () => {
     fireEvent.change(screen.getByLabelText("PO line #"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Record bill" }));
 
-    await waitFor(() => expect(postsTo(fetchMock)).toHaveLength(1));
-    expect(postsTo(fetchMock)[0]).toMatchObject({
-      action: "createBill",
-      poNumber: 42,
-      lines: [{ description: "Canvas bags", quantity: 2000, unitPriceMinor: 6250, poLineNumber: 1 }],
+    await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(1));
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.createBill",
+      input: {
+        poNumber: 42,
+        lines: [{ description: "Canvas bags", quantity: 2000, unitPriceMinor: 6250, poLineNumber: 1 }],
+      },
+      intentId: expect.any(String),
     });
   });
 
@@ -1323,7 +1326,7 @@ describe("PurchasingPage", () => {
   it("refuses to pay more than a bill owes and sends integer minor units", async () => {
     const fetchMock = purchasingFetch({ workspace: workspaceFixture({ bills: [billFixture()] }) });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="actor-bill-payment" organizationId="org-bill-payment" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
@@ -1340,8 +1343,12 @@ describe("PurchasingPage", () => {
     expect((pay as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(pay);
 
-    await waitFor(() => expect(postsTo(fetchMock)).toHaveLength(1));
-    expect(postsTo(fetchMock)[0]).toMatchObject({ action: "payBill", billNumber: 7, amountMinor: 5000 });
+    await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(1));
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.payBill",
+      input: { billNumber: 7, amountMinor: 5000 },
+      intentId: expect.any(String),
+    });
   });
 
   it("points at the ported reports instead of rebuilding them", async () => {

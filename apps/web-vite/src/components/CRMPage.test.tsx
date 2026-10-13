@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CRMPage } from "./CRMPage";
 import { submitCrmTaskMutation } from "../api/crm";
 
@@ -64,6 +64,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+beforeEach(() => { stubCrmDealStageLocks(); });
 
 describe("Vite CRM page", () => {
   it("loads customer, deal, task, and saved-view collections directly through Go capabilities", async () => {
@@ -633,13 +635,13 @@ describe("Vite CRM page", () => {
         return Response.json({ tasks: [] });
       }
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
-      if (path === "/api/crm" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
         return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
       }
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
     fireEvent.change(screen.getByLabelText("Task"), { target: { value: "Review renewal terms" } });
@@ -654,14 +656,17 @@ describe("Vite CRM page", () => {
     expect((screen.getByLabelText("Customer") as HTMLSelectElement).value).toBe(customerId);
     expect((screen.getByLabelText("Note") as HTMLInputElement).value).toBe("Include the updated service schedule");
     expect(taskReads).toBe(1);
-    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST");
+    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
-      action: "createTask",
-      title: "Review renewal terms",
-      dueAt: new Date("2026-10-15T12:00:00").toISOString(),
-      note: "Include the updated service schedule",
-      refType: "customer",
-      refId: customerId,
+      capabilityId: "crm.createTask",
+      input: {
+        title: "Review renewal terms",
+        dueAt: new Date("2026-10-15T12:00:00").toISOString(),
+        note: "Include the updated service schedule",
+        refType: "customer",
+        refId: customerId,
+      },
+      intentId: expect.any(String),
     });
   });
 
@@ -694,11 +699,11 @@ describe("Vite CRM page", () => {
         if (teamReads === 1) return new Response(null, { status: 503 });
         return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
       }
-      if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { taskId } });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { taskId } });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
     expect(await screen.findByRole("alert")).not.toBeNull();
@@ -712,11 +717,11 @@ describe("Vite CRM page", () => {
     expect(assignedTask.closest("li")?.textContent).toContain("Avery");
     expect(teamReads).toBe(2);
     expect(taskReads).toBe(2);
-    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST");
+    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
-      action: "createTask",
-      title: "Review renewal terms",
-      assigneeUserId: ownerId,
+      capabilityId: "crm.createTask",
+      input: { title: "Review renewal terms", assigneeUserId: ownerId },
+      intentId: expect.any(String),
     });
   });
 
@@ -738,11 +743,11 @@ describe("Vite CRM page", () => {
         teamReads += 1;
         return teamResponse;
       }
-      if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { taskId: "44444444-4444-4444-8444-444444444444" } });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { taskId: "44444444-4444-4444-8444-444444444444" } });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
     expect(await screen.findByText("Loading team members…")).not.toBeNull();
@@ -759,10 +764,10 @@ describe("Vite CRM page", () => {
 
     expect(await screen.findByText("CRM changes saved.")).not.toBeNull();
     expect(taskReads).toBe(2);
-    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST");
+    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST");
     const body = JSON.parse(String(post?.[1]?.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({ action: "createTask", title: "Prepare renewal notes" });
-    expect(body).not.toHaveProperty("assigneeUserId");
+    expect(body).toMatchObject({ capabilityId: "crm.createTask", input: { title: "Prepare renewal notes" }, intentId: expect.any(String) });
+    expect(body.input).not.toHaveProperty("assigneeUserId");
   });
 
   it("keeps customer profile editing and invoice/document timeline tabs available", async () => {
@@ -1139,11 +1144,11 @@ describe("Vite CRM page", () => {
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [{ id: taskId, title: "Review renewal", doneAt: null }] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
-      if (path === "/api/crm" && init?.method === "POST") return Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
     const completion = screen.getByRole("checkbox", { name: "Review renewal" }) as HTMLInputElement;
@@ -1151,11 +1156,49 @@ describe("Vite CRM page", () => {
 
     expect(await screen.findByText("Manager approval required")).not.toBeNull();
     expect(completion.checked).toBe(false);
-    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")?.[1]?.body))).toMatchObject({ action: "completeTask", taskId });
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")?.[1]?.body))).toMatchObject({ capabilityId: "crm.completeTask", input: { taskId }, intentId: expect.any(String) });
+  });
+
+  it("ignores a task completion response after the active organization changes", async () => {
+    const taskId = "99999999-9999-4999-8999-999999999999";
+    const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    let finishCompletion!: (response: Response) => void;
+    const completionResponse = new Promise<Response>((resolve) => { finishCompletion = resolve; });
+    let taskReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") {
+        taskReads += 1;
+        return Response.json({ tasks: [{ id: taskId, title: "Review renewal", doneAt: null }] });
+      }
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return completionResponse;
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    const completion = await screen.findByRole("checkbox", { name: "Review renewal" });
+    fireEvent.click(completion);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")).toBe(true));
+
+    view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
+    const taskReadsAfterSwitch = taskReads;
+
+    await act(async () => {
+      finishCompletion(Response.json({ ok: true, data: { completed: true } }));
+    });
+
+    expect(taskReads).toBe(taskReadsAfterSwitch);
+    expect(screen.queryByText("CRM changes saved.")).toBeNull();
+    expect((screen.getByRole("checkbox", { name: "Review renewal" }) as HTMLInputElement).checked).toBe(false);
   });
 
   it("saves and retries an exact task detail update through the Go task selector", async () => {
-    vi.stubGlobal("__GO_CRM_TASK_WRITES__", true);
     const taskId = "99999999-9999-4999-8999-999999999999";
     const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
     const task = { id: taskId, title: "Review renewal", dueAt: null, doneAt: null, assigneeUserId: null, assigneeName: null };
@@ -1195,8 +1238,80 @@ describe("Vite CRM page", () => {
     expect(bodies[1]).toEqual(bodies[0]);
   });
 
+  it("keeps the new organization task draft when an old task create resolves", async () => {
+    let finishCreate!: (response: Response) => void;
+    const createResponse = new Promise<Response>((resolve) => { finishCreate = resolve; });
+    const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return createResponse;
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    const taskTitle = await screen.findByLabelText("Task");
+    fireEvent.change(taskTitle, { target: { value: "Old organization task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")).toBe(true));
+
+    view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
+    const newTaskTitle = await screen.findByLabelText("Task");
+    await waitFor(() => expect((newTaskTitle as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(newTaskTitle, { target: { value: "New organization task" } });
+
+    await act(async () => {
+      finishCreate(Response.json({ ok: true, data: { taskId: "77e93149-61d7-48ed-929d-754ddfa263b1" } }));
+    });
+
+    expect((screen.getByLabelText("Task") as HTMLInputElement).value).toBe("New organization task");
+    expect(screen.queryByText("CRM changes saved.")).toBeNull();
+  });
+
+  it("keeps the new organization task detail editor when an old update resolves", async () => {
+    const taskId = "99999999-9999-4999-8999-999999999999";
+    let finishUpdate!: (response: Response) => void;
+    const updateResponse = new Promise<Response>((resolve) => { finishUpdate = resolve; });
+    const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [{ id: taskId, title: "Review renewal", dueAt: null, doneAt: null, assigneeUserId: null }] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return updateResponse;
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    fireEvent.change(await screen.findByLabelText("Task due date"), { target: { value: "2026-10-15" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")).toBe(true));
+
+    view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    const dueDate = await screen.findByLabelText("Task due date");
+    fireEvent.change(dueDate, { target: { value: "2026-10-20" } });
+
+    await act(async () => {
+      finishUpdate(Response.json({ ok: true, data: { taskId, previous: { dueAt: null, assigneeUserId: null } } }));
+    });
+
+    expect((screen.getByLabelText("Task due date") as HTMLInputElement).value).toBe("2026-10-20");
+    expect(screen.queryByText("CRM changes saved.")).toBeNull();
+  });
+
   it("recovers task detail retries on mount and prevents completion until resolved", async () => {
-    vi.stubGlobal("__GO_CRM_TASK_WRITES__", true);
     const taskId = "99999999-9999-4999-8999-999999999999";
     const otherTaskId = "88888888-8888-4888-8888-888888888888";
     const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
@@ -1204,7 +1319,7 @@ describe("Vite CRM page", () => {
     const scope = { actorId: customerId, organizationId: dealId };
     const preseedFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 }));
     vi.stubGlobal("fetch", preseedFetch);
-    await submitCrmTaskMutation(action, undefined, true, scope);
+    await submitCrmTaskMutation(action, undefined, scope);
     const savedAttempt = JSON.parse(String(preseedFetch.mock.calls[0]?.[1]?.body));
 
     let capabilityWrites = 0;

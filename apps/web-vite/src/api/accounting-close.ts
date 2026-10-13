@@ -49,10 +49,6 @@ const ErrorResponseSchema = z.object({ error: z.string().optional(), message: z.
 export type AccountingCloseTask = z.infer<typeof CloseTaskSchema>;
 export type AccountingCloseReadiness = z.infer<typeof CloseReadinessSchema>;
 
-export function accountingPeriodCloseReadsUseGo(): boolean {
-  return typeof __GO_ACCOUNTING_PERIOD_CLOSE_READS__ !== "undefined" && __GO_ACCOUNTING_PERIOD_CLOSE_READS__;
-}
-
 export class AccountingCloseApiError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -122,18 +118,14 @@ export async function fetchAccountingCloseReadiness(
   if (!Number.isSafeInteger(year) || year < 2000 || year > 2100 || !Number.isSafeInteger(month) || month < 1 || month > 12) {
     throw new AccountingCloseApiError(400, "Choose a valid close period.");
   }
-  const useGo = accountingPeriodCloseReadsUseGo();
-  const query = new URLSearchParams({ year: String(year), month: String(month) });
-  const { response, body } = useGo
-    ? await getJson("/api/capabilities/execute", signal, {
-      method: "POST",
-      body: JSON.stringify({
-        capabilityId: "accounting.periodCloseWorkbench",
-        input: { year, month },
-        intentId: crypto.randomUUID(),
-      }),
-    })
-    : await getJson(`/api/accounting/close?${query.toString()}`, signal);
+  const { response, body } = await getJson("/api/capabilities/execute", signal, {
+    method: "POST",
+    body: JSON.stringify({
+      capabilityId: "accounting.periodCloseWorkbench",
+      input: { year, month },
+      intentId: crypto.randomUUID(),
+    }),
+  });
   if (!response.ok) {
     throw new AccountingCloseApiError(response.status, errorMessage(response.status, body, "period-close readiness"));
   }

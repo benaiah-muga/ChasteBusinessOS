@@ -568,18 +568,22 @@ describe("governed purchasing writes", () => {
     }
   });
 
-  it("keeps legacy vendor creation as the default when the Go slice flag is off", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { vendorId: "vendor-1" } }));
+  it("creates vendors through Go even when purchasing route selectors are off", async () => {
+    vi.stubGlobal("__GO_PURCHASING_VENDOR_SLICE__", false);
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", false);
+    const vendorId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { vendorId } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }))
-      .resolves.toEqual({ kind: "completed", data: { vendorId: "vendor-1" } });
+    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }, undefined, retryScope))
+      .resolves.toEqual({ kind: "completed", data: { vendorId } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/purchasing");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(postedBody(fetchMock.mock.calls[0]!).capabilityId).toBe("purchasing.createVendor");
   });
 
   it("reuses the vendor intent after an uncertain response and rejects malformed Go output", async () => {
-    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", false);
     const vendorId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("connection lost"))
@@ -597,7 +601,7 @@ describe("governed purchasing writes", () => {
   });
 
   it("routes bill creation and payment through Go with stable scoped attempts and strict results", async () => {
-    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", false);
     const billNumber = 73;
     const entryId = "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f";
     const paymentId = "3c9e3c30-1e5c-4b3c-9d4b-5b3c4d5e6f70";
@@ -773,14 +777,15 @@ describe("governed purchasing writes", () => {
   });
 
   it("stamps an intentId on every POST for idempotency", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { entryId: "e-1", creditedMinor: 100, billBalanceMinor: 0 } }));
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { entryId: "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f", creditedMinor: 100, billBalanceMinor: 0 } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await creditPurchasingBill({ action: "billCreditNote", billId: "b-1", amountMinor: 100, reason: "damaged" });
+    await creditPurchasingBill({ action: "billCreditNote", billId: "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f", amountMinor: 100, reason: "damaged" }, undefined, retryScope);
     const [, init] = fetchMock.mock.calls[0]!;
     const body = postedBody(fetchMock.mock.calls[0]!);
     expect(init.method).toBe("POST");
-    expect(body.action).toBe("billCreditNote");
+    expect(body.capabilityId).toBe("purchasing.billCreditNote");
+    expect(body.input).toMatchObject({ billId: "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f", amountMinor: 100, reason: "damaged" });
     expect(body.intentId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 
@@ -790,7 +795,7 @@ describe("governed purchasing writes", () => {
       { status: 202 },
     )));
 
-    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 5000 })).resolves.toEqual({
+    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 5000 }, undefined, retryScope)).resolves.toEqual({
       kind: "pending",
       reason: "Over the payment threshold.",
     });
@@ -798,11 +803,11 @@ describe("governed purchasing writes", () => {
 
   it("falls back to the kernel error field, then to a generic reason, for a 202", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ pendingApproval: true, error: "Needs a second approver." }, { status: 202 })));
-    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 5000 }))
+    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 5000 }, undefined, retryScope))
       .resolves.toEqual({ kind: "pending", reason: "Needs a second approver." });
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ pendingApproval: true }, { status: 202 })));
-    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 5000 }))
+    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 5000 }, undefined, retryScope))
       .resolves.toEqual({ kind: "pending", reason: "This action is waiting for approval." });
   });
 
@@ -1050,9 +1055,12 @@ describe("purchasing intel reads", () => {
 });
 
 describe("purchasing error mapping", () => {
+  const retryScope = { actorId: "actor-purchasing-errors", organizationId: "org-purchasing-errors" };
+  beforeEach(() => { stubPurchasingLocks(); });
+
   it("prefers the service message and falls back per status", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ message: "Vendor is deactivated." }, { status: 400 })));
-    await expect(createPurchasingVendor({ action: "createVendor", name: "X" }))
+    await expect(createPurchasingVendor({ action: "createVendor", name: "X Supplies" }, undefined, retryScope))
       .rejects.toMatchObject({ status: 400, message: "Vendor is deactivated." });
 
     for (const [status, expected] of [
@@ -1061,7 +1069,7 @@ describe("purchasing error mapping", () => {
       [428, "Finish setting up your workspace before using Purchasing."],
     ] as const) {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({}, { status })));
-      await expect(createPurchasingVendor({ action: "createVendor", name: "X" }))
+      await expect(createPurchasingVendor({ action: "createVendor", name: "X Supplies" }, undefined, retryScope))
         .rejects.toMatchObject({ status, message: expected });
     }
   });

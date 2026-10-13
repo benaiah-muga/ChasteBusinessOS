@@ -170,6 +170,10 @@ func TestGoCRMTasksParsersMatchCRMContracts(t *testing.T) {
 func TestGoCRMTasksEnforceTenancyCompletionAuditsAndReceiptReplay(t *testing.T) {
 	fx := newExecutorFixture(t)
 	localCustomerID := seedCRMDealCustomer(t, fx, fx.orgID, "Local customer")
+	foreignCustomerID := seedCRMDealCustomer(t, fx, fx.otherOrgID, "Foreign customer")
+	if _, err := executeCRMTaskWithError(fx, createTaskCapabilityID, json.RawMessage(fmt.Sprintf(`{"title":"Cross organization follow-up","refType":"customer","refId":%q}`, foreignCustomerID)), "crm-task-foreign-customer-ref"); err == nil || !strings.Contains(err.Error(), "customer reference not found in this organization") {
+		t.Fatalf("createTask foreign customer reference error=%v", err)
+	}
 	dueAt := "2026-10-01T09:30:00.123Z"
 	createPayload := json.RawMessage(fmt.Sprintf(`{"title":"Call Acme","dueAt":%q,"assigneeUserId":%q,"refType":"customer","refId":%q,"note":"first follow-up"}`, dueAt, fx.userID, localCustomerID))
 	first := executeCRMTask(t, fx, createTaskCapabilityID, createPayload, "crm-task-receipt-create")

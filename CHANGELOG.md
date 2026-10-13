@@ -22,6 +22,15 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite HR expense claims use Go capabilities only and preserve each claim's
   stored currency. Claim and policy inputs follow currency-specific minor units
   and reject values with excess fractional precision.
+- Vite accounting invoices, reports, reminders, customer statements, close
+  readiness, and cash-basis summaries now use Go capabilities without legacy
+  API fallback.
+- Vite purchasing vendor and bill creation, bill payment, and bill credits now
+  use Go capabilities. Credits on foreign-currency bills fail closed until an
+  exchange rate is available.
+- Vite CRM task creation, completion, and detail updates now use Go capabilities
+  with organization-bound, retry-safe requests across tabs and workspace
+  changes.
 - Go Messaging agent sessions now advertise only the CRM capabilities with
   authored tool descriptions and input schemas. Broader Go capabilities remain
   unavailable to model tool calls until their contracts are authored.

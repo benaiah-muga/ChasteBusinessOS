@@ -29,6 +29,13 @@ function stubCrmDealStageLocks() {
   return request;
 }
 
+function clearCompletedTaskResultMarkers() {
+  for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.localStorage.key(index);
+    if (key?.startsWith("chaste:crm:task-intent:") && key.endsWith(":completed")) window.localStorage.removeItem(key);
+  }
+}
+
 describe("CRM API client", () => {
   beforeEach(() => { stubCrmDealStageLocks(); });
 
@@ -424,14 +431,16 @@ describe("CRM API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { completed: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer", note: "Discuss renewal", refType: "customer", refId: customerId }, undefined, true, scope)).resolves.toEqual({ kind: "completed", data: { taskId } });
-    await expect(submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, true, scope)).resolves.toEqual({ kind: "completed", data: { completed: true } });
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer", note: "Discuss renewal", refType: "customer", refId: customerId }, undefined, scope)).resolves.toEqual({ kind: "completed", data: { taskId } });
+    await expect(submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, scope)).resolves.toEqual({ kind: "completed", data: { completed: true } });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(fetchMock.mock.calls.map(([, init]) => (init?.headers as Record<string, string>)["X-Organization-ID"])).toEqual([dealId, dealId]);
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createTask", input: { title: "Call customer", note: "Discuss renewal", refType: "customer", refId: customerId }, intentId: expect.any(String) });
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ capabilityId: "crm.completeTask", input: { taskId }, intentId: expect.any(String) });
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId, extra: true } })));
-    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true, scope)).rejects.toMatchObject({ name: "CrmApiError", message: "The CRM service returned an unexpected task result." });
+    clearCompletedTaskResultMarkers();
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, scope)).rejects.toMatchObject({ name: "CrmApiError", message: "The CRM service returned an unexpected task result." });
   });
 
   it("routes task detail updates through Go and keeps the exact pending payload when the Go route is missing", async () => {
@@ -445,10 +454,10 @@ describe("CRM API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId, previous: { dueAt: "2026-10-15T12:00:00.000Z", assigneeUserId: null } } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitCrmTaskMutation(action, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
+    await expect(submitCrmTaskMutation(action, undefined, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
     await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toEqual(action);
     await expect(readPendingCrmTaskDetailsForScope(scope)).resolves.toEqual([action]);
-    await expect(submitCrmTaskMutation(action, undefined, true, scope)).rejects.toMatchObject({
+    await expect(submitCrmTaskMutation(action, undefined, scope)).rejects.toMatchObject({
       status: 404,
       requestMayHaveReachedServer: true,
       message: "The Go CRM task route is unavailable. Ask an administrator to check the Go task route configuration.",
@@ -462,19 +471,53 @@ describe("CRM API client", () => {
     await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toEqual(action);
     await expect(readPendingCrmTaskDetailsForScope(scope)).resolves.toEqual([action]);
 
-    await submitCrmTaskMutation(action, undefined, true, scope);
+    await submitCrmTaskMutation(action, undefined, scope);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute", "/api/capabilities/execute"]);
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)).intentId).toBe(goBody.intentId);
     await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toBeNull();
     await expect(readPendingCrmTaskDetailsForScope(scope)).resolves.toEqual([]);
 
     const otherTaskId = "4d906ed9-70da-4e66-a8e7-a192cfaf42db";
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId: otherTaskId, previous: { dueAt: null, assigneeUserId: null } } })));
-    await expect(submitCrmTaskMutation(action, undefined, true, scope)).rejects.toMatchObject({ message: "The CRM service returned an unexpected task result." });
-    await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toEqual(action);
+    const actionWithWrongTaskOutput = { ...action, taskId: otherTaskId };
+    const unexpectedTaskId = "6d39b818-fac3-41cb-8e71-3c1b27856f4a";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId: unexpectedTaskId, previous: { dueAt: null, assigneeUserId: null } } })));
+    await expect(submitCrmTaskMutation(actionWithWrongTaskOutput, undefined, scope)).rejects.toMatchObject({ message: "The CRM service returned an unexpected task result." });
+    await expect(readPendingCrmTaskDetails(scope, otherTaskId)).resolves.toEqual(actionWithWrongTaskOutput);
 
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId, previous: { dueAt: null, assigneeUserId: null }, extra: true } })));
-    await expect(submitCrmTaskMutation(action, undefined, true, scope)).rejects.toMatchObject({ message: "The CRM service returned an unexpected task result." });
+    const extraOutputTaskId = "64cd9667-bd03-440e-a20d-11dc639625f0";
+    const actionWithExtraOutput = { ...action, taskId: extraOutputTaskId };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId: extraOutputTaskId, previous: { dueAt: null, assigneeUserId: null }, extra: true } })));
+    await expect(submitCrmTaskMutation(actionWithExtraOutput, undefined, scope)).rejects.toMatchObject({ message: "The CRM service returned an unexpected task result." });
+  });
+
+  it("binds task capabilities to the selected organization and surfaces Go organization mismatches", async () => {
+    const scope = { actorId: customerId, organizationId: dealId };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "Selected organization does not match this session" }, { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, scope)).rejects.toMatchObject({ status: 403 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>)["X-Organization-ID"]).toBe(dealId);
+  });
+
+  it("serializes identical task submissions across tabs and reuses the completed result", async () => {
+    const scope = { actorId: customerId, organizationId: dealId };
+    const taskId = "77e93149-61d7-48ed-929d-754ddfa263b1";
+    let resolveResponse!: (response: Response) => void;
+    const response = new Promise<Response>((resolve) => { resolveResponse = resolve; });
+    const fetchMock = vi.fn(async () => response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const second = submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, scope);
+    resolveResponse(Response.json({ ok: true, data: { taskId } }));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { kind: "completed", data: { taskId } },
+      { kind: "completed", data: { taskId } },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("retains the exact create-task draft and intent while pending and fails closed on a missing Go route", async () => {
@@ -485,20 +528,20 @@ describe("CRM API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId: "77e93149-61d7-48ed-929d-754ddfa263b1" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitCrmTaskMutation(action, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
+    await expect(submitCrmTaskMutation(action, undefined, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
     await expect(readPendingCrmTaskCreate(scope)).resolves.toEqual(action);
     const pendingIntentId = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
     const goFetch = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId: "77e93149-61d7-48ed-929d-754ddfa263b1" } }));
     vi.stubGlobal("fetch", goFetch);
-    await expect(submitCrmTaskMutation(action, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(submitCrmTaskMutation(action, undefined, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     const goBody = JSON.parse(String(goFetch.mock.calls[0]?.[1]?.body));
     expect(goFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
     expect(goBody.intentId).toBe(pendingIntentId);
     await expect(readPendingCrmTaskCreate(scope)).resolves.toEqual(action);
 
-    await submitCrmTaskMutation(action, undefined, true, scope);
+    await submitCrmTaskMutation(action, undefined, scope);
     expect(goFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
     expect(JSON.parse(String(goFetch.mock.calls[1]?.[1]?.body)).intentId).toBe(pendingIntentId);
     await expect(readPendingCrmTaskCreate(scope)).resolves.toBeNull();
@@ -512,10 +555,10 @@ describe("CRM API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { completed: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
     const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-    await submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, true, scope);
+    await submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, scope);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId).toBe(first.intentId);
   });
@@ -526,11 +569,11 @@ describe("CRM API client", () => {
       .mockRejectedValueOnce(new TypeError("connection reset"))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId: "77e93149-61d7-48ed-929d-754ddfa263b1" } }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true)).rejects.toMatchObject({ status: 0 });
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined)).rejects.toMatchObject({ status: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
-    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    await expect(submitCrmTaskMutation({ action: "createTask", title: "Different title" }, undefined, true, scope)).rejects.toMatchObject({ status: 0 });
-    await submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true, scope);
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Different title" }, undefined, scope)).rejects.toMatchObject({ status: 0 });
+    await submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, scope);
     const bodies = fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute").map(([, init]) => JSON.parse(String(init?.body)));
     expect(bodies).toHaveLength(2);
     expect(bodies[0]?.intentId).toBe(bodies[1]?.intentId);
@@ -660,6 +703,33 @@ describe("CRM API client", () => {
     Object.defineProperty(testNavigator, "locks", { configurable: true, value: undefined });
     vi.stubGlobal("navigator", testNavigator);
     await expect(submitCrmDealStageMove(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for task writes when Web Locks are unavailable or rejected", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "createTask" as const, title: "Call customer" };
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, "locks", { configurable: true, value: undefined });
+    vi.stubGlobal("navigator", testNavigator);
+
+    await expect(submitCrmTaskMutation(action, undefined, crmRetryScope)).rejects.toMatchObject({
+      status: 0,
+      requestMayHaveReachedServer: true,
+      message: "This browser cannot safely coordinate CRM task retries across tabs. Enable Web Locks before changing follow-up tasks.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    Object.defineProperty(testNavigator, "locks", {
+      configurable: true,
+      value: { request: vi.fn(async () => { throw new Error("lock request rejected"); }) },
+    });
+    await expect(submitCrmTaskMutation(action, undefined, crmRetryScope)).rejects.toMatchObject({
+      status: 0,
+      requestMayHaveReachedServer: true,
+      message: "The browser could not safely coordinate this CRM task across tabs. Close other CRM tabs and try again.",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

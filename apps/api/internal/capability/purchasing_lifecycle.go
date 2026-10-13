@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
@@ -152,18 +153,18 @@ func billCreditNoteTaxShare(amountMinor, recoverableTaxMinor, totalMinor int64) 
 // bill's posting entry.
 func purchasingBillCreditNote(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input BillCreditNoteInput, now time.Time) (BillCreditNoteOutput, error) {
 	orgID := claims.OrganizationID
-	var billID, status string
+	var billID, status, billCurrency string
 	var number, totalMinor, paidMinor, creditedMinor int64
 	var billEntryID *string
 	// N11: serialize money application per document, so two concurrent
 	// credits cannot both pass the open-balance gate on a stale snapshot.
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, number, status, total_minor, paid_minor, credited_minor, entry_id::text
+		SELECT id::text, number, status, currency, total_minor, paid_minor, credited_minor, entry_id::text
 		FROM vendor_bills
 		WHERE org_id = $1::uuid AND id = $2::uuid
 		LIMIT 1
 		FOR UPDATE`, orgID, input.BillID).
-		Scan(&billID, &number, &status, &totalMinor, &paidMinor, &creditedMinor, &billEntryID)
+		Scan(&billID, &number, &status, &billCurrency, &totalMinor, &paidMinor, &creditedMinor, &billEntryID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BillCreditNoteOutput{}, errors.New("bill not found")
 	}
@@ -199,6 +200,9 @@ func purchasingBillCreditNote(ctx context.Context, tx pgx.Tx, claims authbridge.
 			return BillCreditNoteOutput{}, err
 		}
 	}
+	if !strings.EqualFold(billCurrency, baseCurrency) {
+		return BillCreditNoteOutput{}, errors.New("foreign-currency bill credits are not supported until an exchange rate is applied")
+	}
 	lines := make([]JournalEntryLineInput, 0, 3)
 	lines = append(lines, JournalEntryLineInput{AccountCode: accountsPayableAccountCode, DebitMinor: input.AmountMinor})
 	// The TypeScript leg keeps a zero expense credit when tax absorbs the
@@ -229,7 +233,7 @@ func purchasingBillCreditNote(ctx context.Context, tx pgx.Tx, claims authbridge.
 		OrgID:      orgID,
 		Memo:       fmt.Sprintf("Supplier credit on bill %d: %s", number, input.Reason),
 		SourceType: vendorCreditNoteSourceType, SourceID: &billID, ReversalOfID: reversalOfID,
-		Currency: baseCurrency, PostedAt: now,
+		Currency: billCurrency, PostedAt: now,
 		ActorType: claims.ActorType, ActorID: claims.ActorID, Lines: lines,
 	})
 	if err != nil {

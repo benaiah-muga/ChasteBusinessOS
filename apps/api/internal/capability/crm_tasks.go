@@ -229,6 +229,18 @@ func createTask(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClai
 		if input.RefType != nil {
 			fallback = *input.RefType
 		}
+		if fallback == "customer" {
+			var customerExists bool
+			if err := tx.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM customers WHERE org_id = $1::uuid AND id = $2::uuid
+				)`, claims.OrganizationID, *input.RefID).Scan(&customerExists); err != nil {
+				return CreateTaskOutput{}, err
+			}
+			if !customerExists {
+				return CreateTaskOutput{}, errors.New("customer reference not found in this organization")
+			}
+		}
 		refType = &fallback
 	}
 	var taskID string

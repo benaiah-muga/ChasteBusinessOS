@@ -29,15 +29,8 @@ describe("Accounting invoices API", () => {
     }));
   });
 
-  it("validates the legacy accounting invoice response shape", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ invoices: [invoice] })));
-
-    await expect(fetchAccountingInvoices()).resolves.toEqual([invoice]);
-  });
-
-  it("reads invoices through accounting.listInvoices when the Go selector is enabled", async () => {
+  it("reads invoices through accounting.listInvoices without a legacy fallback", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { invoices: [goInvoice] } }));
-    vi.stubGlobal("__GO_ACCOUNTING_INVOICE_READS__", true);
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchAccountingInvoices()).resolves.toEqual([goInvoice]);
@@ -56,7 +49,6 @@ describe("Accounting invoices API", () => {
 
   it("fails closed on selected Go errors without retrying the legacy route", async () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: false, error: "forbidden: missing accounting.read" }, { status: 403 }));
-    vi.stubGlobal("__GO_ACCOUNTING_INVOICE_READS__", true);
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchAccountingInvoices()).rejects.toMatchObject({
@@ -70,7 +62,6 @@ describe("Accounting invoices API", () => {
 
   it("rejects malformed Go capability envelopes without using the legacy route", async () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { invoices: [invoice] }, ignored: true }));
-    vi.stubGlobal("__GO_ACCOUNTING_INVOICE_READS__", true);
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchAccountingInvoices()).rejects.toMatchObject({
@@ -86,7 +77,6 @@ describe("Accounting invoices API", () => {
     ["unsafe creditedMinor", { ...goInvoice, creditedMinor: Number.MAX_SAFE_INTEGER + 1 }],
     ["unknown invoice fields", { ...goInvoice, extra: "unexpected" }],
   ])("rejects Go invoice rows with %s", async (_caseName, row) => {
-    vi.stubGlobal("__GO_ACCOUNTING_INVOICE_READS__", true);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { invoices: [row] } })));
 
     await expect(fetchAccountingInvoices()).rejects.toMatchObject({
@@ -97,7 +87,7 @@ describe("Accounting invoices API", () => {
   });
 
   it("rejects malformed invoice data and unsafe minor units", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ invoices: [{ ...invoice, totalMinor: Number.MAX_SAFE_INTEGER + 1 }] }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { invoices: [{ ...goInvoice, totalMinor: Number.MAX_SAFE_INTEGER + 1 }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchAccountingInvoices()).rejects.toMatchObject({
@@ -107,18 +97,21 @@ describe("Accounting invoices API", () => {
     });
   });
 
-  it("maps unauthorized and permission errors without bypassing the legacy route", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: missing accounting.read" }, { status: 403 })));
+  it("maps permission errors without retrying the legacy route", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: false, error: "forbidden: missing accounting.read" }, { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchAccountingInvoices()).rejects.toMatchObject({
       name: "AccountingInvoicesApiError",
       status: 403,
       message: "forbidden: missing accounting.read",
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
   });
 
   it("returns unauthorized as a sign-in error", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "unauthorized" }, { status: 401 })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, error: "unauthorized" }, { status: 401 })));
 
     await expect(fetchAccountingInvoices()).rejects.toMatchObject({
       name: "AccountingInvoicesApiError",
