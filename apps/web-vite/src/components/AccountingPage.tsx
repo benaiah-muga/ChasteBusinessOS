@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { calculateTaxLine, currencyMinorUnits } from "@chaste/erp-core";
 import {
   AccountingApiError,
@@ -22,6 +22,7 @@ import {
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
   readPendingAccountingReverseEntry,
+  readPendingAccountingReversePayment,
   readPendingAccountingBankReconciliationWrite,
   readPendingAccountingCloseYear,
   submitAccountingAction,
@@ -40,6 +41,7 @@ import {
   type AccountingCreateInvoiceAction,
   type AccountingCreditNoteAction,
   type AccountingReverseEntryAction,
+  type AccountingReversePaymentAction,
   type AccountingBankReconciliationWriteAction,
   type AccountingReminder,
   type AccountingReports,
@@ -363,11 +365,15 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
   const [pendingCreateInvoice, setPendingCreateInvoice] = useState<AccountingCreateInvoiceAction | null>(null);
   const [pendingCreditNote, setPendingCreditNote] = useState<AccountingCreditNoteAction | null>(null);
   const [pendingReverseEntry, setPendingReverseEntry] = useState<AccountingReverseEntryAction | null>(null);
+  const [pendingReversePayment, setPendingReversePayment] = useState<AccountingReversePaymentAction | null>(null);
   const [pendingBankReconciliationWrite, setPendingBankReconciliationWrite] = useState<AccountingBankReconciliationWriteAction | null>(null);
   const [pendingCloseYear, setPendingCloseYear] = useState<number | null>(null);
   const [pendingPurchasingBillPayment, setPendingPurchasingBillPayment] = useState<Awaited<ReturnType<typeof readPendingPurchasingBillPayment>>>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentRetryScope: AccountingPaymentRetryScope = { actorId, organizationId };
+  const paymentRetryScopeKey = `${actorId ?? ""}:${organizationId ?? ""}`;
+  const paymentRetryScopeKeyRef = useRef(paymentRetryScopeKey);
+  paymentRetryScopeKeyRef.current = paymentRetryScopeKey;
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState((current) => (current.status === "ready" ? current : { status: "loading" }));
@@ -421,6 +427,20 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       if (active && goAccountingRecordPaymentUseGo()) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved invoice payment." });
       }
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
+  useLayoutEffect(() => {
+    setPendingReversePayment(null);
+    if (!actorId || !organizationId) return;
+    let active = true;
+    void readPendingAccountingReversePayment(paymentRetryScope).then((action) => {
+      if (!active) return;
+      setPendingReversePayment(action);
+      if (action) setNotice({ tone: "pending", text: "A payment reversal is unresolved. Retry the exact reversal to recover its result." });
+    }).catch((error) => {
+      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved payment reversal." });
     });
     return () => { active = false; };
   }, [actorId, organizationId]);
@@ -546,6 +566,8 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       payload: Record<string, unknown>,
       label: string,
     ): Promise<boolean> => {
+      const actionScopeKey = `${actorId ?? ""}:${organizationId ?? ""}`;
+      const actionScopeIsCurrent = () => paymentRetryScopeKeyRef.current === actionScopeKey;
       const isCloseYear = path === "/api/accounting" && payload.action === "closeYear";
       const isRecordPayment = path === "/api/accounting" && payload.action === "recordPayment";
       const goRecordPayment = isRecordPayment && goAccountingRecordPaymentUseGo();
@@ -555,11 +577,13 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const goCreditNote = isCreditNote && goAccountingCreditNoteUseGo();
       const isReverseEntry = path === "/api/accounting" && payload.action === "reverse";
       const goReverseEntry = isReverseEntry && goAccountingReverseEntryUseGo();
+      const goReversePayment = path === "/api/accounting" && payload.action === "reversePayment";
       const isBankReconciliationWrite = path === "/api/banking" && (payload.action === "matchBankTransaction" || payload.action === "unmatchBankTransaction");
       const goBankReconciliationWrite = isBankReconciliationWrite && goAccountingBankReconciliationWritesUseGo();
       const isPurchasingBillPayment = path === "/api/accounting" && payload.action === "payBill";
       const goPurchasingBillPayment = isPurchasingBillPayment && goPurchasingFinanceWritesUseGo();
       setBusy(true);
+      let reversePaymentIsUnresolved = false;
       try {
         let outcome: Awaited<ReturnType<typeof submitAccountingAction>>;
         if (goPurchasingBillPayment) {
@@ -572,6 +596,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
         } else {
           outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
         }
+        if (goReversePayment && !actionScopeIsCurrent()) return false;
         if (isCloseYear) {
           setPendingCloseYear(outcome.kind === "pending" ? await readPendingAccountingCloseYear(paymentRetryScope) : null);
         }
@@ -579,6 +604,13 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
           setPendingRecordPayment(outcome.kind === "pending"
             ? await readPendingAccountingRecordPayment(paymentRetryScope)
             : null);
+        }
+        if (goReversePayment) {
+          const pending = outcome.kind === "pending"
+            ? await readPendingAccountingReversePayment(paymentRetryScope)
+            : null;
+          if (!actionScopeIsCurrent()) return false;
+          setPendingReversePayment(pending);
         }
         if (goCreateInvoice) {
           setPendingCreateInvoice(outcome.kind === "pending"
@@ -628,6 +660,18 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
           try { setPendingRecordPayment(await readPendingAccountingRecordPayment(paymentRetryScope)); }
           catch { setPendingRecordPayment(payload as unknown as AccountingRecordPaymentAction); }
         }
+        if (goReversePayment) {
+          try {
+            const pending = await readPendingAccountingReversePayment(paymentRetryScope);
+            if (!actionScopeIsCurrent()) return false;
+            setPendingReversePayment(pending);
+            reversePaymentIsUnresolved = pending !== null;
+          } catch {
+            if (!actionScopeIsCurrent()) return false;
+            setPendingReversePayment(payload as unknown as AccountingReversePaymentAction);
+            reversePaymentIsUnresolved = true;
+          }
+        }
         if (goCreateInvoice) {
           try { setPendingCreateInvoice(await readPendingAccountingCreateInvoice(paymentRetryScope)); }
           catch { setPendingCreateInvoice(payload as unknown as AccountingCreateInvoiceAction); }
@@ -654,7 +698,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             ? error.message
             : `${label} did not complete. Check your connection and try again.`,
         });
-        return false;
+        return reversePaymentIsUnresolved;
       } finally {
         setBusy(false);
       }
@@ -773,6 +817,12 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
                   `Payment on invoice #${pendingRecordPayment.invoiceNumber}`,
                 )}
               >{goAccountingRecordPaymentUseGo() ? "Retry exact payment" : "Enable Go payment route to retry"}</button>}
+              {pendingReversePayment && <button
+                type="button"
+                className="accounting-button accounting-button-small"
+                disabled={busy}
+                onClick={() => void runAction("/api/accounting", { ...pendingReversePayment }, "Payment reversal")}
+              >Retry exact payment reversal</button>}
               {pendingPurchasingBillPayment && <button
                 type="button"
                 className="accounting-button accounting-button-small"
@@ -836,6 +886,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
 
           {tab === "receivables" && (
             <ReceivablesSection
+              key={paymentRetryScopeKey}
               aging={state.data.aging}
               baseCurrency={state.data.baseCurrency}
               agingInvoices={state.data.agingInvoices}

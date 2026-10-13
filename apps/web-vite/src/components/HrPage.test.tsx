@@ -672,13 +672,11 @@ describe("Vite People page", () => {
   });
 
   it("keeps Overview and Go Leave on the same Go report", async () => {
-    vi.stubGlobal("__GO_HR_LEAVE__", true);
     const employeeId = "11111111-1111-4111-8111-111111111111";
     const goReport = { ...report, employees: [{ ...employee, id: employeeId }] };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
-      if (path === "/api/hr") return Response.json(report);
       if (path === "/api/capabilities/execute") return Response.json({ ok: true, data: goReport });
       if (path === "/api/time?pending=1") return Response.json({ entries: [] });
       return Response.json({ rows: [] });

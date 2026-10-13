@@ -283,7 +283,7 @@ describe("messaging API client", () => {
       mentions: [{ type: "user", id: "user-1" }],
       parentMessageId: messageId,
       attachmentIds: ["72b99920-8c21-463a-9c5b-479216017501"],
-    }, undefined, { allowGo: true })).resolves.toEqual({ kind: "completed", data: { ok: true, agentReply: null } });
+    }, undefined, { allowGo: true })).resolves.toEqual({ kind: "completed", data: { ok: true, agentReply: null, messageId } });
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
     expect(lastBody(fetchMock)).toMatchObject({
       capabilityId: "messaging.sendMessage",
@@ -296,6 +296,30 @@ describe("messaging API client", () => {
       },
       intentId: expect.any(String),
     });
+  });
+
+  it("runs the Go-owned workmate reply with the original message and stable intent", async () => {
+    vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {} });
+      return url === "/api/capabilities/execute"
+        ? Response.json({ ok: true, data: { messageId } })
+        : Response.json({ ok: true, messageId: "11111111-1111-4111-8111-111111111111", reply: "On it", replayed: false });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const intentId = "72b99920-8c21-463a-9c5b-479216017501";
+
+    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, {
+      allowGo: true,
+      intentId,
+      requestAgentReply: true,
+    })).resolves.toEqual({ kind: "completed", data: { ok: true, agentReply: "On it", messageId } });
+    expect(calls).toEqual([
+      { url: "/api/capabilities/execute", body: expect.objectContaining({ capabilityId: "messaging.sendMessage", intentId }) },
+      { url: `/api/conversations/${conversationId}/agent-reply`, body: { messageId, intentId } },
+    ]);
   });
 
   it("preserves the Go approval-pending response and rejects malformed success envelopes", async () => {

@@ -37,6 +37,8 @@ export type GoRouteProxyFlags = {
   notifications: boolean;
   notificationsWrite: boolean;
   crmReads: boolean;
+  crmFollowUpDraft: boolean;
+  supportReplyDraft: boolean;
   posRead: boolean;
   posShiftSummary: boolean;
   onboarding: boolean;
@@ -285,10 +287,6 @@ export function goHrExpensesFromEnv(env: Record<string, string | undefined>): bo
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_HR_EXPENSES === "1";
 }
 
-export function goHrLeaveFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_HR_LEAVE === "1";
-}
-
 export function goHrPayrollFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_HR_PAYROLL === "1";
 }
@@ -381,6 +379,8 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     notifications: env.CHASTE_GO_NOTIFICATIONS_ROUTE === "1",
     notificationsWrite: env.CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE === "1",
     crmReads: env.CHASTE_GO_CRM_READS !== "0",
+    crmFollowUpDraft: env.CHASTE_GO_CRM_FOLLOW_UP_DRAFT_ROUTE !== "0",
+    supportReplyDraft: env.CHASTE_GO_SUPPORT_REPLY_DRAFT_ROUTE !== "0",
     posRead: env.CHASTE_GO_POS_READ_ROUTE !== "0",
     posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
     onboarding: env.CHASTE_GO_ONBOARDING_ROUTE === "1",
@@ -404,6 +404,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (method === "GET" && new RegExp(`^/api/go/documents/${attachmentID}/content(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.documentsEditorWorkspace && ["POST", "DELETE"].includes(method ?? "") && new RegExp(`^/api/docs/${attachmentID}/workspace$`, "i").test(path)) return true;
   if (flags.messagingPresence && ["GET", "POST"].includes(method ?? "") && new RegExp(`^/api/conversations/${attachmentID}/presence(?:\\?.*)?$`, "i").test(path)) return true;
+  if (flags.messagingPresence && method === "POST" && new RegExp(`^/api/conversations/${attachmentID}/agent-reply$`, "i").test(path)) return true;
   if (flags.messageAttachmentDownloads && method === "GET" && new RegExp(`^/api/message-attachments/${attachmentID}(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.auth && isGoAuthRequest(path)) return true;
   const scimUserPath = /^\/api\/scim\/v2\/Users(?:\?.*)?$/;
@@ -442,6 +443,8 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
   if (flags.crmReads && method === "GET" && /^\/api\/customers(?:\?.*)?$/.test(path)) return true;
   if (flags.crmReads && method === "GET" && isGoCrmReadRequest(path)) return true;
+  if (flags.crmFollowUpDraft && method === "POST" && /^\/api\/crm\/follow-up-draft(?:\?.*)?$/.test(path)) return true;
+  if (flags.supportReplyDraft && method === "POST" && /^\/api\/support\/draft(?:\?.*)?$/.test(path)) return true;
   if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;
   if (method === "GET" && /^\/api\/pos\/customers(?:\?.*)?$/.test(path)) return true;
   if (flags.posShiftSummary && method === "POST" && /^\/api\/pos\/shift-summary(?:\?.*)?$/.test(path)) return true;

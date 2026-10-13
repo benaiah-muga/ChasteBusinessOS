@@ -56,6 +56,31 @@ async function startViteProxy(): Promise<{ server: ViteDevServer; origin: string
 }
 
 describe("Messaging capability proxy", () => {
+  it("sends agent reply requests directly to Go with Vite session proxying enabled", async () => {
+    const goRequests: Array<{ path: string | undefined; body: unknown }> = [];
+    const go = bodyRecorder("go", goRequests);
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolveClose, reject) => go.close((error) => error ? reject(error) : resolveClose())) });
+    const legacyRequests: Array<{ path: string | undefined; body: unknown }> = [];
+    const legacy = bodyRecorder("legacy", legacyRequests);
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolveClose, reject) => legacy.close((error) => error ? reject(error) : resolveClose())) });
+    vi.stubEnv("CHASTE_GO_API_ORIGIN", goOrigin);
+    vi.stubEnv("CHASTE_LEGACY_WEB_ORIGIN", legacyOrigin);
+    vi.stubEnv("CHASTE_GO_SESSION_CAPABILITY_ROUTE", "1");
+    vi.stubEnv("CHASTE_GO_MESSAGING_PRESENCE", "1");
+    const proxy = await startViteProxy();
+    const conversationId = "72b99920-8c21-463a-9c5b-479216017501";
+    const response = await fetch(`${proxy.origin}/api/conversations/${conversationId}/agent-reply`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messageId: "11111111-1111-4111-8111-111111111111", intentId: "22222222-2222-4222-8222-222222222222" }),
+    });
+    expect(await response.json()).toMatchObject({ target: "go", path: `/api/conversations/${conversationId}/agent-reply` });
+    expect(goRequests).toHaveLength(1);
+    expect(legacyRequests).toHaveLength(0);
+  });
+
   it("sends around-message capability reads to Go with the selected message id", async () => {
     const goRequests: Array<{ path: string | undefined; body: unknown }> = [];
     const go = bodyRecorder("go", goRequests);

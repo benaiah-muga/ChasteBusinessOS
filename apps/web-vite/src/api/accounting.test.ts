@@ -20,6 +20,7 @@ import {
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
   readPendingAccountingReverseEntry,
+  readPendingAccountingReversePayment,
   readPendingAccountingBankReconciliationWrite,
   readPendingAccountingCloseYear,
   submitAccountingAction,
@@ -125,7 +126,7 @@ function stubPaymentLocks(): void {
   vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
 }
 
-function stubFetch(handler: (url: string, init?: RequestInit) => Response) {
+function stubFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => handler(String(input), init));
   vi.stubGlobal("fetch", mock);
   return mock;
@@ -931,11 +932,96 @@ describe("accounting API: Go invoice payments", () => {
     expect(window.localStorage.length).toBe(0);
   });
 
-  it("leaves unrelated Accounting operations on their existing endpoint", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", true);
+  it("routes payment reversals through the Go capability executor and validates its result", async () => {
+    stubPaymentLocks();
+    const action = { action: "reversePayment", paymentId: paymentOutput.paymentId, reason: "Correct payment" };
+    const result = {
+      reversalEntryIds: ["55555555-5555-4555-8555-555555555555"],
+      refundedMinor: 5_000,
+      invoiceNumber: 1042,
+      outstandingMinor: 5_000,
+    };
+    const mock = stubFetch(() => Response.json({ ok: true, data: result }));
+
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    const body = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
+    expect(body).toMatchObject({
+      capabilityId: "accounting.reversePayment",
+      input: { paymentId: action.paymentId, reason: action.reason },
+      intentId: expect.any(String),
+    });
+    expect(body).not.toHaveProperty("actorId");
+    expect(body).not.toHaveProperty("organizationId");
+    await expect(readPendingAccountingReversePayment(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("keeps the payment reversal's intent stable until a validated result arrives", async () => {
+    stubPaymentLocks();
+    const action = { action: "reversePayment", paymentId: paymentOutput.paymentId, reason: "Correct payment" };
+    const mock = stubFetch((_url, _init) => mock.mock.calls.length === 1
+      ? Response.json({ pendingApproval: true, reason: "Approval required" }, { status: 202 })
+      : Response.json({ ok: true, data: {
+        reversalEntryIds: ["55555555-5555-4555-8555-555555555555"],
+        refundedMinor: 5_000,
+        invoiceNumber: 1042,
+        outstandingMinor: 5_000,
+      } }));
+
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingAccountingReversePayment(paymentRetryScope)).resolves.toEqual(action);
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    const first = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const retry = JSON.parse(String(mock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(retry.intentId).toBe(first.intentId);
+    await expect(readPendingAccountingReversePayment(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("does not let a delayed duplicate response clear a newer reversal marker", async () => {
+    stubPaymentLocks();
+    const action = { action: "reversePayment", paymentId: paymentOutput.paymentId, reason: "Correct payment" };
+    const newerAction = { ...action, paymentId: "77777777-7777-4777-8777-777777777777" };
+    const deferred: Array<(response: Response) => void> = [];
+    const mock = stubFetch(() => new Promise((resolve) => deferred.push(resolve)));
+    const success = () => Response.json({ ok: true, data: {
+      reversalEntryIds: ["55555555-5555-4555-8555-555555555555"],
+      refundedMinor: 5_000,
+      invoiceNumber: 1042,
+      outstandingMinor: 5_000,
+    } });
+
+    const original = submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(1));
+    const duplicate = submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(2));
+    const originalIntent = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const duplicateIntent = JSON.parse(String(mock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(duplicateIntent.intentId).toBe(originalIntent.intentId);
+
+    deferred[1]!(success());
+    await duplicate;
+    const newer = submitAccountingAction("/api/accounting", newerAction, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(3));
+    const newerIntent = JSON.parse(String(mock.mock.calls[2]?.[1]?.body)) as { intentId: string };
+    expect(newerIntent.intentId).not.toBe(originalIntent.intentId);
+
+    deferred[0]!(success());
+    await original;
+    await expect(readPendingAccountingReversePayment(paymentRetryScope)).resolves.toEqual(newerAction);
+
+    deferred[2]!(success());
+    await newer;
+    await expect(readPendingAccountingReversePayment(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("rejects malformed payment reversal input before sending a request", async () => {
     const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
-    await expect(submitAccountingAction("/api/accounting", { action: "reversePayment", paymentId: "33333333-3333-4333-8333-333333333333", reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
-    expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "POST" }));
+    await expect(submitAccountingAction("/api/accounting", {
+      action: "reversePayment",
+      paymentId: "not-a-uuid",
+      reason: "ok",
+    }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 400 });
+    expect(mock).not.toHaveBeenCalled();
   });
 
   it("sends only the Go capability input and clears the marker after validated success", async () => {
@@ -1042,11 +1128,13 @@ describe("accounting API: Go invoice creation", () => {
     expect(window.localStorage.length).toBe(0);
   });
 
-  it("keeps other Accounting actions on their existing endpoint", async () => {
+  it("routes payment reversal through Go even when invoice creation is selected", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
-    const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
+    const mock = stubFetch(() => Response.json({ ok: true, data: {
+      reversalEntryIds: ["55555555-5555-4555-8555-555555555555"], refundedMinor: 5_000, invoiceNumber: 1042, outstandingMinor: 5_000,
+    } }));
     await expect(submitAccountingAction("/api/accounting", { action: "reversePayment", paymentId: "33333333-3333-4333-8333-333333333333", reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
-    expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "POST" }));
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
   });
 
   it("routes only createInvoice to Go, preserving the parser's input/output contract", async () => {
@@ -1140,11 +1228,13 @@ describe("accounting API: Go credit notes", () => {
     expect(window.localStorage.length).toBe(0);
   });
 
-  it("keeps other Accounting operations on their existing endpoint", async () => {
+  it("routes payment reversal through Go even when credit notes are selected", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
-    const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
+    const mock = stubFetch(() => Response.json({ ok: true, data: {
+      reversalEntryIds: ["55555555-5555-4555-8555-555555555555"], refundedMinor: 5_000, invoiceNumber: 1042, outstandingMinor: 5_000,
+    } }));
     await expect(submitAccountingAction("/api/accounting", { action: "reversePayment", paymentId: "33333333-3333-4333-8333-333333333333", reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
-    expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "POST" }));
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
   });
 
   it("matches the Go parser bounds and keeps invoice balance authority on the server", async () => {
@@ -1252,11 +1342,13 @@ describe("accounting API: Go journal reversals", () => {
     await expect(readPendingAccountingReverseEntry(paymentRetryScope)).resolves.toBeNull();
   });
 
-  it("keeps other Accounting actions on their existing route", async () => {
+  it("routes payment reversal through Go when journal reversal is selected", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
-    const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
+    const mock = stubFetch(() => Response.json({ ok: true, data: {
+      reversalEntryIds: ["55555555-5555-4555-8555-555555555555"], refundedMinor: 5_000, invoiceNumber: 1042, outstandingMinor: 5_000,
+    } }));
     await expect(submitAccountingAction("/api/accounting", { action: "reversePayment", paymentId: "33333333-3333-4333-8333-333333333333", reason: "Correction" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
-    expect(mock).toHaveBeenCalledWith("/api/accounting", expect.objectContaining({ method: "POST" }));
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
   });
 
   it("retains the exact attempt through pending, 404, and rollback", async () => {

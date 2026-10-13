@@ -2,6 +2,12 @@ package main
 
 import "testing"
 
+func TestGoCRMFollowUpDraftRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) {
+	if !goCRMFollowUpDraftRouteEnabledFromEnv("") || !goCRMFollowUpDraftRouteEnabledFromEnv("1") || goCRMFollowUpDraftRouteEnabledFromEnv("0") {
+		t.Fatal("CRM follow-up draft route should default on and allow explicit disable")
+	}
+}
+
 func TestGoManufacturingBomWriteSelectorDisablesAllCapabilities(t *testing.T) {
 	for _, test := range []struct {
 		name    string

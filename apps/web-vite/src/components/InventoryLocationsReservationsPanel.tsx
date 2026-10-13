@@ -51,11 +51,13 @@ export function InventoryLocationsReservationsPanel({
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const activeWrites = useRef(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const stockItems = useMemo(() => items.filter((item) => item.kind !== "service"), [items]);
   const openReservations = useMemo(() => reservations.filter((reservation) => reservation.status === "open"), [reservations]);
 
   useEffect(() => {
+    activeWrites.current = 0;
     setBusy(false);
     setNotice(null);
   }, [scopeKey]);
@@ -65,6 +67,8 @@ export function InventoryLocationsReservationsPanel({
     successMessage: string,
   ): Promise<boolean> {
     const requestGeneration = scopeGeneration.current;
+    activeWrites.current += 1;
+    let writePending = true;
     setBusy(true);
     setNotice(null);
     try {
@@ -74,6 +78,9 @@ export function InventoryLocationsReservationsPanel({
         setNotice({ tone: "pending", message: `This action is waiting for approval. ${result.reason}` });
         return false;
       }
+      writePending = false;
+      activeWrites.current = Math.max(0, activeWrites.current - 1);
+      setBusy(activeWrites.current > 0);
       setNotice({ tone: "success", message: successMessage });
       try {
         await onChanged();
@@ -93,7 +100,10 @@ export function InventoryLocationsReservationsPanel({
       });
       return false;
     } finally {
-      if (requestGeneration === scopeGeneration.current) setBusy(false);
+      if (writePending && requestGeneration === scopeGeneration.current) {
+        activeWrites.current = Math.max(0, activeWrites.current - 1);
+        setBusy(activeWrites.current > 0);
+      }
     }
   }
 

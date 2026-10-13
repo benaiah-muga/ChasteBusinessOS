@@ -13,6 +13,38 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Go Messaging agent sessions now advertise only the CRM capabilities with
+  authored tool descriptions and input schemas. Broader Go capabilities remain
+  unavailable to model tool calls until their contracts are authored.
+- Vite HR Leave and Time reads and writes use the Go capability API directly;
+  obsolete HR-specific route selectors have been removed.
+- Vite CRM customer creation now uses the Go `crm.createCustomer` capability
+  by default. Vite reports Go errors directly and keeps the exact retry intent
+  for uncertain writes.
+- Vite Support reply drafts now use a session-authenticated Go route. Go loads
+  the active organization's thread and provider configuration before generating
+  a draft, with a per-user limit across conversations that also applies to
+  missing-thread probes. The route accepts JSON request bodies only; sending the
+  draft remains a separate human action.
+- Vite Messaging agent replies now bind their effect intent to the source
+  message and serialize concurrent generation for that trigger. Replayed
+  requests return the persisted reply text, and the Vite client allows enough
+  time for the bounded Go model loop to finish. The trigger lock currently
+  assumes a single Go API instance; multi-replica deployments need shared
+  coordination.
+- Go CRM follow-up drafts now require a same-origin request for cookie sessions
+  and accept JSON request bodies only. Bearer-authenticated native clients keep
+  their cross-origin access.
+- Vite Accounting payment reversals now execute through the Go capability
+  executor and retain an actor/org-scoped retry intent for approval and
+  uncertain outcomes.
+- Vite Purchasing request creation now uses the Go capability executor and
+  restores its scoped draft when approval or an uncertain result needs retry.
+- Vite Settings model edits now capture the input value before scheduling the
+  React state update, avoiding a detached-event error while typing.
+- Vite Inventory location and reservation controls unlock after a successful
+  write while the report refreshes, so separate actions do not wait on each
+  other's reads.
 - Vite document file downloads now use a direct Go route. Go verifies the
   signed session, active organization, `documents.read` permission, and module
   access before returning bounded file bytes with safe download headers.
@@ -487,9 +519,9 @@ The full v1 changelog is preserved at the bottom of this file.
   reversal when `CHASTE_GO_PURCHASING_PAYMENT_RUNS=1`. Go remains authoritative
   for the bill balances and currencies included in each run.
 - Vite People time reports, submitted-entry lists, time logging, and time
-  decisions now use Go capabilities when `CHASTE_GO_HR_TIME=1`. The report and
-  pending queue use separate capabilities so decisions retain their entry IDs
-  and employee details.
+  decisions use Go capabilities directly. The report and pending queue use
+  separate capabilities so decisions retain their entry IDs and employee
+  details.
 - Vite Payroll report reads and draft creation now use Go capabilities when
   `CHASTE_GO_HR_PAYROLL=1`. The draft is generated from the active employees'
   current salary, tax, and approved unpaid leave data.
@@ -853,13 +885,12 @@ The full v1 changelog is preserved at the bottom of this file.
   currencies before creating and instructing a run. Retry intents reserve
   atomically across tabs, stale responses cannot clear a newer action, and
   browsers without Web Locks fail closed.
-- Vite HR Time reports, submitted-entry approvals, time logging, and decisions can
-  use the Go `hr.*` capabilities behind the paired `CHASTE_GO_HR_TIME=1` and
-  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. A new org-scoped
+- Vite HR Time reports, submitted-entry approvals, time logging, and decisions use
+  the Go `hr.*` capabilities directly. A new org-scoped
   `hr.pendingTimeEntries` read provides decision IDs and employee details. Exact
   actor/org scoped writes and approval recovery survive reload; Go 404 and
   uncertain results never fall back to the legacy writer. Other HR tabs keep
-  their current routes. Set the selector to `0` for explicit legacy rollback.
+  their current routes.
 - Vite invoice `recordPayment` writes can use Go's session-authenticated
   `accounting.recordPayment` capability behind the paired
   `CHASTE_GO_ACCOUNTING_RECORD_PAYMENT=1` and
@@ -923,15 +954,12 @@ The full v1 changelog is preserved at the bottom of this file.
 - Go leave requests now verify that the employee belongs to the caller's
   organization before inserting a request. Missing and cross-organization
   employee IDs are rejected without creating leave records.
-- Vite HR Leave now reads its report through Go's session-authenticated
+- Vite HR Leave reads its report through Go's session-authenticated
   `hr.report` capability and routes leave requests, decisions, and cancellation
-  through `hr.requestLeave`, `hr.decideLeave`, and `hr.cancelLeave`. The paired
-  `CHASTE_GO_HR_LEAVE=1` selector is enabled in local setups and requires
-  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Exact actor/org scoped retries and
-  pending approval recovery survive reload; a Go 404 never falls back to the
-  legacy endpoint, and selector rollback blocks unresolved actions. Other HR
-  tabs keep their existing routes. Set the selector to `0` for explicit legacy
-  rollback.
+  through `hr.requestLeave`, `hr.decideLeave`, and `hr.cancelLeave`. Exact
+  actor/org scoped retries and pending approval recovery survive reload; a Go
+  404 never falls back to the legacy endpoint. Other HR tabs keep their
+  existing routes.
 - Vite HR Expenses now reads claims and policy limits through Go's
   session-authenticated `accounting.listExpenseClaims` and
   `accounting.listExpensePolicies` capabilities, and sends submissions,

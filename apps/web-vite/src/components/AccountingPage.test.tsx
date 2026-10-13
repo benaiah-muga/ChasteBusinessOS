@@ -100,7 +100,7 @@ const overview = {
   customers: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Kampala Coffee", paymentTermDays: 30 }],
   invoices: [openInvoice, voidInvoice],
   payments: [
-    { id: "payment-1", invoiceNumber: 1042, amountMinor: 2_500, method: "bank_transfer", receivedAt: "2026-09-21T08:00:00.000Z", currency: "USD" },
+    { id: "33333333-3333-4333-8333-333333333333", invoiceNumber: 1042, amountMinor: 2_500, method: "bank_transfer", receivedAt: "2026-09-21T08:00:00.000Z", currency: "USD" },
   ],
 };
 
@@ -129,6 +129,7 @@ interface StubOptions {
   goCreateInvoiceResponse?: () => Response;
   goCreditNoteResponse?: () => Response;
   goReverseEntryResponse?: () => Response;
+  goReversePaymentResponse?: () => Response | Promise<Response>;
   goBankMatchResponse?: () => Response;
   goBankUnmatchResponse?: () => Response;
   goPurchasingPayBillResponse?: () => Response;
@@ -251,6 +252,14 @@ function stubAccounting(options: StubOptions = {}) {
       }
       if (capabilityId === "accounting.reverseEntry") {
         return options.goReverseEntryResponse?.() ?? Response.json({ ok: true, data: { reversalEntryId: "88888888-8888-4888-8888-888888888888" } });
+      }
+      if (capabilityId === "accounting.reversePayment") {
+        return options.goReversePaymentResponse?.() ?? Response.json({ ok: true, data: {
+          reversalEntryIds: ["88888888-8888-4888-8888-888888888888"],
+          refundedMinor: 2_500,
+          invoiceNumber: 1042,
+          outstandingMinor: 2_500,
+        } });
       }
       if (capabilityId === "accounting.matchBankTransaction") {
         return options.goBankMatchResponse?.() ?? Response.json({ ok: true, data: { status: "matched", allocatedMinor: 2500, lineUnexplainedMinor: 0 } });
@@ -761,6 +770,80 @@ describe("AccountingPage governed writes", () => {
     expect(sent[1]?.input).toEqual(sent[0]?.input);
     expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("routes payment reversals through Go and restores the exact pending reversal after reload", async () => {
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const { calls } = stubAccounting({
+      goReversePaymentResponse: () => {
+        const body = JSON.parse(String(calls.at(-1)?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        sent.push(body);
+        return sent.length === 1
+          ? Response.json({ pendingApproval: true, reason: "Payment reversal approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: {
+            reversalEntryIds: ["88888888-8888-4888-8888-888888888888"],
+            refundedMinor: 2_500,
+            invoiceNumber: 1042,
+            outstandingMinor: 10_000,
+          } });
+      },
+    });
+    const first = render(<AccountingPage {...ids} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+    fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reverse" }));
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Correct duplicate payment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reverse, needs approval" }));
+
+    expect(await screen.findByRole("button", { name: "Retry exact payment reversal" })).not.toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sent[0]).toMatchObject({
+      capabilityId: "accounting.reversePayment",
+      input: { paymentId: "33333333-3333-4333-8333-333333333333", reason: "Correct duplicate payment" },
+    });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes("reversePayment"))).toBe(false);
+
+    first.rerender(<AccountingPage actorId={ids.actorId} organizationId="77777777-7777-4777-8777-777777777777" />);
+    expect(screen.queryByRole("button", { name: "Retry exact payment reversal" })).toBeNull();
+    first.rerender(<AccountingPage {...ids} />);
+    expect(await screen.findByRole("button", { name: "Retry exact payment reversal" })).not.toBeNull();
+    first.unmount();
+    render(<AccountingPage {...ids} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact payment reversal" }));
+    expect(await screen.findByText(/^Payment reversal done\.$/)).not.toBeNull();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.input).toEqual(sent[0]?.input);
+    expect(sent[1]?.intentId).toBe(sent[0]?.intentId);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("does not restore an in-flight reversal into a different actor or organization scope", async () => {
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    let finishRequest: ((response: Response) => void) | undefined;
+    const delayedResponse = new Promise<Response>((resolve) => { finishRequest = resolve; });
+    const { calls } = stubAccounting({ goReversePaymentResponse: () => delayedResponse });
+    const view = render(<AccountingPage {...ids} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+    fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reverse" }));
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Correct duplicate payment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reverse, needs approval" }));
+    await waitFor(() => expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.reversePayment"))).toBe(true));
+
+    view.rerender(<AccountingPage actorId={ids.actorId} organizationId="77777777-7777-4777-8777-777777777777" />);
+    expect(screen.queryByRole("button", { name: "Retry exact payment reversal" })).toBeNull();
+    finishRequest?.(Response.json({ pendingApproval: true, reason: "Payment reversal approval required" }, { status: 202 }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry exact payment reversal" })).toBeNull());
+
+    view.rerender(<AccountingPage {...ids} />);
+    expect(await screen.findByRole("button", { name: "Retry exact payment reversal" })).not.toBeNull();
   });
 
   it("offers exact recovery from the global notice when the invoice is absent after reload", async () => {

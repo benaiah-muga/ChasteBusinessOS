@@ -18,6 +18,27 @@ when the production request and worker paths have no TypeScript business code,
 the Next.js server is retired, and every gate below passes against the Go and
 Vite deployment. TypeScript remains for the browser and generated API types.
 
+## Current Vite and Go completion evidence
+
+The active Vite CRM customer-create, CRM follow-up-draft, Support reply-draft,
+Messaging agent-reply, Accounting payment-reversal, and Purchasing
+purchase-request paths are Go-owned by default. CRM mutations and Purchasing
+request creation use the session capability executor. Accounting reversals
+retain scoped intent across pending or uncertain results. Draft generation
+reads only the signed-in user's active organization and never sends a message
+on its own. Messaging reply generation locks by organization, conversation,
+and trigger message, derives effect intent IDs from that source message, and
+returns the stored reply on a retry. Runtime proofs use a local
+OpenAI-compatible stub when no provider key is configured; that verifies
+routing and persistence, not a production AI provider integration. Go
+Messaging currently advertises only the CRM read and write capabilities with
+authored descriptions and closed input schemas. Other supported Go
+capabilities are not exposed to model tool calls until their input contracts
+are authored and tested, so broad operational tool-call reliability remains
+unverified. The messaging trigger lock is process-local, so this path currently
+assumes one Go API instance. Add shared coordination before running multiple
+API replicas.
+
 The user did not supply a delivery date or speed target. Phase 0 measures the
 current system and locks targets. Until then, the working targets are at least
 2x faster median edit-to-ready time for a representative UI change, no more
@@ -2016,9 +2037,8 @@ new owners and the manifest shows zero legacy runtime paths.
      errors.
 190. (Implemented and verified: DB-backed Go test and authenticated browser proof pass) Route only the Vite HR Leave tab through Go's session-authenticated
      `hr.report`, `hr.requestLeave`, `hr.decideLeave`, and `hr.cancelLeave`
-     capabilities behind paired `CHASTE_GO_HR_LEAVE=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the Leave selector
-     to `0` for explicit legacy rollback. Scope durable exact-action retries by
+     capabilities directly, without an HR-specific selector or legacy
+     rollback. Scope durable exact-action retries by
      the authenticated actor and organization, recover pending approvals after
      reload, block other leave mutations while unresolved, and fail closed on
      Go 404 without falling back to `/api/hr`. Keep all other HR tabs on their
@@ -2141,8 +2161,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Time report and pending-entry reads, time logging, and submitted-entry
      decisions through Go's session-authenticated
      `hr.timeReport`, `hr.pendingTimeEntries`, `hr.logTime`, and
-     `hr.decideTimeEntry` capabilities behind paired `CHASTE_GO_HR_TIME=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other HR tabs on
+     `hr.decideTimeEntry` capabilities directly. Keep other HR tabs on
      their current routes. Pending time reads require a dedicated `hr.read`
      capability because the aggregate report lacks decision IDs and employee
      display details; preserve the legacy queue's 100-row date-descending

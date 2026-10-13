@@ -17,6 +17,7 @@ import {
   fetchPurchasingWorkspace,
   payPurchasingBill,
   readPendingPurchasingBillPayment,
+  readPendingPurchasingRequest,
   PurchasingApiError,
   receivePurchasingGoods,
   returnPurchasingGoods,
@@ -288,6 +289,23 @@ describe("governed purchasing writes", () => {
 
   beforeEach(() => { stubPurchasingLocks(); });
 
+  it("always creates purchase requests through the Go capability when other sourcing writes are disabled", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", false);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { requestId: "0569aacb-58c3-4a30-8afe-3554e38eb2ce" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createPurchasingRequest(
+      { action: "createPurchaseRequest", title: "Need packaging", justification: "Stock is too low for confirmed orders." },
+      undefined,
+      { actorId: "actor-request-go", organizationId: "org-request-go" },
+    )).resolves.toMatchObject({ kind: "completed", data: { requestId: "0569aacb-58c3-4a30-8afe-3554e38eb2ce" } });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(postedBody(fetchMock.mock.calls[0]!).capabilityId).toBe("purchasing.createPurchaseRequest");
+    expect(postedBody(fetchMock.mock.calls[0]!).intentId).toEqual(expect.any(String));
+  });
+
   it("routes all sourcing actions through scoped Go capabilities with strict output shapes", async () => {
     vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
     const requestId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
@@ -335,12 +353,14 @@ describe("governed purchasing writes", () => {
     const firstIntent = postedBody(fetchMock.mock.calls[0]!).intentId;
     await expect(createPurchasingRequest(action, undefined, scoped)).resolves.toMatchObject({ kind: "pending" });
     expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(firstIntent);
+    await expect(readPendingPurchasingRequest(scoped)).resolves.toEqual(action);
     await expect(createPurchasingRequest(action, undefined, scoped)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(firstIntent);
     await expect(createPurchasingRequest(action, undefined, scoped)).resolves.toMatchObject({ kind: "completed" });
     expect(postedBody(fetchMock.mock.calls[3]!).intentId).toBe(firstIntent);
     expect(fetchMock.mock.calls[3]?.[0]).toBe("/api/capabilities/execute");
+    await expect(readPendingPurchasingRequest(scoped)).resolves.toBeNull();
   });
 
   it("reserves one sourcing intent across concurrent tabs", async () => {

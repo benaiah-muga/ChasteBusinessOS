@@ -331,15 +331,19 @@ func newOpenAIWorkSummaryModel() myWorkSummaryModel {
 }
 
 func (m *openAIWorkSummaryModel) Brief(ctx context.Context, config myWorkSummaryConfig, model, prompt string) (string, error) {
+	return m.Complete(ctx, config, model, myWorkBriefSystemPrompt, prompt, 0.2, 220)
+}
+
+func (m *openAIWorkSummaryModel) Complete(ctx context.Context, config myWorkSummaryConfig, model, system, prompt string, temperature float64, maxTokens int) (string, error) {
 	endpoint, address, err := resolveWorkSummaryEndpoint(config.baseURL)
 	if err != nil {
 		return "", errors.New("configured model endpoint is invalid or outside the provider network trust boundary")
 	}
 	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/chat/completions"
 	body, err := json.Marshal(map[string]any{
-		"model": stripMyWorkProviderPrefix(model), "temperature": 0.2, "max_tokens": 220,
+		"model": stripMyWorkProviderPrefix(model), "temperature": temperature, "max_tokens": maxTokens,
 		"messages": []map[string]string{
-			{"role": "system", "content": myWorkBriefSystemPrompt},
+			{"role": "system", "content": system},
 			{"role": "user", "content": prompt},
 		},
 	})

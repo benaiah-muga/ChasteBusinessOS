@@ -1206,7 +1206,7 @@ it("sends page presence heartbeats and typing updates through the selected Go se
     render(<MessagesPage />);
 
     const composer = (await screen.findByLabelText("Message general")) as HTMLTextAreaElement;
-    await screen.findByText("Morning all", {}, { timeout: 5_000 });
+    await screen.findAllByText("Morning all", {}, { timeout: 5_000 });
     fireEvent.change(composer, { target: { value: "@Gra", selectionStart: 4 } });
     const option = await screen.findByRole("option", { name: /@Grace/ });
     fireEvent.click(option);
@@ -1217,7 +1217,7 @@ it("sends page presence heartbeats and typing updates through the selected Go se
     expect(posts[0]).toMatchObject({ body: "@Grace", mentions: [{ type: "user", id: other }] });
   });
 
-  it("keeps agent-enabled and @agent sends on the legacy path while Go replies are not ported", async () => {
+  it("sends agent-enabled and @agent messages and replies through Go", async () => {
     vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
     const paths: string[] = [];
     const posts: Record<string, unknown>[] = [];
@@ -1228,10 +1228,11 @@ it("sends page presence heartbeats and typing updates through the selected Go se
       if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
       if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
       if (path.includes("/presence")) return Response.json({ people: [] });
-      if (path.endsWith("/messages") && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
         posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
-        return Response.json({ ok: true, agentReply: "On it" });
+        return Response.json({ ok: true, data: { messageId: "11111111-1111-4111-8111-111111111111" } });
       }
+      if (path.endsWith("/agent-reply") && init?.method === "POST") return Response.json({ ok: true, messageId: "22222222-2222-4222-8222-222222222222", reply: "On it", replayed: false });
       if (path.endsWith("/messages")) return Response.json(threadBody());
       return Response.json({ error: "not found" }, { status: 404 });
     });
@@ -1247,9 +1248,52 @@ it("sends page presence heartbeats and typing updates through the selected Go se
     expect(fetchMock.mock.calls.some(([path, init]) =>
       String(path) === "/api/capabilities/execute" &&
       (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId === "messaging.sendMessage",
-    )).toBe(false);
-    expect(posts[0]).toMatchObject({ body: "@Chaste", mentions: [{ type: "agent", id: "agent-1" }] });
+    )).toBe(true);
+    expect(posts[0]).toMatchObject({ capabilityId: "messaging.sendMessage", input: { body: "@Chaste", mentions: [{ type: "agent", id: "agent-1" }] } });
+    expect(paths.some((path) => path.endsWith("/agent-reply"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path).endsWith("/messages") && init?.method === "POST")).toBe(false);
   });
+
+  it("retries a failed Go agent reply with the same human message and intent", async () => {
+    vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
+    const humanWrites: Array<Record<string, unknown>> = [];
+    const replyRequests: Array<Record<string, unknown>> = [];
+    let replyAttempts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation({ agentEnabled: true })], me });
+      if (isGoPeopleLookup(path, init)) return Promise.resolve(peopleCapabilityResponse(people));
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        humanWrites.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return Response.json({ ok: true, data: { messageId: "11111111-1111-4111-8111-111111111111" } });
+      }
+      if (path.endsWith("/agent-reply") && init?.method === "POST") {
+        replyAttempts += 1;
+        replyRequests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (replyAttempts === 1) return Response.json({ error: "provider unavailable" }, { status: 502 });
+        return Response.json({ ok: true, messageId: "22222222-2222-4222-8222-222222222222", reply: "On it", replayed: false });
+      }
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+
+    const composer = await screen.findByLabelText("Message general");
+    fireEvent.change(composer, { target: { value: "Please check the report" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("provider unavailable");
+    expect((composer as HTMLTextAreaElement).value).toBe("Please check the report");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(replyAttempts).toBe(2));
+    expect(humanWrites).toHaveLength(2);
+    expect(humanWrites[1]).toEqual(humanWrites[0]);
+    expect(replyRequests[1]).toEqual(replyRequests[0]);
+    expect(replyRequests[0]).toMatchObject({ messageId: "11111111-1111-4111-8111-111111111111", intentId: humanWrites[0]?.intentId });
+  }, 15_000);
 
   it("sends mentions, replies, and uploaded attachments through Go when the slice is enabled", async () => {
     vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
@@ -1272,7 +1316,7 @@ it("sends page presence heartbeats and typing updates through the selected Go se
     const { container } = render(<MessagesPage />);
     const composer = (await screen.findByLabelText("Message general")) as HTMLTextAreaElement;
 
-    await screen.findByText("Morning all");
+    await screen.findAllByText("Morning all");
     const replyButton = await screen.findByRole("button", { name: "Reply" });
     const originalMessage = replyButton.closest<HTMLElement>(".messages-message");
     expect(originalMessage).not.toBeNull();
@@ -1473,7 +1517,7 @@ it("sends page presence heartbeats and typing updates through the selected Go se
     render(<MessagesPage />);
 
     const composer = await screen.findByLabelText("Message general");
-    await screen.findByText("Morning all", {}, { timeout: 5_000 });
+    await screen.findAllByText("Morning all", {}, { timeout: 5_000 });
     fireEvent.change(composer, { target: { value: "Keep this draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 

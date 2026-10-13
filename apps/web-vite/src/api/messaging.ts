@@ -198,7 +198,7 @@ const GoDeleteConversationEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ deleted: z.literal(true) }).strict(),
 }).strict();
-const SendMessageSchema = z.object({ ok: z.literal(true), agentReply: z.string().nullable() }).strict();
+const SendMessageSchema = z.object({ ok: z.literal(true), agentReply: z.string().nullable(), messageId: z.string().uuid().optional() }).strict();
 export type SendMessageResult = z.infer<typeof SendMessageSchema>;
 const GoSendMessageEnvelopeSchema = z.object({
   ok: z.literal(true),
@@ -309,6 +309,7 @@ async function send(
   init: RequestInit,
   subject: string,
   signal?: AbortSignal,
+  timeoutMs = init.method === "POST" ? 20_000 : 15_000,
 ): Promise<{ response: Response; body: unknown }> {
   const form = typeof FormData !== "undefined" && init.body instanceof FormData;
   let response: Response;
@@ -320,7 +321,7 @@ async function send(
       headers: form || init.body == null
         ? { accept: "application/json", ...init.headers }
         : { accept: "application/json", "content-type": "application/json", ...init.headers },
-      signal: requestSignal(signal, init.method === "POST" ? 20_000 : 15_000),
+      signal: requestSignal(signal, timeoutMs),
     });
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -686,14 +687,14 @@ export function sendConversationMessage(
   conversationId: string,
   input: { body: string; mentions: MessageMention[]; parentMessageId?: string; attachmentIds: string[] },
   signal?: AbortSignal,
-  options?: { allowGo?: boolean; intentId?: string },
+	options?: { allowGo?: boolean; intentId?: string; requestAgentReply?: boolean },
 ): Promise<MessagingOutcome<SendMessageResult>> {
   const useGo = options?.allowGo === true
     && typeof __GO_MESSAGING_SEND_SLICE__ !== "undefined"
     && __GO_MESSAGING_SEND_SLICE__;
   if (useGo) {
     const intentId = options.intentId == null ? newIntentId() : z.string().uuid().parse(options.intentId);
-    return sendConversationMessageThroughGo(conversationId, input, intentId, signal);
+    return sendConversationMessageThroughGo(conversationId, input, intentId, signal, options?.requestAgentReply === true);
   }
   return governed(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: "POST",
@@ -712,6 +713,7 @@ async function sendConversationMessageThroughGo(
   input: { body: string; mentions: MessageMention[]; parentMessageId?: string; attachmentIds: string[] },
   intentId: string,
   signal?: AbortSignal,
+  requestAgentReply = false,
 ): Promise<MessagingOutcome<SendMessageResult>> {
   const { response, body } = await send("/api/capabilities/execute", {
     method: "POST",
@@ -738,7 +740,34 @@ async function sendConversationMessageThroughGo(
   if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "send this message"));
   const parsed = GoSendMessageEnvelopeSchema.safeParse(body);
   if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected response to send this message.");
-  return { kind: "completed", data: { ok: true, agentReply: null } };
+  let agentReply: string | null = null;
+  if (requestAgentReply) {
+    const reply = await sendConversationAgentReplyThroughGo(conversationId, parsed.data.data.messageId, intentId, signal);
+    if (reply.kind === "pending") return { kind: "pending", reason: reply.reason };
+    agentReply = reply.reply;
+  }
+  return { kind: "completed", data: { ok: true, agentReply, messageId: parsed.data.data.messageId } };
+}
+
+async function sendConversationAgentReplyThroughGo(
+  conversationId: string,
+  messageId: string,
+  intentId: string,
+  signal?: AbortSignal,
+): Promise<{ kind: "completed"; reply: string; messageId: string; replayed: boolean } | { kind: "pending"; reason: string }> {
+  const { response, body } = await send(`/api/conversations/${encodeURIComponent(conversationId)}/agent-reply`, {
+    method: "POST",
+    body: JSON.stringify({ messageId, intentId }),
+  }, "get the AI reply", signal, 480_000);
+  if (response.status === 202) {
+    const pending = PendingApprovalSchema.safeParse(body);
+    if (!pending.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to the agent reply.");
+    return { kind: "pending", reason: pending.data.hint ?? pending.data.reason ?? pending.data.error ?? "The agent reply is waiting for approval." };
+  }
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "get the AI reply"));
+  const parsed = z.object({ ok: z.literal(true), messageId: z.string().uuid(), reply: z.string(), replayed: z.boolean() }).strict().safeParse(body);
+  if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected agent reply response.");
+  return { kind: "completed", ...parsed.data };
 }
 
 export type ConversationLifecycleAction =

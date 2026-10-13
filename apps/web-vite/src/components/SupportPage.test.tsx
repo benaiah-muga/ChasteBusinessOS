@@ -66,6 +66,7 @@ function moduleSwitchboard(enabled = true) {
 interface Handlers {
   post?: (payload: Record<string, unknown>) => Response;
   execute?: (payload: Record<string, unknown>) => Response;
+  draft?: (conversationId: string) => Response;
   getThread?: () => Response;
   team?: () => Response;
 }
@@ -77,6 +78,7 @@ function supportFetch(handlers: Handlers = {}) {
     if (init?.method === "POST") {
       const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
       calls.push({ path, payload });
+      if (path === "/api/support/draft") return handlers.draft?.(String(payload.conversationId)) ?? Response.json({ draft: "Draft unavailable." });
       if (path === "/api/capabilities/execute") {
         return handlers.execute?.(payload) ?? Response.json({ ok: true, data: {} });
       }
@@ -448,8 +450,11 @@ describe("Vite support page", () => {
 
   it("keeps an AI reply as a draft until a human sends it", async () => {
     const { calls } = supportFetch({
+      draft: (requestedConversationId) => {
+        expect(requestedConversationId).toBe(conversationId);
+        return Response.json({ draft: "Thanks for flagging this.", sessionId: "s1", steps: 4 });
+      },
       post: (payload) => {
-        if (payload.action === "draft") return Response.json({ draft: "Thanks for flagging this.", sessionId: "s1", steps: 4 });
         if (payload.action === "send") return Response.json({ ok: true, data: { messageId: "m1", senderType: "agent" } });
         return Response.json({ ok: true, data: { updated: true } });
       },
@@ -461,7 +466,8 @@ describe("Vite support page", () => {
 
     const draftBox = await screen.findByLabelText("AI draft reply");
     expect((draftBox as HTMLTextAreaElement).value).toBe("Thanks for flagging this.");
-    expect(calls.filter((call) => call.payload!.action === "draft")).toHaveLength(1);
+    expect(calls.filter((call) => call.path === "/api/support/draft")).toHaveLength(1);
+    expect(calls.find((call) => call.path === "/api/support/draft")?.payload).toEqual({ conversationId });
     expect(calls.some((call) => call.payload!.action === "send")).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Send to customer" }));

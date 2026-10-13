@@ -1543,19 +1543,19 @@ export async function fetchCrmTeamMembers(signal?: AbortSignal): Promise<Array<{
 }
 
 export const CrmFollowUpDraftSchema = z.object({
-  draft: z.string().min(1),
+  draft: z.string().trim().min(1),
   sources: z.array(z.object({
     kind: z.enum(["invoice", "quote", "task"]),
-    date: z.string(),
-    refId: z.string(),
-    summary: z.string(),
-  })),
-});
+    date: z.string().datetime({ offset: true }),
+    refId: uuid,
+    summary: z.string().min(1),
+  }).strict()).min(1).max(8),
+}).strict();
 export type CrmFollowUpDraft = z.infer<typeof CrmFollowUpDraftSchema>;
 
 export async function fetchCrmFollowUpDraft(customerId: string, signal?: AbortSignal): Promise<CrmFollowUpDraft> {
   if (!uuid.safeParse(customerId).success) throw new CrmApiError(0, "Choose a valid customer before drafting a follow-up.");
-  const { response, body } = await request("/api/crm", { method: "POST", body: JSON.stringify({ action: "draftFollowUp", customerId }) }, signal);
+  const { response, body } = await request("/api/crm/follow-up-draft", { method: "POST", body: JSON.stringify({ customerId }) }, signal);
   if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
   const parsed = CrmFollowUpDraftSchema.safeParse(body);
   if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected follow-up draft.");

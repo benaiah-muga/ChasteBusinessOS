@@ -855,6 +855,7 @@ async function submitPurchaseLifecycle<T>(
 
 type PurchaseFinanceAction = z.infer<typeof GoCreateVendorSchema> | z.infer<typeof GoCreateBillSchema> | z.infer<typeof GoPayBillSchema> | z.infer<typeof GoBillCreditNoteSchema>;
 type PurchaseSourcingAction = z.infer<typeof GoCreatePurchaseRequestSchema> | z.infer<typeof GoDecidePurchaseRequestSchema> | z.infer<typeof GoCreateRfqSchema> | z.infer<typeof GoRecordQuoteSchema> | z.infer<typeof SelectWinningQuoteSchema>;
+export type PendingPurchaseRequestAction = z.infer<typeof GoCreatePurchaseRequestSchema>;
 type PurchaseFinanceAttempt = { storageKey: string; fingerprint: string; intentId: string };
 type PurchaseFinanceRetryScope = { actorId: string; organizationId: string };
 const purchaseFinanceAttemptPrefix = "chaste.purchasing.finance.active.v1:";
@@ -870,7 +871,7 @@ async function createPurchaseFinanceAttempt(action: PurchaseFinanceAction, scope
   }
   const storageKey = `${purchaseFinanceAttemptPrefix}${action.action}:${scopeDigest}`;
   return withPurchasingReservationLock(storageKey, async () => {
-    let stored: { fingerprint: string; intentId: string } | null;
+    let stored: { fingerprint: string; intentId: string; action?: unknown } | null;
     try {
       stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
     } catch {
@@ -879,7 +880,18 @@ async function createPurchaseFinanceAttempt(action: PurchaseFinanceAction, scope
     if (stored && stored.fingerprint !== fingerprint) {
       throw new PurchasingApiError(0, "A previous result for this purchasing action is unresolved. Retry the exact action or check the related record before changing it.");
     }
-    if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+    if (stored) {
+      if (stored.action === undefined) {
+        try {
+          window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: stored.intentId, action }));
+          const upgraded = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+          if (!upgraded || upgraded.fingerprint !== fingerprint || upgraded.intentId !== stored.intentId) throw new Error("saved sourcing action did not persist");
+        } catch {
+          throw new PurchasingApiError(0, "Enable browser storage before retrying this purchase request so its exact action can be recovered safely.");
+        }
+      }
+      return { storageKey, fingerprint, intentId: stored.intentId };
+    }
     const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
     try {
       window.localStorage.setItem(storageKey, JSON.stringify({
@@ -1021,7 +1033,7 @@ async function createPurchaseSourcingAttempt(action: PurchaseSourcingAction, sco
     if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
     const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+      window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, action }));
       const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
       if (!persisted || persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId) throw new Error("saved attempt did not persist");
       return attempt;
@@ -1029,6 +1041,41 @@ async function createPurchaseSourcingAttempt(action: PurchaseSourcingAction, sco
       throw new PurchasingApiError(0, "Enable browser storage before changing a purchase request so an uncertain result can be retried safely.");
     }
   });
+}
+
+export async function readPendingPurchasingRequest(
+  retryScope: { actorId: string | null; organizationId: string | null },
+): Promise<PendingPurchaseRequestAction | null> {
+  if (!retryScope.actorId?.trim() || !retryScope.organizationId?.trim()) return null;
+  const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
+  let storageKey: string;
+  try {
+    const scopeDigest = await digestHex(JSON.stringify(scope));
+    storageKey = `${purchaseSourcingAttemptPrefix}createPurchaseRequest:new:${scopeDigest}`;
+  } catch {
+    throw new PurchasingApiError(0, "Purchase request recovery is unavailable in this browser session.");
+  }
+  let stored: { fingerprint: string; intentId: string; action?: unknown } | null;
+  try {
+    stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+  } catch {
+    throw new PurchasingApiError(0, "The saved purchase request could not be read. Enable browser storage before retrying.");
+  }
+  if (!stored) return null;
+  const action = GoCreatePurchaseRequestSchema.safeParse(stored.action);
+  if (!action.success) {
+    throw new PurchasingApiError(0, "A previous purchase request is unresolved, but its exact details cannot be recovered safely. Check the request history before clearing browser storage.", true);
+  }
+  let fingerprint: string;
+  try {
+    fingerprint = await digestHex(JSON.stringify({ ...scope, action: canonicalize(action.data) }));
+  } catch {
+    throw new PurchasingApiError(0, "Purchase request recovery is unavailable in this browser session.");
+  }
+  if (fingerprint !== stored.fingerprint) {
+    throw new PurchasingApiError(0, "The saved purchase request details failed verification. Check request history before retrying.", true);
+  }
+  return action.data;
 }
 
 function clearPurchaseSourcingAttempt(attempt: PurchaseSourcingAttempt): void {
@@ -1157,8 +1204,6 @@ export async function createPurchasingRequest(
   signal?: AbortSignal,
   retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
-  if (!useGo) return submit(action, OpaqueOutputSchema, "raising the purchase request", signal);
   const parsed = GoCreatePurchaseRequestSchema.safeParse(action);
   if (!parsed.success) throw new PurchasingApiError(0, "Enter a request title of 3 to 200 characters and a justification of 10 to 4000 characters.");
   return submitPurchaseSourcingCapability(parsed.data, "purchasing.createPurchaseRequest", GoCreatePurchaseRequestOutputSchema, "raising the purchase request", signal, retryScope);

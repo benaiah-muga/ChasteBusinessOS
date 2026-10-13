@@ -43,11 +43,41 @@ const confirmAttemptKey = (actorId: string, organizationId: string, orderId: str
   `chaste:sales-confirm-attempt:${encodeURIComponent(JSON.stringify([actorId, organizationId]))}:${orderId}`;
 
 function salesFetch() {
-  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  return goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
     void init;
     if (input === "/api/modules") return Response.json(switchboard);
     if (input === "/api/pos/customers") return Response.json(customers);
     return Response.json({ orders });
+  });
+}
+
+function goAwareFetch(fetcher: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (input === "/api/capabilities/execute" && init?.method === "POST") {
+      let capabilityId: string | undefined;
+      try { capabilityId = (JSON.parse(String(init.body)) as { capabilityId?: string }).capabilityId; }
+      catch { /* The application validates the request before the mock handles it. */ }
+      if (capabilityId === "accounting.listQuotes") return Response.json({ ok: true, data: { quotes: [] } });
+      if (capabilityId === "crm.listCustomers") return Response.json({ ok: true, data: { customers: [] } });
+      if (capabilityId === "crm.listDeals") return Response.json({ ok: true, data: { deals: [] } });
+      if (capabilityId === "crm.listTasks") return Response.json({ ok: true, data: { tasks: [] } });
+      if (capabilityId === "crm.listCustomerViews") return Response.json({ ok: true, data: { views: [] } });
+      if (capabilityId === "sales.listOrders") {
+        const legacyFixture = await fetcher("/api/sales", { method: "GET", credentials: "same-origin" });
+        if (!legacyFixture.ok) return legacyFixture;
+        return Response.json({ ok: true, data: await legacyFixture.json() }, { status: legacyFixture.status });
+      }
+    }
+    return fetcher(input, init);
+  });
+}
+
+type SalesFetchMock = ReturnType<typeof goAwareFetch>;
+function salesWriteCalls(fetchMock: SalesFetchMock) {
+  return fetchMock.mock.calls.filter(([input, init]) => {
+    if (input !== "/api/capabilities/execute") return false;
+    const { capabilityId } = JSON.parse(String(init?.body)) as { capabilityId?: string };
+    return ["sales.confirmOrder", "sales.createOrder", "sales.deliverOrder", "sales.cancelOrder"].includes(capabilityId ?? "");
   });
 }
 
@@ -154,7 +184,7 @@ describe("Vite sales page", () => {
 
   it("renders an accessible empty state and retries failed reads", async () => {
     let attempt = 0;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       attempt += 1;
@@ -171,7 +201,7 @@ describe("Vite sales page", () => {
   });
 
   it("confirms a draft through the governed Go capability endpoint", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
@@ -190,7 +220,7 @@ describe("Vite sales page", () => {
     expect(await screen.findByRole("status")).not.toBeNull();
     expect(screen.getByText("Order #43 confirmed.")).not.toBeNull();
     expect(within(screen.getByRole("row", { name: /#43/ })).getByRole("cell", { name: "Confirmed" })).not.toBeNull();
-    const request = fetchMock.mock.calls.find(([input]) => input === "/api/capabilities/execute");
+    const request = salesWriteCalls(fetchMock)[0];
     expect(request?.[1]).toMatchObject({ method: "POST", credentials: "same-origin" });
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
       capabilityId: "sales.confirmOrder",
@@ -215,7 +245,7 @@ describe("Vite sales page", () => {
       }
       return originalDigest(algorithm, data);
     });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
@@ -230,13 +260,13 @@ describe("Vite sales page", () => {
     await waitFor(() => expect(markerScanStarted).toBe(true));
     expect(confirmButton.disabled).toBe(true);
     fireEvent.click(confirmButton);
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
 
     releaseMarkerScan?.();
     await waitFor(() => expect(confirmButton.disabled).toBe(false));
     fireEvent.click(confirmButton);
     expect(await screen.findByText("Order #43 confirmed.")).not.toBeNull();
-    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(salesWriteCalls(fetchMock)).toHaveLength(1);
   });
 
   it("ignores a confirmation response from the prior organization", async () => {
@@ -251,7 +281,7 @@ describe("Vite sales page", () => {
     const orgAResponse = new Promise<Response>((resolve) => { releaseOrgA = resolve; });
     const orgBResponse = new Promise<Response>((resolve) => { releaseOrgB = resolve; });
     let writes = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders: activeOrganization === "org-1" ? orders : [orgBOrder] });
@@ -295,7 +325,7 @@ describe("Vite sales page", () => {
 
   it("retains the create draft while approval is pending, then clears it on success", async () => {
     let writes = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
@@ -330,7 +360,7 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
     expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "Create sales order" })).toBeNull();
-    const requests = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const requests = salesWriteCalls(fetchMock);
     expect(requests).toHaveLength(2);
     const firstBody = JSON.parse(String(requests[0]?.[1]?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> };
     const retryBody = JSON.parse(String(requests[1]?.[1]?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> };
@@ -341,7 +371,7 @@ describe("Vite sales page", () => {
 
   it("restores and locks an unresolved create draft after remount", async () => {
     let writes = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
@@ -364,7 +394,7 @@ describe("Vite sales page", () => {
     fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "12.50" } });
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
     expect(await screen.findByText("Manager approval required")).not.toBeNull();
-    const firstRequest = fetchMock.mock.calls.find(([input]) => input === "/api/capabilities/execute");
+    const firstRequest = salesWriteCalls(fetchMock)[0];
     const firstBody = JSON.parse(String(firstRequest?.[1]?.body)) as { intentId: string; input: Record<string, unknown> };
 
     firstMount.unmount();
@@ -376,7 +406,7 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
 
     expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
-    const requests = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const requests = salesWriteCalls(fetchMock);
     const retryBody = JSON.parse(String(requests[1]?.[1]?.body)) as { intentId: string; input: Record<string, unknown> };
     expect(retryBody.intentId).toBe(firstBody.intentId);
     expect(retryBody.input).toEqual(firstBody.input);
@@ -394,7 +424,7 @@ describe("Vite sales page", () => {
       }
       return originalDigest(algorithm, data);
     });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
@@ -420,7 +450,7 @@ describe("Vite sales page", () => {
     expect((screen.getByLabelText("Description") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
-    expect(fetchMock.mock.calls.some(([input]) => input === "/api/capabilities/execute")).toBe(false);
+    expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
 
     releaseScopeDigest?.();
     await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
@@ -431,7 +461,7 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
     expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
 
-    const request = fetchMock.mock.calls.find(([input]) => input === "/api/capabilities/execute");
+    const request = salesWriteCalls(fetchMock)[0];
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
       capabilityId: "sales.createOrder",
       input: { customerId: customers.customers[1]!.id, lines: [{ description: "Org B draft" }] },
@@ -440,7 +470,7 @@ describe("Vite sales page", () => {
 
   it("drops a stale order action target and reloads rows when organization scope changes", async () => {
     let activeOrganization = "org-1";
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders: activeOrganization === "org-1" ? orders : [] });
@@ -462,7 +492,7 @@ describe("Vite sales page", () => {
 
     expect(await screen.findByText("No sales orders yet")).not.toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(fetchMock.mock.calls.some(([input]) => input === "/api/capabilities/execute")).toBe(false);
+    expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
   });
 
   it("ignores a prior-scope create response after restoring the active scope's pending draft", async () => {
@@ -470,7 +500,7 @@ describe("Vite sales page", () => {
     let releaseOrgA: ((response: Response) => void) | undefined;
     const orgAResponse = new Promise<Response>((resolve) => { releaseOrgA = resolve; });
     let writes = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
@@ -514,8 +544,7 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
     expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
 
-    const writeBodies = fetchMock.mock.calls
-      .filter(([input]) => input === "/api/capabilities/execute")
+    const writeBodies = salesWriteCalls(fetchMock)
       .map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string; input: Record<string, unknown> });
     expect(writeBodies).toHaveLength(3);
     expect(writeBodies[2]?.intentId).toBe(writeBodies[0]?.intentId);
@@ -537,7 +566,7 @@ describe("Vite sales page", () => {
     expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Deliver #41" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
     expect(localStorage.getItem(`chaste:sales-order-write-attempt:${digestHex}`)).toBe("{");
   });
 
@@ -564,7 +593,7 @@ describe("Vite sales page", () => {
     expect(clearButton.disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Deliver #41" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
 
     fireEvent.click(screen.getByLabelText("I reviewed the Sales order history and understand this only clears the ambiguous retry marker."));
     expect(clearButton.disabled).toBe(false);
@@ -572,12 +601,12 @@ describe("Vite sales page", () => {
 
     expect(await screen.findByText("The reviewed ambiguous retry marker was cleared. No Sales action was sent.")).not.toBeNull();
     expect(localStorage.getItem(markerKey)).toBeNull();
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
   });
 
   it("unlocks a pending create after a terminal error and submits corrected input with a new intent", async () => {
     let writes = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
@@ -607,8 +636,7 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
     expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
 
-    const requests = fetchMock.mock.calls
-      .filter(([input]) => input === "/api/capabilities/execute")
+    const requests = salesWriteCalls(fetchMock)
       .map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string; input: Record<string, unknown> });
     expect(requests).toHaveLength(3);
     expect(requests[0]?.intentId).toBe(requests[1]?.intentId);
@@ -618,7 +646,7 @@ describe("Vite sales page", () => {
 
   it("keeps the delivery target open through pending approval and closes after completion", async () => {
     let writes = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
@@ -646,7 +674,7 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Deliver all and invoice" }));
     expect(await screen.findByText("Order #41 fully delivered and invoiced.")).not.toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
-    const requests = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const requests = salesWriteCalls(fetchMock);
     const bodies = requests.map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> });
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toMatchObject({ capabilityId: "sales.deliverOrder", input: { orderId: orders[0]!.id } });
@@ -656,7 +684,7 @@ describe("Vite sales page", () => {
 
   it("keeps the Go partial-delivery status when refreshing the order list fails", async () => {
     let salesReads = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") {
@@ -689,7 +717,7 @@ describe("Vite sales page", () => {
 
   it("keeps the cancellation target open through pending approval and closes after completion", async () => {
     let writes = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
@@ -715,7 +743,7 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel order" }));
     expect(await screen.findByText("Order #41 cancelled.")).not.toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
-    const requests = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const requests = salesWriteCalls(fetchMock);
     const bodies = requests.map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> });
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toMatchObject({ capabilityId: "sales.cancelOrder", input: { orderId: orders[0]!.id } });
@@ -724,7 +752,7 @@ describe("Vite sales page", () => {
 
   it("keeps the approval intent across remounts and clears it after resolution", async () => {
     let capabilityAttempt = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
@@ -746,7 +774,7 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delivered" }));
     expect(screen.getByText("Manager approval required")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "All" }));
-    const capabilityCalls = () => fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const capabilityCalls = () => salesWriteCalls(fetchMock);
     const intentFrom = (call: ReturnType<typeof capabilityCalls>[number]) =>
       (JSON.parse(String(call[1]?.body)) as { intentId: string }).intentId;
     const backorderInputFrom = (call: ReturnType<typeof capabilityCalls>[number]) =>
@@ -786,7 +814,7 @@ describe("Vite sales page", () => {
 
   it("serializes confirmation retries across tabs and reuses the durable attempt", async () => {
     let capabilityAttempt = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
@@ -805,8 +833,8 @@ describe("Vite sales page", () => {
     fireEvent.click(confirmButtons[0]!);
     fireEvent.click(confirmButtons[1]!);
 
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute")).toHaveLength(2));
-    const capabilityCalls = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    await waitFor(() => expect(salesWriteCalls(fetchMock)).toHaveLength(2));
+    const capabilityCalls = salesWriteCalls(fetchMock);
     const intentFrom = (call: typeof capabilityCalls[number]) =>
       (JSON.parse(String(call[1]?.body)) as { intentId: string }).intentId;
     expect(intentFrom(capabilityCalls[1]!)).toBe(intentFrom(capabilityCalls[0]!));
@@ -816,7 +844,7 @@ describe("Vite sales page", () => {
 
   it("fails closed when durable storage is unavailable", async () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage is blocked"); });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
@@ -831,14 +859,14 @@ describe("Vite sales page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
     expect(await screen.findByRole("alert")).not.toBeNull();
     expect(screen.getByRole("alert").textContent).toContain("Enable browser storage");
-    expect(fetchMock.mock.calls.some(([input]) => input === "/api/capabilities/execute")).toBe(false);
+    expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
   });
 
   it("fails closed when Web Locks are unavailable", async () => {
     const testNavigator = Object.create(navigator) as Navigator;
     Object.defineProperty(testNavigator, "locks", { configurable: true, value: undefined });
     vi.stubGlobal("navigator", testNavigator);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/pos/customers") return Response.json(customers);
       if (input === "/api/sales") return Response.json({ orders });
@@ -852,12 +880,12 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm #43" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain("Web Locks support");
-    expect(fetchMock.mock.calls.some(([input]) => input === "/api/capabilities/execute")).toBe(false);
+    expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
     expect(localStorage.getItem(confirmAttemptKey("actor-1", "org-1", orders[2]!.id))).toBeNull();
   });
 
   it("shows route-level Go permission failures as access denied", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => input === "/api/modules"
+    vi.stubGlobal("fetch", goAwareFetch(async (input: RequestInfo | URL) => input === "/api/modules"
       ? Response.json(switchboard)
       : input === "/api/pos/customers" ? Response.json(customers)
       : Response.json({ error: "forbidden: missing sales.read" }, { status: 422 })));
@@ -878,12 +906,13 @@ describe("Vite sales page", () => {
   });
 
   it("does not fetch orders while the Sales module is disabled", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ catalog: [{ id: "sales" }], enabledModules: [] }));
+    const fetchMock = goAwareFetch(async () => Response.json({ catalog: [{ id: "sales" }], enabledModules: [] }));
     vi.stubGlobal("fetch", fetchMock);
     render(<SalesPage />);
 
     expect(await screen.findByRole("heading", { name: "Sales is turned off" })).not.toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/capabilities/execute"
+      && (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId === "sales.listOrders")).toBe(false);
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.any(Object));
   });
 });

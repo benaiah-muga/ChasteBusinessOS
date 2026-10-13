@@ -244,6 +244,18 @@ func MountGoMessagingPresenceRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+func MountGoMessagingAgentRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/conversations/{id}/agent-reply", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoPolicySessionRoute mounts only the Vite Settings policy collection.
 // Other methods and nested paths continue to the base handler.
 func MountGoPolicySessionRoute(base, route http.Handler) http.Handler {
@@ -283,6 +295,19 @@ func MountGoCRMReadRoute(base, route http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/crm", route)
 	mux.Handle("GET /api/customers", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountGoCRMFollowUpDraftRoute owns the authenticated Vite follow-up draft.
+func MountGoCRMFollowUpDraftRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/crm/follow-up-draft", route)
 	if base != nil {
 		mux.Handle("/", base)
 	}
@@ -421,6 +446,19 @@ func MountGoSupportCustomersRoute(base, route http.Handler) http.Handler {
 	mux.Handle("GET /api/support/customers", route)
 	if base != nil {
 		mux.Handle("HEAD /api/support/customers", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountGoSupportReplyDraftRoute owns authenticated Vite support reply drafts.
+func MountGoSupportReplyDraftRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/support/draft", route)
+	if base != nil {
 		mux.Handle("/", base)
 	}
 	return mux

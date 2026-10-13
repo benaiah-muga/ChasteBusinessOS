@@ -808,7 +808,13 @@ describe("support drafting", () => {
     const draft = await fetchSupportDraft(conversationId);
 
     expect(draft.draft).toBe("Thanks for flagging this.");
-    expect(bodies).toEqual([{ action: "draft", conversationId }]);
+    expect(bodies).toEqual([{ conversationId }]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/support/draft", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: expect.any(AbortSignal),
+    }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

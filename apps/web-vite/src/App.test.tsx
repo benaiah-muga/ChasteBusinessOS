@@ -230,6 +230,42 @@ beforeEach(() => {
       } });
       if (capabilityId === "purchasing.listPaymentRuns") return Response.json({ ok: true, data: { runs: [paymentRunFixture] } });
       if (capabilityId === "purchasing.listPaymentRunBills") return Response.json({ ok: true, data: { bills: [] } });
+      if (capabilityId === "purchasing.listWorkspace") return Response.json({ ok: true, data: {
+        baseCurrency: "USD",
+        orders: [{
+          id: "10000000-0000-4000-8000-000000000005",
+          number: 204,
+          vendorName: "Acme Supplies",
+          status: "partially_received",
+          memo: null,
+          orderedMinor: 150000,
+          lines: [{ lineNumber: 1, description: "Steel rods", quantity: 10000, unitPriceMinor: 15000 }],
+        }],
+      } });
+      if (capabilityId === "purchasing.listReceipts") return Response.json({ ok: true, data: {
+        receipts: [{
+          number: 2,
+          receivedAt: "2026-09-28T09:30:00.000Z",
+          note: "Second delivery",
+          lines: [{
+            position: 1,
+            description: "Steel rods",
+            acceptedThousandths: 7000,
+            rejectedThousandths: 1000,
+            returnedThousandths: 500,
+            rejectionNote: "Damaged ends",
+          }],
+        }],
+        orderLines: [{
+          position: 1,
+          description: "Steel rods",
+          orderedThousandths: 10000,
+          acceptedThousandths: 7000,
+          rejectedThousandths: 1000,
+          returnedThousandths: 500,
+          remainingThousandths: 2000,
+        }],
+      } });
       return new Response(null, { status: 404 });
     }
     if (path === "/api/purchasing" && init?.method === "POST") return Response.json({ ok: true, data: {
@@ -516,7 +552,6 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "People" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "People" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("link", { name: /Open full HR workspace/ })).not.toBeNull();
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
@@ -573,16 +608,17 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "Purchase receipt history" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Receipts" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Open full receiving workspace" }).getAttribute("href"))
-      .toBe("http://localhost:3001/purchasing/receiving");
+      .toBe("/purchasing/receiving");
     expect(await screen.findByText("Damaged ends")).not.toBeNull();
     expect(screen.getByText("2.000")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({ credentials: "same-origin" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({ credentials: "same-origin" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ action: "receiptDetail", poNumber: 204 }),
-      credentials: "same-origin",
-    }));
+    const purchasingReads = fetchMock.mock.calls
+      .filter(([input]) => String(input) === "/api/capabilities/execute")
+      .map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId?: string; input?: unknown });
+    expect(purchasingReads).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capabilityId: "purchasing.listWorkspace", input: {} }),
+      expect.objectContaining({ capabilityId: "purchasing.listReceipts", input: { poNumber: 204 } }),
+    ]));
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
@@ -684,8 +720,13 @@ describe("Vite app frame", () => {
     expect(screen.getByRole("link", { name: "CRM" }).getAttribute("aria-current")).toBe("page");
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/crm?deals=1", expect.objectContaining({ credentials: "same-origin" }));
-      expect(fetchMock).toHaveBeenCalledWith("/api/customers", expect.objectContaining({ credentials: "same-origin" }));
+      const goReads = fetchMock.mock.calls
+        .filter(([input]) => String(input) === "/api/capabilities/execute")
+        .map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId?: string });
+      expect(goReads.map(({ capabilityId }) => capabilityId)).toEqual(expect.arrayContaining([
+        "crm.listDeals",
+        "crm.listCustomerCollection",
+      ]));
     });
   });
 

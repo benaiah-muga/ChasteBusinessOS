@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { readPendingPurchasingRequest } from "../api/purchasing";
 import { PurchasingPage, aggregateReceiveLines, buildBillLines, buildReturnLines, formatThousandths, majorToInput, parseMinor, parseThousandths } from "./PurchasingPage";
 import { PurchasingReceivingPage, aggregateReceiveLines as aggregateReceivingLines, formatThousandths as formatReceivingThousandths, prefillReceivingDraft } from "./PurchasingReceivingPage";
 
@@ -184,11 +185,13 @@ function stubPurchasingLocks(): void {
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/purchasing");
+  window.localStorage.clear();
   stubPurchasingLocks();
 });
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -519,6 +522,7 @@ describe("PurchasingPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<PurchasingPage actorId="actor-sourcing-page" organizationId="org-sourcing-page" />);
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Packaging stock" } });
     fireEvent.change(screen.getByLabelText("Justification"), { target: { value: "Stock will run out before confirmed orders ship." } });
     fireEvent.change(screen.getByLabelText("Estimate (optional, USD)"), { target: { value: "42.00" } });
@@ -535,6 +539,85 @@ describe("PurchasingPage", () => {
     });
   });
 
+  it("locks and retries the exact Go purchase request after approval pending, including after reload", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", false);
+    const fetchMock = purchasingFetch({
+      post: (body) => body.action === "createPurchaseRequest"
+        ? Response.json({ pendingApproval: true, reason: "Reviewer approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId: "actor-request-default-go", organizationId: "org-request-default-go" };
+    const firstPage = render(<PurchasingPage {...props} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Packaging stock" } });
+    fireEvent.change(screen.getByLabelText("Justification"), { target: { value: "Stock will run out before confirmed orders ship." } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+    expect(await screen.findByText(/is waiting for approval: Reviewer approval required\./)).toBeTruthy();
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.createPurchaseRequest",
+      input: { title: "Packaging stock", justification: "Stock will run out before confirmed orders ship." },
+      intentId: expect.any(String),
+    });
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/purchasing" && init?.method === "POST")).toBe(false);
+    const originalIntent = capabilityPosts(fetchMock)[0]?.intentId;
+    const titleInput = screen.getByLabelText("What needs buying") as HTMLInputElement;
+    expect(titleInput.disabled).toBe(true);
+    expect(titleInput.value).toBe("Packaging stock");
+
+    firstPage.unmount();
+    render(<PurchasingPage {...props} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    const restoredTitle = await screen.findByLabelText("What needs buying") as HTMLInputElement;
+    expect(restoredTitle.value).toBe("Packaging stock");
+    expect(restoredTitle.disabled).toBe(true);
+    expect((screen.getByLabelText("Justification") as HTMLTextAreaElement).value).toBe("Stock will run out before confirmed orders ship.");
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact purchase request" }));
+    await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(2));
+    expect(capabilityPosts(fetchMock)[1]).toMatchObject({
+      capabilityId: "purchasing.createPurchaseRequest",
+      input: { title: "Packaging stock", justification: "Stock will run out before confirmed orders ship." },
+      intentId: originalIntent,
+    });
+  });
+
+  it("does not restore a failed request into a different organization after the request settles", async () => {
+    let rejectRequest: (() => void) | null = null;
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolveStarted) => { requestStarted = resolveStarted; });
+    const fetchMock = purchasingFetch({
+      post: () => new Promise((_resolve, reject) => {
+        rejectRequest = () => reject(new TypeError("connection dropped"));
+        requestStarted();
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const page = render(<PurchasingPage actorId="actor-scope-race" organizationId="org-scope-race-a" />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Old organization request" } });
+    fireEvent.change(screen.getByLabelText("Justification"), { target: { value: "This request belongs to the first organization." } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
+    await started;
+
+    page.rerender(<PurchasingPage actorId="actor-scope-race" organizationId="org-scope-race-b" />);
+    const newScopeTitle = await screen.findByLabelText("What needs buying") as HTMLInputElement;
+    await waitFor(() => expect(newScopeTitle.disabled).toBe(false));
+    expect(newScopeTitle.value).toBe("");
+
+    await act(async () => {
+      rejectRequest?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "Retry exact purchase request" })).toBeNull();
+    expect(screen.queryByText(/connection dropped/)).toBeNull();
+  });
+
   it("restores the exact scoped sourcing draft and intent after a pending request reload", async () => {
     vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
     const fetchMock = purchasingFetch({
@@ -546,10 +629,14 @@ describe("PurchasingPage", () => {
     const props = { actorId: "actor-sourcing-reload", organizationId: "org-sourcing-reload" };
     const firstPage = render(<PurchasingPage {...props} />);
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Packaging stock" } });
     fireEvent.change(screen.getByLabelText("Justification"), { target: { value: "Stock will run out before confirmed orders ship." } });
     fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
     await screen.findByText(/is waiting for approval/);
+    const markerKey = Object.keys(window.localStorage).find((key) => key.startsWith("chaste.purchasing.sourcing.active.v1:createPurchaseRequest:new:"));
+    expect(markerKey).toBeTruthy();
+    await expect(readPendingPurchasingRequest(props)).resolves.toMatchObject({ title: "Packaging stock" });
     const originalIntent = capabilityPosts(fetchMock)[0]?.intentId;
     firstPage.unmount();
 
@@ -557,7 +644,10 @@ describe("PurchasingPage", () => {
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
     expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe("Packaging stock");
     expect((screen.getByLabelText("Justification") as HTMLTextAreaElement).value).toBe("Stock will run out before confirmed orders ship.");
-    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
+    expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(true);
+    const retryRequest = await screen.findByRole("button", { name: "Retry exact purchase request" });
+    await waitFor(() => expect((retryRequest as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(retryRequest);
     await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(2));
     expect(capabilityPosts(fetchMock)[1]?.intentId).toBe(originalIntent);
   });
@@ -584,6 +674,7 @@ describe("PurchasingPage", () => {
     const props = { actorId: "actor-quote-reload", organizationId: "org-quote-reload" };
     const firstPage = render(<PurchasingPage {...props} />);
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    await waitFor(() => expect((screen.getByLabelText("Quote amount from Harbor Supplies") as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Quote amount from Harbor Supplies"), { target: { value: "42.50" } });
     fireEvent.change(screen.getByLabelText("Quote notes from Harbor Supplies"), { target: { value: "Freight included" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -595,6 +686,7 @@ describe("PurchasingPage", () => {
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
     expect((screen.getByLabelText("Quote amount from Harbor Supplies") as HTMLInputElement).value).toBe("42.50");
     expect((screen.getByLabelText("Quote notes from Harbor Supplies") as HTMLInputElement).value).toBe("Freight included");
+    await waitFor(() => expect((screen.getByLabelText("Quote amount from Harbor Supplies") as HTMLInputElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(2));
     expect(capabilityPosts(fetchMock)[1]).toMatchObject({
@@ -608,6 +700,7 @@ describe("PurchasingPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     const page = render(<PurchasingPage actorId="scope-secret-actor" organizationId="scope-secret-org-a" />);
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Private draft" } });
     await waitFor(() => expect(Object.keys(window.localStorage).some((key) => key.includes("scope-secret-actor") || key.includes("scope-secret-org-a"))).toBe(false));
     page.rerender(<PurchasingPage actorId="scope-secret-actor" organizationId={null} />);
@@ -718,6 +811,7 @@ describe("PurchasingPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<PurchasingPage actorId="actor-sourcing-currency" organizationId="org-sourcing-currency" />);
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    await waitFor(() => expect((screen.getByLabelText("Quote amount from Harbor Supplies") as HTMLInputElement).disabled).toBe(false));
     expect(screen.getByText(/Estimated/).textContent).toContain("¥");
     fireEvent.change(screen.getByLabelText("Quote amount from Harbor Supplies"), { target: { value: "12" } });
     fireEvent.change(screen.getByLabelText("Quote notes from Harbor Supplies"), { target: { value: "Freight included" } });
@@ -752,6 +846,7 @@ describe("PurchasingPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<PurchasingPage actorId="actor-sourcing-rfq" organizationId="org-sourcing-rfq" />);
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    await waitFor(() => expect((screen.getByLabelText("Supplier 1") as HTMLInputElement).disabled).toBe(false));
     for (let index = 1; index <= 10; index += 1) fireEvent.click(screen.getByLabelText(`Supplier ${index}`));
     expect((screen.getByLabelText("Supplier 11") as HTMLInputElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Send RFQs (10)" }));

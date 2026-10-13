@@ -961,7 +961,10 @@ function AiTab() {
                   <input
                     id={`settings-ai-model-${field}`}
                     value={models[field]}
-                    onChange={(event) => setModels((current) => ({ ...current, [field]: event.currentTarget.value }))}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setModels((current) => ({ ...current, [field]: value }));
+                    }}
                     aria-describedby={`settings-ai-model-${field}-hint`}
                     style={ui.monoField}
                   />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { z } from "zod";
 import {
@@ -21,12 +21,14 @@ import {
   goPurchasingIntelReadsUseGo,
   goPurchasingWorkflowReadsUseGo,
   payPurchasingBill,
+  readPendingPurchasingRequest,
   PurchasingApiError,
   recordPurchasingQuote,
   returnPurchasingGoods,
   selectPurchasingWinningQuote,
   type PurchasingAction,
   type PurchasingActionOutcome,
+  type PendingPurchaseRequestAction,
   type PurchasingBill,
   type PurchasingOrder,
   type PurchasingPriceHistoryRow,
@@ -75,6 +77,12 @@ const emptyPoLine: PoLineDraft = { description: "", quantity: "1", unitPrice: "0
 const emptyBillLine: BillLineDraft = { description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "", taxCodeId: "" };
 const PersistedSourcingDraftSchema = z.object({
   requestForm: z.object({ title: z.string(), justification: z.string(), estimate: z.string() }).strict(),
+  pendingRequestAction: z.object({
+    action: z.literal("createPurchaseRequest"),
+    title: z.string().min(3).max(200),
+    justification: z.string().min(10).max(4000),
+    estimatedAmountMinor: z.number().int().safe().nonnegative().optional(),
+  }).strict().nullable().optional(),
   rfqPick: z.record(z.string(), z.array(z.string())),
   quoteDraft: z.record(z.string(), z.object({ amount: z.string(), leadTime: z.string(), notes: z.string() }).strict()),
   rejectFor: z.string().nullable(),
@@ -313,6 +321,9 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   const [poForm, setPoForm] = useState({ vendorId: "", memo: "", lines: [emptyPoLine] });
   const [billForm, setBillForm] = useState({ vendorId: "", vendorRef: "", poNumber: "", lines: [emptyBillLine] });
   const [requestForm, setRequestForm] = useState({ title: "", justification: "", estimate: "" });
+  const [pendingRequestAction, setPendingRequestAction] = useState<PendingPurchaseRequestAction | null>(null);
+  const [requestRecoveryStatus, setRequestRecoveryStatus] = useState<"loading" | "ready" | "failed">("loading");
+  const [requestRecoveryError, setRequestRecoveryError] = useState<string | null>(null);
   const [requestEstimateError, setRequestEstimateError] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<Record<string, string>>({});
   const [payAmount, setPayAmount] = useState<Record<string, string>>({});
@@ -332,8 +343,11 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   const sourcingDraftScopeIdentity = actorId?.trim() && organizationId?.trim()
     ? JSON.stringify({ actorId: actorId.trim(), organizationId: organizationId.trim() })
     : null;
+  const sourcingDraftScopeIdentityRef = useRef(sourcingDraftScopeIdentity);
+  sourcingDraftScopeIdentityRef.current = sourcingDraftScopeIdentity;
   const goSourcingWritesEnabled = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
   const [sourcingDraftStorageKey, setSourcingDraftStorageKey] = useState<string | null>(null);
+  const [sourcingDraftStorageIdentity, setSourcingDraftStorageIdentity] = useState<string | null>(null);
   const [hydratedSourcingDraftScope, setHydratedSourcingDraftScope] = useState<string | null>(null);
   const [sourcingDraftStorageStatus, setSourcingDraftStorageStatus] = useState<"loading" | "ready" | "failed">("loading");
   const sourcingDraftsReady = !goSourcingWritesEnabled || Boolean(
@@ -343,8 +357,13 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   useEffect(() => {
     let active = true;
     setSourcingDraftStorageKey(null);
+    setSourcingDraftStorageIdentity(null);
     setHydratedSourcingDraftScope(null);
     setSourcingDraftStorageStatus("loading");
+    setPendingRequestAction(null);
+    setRequestRecoveryError(null);
+    setRequestRecoveryStatus(sourcingDraftScopeIdentity ? "loading" : "ready");
+    setBusy(false);
     setRequestForm({ title: "", justification: "", estimate: "" });
     setRfqPick({});
     setQuoteDraft({});
@@ -358,6 +377,7 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
       if (!active) return;
       const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
       setSourcingDraftStorageKey(`chaste.purchasing.sourcing.draft.v1:${hex}`);
+      setSourcingDraftStorageIdentity(sourcingDraftScopeIdentity);
     }).catch(() => {
       if (active) {
         setSourcingDraftStorageKey(null);
@@ -368,42 +388,71 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   }, [sourcingDraftScopeIdentity]);
 
   useEffect(() => {
-    if (!sourcingDraftStorageKey) return;
+    if (!sourcingDraftScopeIdentity || !sourcingDraftStorageKey || sourcingDraftStorageIdentity !== sourcingDraftScopeIdentity) return;
+    let active = true;
     let storageAvailable = true;
-    try {
-      const raw = window.localStorage.getItem(sourcingDraftStorageKey);
-      const parsed = raw === null ? null : PersistedSourcingDraftSchema.safeParse(JSON.parse(raw));
-      if (parsed?.success) {
-        setRequestForm(parsed.data.requestForm);
-        setRfqPick(parsed.data.rfqPick);
-        setQuoteDraft(parsed.data.quoteDraft);
-        setRejectFor(parsed.data.rejectFor);
-        setRejectReason(parsed.data.rejectReason);
-      } else {
-        if (raw !== null) window.localStorage.removeItem(sourcingDraftStorageKey);
-        setRequestForm({ title: "", justification: "", estimate: "" });
-        setRfqPick({});
-        setQuoteDraft({});
-        setRejectFor(null);
-        setRejectReason("");
+    void (async () => {
+      try {
+        const raw = window.localStorage.getItem(sourcingDraftStorageKey);
+        const parsed = raw === null ? null : PersistedSourcingDraftSchema.safeParse(JSON.parse(raw));
+        if (!active) return;
+        if (parsed?.success) {
+          setRequestForm(parsed.data.requestForm);
+          setPendingRequestAction(parsed.data.pendingRequestAction ?? null);
+          setRfqPick(parsed.data.rfqPick);
+          setQuoteDraft(parsed.data.quoteDraft);
+          setRejectFor(parsed.data.rejectFor);
+          setRejectReason(parsed.data.rejectReason);
+        } else {
+          if (raw !== null) window.localStorage.removeItem(sourcingDraftStorageKey);
+          setRequestForm({ title: "", justification: "", estimate: "" });
+          setPendingRequestAction(null);
+          setRfqPick({});
+          setQuoteDraft({});
+          setRejectFor(null);
+          setRejectReason("");
+        }
+      } catch {
+        storageAvailable = false;
       }
-    } catch {
-      storageAvailable = false;
-    }
-    setHydratedSourcingDraftScope(sourcingDraftStorageKey);
-    setSourcingDraftStorageStatus(storageAvailable ? "ready" : "failed");
-  }, [sourcingDraftStorageKey]);
+
+      try {
+        const pending = await readPendingPurchasingRequest({ actorId, organizationId });
+        if (!active) return;
+        setPendingRequestAction(pending);
+        setRequestRecoveryError(null);
+        if (pending) {
+          setRequestForm({
+            title: pending.title,
+            justification: pending.justification,
+            estimate: pending.estimatedAmountMinor == null ? "" : (pending.estimatedAmountMinor / (10 ** (currencyMinorUnits(baseCurrency ?? "USD") ?? 2))).toFixed(currencyMinorUnits(baseCurrency ?? "USD") ?? 2),
+          });
+          setNotice({ tone: "pending", text: "A purchase request is unresolved. Retry its exact saved details before starting another." });
+        }
+        setRequestRecoveryStatus("ready");
+      } catch (error) {
+        if (!active) return;
+        storageAvailable = false;
+        setRequestRecoveryError(error instanceof Error ? error.message : "Could not recover the pending purchase request.");
+        setRequestRecoveryStatus("failed");
+      }
+      if (!active) return;
+      setHydratedSourcingDraftScope(sourcingDraftStorageKey);
+      setSourcingDraftStorageStatus(storageAvailable ? "ready" : "failed");
+    })();
+    return () => { active = false; };
+  }, [actorId, baseCurrency, organizationId, sourcingDraftScopeIdentity, sourcingDraftStorageIdentity, sourcingDraftStorageKey]);
 
   useEffect(() => {
-    if (!sourcingDraftStorageKey || hydratedSourcingDraftScope !== sourcingDraftStorageKey || sourcingDraftStorageStatus !== "ready") return;
+    if (!sourcingDraftScopeIdentity || sourcingDraftStorageIdentity !== sourcingDraftScopeIdentity || !sourcingDraftStorageKey || hydratedSourcingDraftScope !== sourcingDraftStorageKey || sourcingDraftStorageStatus !== "ready") return;
     try {
-      const serialized = JSON.stringify({ requestForm, rfqPick, quoteDraft, rejectFor, rejectReason });
+      const serialized = JSON.stringify({ requestForm, pendingRequestAction, rfqPick, quoteDraft, rejectFor, rejectReason });
       window.localStorage.setItem(sourcingDraftStorageKey, serialized);
       if (window.localStorage.getItem(sourcingDraftStorageKey) !== serialized) throw new Error("sourcing draft did not persist");
     } catch {
       setSourcingDraftStorageStatus("failed");
     }
-  }, [hydratedSourcingDraftScope, sourcingDraftStorageKey, sourcingDraftStorageStatus, requestForm, rfqPick, quoteDraft, rejectFor, rejectReason]);
+  }, [hydratedSourcingDraftScope, sourcingDraftScopeIdentity, sourcingDraftStorageIdentity, sourcingDraftStorageKey, sourcingDraftStorageStatus, requestForm, pendingRequestAction, rfqPick, quoteDraft, rejectFor, rejectReason]);
 
   const load = useCallback(async ({ signal, quiet = false }: { signal?: AbortSignal; quiet?: boolean } = {}) => {
     if (!quiet) setState({ status: "loading" });
@@ -451,14 +500,18 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
     lifecycle?: { onPending?: () => void; onError?: (error: unknown) => void },
   ): Promise<boolean> {
     if (busy) return false;
+    const requestScopeIdentity = sourcingDraftScopeIdentity;
+    const requestScopeIsCurrent = () => sourcingDraftScopeIdentityRef.current === requestScopeIdentity;
     const isSourcingAction = action.action === "createPurchaseRequest" || action.action === "decidePurchaseRequest" || action.action === "createRfq" || action.action === "recordQuote" || action.action === "selectWinningQuote";
-    if (goSourcingWritesEnabled && isSourcingAction) {
+    const needsScopedDraftStorage = action.action === "createPurchaseRequest" || (goSourcingWritesEnabled && isSourcingAction);
+    if (needsScopedDraftStorage) {
       if (!sourcingDraftsReady || !sourcingDraftStorageKey) {
         setNotice({ tone: "error", text: "Wait for your scoped purchasing draft to finish loading before submitting this action." });
         return false;
       }
       try {
-        const serializedDraft = JSON.stringify({ requestForm, rfqPick, quoteDraft, rejectFor, rejectReason });
+        const submittedRequest = action.action === "createPurchaseRequest" ? action : pendingRequestAction;
+        const serializedDraft = JSON.stringify({ requestForm, pendingRequestAction: submittedRequest, rfqPick, quoteDraft, rejectFor, rejectReason });
         window.localStorage.setItem(sourcingDraftStorageKey, serializedDraft);
         if (window.localStorage.getItem(sourcingDraftStorageKey) !== serializedDraft) throw new Error("sourcing draft did not persist");
       } catch {
@@ -469,8 +522,10 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
     }
     setBusy(true);
     setNotice(null);
+    if (action.action === "createPurchaseRequest") setPendingRequestAction(action);
     try {
       const outcome = await submitAction(action, { actorId, organizationId });
+      if (!requestScopeIsCurrent()) return false;
       if (outcome.kind === "pending") {
         lifecycle?.onPending?.();
         setNotice({ tone: "pending", text: `${label} is waiting for approval${outcome.reason ? `: ${outcome.reason}` : ""}.` });
@@ -478,17 +533,32 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
       }
       setNotice({ tone: "success", text: `${label} done.` });
       after?.();
+      if (action.action === "createPurchaseRequest") setPendingRequestAction(null);
       await load({ quiet: true });
       return true;
     } catch (error) {
+      if (!requestScopeIsCurrent()) return false;
       lifecycle?.onError?.(error);
+      if (action.action === "createPurchaseRequest") {
+        try {
+          const pending = await readPendingPurchasingRequest({ actorId, organizationId });
+          if (!requestScopeIsCurrent()) return false;
+          setPendingRequestAction(pending);
+          setRequestRecoveryStatus("ready");
+          if (!pending) setRequestRecoveryError(null);
+        } catch (recoveryError) {
+          if (!requestScopeIsCurrent()) return false;
+          setRequestRecoveryStatus("failed");
+          setRequestRecoveryError(recoveryError instanceof Error ? recoveryError.message : "Could not recover the pending purchase request.");
+        }
+      }
       setNotice({
         tone: "error",
         text: error instanceof Error ? error.message : `${label} failed. Try again.`,
       });
       return false;
     } finally {
-      setBusy(false);
+      if (requestScopeIsCurrent()) setBusy(false);
     }
   }
 
@@ -636,6 +706,9 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
         {tab === "requests" && goSourcingWritesEnabled && !sourcingDraftsReady && sourcingDraftStorageStatus === "loading" && (
           <p className="purchasing-inline-note" role="status">Loading your scoped sourcing draft before enabling submissions.</p>
         )}
+        {tab === "requests" && requestRecoveryStatus === "failed" && (
+          <p className="purchasing-notice is-error" role="alert">{requestRecoveryError ?? "Could not recover the pending purchase request."}</p>
+        )}
 
         {tab === "overview" && (
           <Overview
@@ -657,6 +730,11 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
             busy={busy || !sourcingDraftsReady}
             form={requestForm}
             setForm={setRequestForm}
+            pendingRequestAction={pendingRequestAction}
+            requestRecoveryStatus={requestRecoveryStatus}
+            onRetryPending={() => {
+              if (pendingRequestAction) void runAction("Purchase request raised", pendingRequestAction, () => setRequestForm({ title: "", justification: "", estimate: "" }));
+            }}
             estimateError={requestEstimateError}
             setEstimateError={setRequestEstimateError}
             rfqPick={rfqPick}
@@ -1036,13 +1114,16 @@ function Overview({ orders, bills, requests, vendorCount, outstanding, currency,
 
 /* ---------------------------------------------------------------- requests --- */
 
-function RequestsTab({ requests, vendors, currency, busy, form, setForm, estimateError, setEstimateError, rfqPick, setRfqPick, quoteDraft, setQuoteDraft, rejectFor, rejectReason, setRejectFor, setRejectReason, onRun }: {
+function RequestsTab({ requests, vendors, currency, busy, form, setForm, pendingRequestAction, requestRecoveryStatus, onRetryPending, estimateError, setEstimateError, rfqPick, setRfqPick, quoteDraft, setQuoteDraft, rejectFor, rejectReason, setRejectFor, setRejectReason, onRun }: {
   requests: PurchasingRequest[];
   vendors: PurchasingVendor[];
   currency: string;
   busy: boolean;
   form: { title: string; justification: string; estimate: string };
   setForm: (form: { title: string; justification: string; estimate: string }) => void;
+  pendingRequestAction: PendingPurchaseRequestAction | null;
+  requestRecoveryStatus: "loading" | "ready" | "failed";
+  onRetryPending: () => void;
   estimateError: string | null;
   setEstimateError: (message: string | null) => void;
   rfqPick: Record<string, string[]>;
@@ -1055,6 +1136,7 @@ function RequestsTab({ requests, vendors, currency, busy, form, setForm, estimat
   setRejectReason: (reason: string) => void;
   onRun: (label: string, action: PurchasingWrite, after?: () => void) => Promise<boolean>;
 }) {
+  const requestLocked = busy || requestRecoveryStatus !== "ready" || Boolean(pendingRequestAction);
   return (
     <section className="purchasing-form" aria-label="Purchase requests and quotes">
       <section className="purchasing-card" aria-labelledby="purchasing-request-form-title">
@@ -1086,7 +1168,7 @@ function RequestsTab({ requests, vendors, currency, busy, form, setForm, estimat
                 id="purchasing-request-title"
                 className="purchasing-input"
                 placeholder="e.g. Packaging supplies for Q4"
-                disabled={busy}
+                disabled={requestLocked}
                 maxLength={200}
                 value={form.title}
                 onChange={(event) => setForm({ ...form, title: event.currentTarget.value })}
@@ -1100,7 +1182,7 @@ function RequestsTab({ requests, vendors, currency, busy, form, setForm, estimat
                 inputMode="decimal"
                 placeholder="0.00"
                 value={form.estimate}
-                disabled={busy}
+                disabled={requestLocked}
                 aria-invalid={estimateError ? true : undefined}
                 onChange={(event) => {
                   setForm({ ...form, estimate: event.currentTarget.value });
@@ -1117,7 +1199,7 @@ function RequestsTab({ requests, vendors, currency, busy, form, setForm, estimat
               className="purchasing-textarea"
               rows={2}
               placeholder="Justify it for the reviewer: why now, from whom, what changes if it is declined…"
-              disabled={busy}
+              disabled={requestLocked}
               maxLength={4000}
               value={form.justification}
               onChange={(event) => setForm({ ...form, justification: event.currentTarget.value })}
@@ -1127,12 +1209,19 @@ function RequestsTab({ requests, vendors, currency, busy, form, setForm, estimat
             <button
               type="submit"
               className="purchasing-button is-primary"
-              disabled={busy || form.title.trim().length < 3 || form.justification.trim().length < 10}
+              disabled={requestLocked || form.title.trim().length < 3 || form.justification.trim().length < 10}
             >
               Submit request
             </button>
+            {pendingRequestAction && (
+              <button type="button" className="purchasing-button is-primary" disabled={busy || requestRecoveryStatus !== "ready"} onClick={onRetryPending}>
+                Retry exact purchase request
+              </button>
+            )}
             <p className="purchasing-inline-note">
-              Requests wait for a reviewer. Approved ones go out as RFQs; the winning bid becomes a purchase order.
+              {pendingRequestAction
+                ? "This request has an unresolved result. Its details are locked until the saved action is resolved."
+                : "Requests wait for a reviewer. Approved ones go out as RFQs; the winning bid becomes a purchase order."}
             </p>
           </div>
         </form>

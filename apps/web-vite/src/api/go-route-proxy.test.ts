@@ -65,7 +65,6 @@ import {
   goHrExpensesFromEnv,
   goHrHiringFromEnv,
   goHrEmployeeWritesFromEnv,
-  goHrLeaveFromEnv,
   goHrPayrollFromEnv,
   goAccountingRecordPaymentFromEnv,
   goAccountingCreateInvoiceFromEnv,
@@ -246,15 +245,6 @@ describe("HR expenses Go selector", () => {
     expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_EXPENSES: "0" })).toBe(false);
     expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_EXPENSES: "1" })).toBe(false);
-  });
-});
-
-describe("HR Leave Go selector", () => {
-  it("requires the paired session capability route and explicit leave selector", () => {
-    expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_LEAVE: "1" })).toBe(true);
-    expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_LEAVE: "0" })).toBe(false);
-    expect(goHrLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_LEAVE: "1" })).toBe(false);
   });
 });
 
@@ -800,6 +790,8 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_LEDGER_ROUTE", flag: "ledger", method: "GET", url: "/api/ledger" },
   { env: "CHASTE_GO_METRICS_ROUTE", flag: "metrics", method: "GET", url: "/api/metrics" },
   { env: "CHASTE_GO_MY_WORK_SUMMARY_ROUTE", flag: "myWorkSummary", method: "POST", url: "/api/my-work/summarize?scope=mine" },
+  { env: "CHASTE_GO_CRM_FOLLOW_UP_DRAFT_ROUTE", flag: "crmFollowUpDraft", method: "POST", url: "/api/crm/follow-up-draft?source=customer" },
+  { env: "CHASTE_GO_SUPPORT_REPLY_DRAFT_ROUTE", flag: "supportReplyDraft", method: "POST", url: "/api/support/draft" },
   { env: "CHASTE_GO_SIGNALS_ROUTE", flag: "signals", method: "GET", url: "/api/signals?status=active" },
   { env: "CHASTE_GO_SCIM_TOKENS_ROUTE", flag: "scimTokens", method: "GET", url: "/api/scim/tokens" },
   { env: "CHASTE_GO_SCIM_TOKENS_ROUTE", flag: "scimTokens", method: "POST", url: "/api/scim/tokens" },
@@ -922,7 +914,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.aiConfig).toBe(true);
     expect(flags.email).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "moduleSettings", "aiConfig", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision", "email"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "moduleSettings", "aiConfig", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "crmFollowUpDraft", "supportReplyDraft", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision", "email"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -1869,6 +1861,31 @@ describe("Vite Go route proxy selection", () => {
     const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_SALES_ORDERS_ROUTE: "0" });
     expect(isGoRouteRequest(rolledBack, "GET", "/api/sales")).toBe(false);
     expect(isGoRouteRequest(rolledBack, "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001")).toBe(true);
+  });
+
+  it("routes only the exact CRM follow-up draft POST to Go by default", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(defaults.crmFollowUpDraft).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/crm/follow-up-draft")).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/crm/follow-up-draft?source=customer")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/crm/follow-up-draft")).toBe(false);
+    expect(isGoRouteRequest(defaults, "POST", "/api/crm/follow-up-draft/extra")).toBe(false);
+    expect(isGoRouteRequest(defaults, "POST", "/api/crm/follow-up-draft/")).toBe(false);
+
+    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_CRM_FOLLOW_UP_DRAFT_ROUTE: "0" });
+    expect(isGoRouteRequest(disabled, "POST", "/api/crm/follow-up-draft")).toBe(false);
+  });
+
+  it("routes only the exact support reply draft POST to Go by default", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(defaults.supportReplyDraft).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/support/draft")).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/support/draft?source=thread")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/support/draft")).toBe(false);
+    expect(isGoRouteRequest(defaults, "POST", "/api/support/draft/extra")).toBe(false);
+
+    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_SUPPORT_REPLY_DRAFT_ROUTE: "0" });
+    expect(isGoRouteRequest(disabled, "POST", "/api/support/draft")).toBe(false);
   });
 
   it("routes only exact sales invoice GET paths to Go by default", () => {

@@ -42,14 +42,14 @@ function messageFor(status: number, body: unknown): string {
   return "The support request could not be completed. Check the details and try again.";
 }
 
-async function request(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
+async function request(path: string, init: RequestInit = {}, signal?: AbortSignal, timeoutMs?: number): Promise<{ response: Response; body: unknown }> {
   let response: Response;
   try {
     response = await fetch(path, {
       ...init,
       credentials: "same-origin",
       headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
-      signal: requestSignal(signal, init.method === "POST" ? 20_000 : 15_000),
+      signal: requestSignal(signal, timeoutMs ?? (init.method === "POST" ? 20_000 : 15_000)),
     });
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -963,7 +963,7 @@ export type SupportDraft = z.infer<typeof SupportDraftSchema>;
 
 export async function fetchSupportDraft(conversationId: string, signal?: AbortSignal): Promise<SupportDraft> {
   if (!uuid.safeParse(conversationId).success) throw new SupportApiError(0, "Choose a conversation before drafting a reply.");
-  const { response, body } = await request("/api/support", { method: "POST", body: JSON.stringify({ action: "draft", conversationId }) }, signal);
+  const { response, body } = await request("/api/support/draft", { method: "POST", cache: "no-store", body: JSON.stringify({ conversationId }) }, signal, 60_000);
   if (response.status === 202 || PendingEnvelopeSchema.safeParse(body).success) {
     throw new SupportApiError(response.status, "Drafting is waiting for approval in the Approvals inbox.");
   }

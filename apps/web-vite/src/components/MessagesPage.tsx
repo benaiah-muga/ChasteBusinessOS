@@ -1440,7 +1440,8 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
       const body = draft.trim();
       const mentions = extractMentions(body, people);
       const goFlagEnabled = typeof __GO_MESSAGING_SEND_SLICE__ !== "undefined" && __GO_MESSAGING_SEND_SLICE__;
-      const allowGo = goFlagEnabled && activeConv != null && !activeConv.agentEnabled && !mentions.some((mention) => mention.type === "agent");
+      const requestAgentReply = activeConv?.agentEnabled === true || mentions.some((mention) => mention.type === "agent");
+      const allowGo = goFlagEnabled && activeConv != null;
       const action = {
         conversationId: activeId,
         body,
@@ -1454,7 +1455,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
         mentions,
         parentMessageId: replyTo?.id,
         attachmentIds,
-      }, undefined, { allowGo, intentId: goSendIntent?.intentId });
+      }, undefined, { allowGo, intentId: goSendIntent?.intentId, requestAgentReply });
       if (outcome.kind === "pending") {
         setComposerPending(outcome.reason);
         return;

@@ -1554,7 +1554,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [{ id: taskId, title: "Schedule Northwind review", doneAt: "2026-09-19T12:00:00.000Z" }] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/crm?timeline=" + customerId) return Response.json({ entries: [] });
-      if (path === "/api/crm" && init?.method === "POST") return Response.json({ draft: "Hello Northwind, can we review invoice 7?", sources: [{ kind: "invoice", date: "2026-09-20T12:00:00.000Z", refId: dealId, summary: "Invoice #7 is awaiting payment" }, { kind: "task", date: "2026-09-21T12:00:00.000Z", refId: taskId, summary: "Schedule Northwind review" }] });
+      if (path === "/api/crm/follow-up-draft" && init?.method === "POST") return Response.json({ draft: "Hello Northwind, can we review invoice 7?", sources: [{ kind: "invoice", date: "2026-09-20T12:00:00.000Z", refId: dealId, summary: "Invoice #7 is awaiting payment" }, { kind: "task", date: "2026-09-21T12:00:00.000Z", refId: taskId, summary: "Schedule Northwind review" }] });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
@@ -1565,7 +1565,8 @@ describe("Vite CRM page", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Draft with AI" }));
     expect(await within(dialog).findByLabelText("Message")).not.toBeNull();
     expect(within(dialog).getByText("Invoice #7 is awaiting payment")).not.toBeNull();
-    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")?.[1]?.body))).toMatchObject({ action: "draftFollowUp", customerId });
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm/follow-up-draft" && init?.method === "POST")?.[1]?.body))).toEqual({ customerId });
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")).toBe(false);
     fireEvent.click(within(dialog).getByRole("button", { name: /Schedule Northwind review/ }));
     expect(await screen.findByRole("heading", { name: "Follow-up tasks" })).not.toBeNull();
     expect((screen.getByRole("checkbox", { name: "Show completed (1)" }) as HTMLInputElement).checked).toBe(true);

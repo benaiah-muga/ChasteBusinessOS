@@ -161,6 +161,10 @@ func goInventoryReadRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goCRMFollowUpDraftRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goSupportChannelsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -240,6 +244,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go authored document workspace route mounted", "path", "/api/docs/{id}/workspace")
 	}
 	var messagingPresenceRoute http.Handler
+	var messagingAgentRoute http.Handler
 	if goMessagingPresenceRouteEnabledFromEnv(os.Getenv("GO_MESSAGING_PRESENCE_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
@@ -247,6 +252,8 @@ func run(logger *slog.Logger) error {
 		}
 		messagingPresenceRoute = httpapi.NewMessagingPresenceHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
 		logger.Info("Go messaging presence route mounted", "path", "/api/conversations/{id}/presence")
+		messagingAgentRoute = httpapi.NewMessagingAgentHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
+		logger.Info("Go messaging agent route mounted", "path", "/api/conversations/{id}/agent-reply")
 	}
 	var portalInvoiceRoute http.Handler
 	if goPortalInvoiceRouteEnabledFromEnv(os.Getenv("GO_PORTAL_INVOICE_ROUTE")) {
@@ -461,6 +468,17 @@ func run(logger *slog.Logger) error {
 		crmReadRoute = httpapi.NewCRMReadSessionHandlerWithPOSCustomers(resolver, capabilityExecutor, pool, logger)
 		logger.Info("Go CRM session read routes mounted", "paths", []string{"GET /api/crm", "GET /api/customers"})
 	}
+	var crmFollowUpDraftRoute http.Handler
+	if goCRMFollowUpDraftRouteEnabledFromEnv(os.Getenv("GO_CRM_FOLLOW_UP_DRAFT_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		crmFollowUpDraftRoute = httpapi.NewCRMFollowUpDraftSessionHandler(
+			resolver, capabilityExecutor, pool, httpapi.NewMyWorkSummaryPostgresReader(pool), nil, logger, trustedProxyCIDRs,
+		)
+		logger.Info("Go CRM follow-up draft route mounted", "path", "POST /api/crm/follow-up-draft")
+	}
 	var posReadRoute http.Handler
 	if goPosReadRouteEnabledFromEnv(os.Getenv("GO_POS_READ_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
@@ -487,6 +505,15 @@ func run(logger *slog.Logger) error {
 		}
 		supportCustomersRoute = httpapi.NewSupportCustomersSessionHandler(pool, resolver, logger)
 		logger.Info("Go Support customer picker route mounted", "path", "GET /api/support/customers")
+	}
+	var supportReplyDraftRoute http.Handler
+	if os.Getenv("GO_SUPPORT_REPLY_DRAFT_ROUTE") != "0" {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		supportReplyDraftRoute = httpapi.NewSupportReplyDraftSessionHandler(pool, resolver, logger, trustedProxyCIDRs)
+		logger.Info("Go Support reply draft route mounted", "path", "POST /api/support/draft")
 	}
 	var posShiftSummaryRoute http.Handler
 	if goPosShiftSummaryRouteEnabledFromEnv(os.Getenv("GO_POS_SHIFT_SUMMARY_ROUTE")) {
@@ -805,10 +832,13 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoModuleSettingsRoute(apiHandler, moduleSettingsRoute)
 	apiHandler = httpapi.MountGoPolicySessionRoute(apiHandler, policyRoute)
 	apiHandler = httpapi.MountGoSupportCustomersRoute(apiHandler, supportCustomersRoute)
+	apiHandler = httpapi.MountGoSupportReplyDraftRoute(apiHandler, supportReplyDraftRoute)
+	apiHandler = httpapi.MountGoCRMFollowUpDraftRoute(apiHandler, crmFollowUpDraftRoute)
 	apiHandler = httpapi.MountGoAIConfigRoute(apiHandler, aiConfigRoute)
 	apiHandler = httpapi.MountGoDocumentsEditorWorkspaceRoute(apiHandler, documentsEditorWorkspaceRoute)
 	apiHandler = httpapi.MountGoDocumentContentDownloadRoute(apiHandler, documentContentDownloadRoute)
 	apiHandler = httpapi.MountGoMessagingPresenceRoute(apiHandler, messagingPresenceRoute)
+	apiHandler = httpapi.MountGoMessagingAgentRoute(apiHandler, messagingAgentRoute)
 	apiMux := http.NewServeMux()
 	apiMux.Handle("/api/email", emailRoute)
 	apiMux.Handle("/", apiHandler)

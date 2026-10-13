@@ -423,6 +423,23 @@ const StoredReverseEntrySchema = z.object({
 }).strict();
 const ReverseEntryOutputSchema = z.object({ reversalEntryId: z.string().uuid() }).strict();
 const REVERSE_ENTRY_ATTEMPT_PREFIX = "chaste:accounting:reverse-entry:go:attempt:v1:";
+const ReversePaymentActionSchema = z.object({
+  action: z.literal("reversePayment"),
+  paymentId: z.string().uuid(),
+  reason: z.string().min(3).max(500),
+}).strict();
+const StoredReversePaymentSchema = z.object({
+  action: ReversePaymentActionSchema,
+  intentId: z.string().uuid(),
+  fingerprint: z.string().length(64),
+}).strict();
+const ReversePaymentOutputSchema = z.object({
+  reversalEntryIds: z.array(z.string().uuid()),
+  refundedMinor: minor,
+  invoiceNumber: z.number().int().safe(),
+  outstandingMinor: minor,
+}).strict();
+const REVERSE_PAYMENT_ATTEMPT_PREFIX = "chaste:accounting:reverse-payment:go:attempt:v1:";
 const CloseYearActionSchema = z.object({
   action: z.literal("closeYear"),
   year: z.number().int().safe().min(2000).max(2100),
@@ -507,6 +524,7 @@ export type AccountingPaymentRetryScope = { actorId: string | null; organization
 export type AccountingCreateInvoiceAction = z.infer<typeof CreateInvoiceActionSchema>;
 export type AccountingCreditNoteAction = z.infer<typeof CreditNoteActionSchema>;
 export type AccountingReverseEntryAction = z.infer<typeof ReverseEntryActionSchema>;
+export type AccountingReversePaymentAction = z.infer<typeof ReversePaymentActionSchema>;
 export type AccountingBankReconciliationWriteAction = z.infer<typeof BankReconciliationWriteActionSchema>;
 
 export function goAccountingRecordPaymentUseGo(): boolean {
@@ -573,6 +591,16 @@ export async function readPendingAccountingReverseEntry(scope: AccountingPayment
   catch { throw new AccountingApiError(0, "Enable browser storage to recover an unresolved journal reversal.", true); }
   if (raw === null) return null;
   return parseStoredReverseEntry(raw).action;
+}
+
+export async function readPendingAccountingReversePayment(scope: AccountingPaymentRetryScope): Promise<AccountingReversePaymentAction | null> {
+  const { scopeHash } = await accountingPaymentScope(scope);
+  const storageKey = `${REVERSE_PAYMENT_ATTEMPT_PREFIX}${scopeHash}`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new AccountingApiError(0, "Enable browser storage to recover an unresolved payment reversal.", true); }
+  if (raw === null) return null;
+  return parseStoredReversePayment(raw).action;
 }
 
 export async function readPendingAccountingCreditNote(scope: AccountingPaymentRetryScope): Promise<AccountingCreditNoteAction | null> {
@@ -962,6 +990,12 @@ export async function submitAccountingAction(
       throw new AccountingApiError(0, "A Go invoice payment is unresolved. Restore the Go payment route and retry that exact payment before using the legacy route.", true);
     }
   }
+  if (path === "/api/accounting" && payload.action === "reversePayment") {
+    const action = ReversePaymentActionSchema.safeParse(payload);
+    if (!action.success) throw new AccountingApiError(400, "Enter a valid payment reversal before submitting.");
+    const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
+    return submitGoAccountingReversePayment(action.data, scoped, signal);
+  }
   const { response, body } = await getJson(path, { method: "POST", body: JSON.stringify(payload) }, signal);
   if (response.status === 202) {
     const parsed = PendingSchema.safeParse(body);
@@ -1089,6 +1123,47 @@ async function submitGoAccountingReverseEntry(
   }
   await clearAccountingReverseEntryAttempt(attempt.storageKey);
   return { kind: "completed" };
+}
+
+async function submitGoAccountingReversePayment(
+  action: AccountingReversePaymentAction,
+  scope: { actorId: string; organizationId: string; scopeHash: string },
+  signal?: AbortSignal,
+): Promise<AccountingActionOutcome> {
+  const attempt = await accountingReversePaymentAttempt(action, scope.scopeHash);
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await getJson("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "accounting.reversePayment", input: reversePaymentCapabilityInput(action), intentId: attempt.intentId }),
+    }, signal));
+  } catch (error) {
+    if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
+    throw new AccountingApiError(0, "The Go Accounting service could not confirm this payment reversal. Retry the same reversal to recover its result.", true);
+  }
+  if (response.status === 202) {
+    const parsed = PendingSchema.safeParse(body);
+    if (!parsed.success) throw new AccountingApiError(202, "The Go Accounting service returned an invalid payment reversal approval response.", true);
+    return { kind: "pending", reason: parsed.data.reason ?? parsed.data.error ?? "This payment reversal is waiting for approval." };
+  }
+  if (!response.ok) {
+    const uncertain = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
+    if (!uncertain) await clearAccountingReversePaymentAttempt(attempt.storageKey, attempt.intentId, attempt.fingerprint);
+    throw new AccountingApiError(response.status, errorMessage(response.status, body, "reverse this payment"), uncertain);
+  }
+  const envelope = EnvelopeSchema.safeParse(body);
+  const output = envelope.success ? ReversePaymentOutputSchema.safeParse(envelope.data.data) : null;
+  if (response.status !== 200 || !output?.success) {
+    throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected payment reversal response.", true);
+  }
+  await clearAccountingReversePaymentAttempt(attempt.storageKey, attempt.intentId, attempt.fingerprint);
+  return { kind: "completed" };
+}
+
+function reversePaymentCapabilityInput(action: AccountingReversePaymentAction): Record<string, unknown> {
+  const { action: _action, ...input } = action;
+  return input;
 }
 
 function reverseEntryCapabilityInput(action: AccountingReverseEntryAction): Record<string, unknown> {
@@ -1365,6 +1440,35 @@ async function accountingReverseEntryAttempt(action: AccountingReverseEntryActio
   );
 }
 
+async function accountingReversePaymentAttempt(action: AccountingReversePaymentAction, scopeHash: string): Promise<{ storageKey: string; intentId: string; fingerprint: string }> {
+  const storageKey = `${REVERSE_PAYMENT_ATTEMPT_PREFIX}${scopeHash}`;
+  const fingerprint = await accountingPaymentFingerprint(action);
+  return withAccountingReservationLock(
+    storageKey,
+    "This browser cannot safely reserve a payment reversal. Open Accounting in a browser with Web Locks enabled before reversing it.",
+    "The browser could not reserve this payment reversal safely. Retry after closing other Accounting tabs.",
+    async () => {
+      let raw: string | null;
+      try { raw = window.localStorage.getItem(storageKey); }
+      catch { throw new AccountingApiError(0, "Enable browser storage before reversing a payment so it can be retried safely."); }
+      if (raw !== null) {
+        const stored = parseStoredReversePayment(raw);
+        if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous payment reversal is unresolved. Retry its exact details before reversing another payment.", true);
+        return { storageKey, intentId: stored.intentId, fingerprint: stored.fingerprint };
+      }
+      const stored = { action, intentId: crypto.randomUUID(), fingerprint };
+      const serialized = JSON.stringify(stored);
+      try {
+        window.localStorage.setItem(storageKey, serialized);
+        if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("payment reversal retry marker did not persist");
+      } catch {
+        throw new AccountingApiError(0, "Enable browser storage before reversing a payment so it can be retried safely.");
+      }
+      return { storageKey, intentId: stored.intentId, fingerprint: stored.fingerprint };
+    },
+  );
+}
+
 async function accountingBankReconciliationWriteAttempt(action: AccountingBankReconciliationWriteAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
   const storageKey = `${BANK_RECONCILIATION_WRITE_ATTEMPT_PREFIX}${scopeHash}`;
   const fingerprint = await accountingPaymentFingerprint(action);
@@ -1468,6 +1572,15 @@ function parseStoredReverseEntry(raw: string): z.infer<typeof StoredReverseEntry
   return parsed.data;
 }
 
+function parseStoredReversePayment(raw: string): z.infer<typeof StoredReversePaymentSchema> {
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new AccountingApiError(0, "An unresolved payment reversal marker is malformed. Contact an administrator before retrying.", true); }
+  const parsed = StoredReversePaymentSchema.safeParse(decoded);
+  if (!parsed.success) throw new AccountingApiError(0, "An unresolved payment reversal marker is malformed. Contact an administrator before retrying.", true);
+  return parsed.data;
+}
+
 function parseStoredBankReconciliationWrite(raw: string): z.infer<typeof StoredBankReconciliationWriteSchema> {
   let decoded: unknown;
   try { decoded = JSON.parse(raw); }
@@ -1504,6 +1617,24 @@ async function clearAccountingCreditNoteAttempt(storageKey: string): Promise<voi
 async function clearAccountingReverseEntryAttempt(storageKey: string): Promise<void> {
   try { window.localStorage.removeItem(storageKey); }
   catch { throw new AccountingApiError(0, "The reversal completed, but its retry marker could not be cleared. Reload before reversing another entry.", true); }
+}
+
+async function clearAccountingReversePaymentAttempt(storageKey: string, intentId: string, fingerprint: string): Promise<void> {
+  await withAccountingReservationLock(
+    storageKey,
+    "This browser cannot safely clear a payment reversal marker. Open Accounting in a browser with Web Locks enabled before continuing.",
+    "The browser could not safely clear the payment reversal marker. Reload before reversing another payment.",
+    async () => {
+      try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (raw === null) return;
+        const current = parseStoredReversePayment(raw);
+        if (current.intentId === intentId && current.fingerprint === fingerprint) window.localStorage.removeItem(storageKey);
+      } catch {
+        throw new AccountingApiError(0, "The payment reversal completed, but its retry marker could not be cleared. Reload before reversing another payment.", true);
+      }
+    },
+  );
 }
 
 async function clearAccountingBankReconciliationWriteAttempt(storageKey: string): Promise<void> {

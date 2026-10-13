@@ -1048,16 +1048,20 @@ describe("CRM API client", () => {
     await expect(readCrmCustomerImportUndo(scope)).resolves.toBeNull();
   });
 
-  it("requests the existing AI follow-up draft action and validates its grounded sources", async () => {
+  it("requests the Go follow-up draft route and strictly validates its grounded sources", async () => {
     const draft = { draft: "Hello Northwind, should we review the invoice together?", sources: [{ kind: "invoice", date: "2026-09-20T12:00:00.000Z", refId: dealId, summary: "Invoice #7 is awaiting payment" }] };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json(draft));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchCrmFollowUpDraft(customerId)).resolves.toEqual(draft);
-    expect(fetchMock).toHaveBeenCalledWith("/api/crm", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ action: "draftFollowUp", customerId });
+    expect(fetchMock).toHaveBeenCalledWith("/api/crm/follow-up-draft", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ customerId });
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/crm")).toBe(false);
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ draft: "Only a draft" })));
+    await expect(fetchCrmFollowUpDraft(customerId)).rejects.toMatchObject({ name: "CrmApiError" });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...draft, unexpected: true })));
     await expect(fetchCrmFollowUpDraft(customerId)).rejects.toMatchObject({ name: "CrmApiError" });
   });
 

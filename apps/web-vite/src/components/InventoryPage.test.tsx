@@ -223,6 +223,8 @@ describe("Vite inventory page", () => {
   });
 
   it("keeps the newest inventory refresh when separate actions finish out of order", async () => {
+    vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", true);
+    vi.stubGlobal("__GO_INVENTORY_CYCLE_COUNT_WRITES__", true);
     let reportReads = 0;
     const postActions: string[] = [];
     let resolveOlderReport: ((response: Response) => void) | undefined;
@@ -276,6 +278,9 @@ describe("Vite inventory page", () => {
   });
 
   it("does not start a refresh when an action finishes after the page unmounts", async () => {
+    vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", true);
+    const actorId = "actor-1";
+    const organizationId = "org-1";
     let resolveLocationAction: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return Response.json(switchboard);
@@ -285,7 +290,7 @@ describe("Vite inventory page", () => {
       return Response.json(report);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const page = render(<InventoryPage />);
+    const page = render(<InventoryPage actorId={actorId} organizationId={organizationId} />);
     expect(await screen.findByRole("heading", { name: "Create a stock location" })).not.toBeNull();
 
     const locationForm = screen.getByRole("heading", { name: "Create a stock location" }).closest("form");
