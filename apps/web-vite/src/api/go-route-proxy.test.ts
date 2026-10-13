@@ -14,7 +14,6 @@ import {
   goMarketingCampaignWritesFromEnv,
   goMarketingOverviewReadsFromEnv,
   goProjectsWritesFromEnv,
-  goSessionCapabilityRouteFromEnv,
   goInventoryTransferWritesFromEnv,
   goInventoryLocationReservationWritesFromEnv,
   goInventoryBarcodeLookupFromEnv,
@@ -99,14 +98,6 @@ describe("Marketing overview Go selector", () => {
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_OVERVIEW_READS: "0" })).toBe(false);
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MARKETING_OVERVIEW_READS: "1" })).toBe(false);
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
-  });
-});
-
-describe("session capability proxy selector", () => {
-  it("enables the Go executor proxy only with its explicit route flag", () => {
-    expect(goSessionCapabilityRouteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
-    expect(goSessionCapabilityRouteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
-    expect(goSessionCapabilityRouteFromEnv({})).toBe(false);
   });
 });
 

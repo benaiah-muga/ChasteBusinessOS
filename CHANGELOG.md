@@ -13,6 +13,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite governed capability execution now proxies directly to Go regardless of
+  legacy slice selector flags, so a missing migration flag cannot send a
+  governed request back to the temporary app.
 - Vite dashboard, approvals, close-readiness, and purchasing-aging handoffs now
   remain inside React routes. Dashboard workmate prompts arrive in the Messages
   composer, and document links load the requested Go document directly with

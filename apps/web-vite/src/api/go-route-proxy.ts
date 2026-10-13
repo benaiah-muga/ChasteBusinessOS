@@ -70,10 +70,6 @@ export function goMarketingOverviewReadsFromEnv(env: Record<string, string | und
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MARKETING_OVERVIEW_READS !== "0";
 }
 
-export function goSessionCapabilityRouteFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
-}
-
 export function goEmailRouteFromEnv(env: Record<string, string | undefined>): boolean {
   return env.GO_EMAIL_ROUTE !== "0";
 }
