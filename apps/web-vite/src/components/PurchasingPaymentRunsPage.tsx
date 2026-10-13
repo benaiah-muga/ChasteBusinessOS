@@ -89,8 +89,8 @@ export function PurchasingPaymentRunsPage({ actorId = null, organizationId = nul
     if (showLoading) setState({ status: "loading" });
     try {
       const [runs, bills] = await Promise.all([
-        fetchPurchasingPaymentRuns(signal),
-        fetchPurchasingPaymentRunBills(signal),
+        fetchPurchasingPaymentRuns(organizationId, signal),
+        fetchPurchasingPaymentRunBills(organizationId, signal),
       ]);
       if (!signal?.aborted) setState({ status: "ready", runs, bills });
     } catch (error) {
@@ -102,7 +102,7 @@ export function PurchasingPaymentRunsPage({ actorId = null, organizationId = nul
           : new PurchasingPaymentRunsApiError(0, "Could not load payment run data from Go."),
       });
     }
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();

@@ -38,13 +38,14 @@ function formatMoney(minor: number, currency: string): string {
   }
 }
 
-export function PurchasingAgingPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
+export function PurchasingAgingPage({ baseCurrency = null, organizationId }: { baseCurrency?: string | null; organizationId: string | null }) {
   const [state, setState] = useState<PageState>({ status: "loading" });
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
+    if (!organizationId?.trim()) return;
     try {
-      const result = await loadPurchasingAging(signal);
+      const result = await loadPurchasingAging(organizationId, signal);
       if (signal?.aborted) return;
       if (!result) {
         setState({ status: "disabled" });
@@ -64,7 +65,7 @@ export function PurchasingAgingPage({ baseCurrency = null }: { baseCurrency?: st
           : new PurchasingPaymentRunsApiError(0, "Could not load accounts payable aging. Try again."),
       });
     }
-  }, [baseCurrency]);
+  }, [baseCurrency, organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();

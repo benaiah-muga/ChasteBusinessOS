@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PurchasingReceiptsPage } from "./PurchasingReceiptsPage";
 
+const organizationId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -83,7 +85,7 @@ function stubPurchasing(receiptsFor42: unknown = firstReceiptResponse) {
 describe("PurchasingReceiptsPage", () => {
   it("loads order history and renders precise accepted and rejected quantities", async () => {
     const fetchMock = stubPurchasing();
-    render(<PurchasingReceiptsPage />);
+    render(<PurchasingReceiptsPage organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "Purchase receipt history" })).toBeTruthy();
     expect(await screen.findByRole("heading", { name: "Receipt #7" })).toBeTruthy();
@@ -102,11 +104,12 @@ describe("PurchasingReceiptsPage", () => {
       body: expect.stringContaining('"capabilityId":"purchasing.listReceipts"'),
     })));
     expect(fetchMock.mock.calls.every(([url]) => String(url) !== "/api/purchasing")).toBe(true);
+    expect(fetchMock.mock.calls.every(([, init]) => new Headers(init?.headers).get("X-Organization-ID") === organizationId)).toBe(true);
   });
 
   it("loads receipt history for the newly selected purchase order", async () => {
     const fetchMock = stubPurchasing();
-    render(<PurchasingReceiptsPage />);
+    render(<PurchasingReceiptsPage organizationId={organizationId} />);
 
     await screen.findByRole("heading", { name: "Receipt #7" });
     fireEvent.change(screen.getByRole("combobox", { name: "Purchase order" }), { target: { value: "41" } });
@@ -135,7 +138,7 @@ describe("PurchasingReceiptsPage", () => {
       },
     };
     stubPurchasing(legacyMovementResponse);
-    render(<PurchasingReceiptsPage />);
+    render(<PurchasingReceiptsPage organizationId={organizationId} />);
 
     expect(await screen.findByText(/stock movements recorded before receipt documents were introduced/)).toBeTruthy();
     const orderSummary = screen.getByRole("table", { name: "Quantities received, rejected, returned, and remaining for each order line" });
@@ -146,7 +149,7 @@ describe("PurchasingReceiptsPage", () => {
   it("does not fetch purchase orders when Purchasing is disabled", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ catalog: [{ id: "purchasing" }], enabledModules: [] }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingReceiptsPage />);
+    render(<PurchasingReceiptsPage organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "Purchasing is turned off" })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -158,7 +161,7 @@ describe("PurchasingReceiptsPage", () => {
       .mockResolvedValueOnce(Response.json({ catalog: [{ id: "purchasing" }], enabledModules: ["purchasing"] }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { baseCurrency: "USD", orders: [] } }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingReceiptsPage />);
+    render(<PurchasingReceiptsPage organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "No purchase orders yet" })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -175,7 +178,7 @@ describe("PurchasingReceiptsPage", () => {
       return Response.json({ error: "unauthorized" }, { status: 401 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingReceiptsPage />);
+    render(<PurchasingReceiptsPage organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "Sign in again" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe("/login");

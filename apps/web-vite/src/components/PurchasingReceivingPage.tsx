@@ -146,22 +146,26 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
   const [lastReceipt, setLastReceipt] = useState<{ number: number; fullyReceived: boolean } | null>(null);
 
   const load = useCallback(async ({ signal, quiet = false }: { signal?: AbortSignal; quiet?: boolean } = {}) => {
+    if (!organizationId?.trim()) {
+      setState({ status: "loading" });
+      return;
+    }
     // A quiet reload refreshes order statuses after a receipt without flashing
     // the whole page back to the loading state.
     if (!quiet) setState({ status: "loading" });
     try {
-      if (!(await fetchReceivingEnabled(signal))) {
+      if (!(await fetchReceivingEnabled(organizationId, signal))) {
         if (!signal?.aborted) setState({ status: "disabled" });
         return;
       }
-      const result = await fetchReceivingOrders(signal);
+      const result = await fetchReceivingOrders(organizationId, signal);
       if (signal?.aborted) return;
       setState({ status: "ready", orders: result.orders, baseCurrency: baseCurrency || result.baseCurrency });
     } catch (error) {
       if (signal?.aborted) return;
       setState({ status: "failed", error: apiError(error, "Could not load purchase orders. Try again.") });
     }
-  }, [baseCurrency]);
+  }, [baseCurrency, organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -199,7 +203,7 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
     }
     setOpenNumber(found.number);
     try {
-      const loaded = await fetchReceivingDetail(found.number);
+      const loaded = await fetchReceivingDetail(found.number, organizationId);
       setDetail(loaded);
       setDraft(prefillReceivingDraft(found, loaded.orderLines));
       setDetailError(null);
@@ -211,7 +215,7 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
     } finally {
       setFinding(false);
     }
-  }, [state]);
+  }, [state, organizationId]);
 
   const rollupFor = useCallback((position: number): ReceivingOrderLineRollup | undefined =>
     detail?.orderLines.find((line) => line.position === position), [detail]);
@@ -291,7 +295,7 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
           : "Partially received; what is still expected stays visible on the order."}`,
       });
       try {
-        const refreshedDetail = await fetchReceivingDetail(order.number);
+        const refreshedDetail = await fetchReceivingDetail(order.number, organizationId);
         setDetail(refreshedDetail);
       } catch {
         setDetailError("The receipt was recorded, but the history could not be reloaded.");

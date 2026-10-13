@@ -86,28 +86,43 @@ function stubReceivingLocks() {
 }
 
 describe("receiving module gate and order lookup", () => {
+  it("requires organization scope before checking the module gate", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchReceivingEnabled(null)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit organization before reading orders", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchReceivingOrders(null)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("confirms Purchasing is on before loading orders", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json(switchboard))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { baseCurrency: "USD", orders: [order] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchReceivingEnabled()).resolves.toBe(true);
-    await expect(fetchReceivingOrders()).resolves.toEqual({ baseCurrency: "USD", orders: [order] });
+    await expect(fetchReceivingEnabled("org-1")).resolves.toBe(true);
+    await expect(fetchReceivingOrders("org-1")).resolves.toEqual({ baseCurrency: "USD", orders: [order] });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe("org-1");
     expect(postedBody(fetchMock.mock.calls[1]!)).toMatchObject({ capabilityId: "purchasing.listWorkspace", input: {} });
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("X-Organization-ID")).toBe("org-1");
     expect(fetchMock.mock.calls.every(([, init]) => init?.credentials === "same-origin" && init.cache === "no-store")).toBe(true);
   });
 
   it("reports Purchasing as off and refuses an inconsistent switchboard", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ catalog: [{ id: "purchasing" }], enabledModules: [] })));
-    await expect(fetchReceivingEnabled()).resolves.toBe(false);
+    await expect(fetchReceivingEnabled("org-1")).resolves.toBe(false);
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
       catalog: [{ id: "purchasing" }],
       enabledModules: ["purchasing", "ghost"],
     })));
-    await expect(fetchReceivingEnabled()).rejects.toMatchObject({
+    await expect(fetchReceivingEnabled("org-1")).rejects.toMatchObject({
       status: 200,
       message: "The module switchboard returned an invalid Purchasing configuration.",
     });
@@ -118,7 +133,7 @@ describe("receiving module gate and order lookup", () => {
       ok: true,
       data: { baseCurrency: "USD", orders: [{ ...order, lines: [{ lineNumber: 1 }] }] },
     })));
-    await expect(fetchReceivingOrders()).rejects.toMatchObject({
+    await expect(fetchReceivingOrders("org-1")).rejects.toMatchObject({
       status: 200,
       message: "The Go Purchasing service returned purchase orders in an unexpected format.",
     });
@@ -128,7 +143,7 @@ describe("receiving module gate and order lookup", () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ baseCurrency: "USD", orders: [order] }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchReceivingOrders()).rejects.toBeInstanceOf(ReceivingApiError);
+    await expect(fetchReceivingOrders("org-1")).rejects.toBeInstanceOf(ReceivingApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
   });
@@ -139,13 +154,13 @@ describe("receiving detail rollup", () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: detail }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchReceivingDetail(42)).resolves.toEqual(detail);
+    await expect(fetchReceivingDetail(42, "org-1")).resolves.toEqual(detail);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
       credentials: "same-origin",
       cache: "no-store",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": "org-1" },
       body: expect.stringMatching(/^\{"capabilityId":"purchasing\.listReceipts","input":\{"poNumber":42\},"intentId":"[0-9a-f-]+"\}$/),
     }));
   });
@@ -154,7 +169,7 @@ describe("receiving detail rollup", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchReceivingDetail(poNumber)).rejects.toMatchObject({
+    await expect(fetchReceivingDetail(poNumber, "org-1")).rejects.toMatchObject({
       status: 0,
       message: "Enter a valid purchase order number before loading receipt history.",
     });
@@ -168,14 +183,14 @@ describe("receiving detail rollup", () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json(body, { status }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchReceivingDetail(42)).rejects.toBeInstanceOf(ReceivingApiError);
+    await expect(fetchReceivingDetail(42, "org-1")).rejects.toBeInstanceOf(ReceivingApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
   });
 
   it("keeps rejected, returned, and remaining quantities distinct", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: detail })));
-    const result = await fetchReceivingDetail(42);
+    const result = await fetchReceivingDetail(42, "org-1");
 
     const bag = result.orderLines.find((line) => line.position === 1)!;
     expect(bag).toMatchObject({ orderedThousandths: 2500, acceptedThousandths: 1500, rejectedThousandths: 500, remainingThousandths: 500 });
@@ -187,7 +202,7 @@ describe("receiving detail rollup", () => {
       ok: true,
       data: { receipts: [], orderLines: [{ position: 1, remainingThousandths: -5 }] },
     })));
-    await expect(fetchReceivingDetail(42)).rejects.toMatchObject({
+    await expect(fetchReceivingDetail(42, "org-1")).rejects.toMatchObject({
       status: 200,
       message: "The Purchasing service returned receipt history in an unexpected format.",
     });
@@ -213,6 +228,19 @@ describe("recording a receipt", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("pins receipts to the captured organization if the active organization changes in flight", async () => {
+    const responses: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => responses.push(resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = submitReceiveGoods(action, undefined, { actorId: "actor-a", organizationId: "org-a" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    document.cookie = "activeOrganization=org-b";
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe("org-a");
+    responses[0]?.(Response.json({ ok: true, data: { received: true, fullyReceived: true, receiptNumber: 2 } }));
+    await expect(pending).resolves.toMatchObject({ kind: "completed", data: { receiptNumber: 2 } });
+  });
+
   it("routes through Go with the capability envelope and reuses its scoped intent while pending or uncertain", async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("connection lost"))
@@ -222,6 +250,7 @@ describe("recording a receipt", () => {
 
     await expect(submitReceiveGoods(action, undefined, retryScope)).rejects.toMatchObject({ status: 0 });
     const first = postedBody(fetchMock.mock.calls[0]!);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe(retryScope.organizationId);
     await expect(submitReceiveGoods(action, undefined, retryScope)).resolves.toEqual({
       kind: "pending",
       reason: "Overreceipt needs approval.",

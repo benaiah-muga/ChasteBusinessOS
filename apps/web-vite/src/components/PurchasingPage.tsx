@@ -18,8 +18,6 @@ import {
   fetchPurchasingSupplierPerformance,
   fetchPurchasingSupplierStatement,
   fetchPurchasingWorkspace,
-  goPurchasingIntelReadsUseGo,
-  goPurchasingWorkflowReadsUseGo,
   payPurchasingBill,
   readPendingPurchasingRequest,
   PurchasingApiError,
@@ -345,7 +343,7 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
     : null;
   const sourcingDraftScopeIdentityRef = useRef(sourcingDraftScopeIdentity);
   sourcingDraftScopeIdentityRef.current = sourcingDraftScopeIdentity;
-  const goSourcingWritesEnabled = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
+  const goSourcingWritesEnabled = true;
   const [sourcingDraftStorageKey, setSourcingDraftStorageKey] = useState<string | null>(null);
   const [sourcingDraftStorageIdentity, setSourcingDraftStorageIdentity] = useState<string | null>(null);
   const [hydratedSourcingDraftScope, setHydratedSourcingDraftScope] = useState<string | null>(null);
@@ -455,20 +453,24 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   }, [hydratedSourcingDraftScope, sourcingDraftScopeIdentity, sourcingDraftStorageIdentity, sourcingDraftStorageKey, sourcingDraftStorageStatus, requestForm, pendingRequestAction, rfqPick, quoteDraft, rejectFor, rejectReason]);
 
   const load = useCallback(async ({ signal, quiet = false }: { signal?: AbortSignal; quiet?: boolean } = {}) => {
+    if (!organizationId?.trim()) {
+      if (!signal?.aborted) setState({ status: "loading" });
+      return;
+    }
     if (!quiet) setState({ status: "loading" });
     try {
-      if (!(await fetchPurchasingEnabled(signal))) {
+      if (!(await fetchPurchasingEnabled(organizationId, signal))) {
         if (!signal?.aborted) setState({ status: "disabled" });
         return;
       }
       const [workspace, products, taxCodes, goRequests] = await Promise.all([
-        fetchPurchasingWorkspace(signal),
-        fetchPurchasingProducts(signal).catch(() => [] as PurchasingProduct[]),
-        fetchPurchasingInputTaxCodes(signal).catch(() => [] as PurchasingTaxCode[]),
-        goPurchasingWorkflowReadsUseGo() ? fetchGoPurchasingWorkflowRequests(signal) : Promise.resolve(null),
+        fetchPurchasingWorkspace(organizationId, signal),
+        fetchPurchasingProducts(organizationId, signal).catch(() => [] as PurchasingProduct[]),
+        fetchPurchasingInputTaxCodes(organizationId, signal).catch(() => [] as PurchasingTaxCode[]),
+        fetchGoPurchasingWorkflowRequests(organizationId, signal),
       ]);
       if (signal?.aborted) return;
-      setState({ status: "ready", workspace: goRequests ? { ...workspace, requests: goRequests } : workspace, products, taxCodes });
+      setState({ status: "ready", workspace: { ...workspace, requests: goRequests }, products, taxCodes });
     } catch (error) {
       if (signal?.aborted) return;
       setState({
@@ -478,7 +480,7 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
           : new PurchasingApiError(0, "Could not load the Purchasing workspace. Try again."),
       });
     }
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -811,9 +813,8 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
         {tab === "intel" && (
           <IntelTab
             vendors={vendors}
-            initialRows={workspace.priceHistory?.rows ?? []}
-            performance={workspace.supplierPerformance?.vendors ?? []}
             currency={currency}
+            organizationId={organizationId}
           />
         )}
       </div>
@@ -2250,19 +2251,17 @@ function VendorsTab({ vendors, orders, bills, currency, busy, form, setForm, sel
 
 /* ------------------------------------------------------------------ intel --- */
 
-function IntelTab({ vendors, initialRows, performance, currency }: {
+function IntelTab({ vendors, currency, organizationId }: {
   vendors: PurchasingVendor[];
-  initialRows: PurchasingPriceHistoryRow[];
-  performance: PurchasingSupplierPerformance[];
   currency: string;
+  organizationId: string | null;
 }) {
-  const goIntelReads = goPurchasingIntelReadsUseGo();
-  const [rows, setRows] = useState(goIntelReads ? [] : initialRows);
+  const [rows, setRows] = useState<PurchasingPriceHistoryRow[]>([]);
   const [sku, setSku] = useState("");
-  const [historyBusy, setHistoryBusy] = useState(goIntelReads);
+  const [historyBusy, setHistoryBusy] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  const [performanceRows, setPerformanceRows] = useState(goIntelReads ? [] : performance);
-  const [performanceBusy, setPerformanceBusy] = useState(goIntelReads);
+  const [performanceRows, setPerformanceRows] = useState<PurchasingSupplierPerformance[]>([]);
+  const [performanceBusy, setPerformanceBusy] = useState(true);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
   const [vendorId, setVendorId] = useState("");
   const [statement, setStatement] = useState<PurchasingSupplierStatement | null>(null);
@@ -2270,12 +2269,11 @@ function IntelTab({ vendors, initialRows, performance, currency }: {
   const [statementError, setStatementError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!goIntelReads) return;
     const controller = new AbortController();
     let active = true;
     setHistoryBusy(true);
     setHistoryError(null);
-    void fetchPurchasingPriceHistory(undefined, controller.signal).then((result) => {
+    void fetchPurchasingPriceHistory(undefined, organizationId, controller.signal).then((result) => {
       if (active) setRows(result);
     }).catch((error: unknown) => {
       if (active) setHistoryError(error instanceof PurchasingApiError ? error.message : "Could not load price history.");
@@ -2284,7 +2282,7 @@ function IntelTab({ vendors, initialRows, performance, currency }: {
     });
     setPerformanceBusy(true);
     setPerformanceError(null);
-    void fetchPurchasingSupplierPerformance(controller.signal).then((result) => {
+    void fetchPurchasingSupplierPerformance(organizationId, controller.signal).then((result) => {
       if (active) setPerformanceRows(result);
     }).catch((error: unknown) => {
       if (active) setPerformanceError(error instanceof PurchasingApiError ? error.message : "Could not load supplier performance.");
@@ -2295,14 +2293,14 @@ function IntelTab({ vendors, initialRows, performance, currency }: {
       active = false;
       controller.abort();
     };
-  }, [goIntelReads]);
+  }, [organizationId]);
 
   async function loadHistory(event: FormEvent): Promise<void> {
     event.preventDefault();
     setHistoryBusy(true);
     setHistoryError(null);
     try {
-      setRows(await fetchPurchasingPriceHistory(sku.trim() || undefined));
+      setRows(await fetchPurchasingPriceHistory(sku.trim() || undefined, organizationId));
     } catch (error) {
       setHistoryError(error instanceof PurchasingApiError ? error.message : "Could not load price history.");
     } finally {
@@ -2315,7 +2313,7 @@ function IntelTab({ vendors, initialRows, performance, currency }: {
     setStatementBusy(true);
     setStatementError(null);
     try {
-      setStatement(await fetchPurchasingSupplierStatement(vendorId));
+      setStatement(await fetchPurchasingSupplierStatement(vendorId, organizationId));
     } catch (error) {
       setStatementError(error instanceof PurchasingApiError ? error.message : "Could not load the statement.");
     } finally {

@@ -59,7 +59,10 @@ function apiError(error: unknown, fallback: string): PurchasingReceiptsApiError 
     : new PurchasingReceiptsApiError(0, fallback);
 }
 
-export function PurchasingReceiptsPage({ baseCurrency = null }: { baseCurrency?: string | null } = {}) {
+export function PurchasingReceiptsPage({
+  baseCurrency = null,
+  organizationId = null,
+}: { baseCurrency?: string | null; organizationId?: string | null } = {}) {
   const [ordersState, setOrdersState] = useState<OrdersState>({ status: "loading" });
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   const [receiptsState, setReceiptsState] = useState<ReceiptsState>({ status: "idle" });
@@ -67,15 +70,16 @@ export function PurchasingReceiptsPage({ baseCurrency = null }: { baseCurrency?:
 
   const loadOrders = useCallback(async (signal?: AbortSignal) => {
     setOrdersState({ status: "loading" });
+    if (!organizationId?.trim()) return;
     try {
-      const enabled = await fetchPurchasingReceiptsEnabled(signal);
+      const enabled = await fetchPurchasingReceiptsEnabled(organizationId, signal);
       if (signal?.aborted) return;
       if (!enabled) {
         setOrdersState({ status: "disabled" });
         setSelectedNumber(null);
         return;
       }
-      const result = await fetchPurchasingOrders(signal);
+      const result = await fetchPurchasingOrders(organizationId, signal);
       if (signal?.aborted) return;
       if (result.orders.length === 0) {
         setSelectedNumber(null);
@@ -93,7 +97,7 @@ export function PurchasingReceiptsPage({ baseCurrency = null }: { baseCurrency?:
         error: apiError(error, "Could not load purchase orders. Try again."),
       });
     }
-  }, [baseCurrency]);
+  }, [baseCurrency, organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,7 +112,7 @@ export function PurchasingReceiptsPage({ baseCurrency = null }: { baseCurrency?:
     }
     const controller = new AbortController();
     setReceiptsState({ status: "loading" });
-    void fetchPurchaseOrderReceipts(selectedNumber, controller.signal).then((result) => {
+    void fetchPurchaseOrderReceipts(selectedNumber, organizationId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       setReceiptsState(result.receipts.length === 0 && result.orderLines.every((line) =>
         line.acceptedThousandths === 0 && line.rejectedThousandths === 0 && line.returnedThousandths === 0,
@@ -123,7 +127,7 @@ export function PurchasingReceiptsPage({ baseCurrency = null }: { baseCurrency?:
       });
     });
     return () => controller.abort();
-  }, [ordersState, receiptRetry, selectedNumber]);
+  }, [organizationId, ordersState, receiptRetry, selectedNumber]);
 
   const selectedOrder = useMemo(() => ordersState.status === "ready"
     ? ordersState.orders.find((order) => order.number === selectedNumber) ?? null

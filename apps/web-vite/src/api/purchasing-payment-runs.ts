@@ -80,12 +80,13 @@ export function goPurchasingPaymentRunsUseGo(): boolean {
   return typeof __GO_PURCHASING_PAYMENT_RUNS__ !== "undefined" && __GO_PURCHASING_PAYMENT_RUNS__;
 }
 
-export async function fetchPurchasingEnabled(signal?: AbortSignal): Promise<boolean> {
+export async function fetchPurchasingEnabled(organizationId: string | null | undefined, signal?: AbortSignal): Promise<boolean> {
+  const scoped = await paymentRunScope({ actorId: "purchasing-module-read", organizationId });
   let response: Response;
   try {
     response = await fetch("/api/modules", {
       credentials: "same-origin",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "X-Organization-ID": scoped.organizationId },
       cache: "no-store",
       signal: requestSignal(signal),
     });
@@ -126,13 +127,13 @@ async function errorMessage(response: Response): Promise<string> {
   return "Could not load supplier payment runs. Check the service and try again.";
 }
 
-export async function fetchPurchasingPaymentRuns(signal?: AbortSignal): Promise<PurchasingPaymentRun[]> {
-  const data = await executeRead("purchasing.listPaymentRuns", {}, PaymentRunsResponseSchema, "payment runs", signal);
+export async function fetchPurchasingPaymentRuns(organizationId: string | null | undefined, signal?: AbortSignal): Promise<PurchasingPaymentRun[]> {
+  const data = await executeRead("purchasing.listPaymentRuns", {}, PaymentRunsResponseSchema, "payment runs", organizationId, signal);
   return data.runs;
 }
 
-export async function fetchPurchasingPaymentRunBills(signal?: AbortSignal): Promise<PurchasingPaymentRunBill[]> {
-  const data = await executeRead("purchasing.listPaymentRunBills", {}, PaymentRunBillsResponseSchema, "eligible bills", signal);
+export async function fetchPurchasingPaymentRunBills(organizationId: string | null | undefined, signal?: AbortSignal): Promise<PurchasingPaymentRunBill[]> {
+  const data = await executeRead("purchasing.listPaymentRunBills", {}, PaymentRunBillsResponseSchema, "eligible bills", organizationId, signal);
   return data.bills;
 }
 
@@ -141,15 +142,17 @@ async function executeRead<TData>(
   input: Record<string, unknown>,
   responseSchema: z.ZodType<{ ok: true; data: TData }>,
   label: string,
+  organizationId: string | null | undefined,
   signal?: AbortSignal,
 ): Promise<TData> {
   if (!goPurchasingPaymentRunsUseGo()) throw new PurchasingPaymentRunsApiError(503, "Go supplier payment runs are disabled. Enable CHASTE_GO_PURCHASING_PAYMENT_RUNS and the session capability route.");
+  const scoped = await paymentRunScope({ actorId: "purchasing-read", organizationId });
   let response: Response;
   try {
     response = await fetch("/api/capabilities/execute", {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": scoped.organizationId },
       cache: "no-store",
       body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
       signal: requestSignal(signal),
@@ -193,7 +196,7 @@ export async function submitPurchasingPaymentRunAction(
       response = await fetch("/api/capabilities/execute", {
         method: "POST",
         credentials: "same-origin",
-        headers: { accept: "application/json", "content-type": "application/json" },
+        headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": scoped.organizationId },
         cache: "no-store",
         body: JSON.stringify({ capabilityId, input, intentId: attempt.intentId }),
         signal: requestSignal(signal),
@@ -227,7 +230,7 @@ export async function submitPurchasingPaymentRunAction(
   }
 }
 
-async function paymentRunScope(scope: PaymentRunRetryScope): Promise<{ scopeHash: string }> {
+async function paymentRunScope(scope: PaymentRunRetryScope): Promise<{ organizationId: string; scopeHash: string }> {
   const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
   if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
@@ -235,7 +238,7 @@ async function paymentRunScope(scope: PaymentRunRetryScope): Promise<{ scopeHash
   }
   try {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
-    return { scopeHash: Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("") };
+    return { organizationId, scopeHash: Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("") };
   } catch {
     throw new PurchasingPaymentRunsApiError(0, "Could not prepare a durable payment run retry. Check browser security settings.");
   }

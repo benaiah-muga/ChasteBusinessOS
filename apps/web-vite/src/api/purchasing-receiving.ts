@@ -182,8 +182,12 @@ async function request(path: string, init: RequestInit, activity: string, signal
   return { response, body };
 }
 
-export async function fetchReceivingEnabled(signal?: AbortSignal): Promise<boolean> {
-  const { body } = await request("/api/modules", { headers: { accept: "application/json" } }, "check whether Purchasing is on", signal);
+export async function fetchReceivingEnabled(organizationId: string | null | undefined, signal?: AbortSignal): Promise<boolean> {
+  const normalizedOrganizationId = organizationId?.trim();
+  if (!normalizedOrganizationId) throw new ReceivingApiError(0, "Wait for the active organization to finish loading before checking Purchasing.");
+  const { body } = await request("/api/modules", {
+    headers: { accept: "application/json", "X-Organization-ID": normalizedOrganizationId },
+  }, "check whether Purchasing is on", signal);
   const parsed = SwitchboardSchema.safeParse(body);
   if (!parsed.success) throw new ReceivingApiError(200, "The module switchboard returned data in an unexpected format.");
   const catalogIds = new Set(parsed.data.catalog.map((module) => module.id));
@@ -193,10 +197,12 @@ export async function fetchReceivingEnabled(signal?: AbortSignal): Promise<boole
   return parsed.data.enabledModules.includes("purchasing");
 }
 
-export async function fetchReceivingOrders(signal?: AbortSignal): Promise<{ baseCurrency: string; orders: ReceivingOrder[] }> {
+export async function fetchReceivingOrders(organizationId: string | null | undefined, signal?: AbortSignal): Promise<{ baseCurrency: string; orders: ReceivingOrder[] }> {
+  const normalizedOrganizationId = organizationId?.trim();
+  if (!normalizedOrganizationId) throw new ReceivingApiError(0, "Wait for the active organization to finish loading before loading purchase orders.");
   const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
+    headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": normalizedOrganizationId },
     body: JSON.stringify({ capabilityId: "purchasing.listWorkspace", input: {}, intentId: crypto.randomUUID() }),
   }, "load purchase orders", signal);
   const parsed = GoReceivingOrdersEnvelopeSchema.safeParse(body);
@@ -206,14 +212,16 @@ export async function fetchReceivingOrders(signal?: AbortSignal): Promise<{ base
   return parsed.data.data;
 }
 
-export async function fetchReceivingDetail(poNumber: number, signal?: AbortSignal): Promise<ReceivingDetail> {
+export async function fetchReceivingDetail(poNumber: number, organizationId: string | null | undefined, signal?: AbortSignal): Promise<ReceivingDetail> {
   const parsedPONumber = PositiveGoIntegerSchema.safeParse(poNumber);
   if (!parsedPONumber.success) {
     throw new ReceivingApiError(0, "Enter a valid purchase order number before loading receipt history.");
   }
+  const normalizedOrganizationId = organizationId?.trim();
+  if (!normalizedOrganizationId) throw new ReceivingApiError(0, "Wait for the active organization to finish loading before loading receipt history.");
   const { body } = await request("/api/capabilities/execute", {
     method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
+    headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": normalizedOrganizationId },
     body: JSON.stringify({ capabilityId: "purchasing.listReceipts", input: { poNumber: parsedPONumber.data }, intentId: crypto.randomUUID() }),
   }, "load receipt history", signal);
   const parsed = ReceiptDetailSchema.safeParse(body);
@@ -238,7 +246,7 @@ export async function submitReceiveGoods(
   try {
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": scope.organizationId },
       body: JSON.stringify({
         capabilityId: "purchasing.receiveGoods",
         input: {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { submitReceiveGoods as submitPurchasingReceiptInGo } from "./purchasing-receiving";
 
 const TimestampSchema = z.string().datetime({ offset: true });
 const SafeIntegerSchema = z.number().int().safe();
@@ -197,20 +198,6 @@ const CreatePurchaseOrderOutputSchema = z.object({
   poNumber: z.number().int().safe().positive(),
 }).strict();
 
-const ReceiveGoodsSchema = z.object({
-  action: z.literal("receiveGoods"),
-  poNumber: z.number().int().safe().positive(),
-  lines: z.array(z.object({
-    lineNumber: z.number().int().safe().positive(),
-    quantity: SafeIntegerSchema,
-    rejected: SafeIntegerSchema.optional(),
-    rejectionNote: z.string().optional(),
-  }).strict()).min(1),
-  overreceiptTolerancePct: SafeIntegerSchema.optional(),
-  authorityReason: z.string().optional(),
-  note: z.string().optional(),
-}).strict();
-
 const ReturnGoodsSchema = z.object({
   action: z.literal("returnGoods"),
   poNumber: z.number().int().safe().positive().max(2_147_483_647),
@@ -343,52 +330,18 @@ const GoSelectWinningQuoteOutputSchema = z.object({
   quoteAmountMinor: NonnegativeSafeIntegerSchema,
 }).strict();
 
-const PriceHistorySchema = z.object({
-  action: z.literal("priceHistory"),
-  sku: z.string().min(1).optional(),
-}).strict();
-
 const SupplierStatementActionSchema = z.object({
   action: z.literal("supplierStatement"),
   vendorId: z.string().uuid(),
 }).strict();
 
-const PurchasingActionSchema = z.discriminatedUnion("action", [
-  CreateVendorSchema,
-  CreatePurchaseOrderSchema,
-  ReceiveGoodsSchema,
-  ReturnGoodsSchema,
-  ClosePurchaseOrderSchema,
-  CreateBillSchema,
-  PayBillSchema,
-  BillCreditNoteSchema,
-  CreatePurchaseRequestSchema,
-  DecidePurchaseRequestSchema,
-  CreateRfqSchema,
-  RecordQuoteSchema,
-  SelectWinningQuoteSchema,
-  PriceHistorySchema,
-  SupplierStatementActionSchema,
-]);
-
 const SuccessEnvelopeSchema = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).strict();
-/**
- * Not strict: the governed executor may park an action without a reason, and
- * the legacy route echoes its own error field, so this envelope must keep
- * whatever the kernel actually sent.
- */
 const PendingEnvelopeSchema = z.object({
   ok: z.literal(false).optional(),
   pendingApproval: z.literal(true),
   reason: z.string().optional(),
   error: z.string().optional(),
 });
-
-const ReceiveGoodsOutputSchema = z.object({
-  received: z.literal(true),
-  fullyReceived: z.boolean(),
-  receiptNumber: z.number().int().safe().positive(),
-}).strict();
 
 const ClosePurchaseOrderOutputSchema = z.object({
   closed: z.literal(true),
@@ -425,8 +378,6 @@ const GoBillCreditNoteOutputSchema = z.object({
 
 const PriceHistoryOutputSchema = z.object({ rows: z.array(PriceHistoryRowSchema) }).strict();
 const SupplierPerformanceOutputSchema = z.object({ vendors: z.array(SupplierPerformanceRowSchema) }).strict();
-/** Writes whose result the page does not read still have to come back as an object. */
-const OpaqueOutputSchema = z.object({}).passthrough();
 
 export type PurchasingVendor = z.infer<typeof VendorSchema>;
 export type PurchasingOrder = z.infer<typeof PurchaseOrderSchema>;
@@ -440,8 +391,29 @@ export type PurchasingSupplierStatement = z.infer<typeof SupplierStatementSchema
 export type PurchasingProduct = z.infer<typeof ProductSchema>;
 export type PurchasingTaxCode = z.infer<typeof TaxCodeSchema>;
 export type PurchasingWorkspace = z.infer<typeof PurchasingWorkspaceSchema>;
-export type PurchasingAction = z.infer<typeof PurchasingActionSchema>;
-export type PurchasingReceiveGoodsResult = z.infer<typeof ReceiveGoodsOutputSchema>;
+export type PurchasingReceiveGoodsAction = {
+  action: "receiveGoods";
+  poNumber: number;
+  lines: Array<{ lineNumber: number; quantity: number; rejected?: number; rejectionNote?: string }>;
+  overreceiptTolerancePct?: number;
+  authorityReason?: string;
+  note?: string;
+};
+export type PurchasingAction =
+  | z.infer<typeof CreateVendorSchema>
+  | z.infer<typeof CreatePurchaseOrderSchema>
+  | PurchasingReceiveGoodsAction
+  | z.infer<typeof ReturnGoodsSchema>
+  | z.infer<typeof ClosePurchaseOrderSchema>
+  | z.infer<typeof CreateBillSchema>
+  | z.infer<typeof PayBillSchema>
+  | z.infer<typeof BillCreditNoteSchema>
+  | z.infer<typeof CreatePurchaseRequestSchema>
+  | z.infer<typeof DecidePurchaseRequestSchema>
+  | z.infer<typeof CreateRfqSchema>
+  | z.infer<typeof RecordQuoteSchema>
+  | z.infer<typeof SelectWinningQuoteSchema>;
+export type PurchasingReceiveGoodsResult = { received: true; fullyReceived: boolean; receiptNumber: number };
 export type PurchasingPayBillAction = z.infer<typeof PayBillSchema>;
 
 export type PurchasingActionOutcome<T = Record<string, unknown>> =
@@ -453,22 +425,6 @@ export class PurchasingApiError extends Error {
     super(message);
     this.name = "PurchasingApiError";
   }
-}
-
-export function goPurchasingFinanceWritesUseGo(): boolean {
-  return typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__;
-}
-
-export function goPurchasingSupplierStatementReadsUseGo(): boolean {
-  return typeof __GO_PURCHASING_SUPPLIER_STATEMENT_READS__ !== "undefined" && __GO_PURCHASING_SUPPLIER_STATEMENT_READS__;
-}
-
-export function goPurchasingIntelReadsUseGo(): boolean {
-  return typeof __GO_PURCHASING_INTEL_READS__ !== "undefined" && __GO_PURCHASING_INTEL_READS__;
-}
-
-export function goPurchasingWorkflowReadsUseGo(): boolean {
-  return typeof __GO_PURCHASING_WORKFLOW_READS__ !== "undefined" && __GO_PURCHASING_WORKFLOW_READS__;
 }
 
 function requestSignal(signal?: AbortSignal, timeoutMs = 15_000): AbortSignal {
@@ -510,15 +466,29 @@ async function request(path: string, init: RequestInit, activity: string, signal
   return { response, body };
 }
 
-async function getValidated<T>(path: string, schema: z.ZodType<T>, subject: string, signal?: AbortSignal): Promise<T> {
-  const { body } = await request(path, { headers: { accept: "application/json" } }, `load ${subject}`, signal);
+async function getValidated<T>(path: string, schema: z.ZodType<T>, subject: string, signal?: AbortSignal, organizationId?: string | null, requireOrganization = false): Promise<T> {
+  const headers = {
+    accept: "application/json",
+    ...(requireOrganization || organizationId !== undefined ? organizationHeader(organizationId) : {}),
+  };
+  const { body } = await request(path, { headers }, `load ${subject}`, signal);
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw new PurchasingApiError(200, `The Purchasing service returned ${subject} in an unexpected format.`);
   return parsed.data;
 }
 
-export async function fetchPurchasingEnabled(signal?: AbortSignal): Promise<boolean> {
-  const switchboard = await getValidated("/api/modules", SwitchboardSchema, "the Purchasing module status", signal);
+function organizationHeader(organizationId: string | null | undefined): Record<string, string> {
+  const id = organizationId?.trim();
+  if (!id) throw new PurchasingApiError(0, "Wait for the active organization to finish loading before using Purchasing.");
+  return { "X-Organization-ID": id };
+}
+
+export async function fetchPurchasingEnabled(organizationId: string | null | undefined, signal?: AbortSignal): Promise<boolean> {
+  const headers = { accept: "application/json", ...organizationHeader(organizationId) };
+  const { body } = await request("/api/modules", { headers }, "load the Purchasing module status", signal);
+  const parsedSwitchboard = SwitchboardSchema.safeParse(body);
+  if (!parsedSwitchboard.success) throw new PurchasingApiError(200, "The Purchasing module switchboard returned data in an unexpected format.");
+  const switchboard = parsedSwitchboard.data;
   const catalogIds = new Set(switchboard.catalog.map((module) => module.id));
   if (!catalogIds.has("purchasing") || switchboard.enabledModules.some((id) => !catalogIds.has(id))) {
     throw new PurchasingApiError(200, "The module switchboard returned an invalid Purchasing configuration.");
@@ -526,10 +496,10 @@ export async function fetchPurchasingEnabled(signal?: AbortSignal): Promise<bool
   return switchboard.enabledModules.includes("purchasing");
 }
 
-export async function fetchPurchasingWorkspace(signal?: AbortSignal): Promise<PurchasingWorkspace> {
+export async function fetchPurchasingWorkspace(organizationId: string | null | undefined, signal?: AbortSignal): Promise<PurchasingWorkspace> {
   const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
+    headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(organizationId) },
     body: JSON.stringify({ capabilityId: "purchasing.listWorkspace", input: {}, intentId: crypto.randomUUID() }),
   }, "load the purchasing workspace", signal);
   const envelope = SuccessEnvelopeSchema.safeParse(body);
@@ -543,10 +513,10 @@ export async function fetchPurchasingWorkspace(signal?: AbortSignal): Promise<Pu
   return parsed.data;
 }
 
-export async function fetchGoPurchasingWorkflowRequests(signal?: AbortSignal): Promise<PurchasingRequest[]> {
+export async function fetchGoPurchasingWorkflowRequests(organizationId: string | null | undefined, signal?: AbortSignal): Promise<PurchasingRequest[]> {
   const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
+    headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(organizationId) },
     body: JSON.stringify({ capabilityId: "purchasing.listPurchaseWorkflow", input: {}, intentId: crypto.randomUUID() }),
   }, "load purchase requests", signal);
   const envelope = SuccessEnvelopeSchema.safeParse(body);
@@ -563,20 +533,22 @@ export async function fetchGoPurchasingWorkflowRequests(signal?: AbortSignal): P
   }));
 }
 
-export async function fetchPurchasingProducts(signal?: AbortSignal): Promise<PurchasingProduct[]> {
+export async function fetchPurchasingProducts(organizationId: string | null | undefined, signal?: AbortSignal): Promise<PurchasingProduct[]> {
   const report = await getValidated(
     "/api/inventory",
     z.object({ items: z.array(ProductSchema) }).passthrough(),
     "stocked products",
     signal,
+    organizationId,
+    true,
   );
   return report.items;
 }
 
-export async function fetchPurchasingInputTaxCodes(signal?: AbortSignal): Promise<PurchasingTaxCode[]> {
+export async function fetchPurchasingInputTaxCodes(organizationId: string | null | undefined, signal?: AbortSignal): Promise<PurchasingTaxCode[]> {
   const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
+    headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(organizationId) },
     body: JSON.stringify({ capabilityId: "accounting.listTaxCodes", input: {}, intentId: crypto.randomUUID() }),
   }, "load input tax codes", signal);
   const envelope = SuccessEnvelopeSchema.safeParse(body);
@@ -586,39 +558,6 @@ export async function fetchPurchasingInputTaxCodes(signal?: AbortSignal): Promis
   const tax = GoTaxCodesOutputSchema.safeParse(envelope.data.data);
   if (!tax.success) throw new PurchasingApiError(response.status, "The Go Accounting service returned an unexpected result.", true);
   return tax.data.codes.filter((code) => code.active && code.direction === "input");
-}
-
-/**
- * One governed seam for every /api/purchasing POST. A 202 stays `pending` with
- * its reason so the page can surface the approval instead of reporting a write
- * that never happened.
- */
-async function submit<T>(
-  action: PurchasingAction,
-  output: z.ZodType<T>,
-  activity: string,
-  signal?: AbortSignal,
-): Promise<PurchasingActionOutcome<T>> {
-  const parsedAction = PurchasingActionSchema.safeParse(action);
-  if (!parsedAction.success) throw new PurchasingApiError(0, "Check the purchasing details and try again.");
-
-  const { response, body } = await request("/api/purchasing", {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ ...parsedAction.data, intentId: crypto.randomUUID() }),
-  }, activity, signal);
-
-  if (response.status === 202) {
-    const pending = PendingEnvelopeSchema.safeParse(body);
-    if (!pending.success) throw new PurchasingApiError(202, "The Purchasing service returned an unexpected approval response.", true);
-    return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This action is waiting for approval." };
-  }
-
-  const envelope = SuccessEnvelopeSchema.safeParse(body);
-  if (!envelope.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not ${activity}.`);
-  const parsedOutput = output.safeParse(envelope.data.data);
-  if (!parsedOutput.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not ${activity}.`);
-  return { kind: "completed", data: parsedOutput.data };
 }
 
 export async function createPurchasingVendor(
@@ -649,7 +588,7 @@ export async function createPurchasingOrder(
   try {
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(scope.organizationId) },
       body: JSON.stringify({
         capabilityId: "purchasing.createPurchaseOrder",
         input: {
@@ -827,7 +766,7 @@ async function submitPurchaseLifecycle<T>(
   try {
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(scope.organizationId) },
       body: JSON.stringify({
         capabilityId,
         input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")),
@@ -940,7 +879,7 @@ async function submitPurchaseFinanceCapability(
   try {
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(scope.organizationId) },
       body: JSON.stringify({
         capabilityId,
         input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")),
@@ -977,7 +916,7 @@ async function submitPurchaseSourcingCapability<T>(
   try {
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(scope.organizationId) },
       body: JSON.stringify({
         capabilityId,
         input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")),
@@ -1093,10 +1032,11 @@ function parsePurchasingActionOutcome<T>(response: Response, body: unknown, outp
 }
 
 export async function receivePurchasingGoods(
-  action: z.infer<typeof ReceiveGoodsSchema>,
+  action: PurchasingReceiveGoodsAction,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome<PurchasingReceiveGoodsResult>> {
-  return submit(action, ReceiveGoodsOutputSchema, "recording the receipt", signal);
+  return submitPurchasingReceiptInGo(action, signal, retryScope);
 }
 
 export async function returnPurchasingGoods(
@@ -1106,8 +1046,6 @@ export async function returnPurchasingGoods(
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = ReturnGoodsSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the return quantities and reasons, then try again.");
-  const useGo = typeof __GO_PURCHASING_RETURN_CLOSE__ !== "undefined" && __GO_PURCHASING_RETURN_CLOSE__;
-  if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "returning the goods", signal);
   return submitPurchaseLifecycle(parsedAction.data, "purchasing.returnGoods", ReturnGoodsOutputSchema, "returning the goods", signal, retryScope);
 }
 
@@ -1118,8 +1056,6 @@ export async function closePurchasingOrder(
 ): Promise<PurchasingActionOutcome<z.infer<typeof ClosePurchaseOrderOutputSchema>>> {
   const parsedAction = ClosePurchaseOrderSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the purchase order number and try again.");
-  const useGo = typeof __GO_PURCHASING_RETURN_CLOSE__ !== "undefined" && __GO_PURCHASING_RETURN_CLOSE__;
-  if (!useGo) return submit(parsedAction.data, ClosePurchaseOrderOutputSchema, "closing the purchase order", signal);
   return submitPurchaseLifecycle(parsedAction.data, "purchasing.closePurchaseOrder", ClosePurchaseOrderOutputSchema, "closing the purchase order", signal, retryScope);
 }
 
@@ -1200,8 +1136,6 @@ export async function decidePurchasingRequest(
   signal?: AbortSignal,
   retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
-  if (!useGo) return submit(action, OpaqueOutputSchema, "recording the decision", signal);
   const parsed = GoDecidePurchaseRequestSchema.safeParse(action);
   if (!parsed.success) throw new PurchasingApiError(0, "Enter a valid purchase request decision and a reason no longer than 1000 characters.");
   return submitPurchaseSourcingCapability(parsed.data, "purchasing.decidePurchaseRequest", GoDecidePurchaseRequestOutputSchema, "recording the decision", signal, retryScope);
@@ -1212,8 +1146,6 @@ export async function createPurchasingRfq(
   signal?: AbortSignal,
   retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
-  if (!useGo) return submit(action, OpaqueOutputSchema, "sending the RFQs", signal);
   const parsed = GoCreateRfqSchema.safeParse(action);
   if (!parsed.success) throw new PurchasingApiError(0, "Select between 1 and 10 valid suppliers for the RFQ.");
   return submitPurchaseSourcingCapability(parsed.data, "purchasing.createRfq", GoCreateRfqOutputSchema, "sending the RFQs", signal, retryScope);
@@ -1224,8 +1156,6 @@ export async function recordPurchasingQuote(
   signal?: AbortSignal,
   retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
-  if (!useGo) return submit(action, OpaqueOutputSchema, "recording the quote", signal);
   const parsed = GoRecordQuoteSchema.safeParse(action);
   if (!parsed.success) throw new PurchasingApiError(0, "Enter a positive quote amount and valid optional lead time and notes.");
   return submitPurchaseSourcingCapability(parsed.data, "purchasing.recordQuote", GoRecordQuoteOutputSchema, "recording the quote", signal, retryScope);
@@ -1236,31 +1166,23 @@ export async function selectPurchasingWinningQuote(
   signal?: AbortSignal,
   retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
-  if (!useGo) return submit(action, OpaqueOutputSchema, "awarding the quote", signal);
-  return submitPurchaseSourcingCapability(action, "purchasing.selectWinningQuote", GoSelectWinningQuoteOutputSchema, "awarding the quote", signal, retryScope);
+  const parsed = SelectWinningQuoteSchema.safeParse(action);
+  if (!parsed.success) throw new PurchasingApiError(0, "Select a valid quote before awarding it.");
+  return submitPurchaseSourcingCapability(parsed.data, "purchasing.selectWinningQuote", GoSelectWinningQuoteOutputSchema, "awarding the quote", signal, retryScope);
 }
 
 export async function fetchPurchasingPriceHistory(
   sku: string | undefined,
+  organizationId: string | null | undefined,
   signal?: AbortSignal,
 ): Promise<PurchasingPriceHistoryRow[]> {
-  if (goPurchasingIntelReadsUseGo()) {
-    const input = sku?.trim() ? { sku: sku.trim() } : {};
-    const result = await executePurchasingIntelRead("purchasing.priceHistory", input, PriceHistoryOutputSchema, "price history", signal);
-    return result.rows;
-  }
-  const action: z.infer<typeof PriceHistorySchema> = sku?.trim() ? { action: "priceHistory", sku: sku.trim() } : { action: "priceHistory" };
-  const outcome = await submit(action, PriceHistoryOutputSchema, "loading price history", signal);
-  if (outcome.kind === "pending") throw new PurchasingApiError(202, "The price history read did not complete.");
-  return outcome.data.rows;
+  const input = sku?.trim() ? { sku: sku.trim() } : {};
+  const result = await executePurchasingIntelRead("purchasing.priceHistory", input, PriceHistoryOutputSchema, "price history", organizationId, signal);
+  return result.rows;
 }
 
-export async function fetchPurchasingSupplierPerformance(signal?: AbortSignal): Promise<PurchasingSupplierPerformance[]> {
-  if (!goPurchasingIntelReadsUseGo()) {
-    throw new PurchasingApiError(0, "Supplier performance Go reads are not enabled.");
-  }
-  const result = await executePurchasingIntelRead("purchasing.supplierPerformance", {}, SupplierPerformanceOutputSchema, "supplier performance", signal);
+export async function fetchPurchasingSupplierPerformance(organizationId: string | null | undefined, signal?: AbortSignal): Promise<PurchasingSupplierPerformance[]> {
+  const result = await executePurchasingIntelRead("purchasing.supplierPerformance", {}, SupplierPerformanceOutputSchema, "supplier performance", organizationId, signal);
   return result.vendors;
 }
 
@@ -1269,6 +1191,7 @@ async function executePurchasingIntelRead<T>(
   input: { sku?: string },
   output: z.ZodType<T>,
   subject: string,
+  organizationId: string | null | undefined,
   signal?: AbortSignal,
 ): Promise<T> {
   let response: Response;
@@ -1276,7 +1199,7 @@ async function executePurchasingIntelRead<T>(
   try {
     ({ response, body } = await request("/api/capabilities/execute", {
       method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(organizationId) },
       body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
     }, `load ${subject}`, signal));
   } catch (error) {
@@ -1300,34 +1223,27 @@ async function executePurchasingIntelRead<T>(
 
 export async function fetchPurchasingSupplierStatement(
   vendorId: string,
+  organizationId: string | null | undefined,
   signal?: AbortSignal,
 ): Promise<PurchasingSupplierStatement> {
   const action = SupplierStatementActionSchema.safeParse({ action: "supplierStatement", vendorId });
   if (!action.success) throw new PurchasingApiError(0, "Choose a valid supplier before loading the statement.");
 
-  if (goPurchasingSupplierStatementReadsUseGo()) {
-    const { response, body } = await request("/api/capabilities/execute", {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({
-        capabilityId: "purchasing.supplierStatement",
-        input: { vendorId: action.data.vendorId },
-        intentId: crypto.randomUUID(),
-      }),
-    }, "load the supplier statement", signal);
-    if (response.status !== 200) {
-      throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not load the supplier statement.");
-    }
-    const envelope = SuccessEnvelopeSchema.safeParse(body);
-    if (!envelope.success) throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not load the supplier statement.");
-    const statement = SupplierStatementSchema.safeParse(envelope.data.data);
-    if (!statement.success) throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not load the supplier statement.");
-    return statement.data;
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(organizationId) },
+    body: JSON.stringify({
+      capabilityId: "purchasing.supplierStatement",
+      input: { vendorId: action.data.vendorId },
+      intentId: crypto.randomUUID(),
+    }),
+  }, "load the supplier statement", signal);
+  if (response.status !== 200) {
+    throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not load the supplier statement.");
   }
-
-  const outcome = await submit(action.data, SupplierStatementSchema, "loading the supplier statement", signal);
-  if (outcome.kind === "pending") {
-    throw new PurchasingApiError(202, "The supplier statement read did not complete.");
-  }
-  return outcome.data;
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not load the supplier statement.");
+  const statement = SupplierStatementSchema.safeParse(envelope.data.data);
+  if (!statement.success) throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not load the supplier statement.");
+  return statement.data;
 }

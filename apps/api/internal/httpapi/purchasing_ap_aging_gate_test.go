@@ -9,14 +9,14 @@ import (
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 )
 
-func TestSessionCapabilityHandlerGatesPurchasingAPAgingWithServerFlag(t *testing.T) {
+func TestSessionCapabilityHandlerKeepsPurchasingAPAgingAvailable(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		enabled    bool
 		wantStatus int
 		wantExec   int
 	}{
-		{name: "default off", wantStatus: http.StatusServiceUnavailable},
+		{name: "server flag off", wantStatus: http.StatusOK, wantExec: 1},
 		{name: "enabled", enabled: true, wantStatus: http.StatusOK, wantExec: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -37,7 +37,7 @@ func TestSessionCapabilityHandlerGatesPurchasingAPAgingWithServerFlag(t *testing
 			if response.Code != test.wantStatus || executor.calls != test.wantExec {
 				t.Fatalf("status=%d executor=%d body=%s, want status=%d executor=%d", response.Code, executor.calls, response.Body.String(), test.wantStatus, test.wantExec)
 			}
-			if test.enabled && executor.capID != "purchasing.apAging" {
+			if executor.capID != "purchasing.apAging" {
 				t.Fatalf("capability=%q, want purchasing.apAging", executor.capID)
 			}
 		})

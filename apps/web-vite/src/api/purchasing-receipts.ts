@@ -91,10 +91,20 @@ function readError(status: number, body: unknown, context: string): string {
   return `Could not load ${context}. Check the service and try again.`;
 }
 
-async function fetchJson(path: string, init: RequestInit, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
+function organizationHeaders(organizationId: string | null | undefined): Record<string, string> {
+  const normalized = organizationId?.trim();
+  if (!normalized || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalized)) {
+    throw new PurchasingReceiptsApiError(0, "Wait for the active organization to finish loading before viewing receipts.");
+  }
+  return { "X-Organization-ID": normalized };
+}
+
+async function fetchJson(path: string, init: RequestInit, organizationId: string | null | undefined, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
+  const headers = new Headers(init.headers);
+  for (const [key, value] of Object.entries(organizationHeaders(organizationId))) headers.set(key, value);
   let response: Response;
   try {
-    response = await fetch(path, { ...init, credentials: "same-origin", cache: "no-store", signal: requestSignal(signal) });
+    response = await fetch(path, { ...init, headers, credentials: "same-origin", cache: "no-store", signal: requestSignal(signal) });
   } catch (error) {
     if (signal?.aborted) throw error;
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";
@@ -109,13 +119,14 @@ async function executePurchasingRead(
   capabilityId: "purchasing.listWorkspace" | "purchasing.listReceipts",
   input: Record<string, unknown>,
   context: string,
+  organizationId: string | null | undefined,
   signal?: AbortSignal,
 ): Promise<unknown> {
   const { response, body } = await fetchJson("/api/capabilities/execute", {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
-  }, signal);
+  }, organizationId, signal);
   if (!response.ok) {
     throw new PurchasingReceiptsApiError(response.status, readError(response.status, body, context));
   }
@@ -126,10 +137,10 @@ async function executePurchasingRead(
   return envelope.data.data;
 }
 
-export async function fetchPurchasingReceiptsEnabled(signal?: AbortSignal): Promise<boolean> {
+export async function fetchPurchasingReceiptsEnabled(organizationId: string | null | undefined, signal?: AbortSignal): Promise<boolean> {
   const { response, body } = await fetchJson("/api/modules", {
     headers: { accept: "application/json" },
-  }, signal);
+  }, organizationId, signal);
   if (!response.ok) {
     throw new PurchasingReceiptsApiError(response.status, readError(response.status, body, "the Purchasing module status"));
   }
@@ -144,8 +155,8 @@ export async function fetchPurchasingReceiptsEnabled(signal?: AbortSignal): Prom
   return parsed.data.enabledModules.includes("purchasing");
 }
 
-export async function fetchPurchasingOrders(signal?: AbortSignal): Promise<{ baseCurrency: string; orders: PurchasingReceiptOrder[] }> {
-  const body = await executePurchasingRead("purchasing.listWorkspace", {}, "purchase orders", signal);
+export async function fetchPurchasingOrders(organizationId: string | null | undefined, signal?: AbortSignal): Promise<{ baseCurrency: string; orders: PurchasingReceiptOrder[] }> {
+  const body = await executePurchasingRead("purchasing.listWorkspace", {}, "purchase orders", organizationId, signal);
   const parsed = PurchaseOrdersResponseSchema.safeParse(body);
   if (!parsed.success) {
     throw new PurchasingReceiptsApiError(200, "The Go Purchasing service returned purchase orders in an unexpected format.");
@@ -153,14 +164,14 @@ export async function fetchPurchasingOrders(signal?: AbortSignal): Promise<{ bas
   return parsed.data;
 }
 
-export async function fetchPurchaseOrderReceipts(poNumber: number, signal?: AbortSignal): Promise<{
+export async function fetchPurchaseOrderReceipts(poNumber: number, organizationId: string | null | undefined, signal?: AbortSignal): Promise<{
   receipts: PurchasingReceipt[];
   orderLines: PurchasingReceiptOrderLine[];
 }> {
   if (!Number.isSafeInteger(poNumber) || poNumber <= 0) {
     throw new PurchasingReceiptsApiError(400, "Choose a valid purchase order to view receipt history.");
   }
-  const body = await executePurchasingRead("purchasing.listReceipts", { poNumber }, "receipt history", signal);
+  const body = await executePurchasingRead("purchasing.listReceipts", { poNumber }, "receipt history", organizationId, signal);
   const parsed = ReceiptsOutputSchema.safeParse(body);
   if (!parsed.success) {
     throw new PurchasingReceiptsApiError(200, "The Go Purchasing service returned receipt history in an unexpected format.");

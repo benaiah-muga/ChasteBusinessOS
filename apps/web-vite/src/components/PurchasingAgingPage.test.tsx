@@ -7,10 +7,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const enabledSwitchboard = { catalog: [{ id: "purchasing" }], enabledModules: ["purchasing"] };
-const report = {
-  baseCurrency: "BHD",
-  apAging: { buckets: { current: 1200, d30: 300, d60: 200, d90plus: 100, totalOutstanding: 1800 } },
-};
+const buckets = { current: 1200, d30: 300, d60: 200, d90plus: 100, totalOutstanding: 1800 };
 
 afterEach(() => {
   cleanup();
@@ -18,12 +15,12 @@ afterEach(() => {
 });
 
 describe("PurchasingAgingPage", () => {
-  it("shows the aging bands in the workspace currency and links bill actions to Purchasing", async () => {
+  it("shows the Go aging bands in workspace currency and links bill actions to Purchasing", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(enabledSwitchboard))
-      .mockResolvedValueOnce(jsonResponse(report));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { buckets } }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingAgingPage />);
+    render(<PurchasingAgingPage baseCurrency="BHD" organizationId="org-test" />);
 
     expect(screen.getByRole("status").textContent).toContain("Loading payable balances");
     expect(await screen.findByRole("heading", { name: /BHD\s+1\.800/ })).toBeTruthy();
@@ -33,16 +30,15 @@ describe("PurchasingAgingPage", () => {
     const workspaceLink = screen.getByRole("link", { name: "Open full Purchasing workspace" }) as HTMLAnchorElement;
     expect(workspaceLink.getAttribute("href")).toBe("/purchasing?tab=bills");
     expect(new URL(workspaceLink.href).origin).toBe(window.location.origin);
-    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
   });
 
   it("uses the Go A/P aging capability and falls back to workspace currency", async () => {
-    vi.stubGlobal("__GO_PURCHASING_AP_AGING_READS__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(enabledSwitchboard))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { buckets: report.apAging.buckets } }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { buckets } }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingAgingPage baseCurrency="UGX" />);
+    render(<PurchasingAgingPage baseCurrency="UGX" organizationId="org-test" />);
 
     expect(await screen.findByRole("heading", { name: /UGX\s+1,800/ })).toBeTruthy();
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
@@ -56,11 +52,8 @@ describe("PurchasingAgingPage", () => {
   it("shows a clear zero-balance state without hiding the aging rows", async () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(jsonResponse(enabledSwitchboard))
-      .mockResolvedValueOnce(jsonResponse({
-        baseCurrency: "UGX",
-        apAging: { buckets: { current: 0, d30: 0, d60: 0, d90plus: 0, totalOutstanding: 0 } },
-      })));
-    render(<PurchasingAgingPage />);
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { buckets: { current: 0, d30: 0, d60: 0, d90plus: 0, totalOutstanding: 0 } } })));
+    render(<PurchasingAgingPage baseCurrency="UGX" organizationId="org-test" />);
 
     expect(await screen.findByText("No unpaid balance")).toBeTruthy();
     expect(screen.getByRole("row", { name: /Over 90 days 91\+ days.*UGX/ })).toBeTruthy();
@@ -70,11 +63,11 @@ describe("PurchasingAgingPage", () => {
   it("reports malformed reports and can retry after a permission or service error", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(enabledSwitchboard))
-      .mockResolvedValueOnce(jsonResponse({ baseCurrency: "BHD", apAging: { buckets: { current: -1 } } }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { buckets: { ...buckets, current: -1 } } }))
       .mockResolvedValueOnce(jsonResponse(enabledSwitchboard))
-      .mockResolvedValueOnce(jsonResponse(report));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { buckets } }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingAgingPage />);
+    render(<PurchasingAgingPage baseCurrency="BHD" organizationId="org-test" />);
 
     expect(await screen.findByRole("heading", { name: "Could not load payable balances" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -85,7 +78,7 @@ describe("PurchasingAgingPage", () => {
   it("does not request aging data when Purchasing is disabled", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ catalog: [{ id: "purchasing" }], enabledModules: [] }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingAgingPage />);
+    render(<PurchasingAgingPage organizationId="org-test" />);
 
     expect(await screen.findByRole("heading", { name: "Purchasing is turned off" })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);

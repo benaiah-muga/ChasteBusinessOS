@@ -79,9 +79,10 @@ describe("Purchasing payment run Go API", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchPurchasingPaymentRuns()).resolves.toEqual([run]);
-    await expect(fetchPurchasingPaymentRunBills()).resolves.toEqual([bill]);
+    await expect(fetchPurchasingPaymentRuns(scope.organizationId)).resolves.toEqual([run]);
+    await expect(fetchPurchasingPaymentRunBills(scope.organizationId)).resolves.toEqual([bill]);
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(fetchMock.mock.calls.every(([, init]) => new Headers(init?.headers).get("X-Organization-ID") === scope.organizationId)).toBe(true);
   });
 
   it("rejects malformed Go read responses and does not use a compatibility route", async () => {
@@ -89,9 +90,18 @@ describe("Purchasing payment run Go API", () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true, data: { bills: [{ ...bill, dueMinor: Number.MAX_SAFE_INTEGER + 1 }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchPurchasingPaymentRunBills()).rejects.toMatchObject({ status: 200 } satisfies Partial<PurchasingPaymentRunsApiError>);
-    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+    await expect(fetchPurchasingPaymentRunBills(scope.organizationId)).rejects.toMatchObject({ status: 200 } satisfies Partial<PurchasingPaymentRunsApiError>);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", headers: expect.objectContaining({ "X-Organization-ID": scope.organizationId }) }));
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/api/purchasing"))).toBe(false);
+  });
+
+  it("rejects an absent organization before issuing a capability request", async () => {
+    vi.stubGlobal("__GO_PURCHASING_PAYMENT_RUNS__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPurchasingPaymentRuns(null)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("retries a pending create with its exact intent after Go 404 and blocks selector-off rollback", async () => {

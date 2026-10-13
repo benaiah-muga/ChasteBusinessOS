@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { fetchPurchasingEnabled, PurchasingPaymentRunsApiError } from "./purchasing-payment-runs";
+import { fetchPurchasingEnabled, PurchasingApiError } from "./purchasing";
+import { PurchasingPaymentRunsApiError } from "./purchasing-payment-runs";
 
 const SafeMinorSchema = z.number().int().safe().nonnegative();
 const AgingBucketsSchema = z.object({
@@ -9,28 +10,22 @@ const AgingBucketsSchema = z.object({
   d90plus: SafeMinorSchema,
   totalOutstanding: SafeMinorSchema,
 }).strict();
-const AgingResponseSchema = z.object({
-  baseCurrency: z.string().regex(/^[A-Z]{3}$/),
-  apAging: z.object({
-    buckets: AgingBucketsSchema,
-  }).strict(),
-});
 const CapabilitySuccessSchema = z.object({ ok: z.literal(true), data: z.unknown() }).passthrough();
 const GoAgingOutputSchema = z.object({ buckets: AgingBucketsSchema }).strict();
 
-export type PurchasingAging = z.infer<typeof AgingResponseSchema>["apAging"]["buckets"];
+export type PurchasingAging = z.infer<typeof AgingBucketsSchema>;
 
-function purchasingAgingGoSelected(): boolean {
-  return typeof __GO_PURCHASING_AP_AGING_READS__ !== "undefined" && __GO_PURCHASING_AP_AGING_READS__;
-}
-
-async function fetchPurchasingAgingFromGo(signal?: AbortSignal): Promise<{ baseCurrency: null; buckets: PurchasingAging }> {
+async function fetchPurchasingAgingFromGo(organizationId: string | null | undefined, signal?: AbortSignal): Promise<{ baseCurrency: null; buckets: PurchasingAging }> {
+  const normalizedOrganizationId = organizationId?.trim();
+  if (!normalizedOrganizationId) {
+    throw new PurchasingPaymentRunsApiError(0, "Wait for the active organization to finish loading before reviewing payables.");
+  }
   let response: Response;
   try {
     response = await fetch("/api/capabilities/execute", {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": normalizedOrganizationId },
       body: JSON.stringify({ capabilityId: "purchasing.apAging", input: {}, intentId: crypto.randomUUID() }),
       cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
@@ -59,43 +54,18 @@ async function fetchPurchasingAgingFromGo(signal?: AbortSignal): Promise<{ baseC
   return { baseCurrency: null, buckets: parsed.data.buckets };
 }
 
-export async function fetchPurchasingAging(signal?: AbortSignal): Promise<{ baseCurrency: string | null; buckets: PurchasingAging }> {
-  if (purchasingAgingGoSelected()) return fetchPurchasingAgingFromGo(signal);
-
-  let response: Response;
-  try {
-    response = await fetch("/api/purchasing", {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { accept: "application/json" },
-      cache: "no-store",
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
-    });
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    throw new PurchasingPaymentRunsApiError(0, "Could not reach the Purchasing service. Check your connection and try again.");
-  }
-  if (!response.ok) {
-    const body: unknown = await response.json().catch(() => null);
-    const message = body && typeof body === "object" && "error" in body && typeof body.error === "string"
-      ? body.error
-      : response.status === 401
-        ? "Sign in again to review payables."
-        : response.status === 403
-          ? "You do not have permission to view accounts payable."
-          : "Could not load accounts payable aging. Try again.";
-    throw new PurchasingPaymentRunsApiError(response.status, message);
-  }
-  const body: unknown = await response.json().catch(() => null);
-  const parsed = AgingResponseSchema.safeParse(body);
-  if (!parsed.success) {
-    throw new PurchasingPaymentRunsApiError(response.status, "The Purchasing service returned an unexpected aging report.");
-  }
-  return { baseCurrency: parsed.data.baseCurrency, buckets: parsed.data.apAging.buckets };
+export async function fetchPurchasingAging(organizationId: string | null | undefined, signal?: AbortSignal): Promise<{ baseCurrency: string | null; buckets: PurchasingAging }> {
+  return fetchPurchasingAgingFromGo(organizationId, signal);
 }
 
-export async function loadPurchasingAging(signal?: AbortSignal) {
-  const enabled = await fetchPurchasingEnabled(signal);
+export async function loadPurchasingAging(organizationId: string | null | undefined, signal?: AbortSignal) {
+  let enabled: boolean;
+  try {
+    enabled = await fetchPurchasingEnabled(organizationId, signal);
+  } catch (error) {
+    if (error instanceof PurchasingApiError) throw new PurchasingPaymentRunsApiError(error.status, error.message);
+    throw error;
+  }
   if (!enabled) return null;
-  return fetchPurchasingAging(signal);
+  return fetchPurchasingAging(organizationId, signal);
 }

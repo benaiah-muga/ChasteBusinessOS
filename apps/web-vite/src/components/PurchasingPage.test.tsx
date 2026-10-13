@@ -147,7 +147,7 @@ function postsTo(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, 
   return fetchMock.mock.calls
     .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
     .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
-    .filter((body) => body.capabilityId !== "accounting.listTaxCodes" && body.capabilityId !== "purchasing.listWorkspace")
+    .filter((body) => !["accounting.listTaxCodes", "purchasing.listWorkspace", "purchasing.listPurchaseWorkflow", "purchasing.priceHistory", "purchasing.supplierPerformance", "purchasing.supplierStatement"].includes(String(body.capabilityId)))
     .map((body) => body.capabilityId === "purchasing.createVendor"
       ? { ...(body.input as Record<string, unknown>), action: "createVendor", intentId: body.intentId }
       : body.capabilityId === "purchasing.createPurchaseOrder"
@@ -157,11 +157,15 @@ function postsTo(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, 
         : body);
 }
 
-function capabilityPosts(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, unknown>[] {
+function allCapabilityPosts(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, unknown>[] {
   return fetchMock.mock.calls
     .filter(([url, init]) => String(url) === "/api/capabilities/execute" && (init as RequestInit | undefined)?.method === "POST")
     .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
     .filter((body) => body.capabilityId !== "accounting.listTaxCodes" && body.capabilityId !== "purchasing.listWorkspace");
+}
+
+function capabilityPosts(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, unknown>[] {
+  return allCapabilityPosts(fetchMock).filter((body) => !["purchasing.listPurchaseWorkflow", "purchasing.priceHistory", "purchasing.supplierPerformance", "purchasing.supplierStatement"].includes(String(body.capabilityId)));
 }
 
 function stubPurchasingLocks(): void {
@@ -344,13 +348,15 @@ describe("PurchasingPage", () => {
       }] } },
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     const workspaceRead = fetchMock.mock.calls.find(([url, init]) => String(url) === "/api/capabilities/execute"
       && JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")).capabilityId === "purchasing.listWorkspace");
     expect(workspaceRead).toBeDefined();
     expect(JSON.parse(String(workspaceRead?.[1]?.body))).toMatchObject({ capabilityId: "purchasing.listWorkspace", input: {}, intentId: expect.any(String) });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) !== "/api/purchasing")
+      .every(([, init]) => new Headers((init as RequestInit | undefined)?.headers).get("X-Organization-ID") === "test-org")).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/purchasing")).toBe(false);
 
     fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
@@ -367,47 +373,48 @@ describe("PurchasingPage", () => {
     expect(await screen.findByText("Go workflow request")).toBeTruthy();
     expect(screen.queryByText("Legacy request")).toBeNull();
     expect(screen.getAllByText("Harbor Supplies").length).toBeGreaterThan(0);
-    expect(capabilityPosts(fetchMock).map((post) => post.capabilityId)).toContain("purchasing.listPurchaseWorkflow");
+    expect(allCapabilityPosts(fetchMock).map((post) => post.capabilityId)).toContain("purchasing.listPurchaseWorkflow");
   });
 
-  it("uses the Go workspace requests and Intel reports when their dedicated selectors are off", async () => {
+  it("uses Go workflow and Intel reads when their old selectors are off", async () => {
     vi.stubGlobal("__GO_PURCHASING_WORKFLOW_READS__", false);
     vi.stubGlobal("__GO_PURCHASING_INTEL_READS__", false);
     const fetchMock = purchasingFetch({
-      workspace: workspaceFixture({
-        requests: [{
-          id: "workspace-request",
-          title: "Workspace request",
+      workflow: { ok: true, data: { requests: [{
+          id: "go-request-selector-off",
+          title: "Go request despite selector",
           justification: "The last packaging order will run out before delivery.",
           estimatedAmountMinor: 25000,
           status: "pending_review",
           decisionReason: null,
           createdAt: "2026-09-25T12:15:00.000Z",
           rfqs: [],
-        }],
-        priceHistory: { rows: [{ vendorName: "Workspace vendor", itemSku: "WS-1", itemDescription: "Workspace item", unitPriceMinor: 3200, orderedAt: null }] },
-        supplierPerformance: { vendors: [{ vendorId: vendor.id, vendorName: "Workspace vendor", orders: 4, avgLeadTimeDays: 3, onTimeRate: 100, fillRate: 95, backorderedOrders: 0 }] },
-      }),
+        }] } },
+      post: (body) => body.action === "priceHistory"
+        ? { ok: true, data: { rows: [{ vendorName: "Go vendor", itemSku: "GO-1", itemDescription: "Go item", unitPriceMinor: 3200, orderedAt: null }] } }
+        : body.action === "supplierPerformance"
+          ? { ok: true, data: { vendors: [{ vendorId: vendor.id, vendorName: "Go vendor", orders: 4, avgLeadTimeDays: 3, onTimeRate: 100, fillRate: 95, backorderedOrders: 0 }] } }
+          : { ok: true, data: {} },
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /^Requests & RFQs/ }));
-    expect(await screen.findByRole("heading", { name: "Workspace request" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Go request despite selector" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: /^Prices & statements/ }));
-    expect(await screen.findByText("Workspace item")).toBeTruthy();
+    expect(await screen.findByText("Go item")).toBeTruthy();
     const performanceTable = screen.getByRole("table", { name: "Lead time, on-time arrival, and fill rate by supplier" });
-    expect(within(performanceTable).getByText("Workspace vendor")).toBeTruthy();
+    expect(within(performanceTable).getByText("Go vendor")).toBeTruthy();
 
     const capabilityIds = fetchMock.mock.calls
       .filter(([url, init]) => String(url) === "/api/capabilities/execute" && (init as RequestInit | undefined)?.method === "POST")
       .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as { capabilityId: string })
       .map((body) => body.capabilityId);
     expect(capabilityIds).toContain("purchasing.listWorkspace");
-    expect(capabilityIds).not.toContain("purchasing.listPurchaseWorkflow");
-    expect(capabilityIds).not.toContain("purchasing.priceHistory");
-    expect(capabilityIds).not.toContain("purchasing.supplierPerformance");
+    expect(capabilityIds).toContain("purchasing.listPurchaseWorkflow");
+    expect(capabilityIds).toContain("purchasing.priceHistory");
+    expect(capabilityIds).toContain("purchasing.supplierPerformance");
     expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/purchasing" && ((init as RequestInit | undefined)?.method ?? "GET") === "GET")).toBe(false);
   });
 
@@ -415,11 +422,11 @@ describe("PurchasingPage", () => {
     vi.stubGlobal("__GO_PURCHASING_WORKFLOW_READS__", true);
     const fetchMock = purchasingFetch({ workflow: Response.json({ error: "route disabled" }, { status: 404 }) });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     expect(await screen.findByText(/route disabled/)).toBeTruthy();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/purchasing")).toBe(false);
-    expect(capabilityPosts(fetchMock).map((post) => post.capabilityId)).toEqual(["purchasing.listPurchaseWorkflow"]);
+    expect(allCapabilityPosts(fetchMock).map((post) => post.capabilityId)).toEqual(["purchasing.listPurchaseWorkflow"]);
   });
 
   it("loads Intel analytics directly from Go and does not use workspace analytics in Go mode", async () => {
@@ -436,14 +443,15 @@ describe("PurchasingPage", () => {
           : { ok: true, data: {} },
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     fireEvent.click(await screen.findByRole("tab", { name: /^Prices & statements/ }));
     expect(await screen.findByText("Go item")).toBeTruthy();
     expect(await screen.findByText("Go vendor")).toBeTruthy();
     expect(screen.queryByText("Legacy item")).toBeNull();
     expect(screen.queryByText("Legacy vendor")).toBeNull();
-    expect(capabilityPosts(fetchMock).map((post) => post.capabilityId)).toEqual([
+    expect(allCapabilityPosts(fetchMock).map((post) => post.capabilityId)).toEqual([
+      "purchasing.listPurchaseWorkflow",
       "purchasing.priceHistory",
       "purchasing.supplierPerformance",
     ]);
@@ -458,7 +466,7 @@ describe("PurchasingPage", () => {
         : Response.json({ error: "unavailable" }, { status: 404 }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     fireEvent.click(await screen.findByRole("tab", { name: /^Prices & statements/ }));
     expect(await screen.findByText(/pending and did not return analytics/)).toBeTruthy();
@@ -477,7 +485,7 @@ describe("PurchasingPage", () => {
         : { ok: true, data: { vendors: [] } },
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     fireEvent.click(await screen.findByRole("tab", { name: /^Prices & statements/ }));
     expect(screen.getByText("Loading price history…")).toBeTruthy();
@@ -504,7 +512,7 @@ describe("PurchasingPage", () => {
     fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: vendor.id } });
     fireEvent.click(screen.getByRole("button", { name: "Load statement" }));
     expect(await screen.findByText("Bill #7")).toBeTruthy();
-    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+    expect(allCapabilityPosts(fetchMock).find((post) => post.capabilityId === "purchasing.supplierStatement")).toMatchObject({
       capabilityId: "purchasing.supplierStatement",
       input: { vendorId: vendor.id },
       intentId: expect.any(String),
@@ -642,7 +650,7 @@ describe("PurchasingPage", () => {
 
     render(<PurchasingPage {...props} />);
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
-    expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe("Packaging stock");
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe("Packaging stock"));
     expect((screen.getByLabelText("Justification") as HTMLTextAreaElement).value).toBe("Stock will run out before confirmed orders ship.");
     expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(true);
     const retryRequest = await screen.findByRole("button", { name: "Retry exact purchase request" });
@@ -662,10 +670,10 @@ describe("PurchasingPage", () => {
       status: "approved",
       decisionReason: null,
       createdAt: "2026-08-01T10:00:00.000Z",
-      rfqs: [{ id: "22222222-2222-4222-8222-222222222222", vendorName: "Harbor Supplies", status: "sent", quoteAmountMinor: null, quoteLeadTimeDays: null, quoteNotes: null }],
+      rfqs: [{ id: "22222222-2222-4222-8222-222222222222", vendorId: vendor.id, vendorName: "Harbor Supplies", status: "sent", quoteAmountMinor: null, quoteLeadTimeDays: null, quoteNotes: null }],
     };
     const fetchMock = purchasingFetch({
-      workspace: workspaceFixture({ requests: [request] }),
+      workflow: { ok: true, data: { requests: [request] } },
       post: (body) => body.action === "recordQuote"
         ? Response.json({ pendingApproval: true, reason: "Quote approval required." }, { status: 202 })
         : { ok: true, data: {} },
@@ -704,7 +712,7 @@ describe("PurchasingPage", () => {
     fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Private draft" } });
     await waitFor(() => expect(Object.keys(window.localStorage).some((key) => key.includes("scope-secret-actor") || key.includes("scope-secret-org-a"))).toBe(false));
     page.rerender(<PurchasingPage actorId="scope-secret-actor" organizationId={null} />);
-    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe(""));
+    expect(screen.getByRole("status").textContent).toContain("Loading the purchasing workspace");
     page.rerender(<PurchasingPage actorId="scope-secret-actor" organizationId="scope-secret-org-b" />);
     await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe(""));
   });
@@ -782,13 +790,14 @@ describe("PurchasingPage", () => {
   it("shows invalid estimate input instead of silently omitting it", async () => {
     const fetchMock = purchasingFetch();
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
     fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
     fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Packaging stock" } });
     fireEvent.change(screen.getByLabelText("Justification"), { target: { value: "Stock will run out before confirmed orders ship." } });
     fireEvent.change(screen.getByLabelText("Estimate (optional, USD)"), { target: { value: "12,5" } });
-    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("Enter a valid non-negative estimate");
+    await waitFor(() => expect((screen.getByLabelText("Estimate (optional, USD)") as HTMLInputElement).value).toBe("12,5"));
+    fireEvent.submit(screen.getByLabelText("Purchase requests and quotes").querySelector("form")!);
+    expect(await screen.findByText("Enter a valid non-negative estimate in the workspace currency.")).toBeTruthy();
     expect(postedActions(fetchMock, "createPurchaseRequest")).toHaveLength(0);
   });
 
@@ -802,10 +811,11 @@ describe("PurchasingPage", () => {
       status: "approved",
       decisionReason: null,
       createdAt: "2026-08-01T10:00:00.000Z",
-      rfqs: [{ id: "22222222-2222-4222-8222-222222222222", vendorName: "Harbor Supplies", status: "sent", quoteAmountMinor: null, quoteLeadTimeDays: null, quoteNotes: null }],
+      rfqs: [{ id: "22222222-2222-4222-8222-222222222222", vendorId: vendor.id, vendorName: "Harbor Supplies", status: "sent", quoteAmountMinor: null, quoteLeadTimeDays: null, quoteNotes: null }],
     };
     const fetchMock = purchasingFetch({
-      workspace: workspaceFixture({ baseCurrency: "JPY", requests: [request] }),
+      workspace: workspaceFixture({ baseCurrency: "JPY" }),
+      workflow: { ok: true, data: { requests: [request] } },
       post: (body) => body.action === "recordQuote" ? { ok: true, data: { status: "quoted" } } : { ok: true, data: {} },
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -840,7 +850,8 @@ describe("PurchasingPage", () => {
       rfqs: [],
     };
     const fetchMock = purchasingFetch({
-      workspace: workspaceFixture({ vendors, requests: [request] }),
+      workspace: workspaceFixture({ vendors }),
+      workflow: { ok: true, data: { requests: [request] } },
       post: (body) => body.action === "createRfq" ? { ok: true, data: { rfqIds: ["22222222-2222-4222-8222-222222222222"] } } : { ok: true, data: {} },
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -897,7 +908,7 @@ describe("PurchasingPage", () => {
   it("blocks zero quantities and malformed prices before sending a purchase order", async () => {
     const fetchMock = purchasingFetch();
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
@@ -923,7 +934,7 @@ describe("PurchasingPage", () => {
   it("opens the tab named in the URL and keeps it shareable", async () => {
     window.history.replaceState(null, "", "/purchasing?tab=bills");
     vi.stubGlobal("fetch", purchasingFetch());
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     await waitFor(() => expect(screen.getByRole("tab", { name: /Bills & payments/ }).getAttribute("aria-selected")).toBe("true"));
     expect(screen.getByRole("heading", { name: "Record vendor bill" })).toBeTruthy();
@@ -936,7 +947,7 @@ describe("PurchasingPage", () => {
   it("falls back to the overview for a tab it does not recognise", async () => {
     window.history.replaceState(null, "", "/purchasing?tab=bogus");
     vi.stubGlobal("fetch", purchasingFetch());
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     await waitFor(() => expect(screen.getByRole("tab", { name: /^Overview/ }).getAttribute("aria-selected")).toBe("true"));
   });
@@ -1230,7 +1241,7 @@ describe("PurchasingPage", () => {
   it("blocks a matched bill that has no PO line reference", async () => {
     const fetchMock = purchasingFetch({ workspace: workspaceFixture({ bills: [] }) });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
@@ -1353,7 +1364,7 @@ describe("PurchasingPage", () => {
 
   it("points at the ported reports instead of rebuilding them", async () => {
     vi.stubGlobal("fetch", purchasingFetch());
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     const reports = screen.getByRole("navigation", { name: "Purchasing reports" });
@@ -1387,11 +1398,12 @@ describe("PurchasingPage", () => {
       if (url === "/api/capabilities/execute") {
         const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
         if (body.capabilityId === "purchasing.listWorkspace") return Response.json({ ok: true, data: workspaceFixture() });
+        if (body.capabilityId === "purchasing.listPurchaseWorkflow") return Response.json({ ok: true, data: { requests: [] } });
       }
       return Response.json({ codes: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     expect(await screen.findByRole("heading", { name: "Could not load Purchasing" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -1401,7 +1413,7 @@ describe("PurchasingPage", () => {
   it("does not request the workspace when Purchasing is turned off", async () => {
     const fetchMock = purchasingFetch({ modules: { catalog: [{ id: "purchasing" }], enabledModules: [] } });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     expect(await screen.findByRole("heading", { name: "Purchasing is turned off" })).toBeTruthy();
     expect(postsTo(fetchMock)).toHaveLength(0);
@@ -1410,7 +1422,7 @@ describe("PurchasingPage", () => {
 
   it("shows a real empty state when nothing has been purchased yet", async () => {
     vi.stubGlobal("fetch", purchasingFetch({ workspace: workspaceFixture({ orders: [], vendors: [], bills: [], requests: [] }) }));
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="test-actor" organizationId="test-org" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
@@ -1660,7 +1672,7 @@ describe("PurchasingReceivingPage", () => {
   it("refuses an order number that is not one of this team's", async () => {
     const fetchMock = receivingFetch();
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingReceivingPage />);
+    render(<PurchasingReceivingPage organizationId="org-test" />);
 
     fireEvent.change(await screen.findByLabelText("PO number"), { target: { value: "999" } });
     fireEvent.click(screen.getByRole("button", { name: "Open order" }));
@@ -1672,7 +1684,7 @@ describe("PurchasingReceivingPage", () => {
   it("does not request orders when Purchasing is turned off", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ catalog: [{ id: "purchasing" }], enabledModules: [] }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingReceivingPage />);
+    render(<PurchasingReceivingPage organizationId="org-test" />);
 
     expect(await screen.findByRole("heading", { name: "Purchasing is turned off" })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);
