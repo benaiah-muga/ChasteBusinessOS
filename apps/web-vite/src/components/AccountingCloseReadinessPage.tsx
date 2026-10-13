@@ -5,7 +5,6 @@ import {
   fetchAccountingCloseReadiness,
   type AccountingCloseReadiness,
 } from "../api/accounting-close";
-import { legacyUrl } from "../legacy";
 import "./accounting-close-readiness-page.css";
 
 type PageState =
@@ -94,9 +93,9 @@ export function AccountingCloseReadinessPage() {
         <div>
           <p className="accounting-close-readiness-eyebrow">Accounting · read only</p>
           <h1>Period close readiness</h1>
-          <p>Review reconciliation, FX, and sign-off checks for a month. Checklist updates, revaluation, close, and reopen stay in the full workspace.</p>
+          <p>Review reconciliation, FX, and sign-off checks for a month. Month-end changes and posting are managed in the Accounting workspace.</p>
         </div>
-        <a className="accounting-close-readiness-full-workspace" href={legacyUrl("/accounting/close")}>Open full period close workspace</a>
+        <a className="accounting-close-readiness-full-workspace" href="/accounting">Open Accounting workspace</a>
       </header>
 
       <section className="accounting-close-period-picker" aria-label="Period selection">

@@ -127,14 +127,14 @@ describe("Vite home dashboard", () => {
     expect(await screen.findByText("KSh12,500.00")).not.toBeNull();
   });
 
-  it("adds receipt remainders, summarizes the ranked work, and preserves the legacy prompt actions", async () => {
+  it("adds receipt remainders, summarizes the ranked work, and keeps navigation in Vite", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => responseFor(String(input)));
     vi.stubGlobal("fetch", fetchMock);
     render(<DashboardPage baseCurrency="USD" />);
 
     expect(await screen.findByText("PO 107: 3 units still outstanding")).not.toBeNull();
     expect(screen.getByRole("link", { name: /PO 107: 3 units still outstanding/ }).getAttribute("href"))
-      .toBe("http://localhost:3001/purchasing/receiving?poNumber=107");
+      .toBe("/purchasing/receiving?poNumber=107");
     fireEvent.click(screen.getByRole("button", { name: "Brief me" }));
     expect(await screen.findByText("Two actions need review, and one delivery remains open.")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/my-work/summarize", expect.objectContaining({
@@ -151,9 +151,33 @@ describe("Vite home dashboard", () => {
     for (const [label, prompt] of prompts) {
       const promptLink = screen.getByRole("link", { name: label }) as HTMLAnchorElement;
       const destination = new URL(promptLink.href);
-      expect(destination.origin).toBe("http://localhost:3001");
-      expect(destination.pathname).toBe("/login");
+      expect(destination.origin).toBe(window.location.origin);
+      expect(destination.pathname).toBe("/messages");
       expect(destination.searchParams.get("workmatePrompt")).toBe(prompt);
     }
+    expect(screen.getByRole("link", { name: "Open books" }).getAttribute("href")).toBe("/accounting");
+    expect(screen.getByRole("link", { name: "View all" }).getAttribute("href")).toBe("/ledger");
+    for (const link of screen.getAllByRole("link")) {
+      expect(new URL((link as HTMLAnchorElement).href).origin).toBe(window.location.origin);
+    }
+  });
+
+  it("falls back to the dashboard when ranked work targets a path outside Vite", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/my-work") {
+        return Response.json({
+          cards: myWorkFixture.map((card) => card.kind === "receipt_remainder"
+            ? { ...card, actionHref: "/login?workmatePrompt=legacy" }
+            : card),
+          generatedAt: "2026-09-27T10:15:00.000Z",
+        });
+      }
+      return responseFor(path);
+    }));
+    render(<DashboardPage />);
+
+    expect(await screen.findByText("PO 107: 3 units still outstanding")).not.toBeNull();
+    expect(screen.getByRole("link", { name: /PO 107: 3 units still outstanding/ }).getAttribute("href")).toBe("/");
   });
 });

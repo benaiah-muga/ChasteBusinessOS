@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardApiError, fetchDashboard, fetchMyWork, fetchSetup, summarizeWork, type DashboardData, type SetupItem, type WorkCard } from "../api/dashboard";
-import { legacyUrl } from "../legacy";
 import "./DashboardPage.css";
 
 type PageState =
@@ -24,6 +23,25 @@ const QUICK_PROMPTS = [
   { label: "Record a bill", prompt: "Help me record a vendor bill we received." },
   { label: "Where is my cash?", prompt: "Give me the cash position: cash balance in, out, and net this month." },
 ];
+
+const VITE_ROUTES = new Set([
+  "/", "/approvals", "/ledger", "/sessions", "/projects", "/analytics", "/team", "/marketplace",
+  "/documents", "/hr", "/crm", "/sales", "/pos/shift-summary", "/inventory", "/products", "/onboarding",
+  "/accounting/invoices", "/accounting/close", "/purchasing/payment-runs", "/purchasing/ap-aging",
+  "/purchasing/receipts", "/accounting", "/messages", "/settings", "/purchasing",
+  "/purchasing/receiving", "/support", "/manufacturing", "/marketing", "/proposals", "/pos",
+]);
+
+function dashboardHref(path: string): string {
+  try {
+    const destination = new URL(path, window.location.origin);
+    const isDynamicViteRoute = /^\/(?:documents\/editor|invite)\/[^/]+$/.test(destination.pathname);
+    if (destination.origin !== window.location.origin || (!VITE_ROUTES.has(destination.pathname) && !isDynamicViteRoute)) return "/";
+    return `${destination.pathname}${destination.search}${destination.hash}`;
+  } catch {
+    return "/";
+  }
+}
 
 function loadDismissed(): Set<string> {
   try {
@@ -133,7 +151,7 @@ export function DashboardPage({ baseCurrency = null }: { baseCurrency?: string |
           <div className="quick-actions" aria-label="Ask your workmate">
             <span>Ask</span>
             {QUICK_PROMPTS.map((action) => (
-              <a key={action.label} href={legacyUrl(`/login?workmatePrompt=${encodeURIComponent(action.prompt)}`)}>{action.label}</a>
+              <a key={action.label} href={`/messages?workmatePrompt=${encodeURIComponent(action.prompt)}`}>{action.label}</a>
             ))}
           </div>
         </div>
@@ -256,7 +274,7 @@ function SetupChecklist({
           <li key={item.id}>
             <span className="setup-dot" aria-hidden="true" />
             <span className="setup-copy"><strong>{item.title}</strong><small>{item.why}</small></span>
-            <a href={legacyUrl(item.href)}>Take me there <span aria-hidden="true">↗</span></a>
+            <a href={dashboardHref(item.href)}>Take me there <span aria-hidden="true">↗</span></a>
             <button type="button" aria-label={`Hide "${item.title}"`} title="Hide this step" onClick={() => onDismiss(item.id)}>×</button>
           </li>
         ))}
@@ -330,7 +348,7 @@ function NeedsYou({ data, count, currency }: { data: DashboardData; count: numbe
       {brief && <p className={`work-brief ${briefState === "unavailable" ? "work-brief-unavailable" : ""}`} role={briefState === "unavailable" ? "status" : undefined}>{brief}</p>}
       {items.length === 0
         ? <div className="empty-attention"><span aria-hidden="true">✳</span><p>Nothing needs you right now.<br />The business is running itself.</p></div>
-        : <ol className="attention-list">{items.map((item) => <li key={item.key}><a href={legacyUrl(item.href)}><i className={`attention-dot attention-${item.level}`} /><span>{item.text}</span><strong>{item.action} <span aria-hidden="true">›</span></strong></a></li>)}</ol>}
+        : <ol className="attention-list">{items.map((item) => <li key={item.key}><a href={dashboardHref(item.href)}><i className={`attention-dot attention-${item.level}`} /><span>{item.text}</span><strong>{item.action} <span aria-hidden="true">›</span></strong></a></li>)}</ol>}
     </section>
   );
 }
@@ -339,7 +357,7 @@ function WorkingCapital({ data, currency }: { data: DashboardData; currency: Cur
   const total = Math.max(1, data.pipeline.stages.reduce((sum, stage) => sum + stage.count, 0));
   return (
     <section className="dashboard-section working-capital" aria-label="Working capital">
-      <div className="section-heading"><p className="section-kicker">Working capital</p><a href={legacyUrl("/accounting")}>Open books <span aria-hidden="true">↗</span></a></div>
+      <div className="section-heading"><p className="section-kicker">Working capital</p><a href="/accounting">Open books <span aria-hidden="true">↗</span></a></div>
       <dl className="capital-card">
         <CapitalRow label="Receivables outstanding" value={formatMoney(data.workingCapital.arOutstandingMinor, currency)} note={data.workingCapital.overdueCount > 0 ? `${data.workingCapital.overdueCount} overdue` : undefined} warning={data.workingCapital.overdueCount > 0} />
         <CapitalRow label="Payables due" value={formatMoney(data.workingCapital.apOutstandingMinor, currency)} />
@@ -370,7 +388,7 @@ function Operations({ data }: { data: DashboardData }) {
 function ActivityFeed({ activity }: { activity: DashboardData["activity"] }) {
   return (
     <section className="activity-feed" aria-label="Recent ledger activity">
-      <div className="section-heading"><p className="section-kicker">Ledger · recent</p><a href={legacyUrl("/ledger")}>View all <span aria-hidden="true">↗</span></a></div>
+      <div className="section-heading"><p className="section-kicker">Ledger · recent</p><a href="/ledger">View all <span aria-hidden="true">↗</span></a></div>
       {activity.length === 0 ? <p className="quiet-state">Nothing recorded yet.</p> : <ol>{activity.map((event, index) => <li key={event.seq}><i className={`actor-dot actor-${event.actorType}`} />{index < activity.length - 1 && <span className="activity-stem" />}<span className="activity-name">{event.capabilityId ?? event.kind}</span>{event.actorType === "agent" && <small>agent</small>}<time dateTime={event.occurredAt}>{timeAgo(event.occurredAt)}</time></li>)}</ol>}
     </section>
   );

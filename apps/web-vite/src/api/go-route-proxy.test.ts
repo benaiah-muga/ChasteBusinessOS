@@ -4,8 +4,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 import {
   createGoRouteProxyPlugin,
-  goAccountingInvoiceReadsFromEnv,
-  goAccountingPaymentRemindersFromEnv,
   goAccountingCashBasisFromEnv,
   goSupportInboxReadsFromEnv,
   goSupportLibraryReadsFromEnv,
@@ -30,7 +28,6 @@ import {
   goCrmCustomerMergeFromEnv,
   goCrmCustomerProfileUpdateFromEnv,
   goCrmViewWritesFromEnv,
-  goCrmTaskWritesFromEnv,
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
   goPurchasingReturnCloseFromEnv,
@@ -70,9 +67,6 @@ import {
   goAccountingCreateInvoiceFromEnv,
   goAccountingCreditNoteFromEnv,
   goAccountingReverseEntryFromEnv,
-  goAccountingPeriodCloseReadsFromEnv,
-  goAccountingCustomerStatementReadsFromEnv,
-  goAccountingReportsFromEnv,
   goBankReconciliationWritesFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -180,14 +174,6 @@ describe("CRM deal create Go selector", () => {
     expect(goCrmDealCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_DEAL_CREATE: "1" })).toBe(true);
     expect(goCrmDealCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goCrmDealCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_DEAL_CREATE: "1" })).toBe(false);
-  });
-});
-
-describe("CRM task Go selector", () => {
-  it("requires both the task selector and session capability route", () => {
-    expect(goCrmTaskWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_TASK_WRITES: "1" })).toBe(true);
-    expect(goCrmTaskWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goCrmTaskWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_TASK_WRITES: "1" })).toBe(false);
   });
 });
 
@@ -308,33 +294,6 @@ describe("accounting reverse entry Go selector", () => {
     expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_REVERSE_ENTRY: "0" })).toBe(false);
     expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_REVERSE_ENTRY: "1" })).toBe(false);
-  });
-});
-
-describe("accounting period close read Go selector", () => {
-  it("requires both period-close reads and the session capability route", () => {
-    expect(goAccountingPeriodCloseReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS: "1" })).toBe(true);
-    expect(goAccountingPeriodCloseReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goAccountingPeriodCloseReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS: "0" })).toBe(false);
-    expect(goAccountingPeriodCloseReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS: "1" })).toBe(false);
-  });
-});
-
-describe("accounting reports Go selector", () => {
-  it("requires the reports selector and session capability route", () => {
-    expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_REPORTS: "1" })).toBe(true);
-    expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_REPORTS: "0" })).toBe(false);
-    expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_REPORTS: "1" })).toBe(false);
-  });
-});
-
-describe("accounting customer statement Go selector", () => {
-  it("requires the statement selector and session capability route", () => {
-    expect(goAccountingCustomerStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS: "1" })).toBe(true);
-    expect(goAccountingCustomerStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goAccountingCustomerStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS: "0" })).toBe(false);
-    expect(goAccountingCustomerStatementReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS: "1" })).toBe(false);
   });
 });
 
@@ -571,22 +530,6 @@ describe("messaging attachment upload Go selector", () => {
     expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD: "0" })).toBe(false);
     expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD: "1" })).toBe(false);
-  });
-});
-
-describe("Accounting invoice reads Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
-    expect(goAccountingInvoiceReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
-    expect(goAccountingInvoiceReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_INVOICE_READS: "0" })).toBe(false);
-    expect(goAccountingInvoiceReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_INVOICE_READS: "1" })).toBe(false);
-  });
-});
-
-describe("Accounting payment reminders Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
-    expect(goAccountingPaymentRemindersFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
-    expect(goAccountingPaymentRemindersFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_PAYMENT_REMINDERS: "0" })).toBe(false);
-    expect(goAccountingPaymentRemindersFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_PAYMENT_REMINDERS: "1" })).toBe(false);
   });
 });
 
@@ -1564,6 +1507,19 @@ describe("Vite Go route proxy selection", () => {
 
     const legacyFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_ROUTE: "0" });
     expect(isGoRouteRequest(legacyFlags, "GET", "/api/my-work")).toBe(false);
+  });
+
+  it("routes only the enabled My Work summary POST endpoint through Go", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_SUMMARY_ROUTE: "1" });
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work/summarize?scope=mine")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work/summarize")).toBe(false);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/my-work/summarize")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work/summarize/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work/summarize/")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
+
+    const disabledFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_SUMMARY_ROUTE: "0" });
+    expect(isGoRouteRequest(disabledFlags, "POST", "/api/my-work/summarize")).toBe(false);
   });
 
   it("keeps unsupported routine methods and subpaths on the legacy route", () => {

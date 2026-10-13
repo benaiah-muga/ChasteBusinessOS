@@ -19,6 +19,19 @@ type DetailState =
   | { status: "failed"; error: DocumentsApiError }
   | { status: "ready"; document: DocumentDetail };
 
+type RequestedDocumentSelection =
+  | { kind: "none" }
+  | { kind: "invalid" }
+  | { kind: "requested"; id: string };
+
+function requestedDocumentSelection(search: string): RequestedDocumentSelection {
+  const values = new URLSearchParams(search).getAll("documentId");
+  if (values.length === 0) return { kind: "none" };
+  const id = values[0] ?? "";
+  if (values.length !== 1 || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) return { kind: "invalid" };
+  return { kind: "requested", id };
+}
+
 function readableError(error: unknown): DocumentsApiError {
   return error instanceof DocumentsApiError
     ? error
@@ -51,8 +64,9 @@ function DocumentDetails({ state, selected }: { state: DetailState; selected: Do
   if (state.status === "failed") {
     return (
       <section className="documents-detail-error" role="alert">
-        <h2>Could not load this document</h2>
+        <h2>{state.error.status === 404 ? "Document not found" : "Could not load this document"}</h2>
         <p>{state.error.message}</p>
+        {state.error.status === 404 && <a href="/documents">Back to document library</a>}
       </section>
     );
   }
@@ -99,9 +113,11 @@ function DocumentDetails({ state, selected }: { state: DetailState; selected: Do
 }
 
 export function DocumentsPage() {
+  const [requestedSelection] = useState(() => requestedDocumentSelection(window.location.search));
   const [state, setState] = useState<ListState>({ status: "loading" });
   const [detailState, setDetailState] = useState<DetailState>({ status: "idle" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [requestedSelectionError, setRequestedSelectionError] = useState<"invalid" | "not-found" | null>(null);
   const [query, setQuery] = useState("");
   const [retry, setRetry] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -115,6 +131,7 @@ export function DocumentsPage() {
   const [ingestError, setIngestError] = useState<string | null>(null);
   const [ingestSuccess, setIngestSuccess] = useState(false);
   const detailRequestId = useRef(0);
+  const requestedSelectionHandled = useRef(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
@@ -126,6 +143,23 @@ export function DocumentsPage() {
       const documents = await fetchDocuments(signal);
       if (signal?.aborted) return;
       setState({ status: "ready", documents });
+      if (!requestedSelectionHandled.current && requestedSelection.kind !== "none") {
+        requestedSelectionHandled.current = true;
+        if (requestedSelection.kind === "invalid") {
+          setRequestedSelectionError("invalid");
+          setSelectedId(null);
+          return;
+        }
+        if (!documents.some((document) => document.id === requestedSelection.id)) {
+          setRequestedSelectionError("not-found");
+          setSelectedId(null);
+          return;
+        }
+        setRequestedSelectionError(null);
+        setSelectedId(requestedSelection.id);
+        return;
+      }
+      setRequestedSelectionError(null);
       setSelectedId((current) => documents.some((document) => document.id === current) ? current : documents[0]?.id ?? null);
     } catch (error) {
       if (signal?.aborted) return;
@@ -297,10 +331,11 @@ export function DocumentsPage() {
       )}
 
       {state.status === "ready" && documents.length === 0 && (
-        <section className="documents-empty" aria-live="polite">
+        <section className="documents-empty" role={requestedSelectionError ? "alert" : undefined} aria-live={requestedSelectionError ? undefined : "polite"}>
           <span aria-hidden="true">▤</span>
-          <h2>No documents yet</h2>
-          <p>Upload a PDF or image, paste text into the records library, or start an editable draft.</p>
+          {requestedSelectionError
+            ? <><h2>{requestedSelectionError === "invalid" ? "Invalid document link" : "Document not found"}</h2><p>{requestedSelectionError === "invalid" ? "The document ID in this link is invalid." : "This document is not in the current workspace or may have been deleted."}</p><a href="/documents">Back to document library</a></>
+            : <><h2>No documents yet</h2><p>Upload a PDF or image, paste text into the records library, or start an editable draft.</p></>}
           <button className="documents-primary-link" type="button" onClick={() => { setIngestMode("text"); setIngestError(null); setIngestSuccess(false); }}>
             Add text to records
           </button>
@@ -310,6 +345,14 @@ export function DocumentsPage() {
           <button className="documents-secondary-action" type="button" onClick={() => void createDraft()} disabled={creating}>
             {creating ? "Creating draft…" : "Create editable draft"}
           </button>
+        </section>
+      )}
+
+      {state.status === "ready" && documents.length > 0 && requestedSelectionError && (
+        <section className="documents-detail-error" role="alert">
+          <h2>{requestedSelectionError === "invalid" ? "Invalid document link" : "Document not found"}</h2>
+          <p>{requestedSelectionError === "invalid" ? "The document ID in this link is invalid." : "This document is not in the current workspace or may have been deleted."}</p>
+          <a href="/documents">Back to document library</a>
         </section>
       )}
 
@@ -331,7 +374,7 @@ export function DocumentsPage() {
                       type="button"
                       className={`documents-list-button${selectedId === document.id ? " documents-list-button-current" : ""}`}
                       aria-current={selectedId === document.id ? "true" : undefined}
-                      onClick={() => setSelectedId(document.id)}
+                      onClick={() => { setRequestedSelectionError(null); setSelectedId(document.id); }}
                     >
                       <span className="documents-list-heading"><strong>{document.title}</strong><span className={`documents-status ${statusClass(document.status)}`}>{document.status}</span></span>
                       <span className="documents-list-meta">{document.folder || "Unfiled"}<span aria-hidden="true"> · </span>{formatDate(document.createdAt)}</span>
@@ -344,7 +387,7 @@ export function DocumentsPage() {
             )}
           </aside>
           <section className="documents-detail-panel" aria-label="Selected document">
-            {selected ? <DocumentDetails state={detailState} selected={selected} /> : <p className="documents-detail-message">Select a document to review its details.</p>}
+            {selected ? <DocumentDetails state={detailState} selected={selected} /> : requestedSelectionError ? null : <p className="documents-detail-message">Select a document to review its details.</p>}
           </section>
         </section>
       )}

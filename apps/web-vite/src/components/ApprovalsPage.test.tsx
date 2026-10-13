@@ -57,7 +57,9 @@ describe("Vite approvals page", () => {
     expect(screen.getByText("Ada Lovelace", { selector: "dd" })).not.toBeNull();
     expect(screen.getByText("$1,250.00")).not.toBeNull();
     expect(screen.getByText("agent · for Ada Lovelace")).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Invoice 104" }).getAttribute("href")).toContain("/documents?documentId=doc-1");
+    const documentLink = screen.getByRole("link", { name: "Invoice 104" }) as HTMLAnchorElement;
+    expect(documentLink.getAttribute("href")).toBe("/documents?documentId=doc-1");
+    expect(new URL(documentLink.href).origin).toBe(window.location.origin);
     expect(screen.getByRole("heading", { name: "Recent decisions" })).not.toBeNull();
     expect(screen.getByText("Please confirm the billing address first.")).not.toBeNull();
     expect(screen.queryByText("never-render-this-value")).toBeNull();
@@ -105,6 +107,9 @@ describe("Vite approvals page", () => {
 
     expect(await screen.findByRole("status")).not.toBeNull();
     expect(await screen.findByText("Approved and executed, the result is in the ledger.")).not.toBeNull();
+    const ledgerLink = screen.getByRole("link", { name: "View in the ledger" }) as HTMLAnchorElement;
+    expect(ledgerLink.getAttribute("href")).toBe("/ledger");
+    expect(new URL(ledgerLink.href).origin).toBe(window.location.origin);
     expect(await screen.findByText("executed", { selector: ".approval-status" })).not.toBeNull();
     expect(screen.queryByRole("region", { name: "Pending approvals" })).toBeNull();
     const post = fetchMock.mock.calls.find(([input]) => String(input).startsWith("/api/approvals?"));

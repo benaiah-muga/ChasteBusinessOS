@@ -233,6 +233,118 @@ describe("messages page pure logic", () => {
 });
 
 describe("messages page states", () => {
+  it("prefills the active Messages composer from a dashboard workmate prompt", async () => {
+    const prompt = "Draft an invoice for a customer. Ask me for the details you need.";
+    window.history.replaceState(null, "", `/messages?workmatePrompt=${encodeURIComponent(prompt)}`);
+    vi.stubGlobal("fetch", router([
+      moduleRoute,
+      emptyList(),
+      threadRoute(),
+      peopleRoute,
+      presenceRoute,
+    ]));
+
+    render(<MessagesPage />);
+
+    const composer = await screen.findByLabelText("Message general") as HTMLTextAreaElement;
+    expect(composer.value).toBe(prompt);
+    expect(window.location.search).toBe("");
+    expect(window.localStorage.getItem(`chaste:message-draft:${me}:${channelId}`)).toBe(prompt);
+  });
+
+  it("keeps a dashboard prompt visible beside an existing draft until the user appends it", async () => {
+    const prompt = "Draft an invoice for a customer. Ask me for the details you need.";
+    const savedDraft = "I was already writing a reply.";
+    window.localStorage.setItem(`chaste:message-draft:${me}:${channelId}`, savedDraft);
+    window.history.replaceState(null, "", `/messages?workmatePrompt=${encodeURIComponent(prompt)}`);
+    vi.stubGlobal("fetch", router([
+      moduleRoute,
+      emptyList(),
+      threadRoute(),
+      peopleRoute,
+      presenceRoute,
+    ]));
+
+    render(<MessagesPage />);
+
+    const composer = await screen.findByLabelText("Message general") as HTMLTextAreaElement;
+    expect(composer.value).toBe(savedDraft);
+    expect(screen.getByRole("group", { name: "Dashboard prompt" }).textContent).toContain(prompt);
+    expect(window.location.search).toContain("workmatePrompt=");
+
+    fireEvent.click(screen.getByRole("button", { name: "Append to draft" }));
+    const combinedDraft = `${savedDraft}\n\n${prompt}`;
+    await waitFor(() => expect(composer.value).toBe(combinedDraft));
+    expect(window.localStorage.getItem(`chaste:message-draft:${me}:${channelId}`)).toBe(combinedDraft);
+    expect(window.location.search).toBe("");
+
+    cleanup();
+    render(<MessagesPage />);
+    expect((await screen.findByLabelText("Message general") as HTMLTextAreaElement).value).toBe(combinedDraft);
+  });
+
+  it("keeps the composer unchanged when dashboard prompt persistence fails, then recovers on append", async () => {
+    const prompt = "Draft an invoice for a customer. Ask me for the details you need.";
+    const storageKey = `chaste:message-draft:${me}:${channelId}`;
+    const setItem = window.localStorage.setItem.bind(window.localStorage);
+    let failFirstWrite = true;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation((key, value) => {
+      if (key === storageKey && failFirstWrite) {
+        failFirstWrite = false;
+        throw new DOMException("storage unavailable", "QuotaExceededError");
+      }
+      setItem(key, value);
+    });
+    window.history.replaceState(null, "", `/messages?workmatePrompt=${encodeURIComponent(prompt)}`);
+    vi.stubGlobal("fetch", router([moduleRoute, emptyList(), threadRoute(), peopleRoute, presenceRoute]));
+
+    render(<MessagesPage />);
+
+    const composer = await screen.findByLabelText("Message general") as HTMLTextAreaElement;
+    expect(composer.value).toBe("");
+    expect(screen.getByRole("group", { name: "Dashboard prompt" }).textContent).toContain(prompt);
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
+    expect(window.location.search).toContain("workmatePrompt=");
+
+    fireEvent.click(screen.getByRole("button", { name: "Append to draft" }));
+
+    await waitFor(() => expect(composer.value).toBe(prompt));
+    expect(window.localStorage.getItem(storageKey)).toBe(prompt);
+    expect(window.location.search).toBe("");
+    expect(screen.queryByRole("group", { name: "Dashboard prompt" })).toBeNull();
+  });
+
+  it("keeps a dashboard prompt queued when URL cleanup fails and appends idempotently", async () => {
+    const prompt = "Draft an invoice for a customer. Ask me for the details you need.";
+    const storageKey = `chaste:message-draft:${me}:${channelId}`;
+    const replaceState = window.history.replaceState.bind(window.history);
+    replaceState(null, "", `/messages?workmatePrompt=${encodeURIComponent(prompt)}`);
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState").mockImplementation(() => {
+      throw new DOMException("history unavailable", "SecurityError");
+    });
+    vi.stubGlobal("fetch", router([moduleRoute, emptyList(), threadRoute(), peopleRoute, presenceRoute]));
+
+    render(<MessagesPage />);
+
+    const composer = await screen.findByLabelText("Message general") as HTMLTextAreaElement;
+    await waitFor(() => expect(composer.value).toBe(prompt));
+    expect(screen.getByRole("group", { name: "Dashboard prompt" })).not.toBeNull();
+    expect(window.location.search).toContain("workmatePrompt=");
+
+    fireEvent.click(screen.getByRole("button", { name: "Append to draft" }));
+
+    expect(composer.value).toBe(prompt);
+    expect(window.localStorage.getItem(storageKey)).toBe(prompt);
+    expect(screen.getByRole("group", { name: "Dashboard prompt" })).not.toBeNull();
+
+    replaceStateSpy.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Append to draft" }));
+    expect(window.location.search).toBe("");
+    expect(screen.queryByRole("group", { name: "Dashboard prompt" })).toBeNull();
+    expect(composer.value).toBe(prompt);
+    replaceState(null, "", "/");
+  });
+
   it("explains that the module is switched off instead of rendering the thread", async () => {
     vi.stubGlobal("fetch", router([
       { match: (path) => (path === "/api/modules" ? Response.json({ catalog: [{ id: "crm" }, { id: "messaging" }], enabledModules: ["crm"] }) : null) },

@@ -5,7 +5,6 @@ import {
   type PurchasingAging,
 } from "../api/purchasing-aging";
 import { PurchasingPaymentRunsApiError } from "../api/purchasing-payment-runs";
-import { legacyUrl } from "../legacy";
 import "./purchasing-aging.css";
 
 type PageState =
@@ -86,7 +85,7 @@ export function PurchasingAgingPage({ baseCurrency = null }: { baseCurrency?: st
           <h1>Accounts payable aging</h1>
           <p>See how much is outstanding and how long vendor bills have been open. Review and pay bills in the full Purchasing workspace.</p>
         </div>
-        <a className="purchasing-aging-full-workspace" href={legacyUrl("/purchasing?tab=bills")}>Open full Purchasing workspace</a>
+        <a className="purchasing-aging-full-workspace" href="/purchasing?tab=bills">Open full Purchasing workspace</a>
       </header>
 
       {state.status === "loading" && <p className="purchasing-aging-message" role="status">Loading payable balances…</p>}

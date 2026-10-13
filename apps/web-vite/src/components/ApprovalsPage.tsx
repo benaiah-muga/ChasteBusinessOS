@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApprovalApiError, fetchApprovals, submitApprovalDecision, type Approval, type ApprovalList } from "../api/approvals";
-import { legacyUrl } from "../legacy";
 import "./ApprovalsPage.css";
 
 type CurrencyStyle = { symbol: string; minorUnits: number };
@@ -181,7 +180,7 @@ function ApprovalCard({
         {documents.length > 0 && (
           <section className="approval-documents" aria-label="Related documents">
             <h3>Related documents</h3>
-            <ul>{documents.map((document) => <li key={document.id}><a href={legacyUrl(`/documents?documentId=${encodeURIComponent(document.id)}`)}>{document.title}</a></li>)}</ul>
+            <ul>{documents.map((document) => <li key={document.id}><a href={`/documents?documentId=${encodeURIComponent(document.id)}`}>{document.title}</a></li>)}</ul>
           </section>
         )}
 
@@ -207,7 +206,7 @@ function RecentDecisions({ history }: { history: Approval[] }) {
     <section className="approval-history" aria-labelledby="approval-history-title">
       <header>
         <div><h2 id="approval-history-title">Recent decisions</h2><p>Approvals, rejections, and expiry history for this organization.</p></div>
-        <a href={legacyUrl("/ledger")}>Open audit ledger</a>
+        <a href="/ledger">Open audit ledger</a>
       </header>
       <ul>
         {history.map((approval) => (
@@ -286,7 +285,7 @@ export function ApprovalsPage({ baseCurrency = null }: { baseCurrency?: string |
       </header>
 
       {notice && <div className={`approval-notice approval-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
-        <span>{notice.message}</span>{notice.linkToLedger && <> <a href={legacyUrl("/ledger")}>View in the ledger</a></>}
+        <span>{notice.message}</span>{notice.linkToLedger && <> <a href="/ledger">View in the ledger</a></>}
       </div>}
 
       {loadError && <div className="approval-load-error" role="alert"><span>{loadError}</span><button type="button" onClick={() => void load()}>Try again</button></div>}

@@ -1,19 +1,21 @@
 package authn
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/testenv"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -36,31 +38,53 @@ func TestVerificationOutboxRetriesThenDeliversThroughLocalSMTPSink(t *testing.T)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	pool, err := pgxpool.New(ctx, runtimeURL)
+	poolConfig, err := pgxpool.ParseConfig(runtimeURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
-	var queued int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM auth_email_outbox WHERE expires_at > now()`).Scan(&queued); err != nil {
-		t.Fatal("check local auth outbox isolation")
+	poolConfig.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if queued != 0 {
-		t.Skip("local auth outbox contains unrelated pending work; drain it before running the SMTP proof")
-	}
+	t.Cleanup(pool.Close)
 
 	proofEmail := fmt.Sprintf("go-mail-proof-%d@example.test", time.Now().UTC().UnixNano())
+	if err := createAuthEmailOutboxShadow(ctx, t, pool); err != nil {
+		t.Fatalf("isolate proof outbox from public workers: %T", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		deleteSMTPMessagesForRecipient(t, cleanupCtx, sinkURL, proofEmail)
+		if _, err := pool.Exec(cleanupCtx, `DELETE FROM auth_email_outbox WHERE recipient = $1`, proofEmail); err != nil {
+			reportDBCleanupFailure(t, "delete synthetic auth outbox row", err)
+		}
+		if _, err := pool.Exec(cleanupCtx, `DELETE FROM auth_verification WHERE value IN (SELECT id FROM auth_user WHERE email = $1)`, proofEmail); err != nil {
+			reportDBCleanupFailure(t, "delete synthetic auth verification row", err)
+		}
+		if _, err := pool.Exec(cleanupCtx, `DELETE FROM auth_user WHERE email = $1`, proofEmail); err != nil {
+			reportDBCleanupFailure(t, "delete synthetic auth user", err)
+		}
+	})
+
 	var deliveryAttempts int
+	var smtpRecipients []string
+	sendToSMTP := func(ctx context.Context, email, link string) error {
+		smtpRecipients = append(smtpRecipients, email)
+		return sender(ctx, email, link)
+	}
 	service, err := NewService(pool, "auth-email-outbox-test-secret-0123456789", Options{
 		BaseURL: "http://localhost:3000/api/auth",
 		VerificationLinkSender: func(ctx context.Context, email, link string) error {
-			if email == proofEmail {
-				deliveryAttempts++
+			if email != proofEmail {
+				return errors.New("auth email proof rejected an unrelated recipient")
 			}
-			if email == proofEmail && deliveryAttempts == 1 {
+			deliveryAttempts++
+			if deliveryAttempts == 1 {
 				return errors.New("injected transient SMTP delivery failure")
 			}
-			return sender(ctx, email, link)
+			return sendToSMTP(ctx, email, link)
 		},
 		RecoveryLinkSender: func(context.Context, string, string) error { return nil },
 	})
@@ -74,13 +98,20 @@ func TestVerificationOutboxRetriesThenDeliversThroughLocalSMTPSink(t *testing.T)
 	if !created || user.EmailVerified {
 		t.Fatalf("signup created=%t email_verified=%t, expected an unverified synthetic account", created, user.EmailVerified)
 	}
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cleanupCancel()
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM auth_email_outbox WHERE recipient = $1`, proofEmail)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM auth_verification WHERE value = $1`, user.ID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM auth_user WHERE id = $1`, user.ID)
-	})
+	var shadowRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_temp.auth_email_outbox WHERE recipient = $1`, proofEmail).Scan(&shadowRows); err != nil {
+		t.Fatal("verify the synthetic message is in the session-local shadow")
+	}
+	if shadowRows != 1 {
+		t.Fatalf("session-local proof outbox rows=%d, want 1", shadowRows)
+	}
+	var publicRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM public.auth_email_outbox WHERE recipient = $1`, proofEmail).Scan(&publicRows); err != nil {
+		t.Fatal("verify the public worker cannot inspect the proof outbox")
+	}
+	if publicRows != 0 {
+		t.Fatal("proof message escaped the session-local outbox shadow")
+	}
 
 	if worked, err := service.ProcessEmailOutboxOnce(ctx); err != nil || !worked {
 		t.Fatalf("first outbox attempt worked=%t err=%v", worked, err)
@@ -109,6 +140,14 @@ func TestVerificationOutboxRetriesThenDeliversThroughLocalSMTPSink(t *testing.T)
 	if deliveryAttempts != 2 {
 		t.Fatalf("delivery attempts=%d, want transient failure followed by one SMTP attempt", deliveryAttempts)
 	}
+	for _, recipient := range smtpRecipients {
+		if recipient != proofEmail {
+			t.Fatalf("unrelated recipient %q was handed to the configured SMTP sender", recipient)
+		}
+	}
+	if len(smtpRecipients) != 1 {
+		t.Fatalf("configured SMTP sender calls=%d, want one for the proof recipient", len(smtpRecipients))
+	}
 	var pending int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM auth_email_outbox WHERE recipient = $1`, proofEmail).Scan(&pending); err != nil {
 		t.Fatal("read completed outbox state")
@@ -117,18 +156,7 @@ func TestVerificationOutboxRetriesThenDeliversThroughLocalSMTPSink(t *testing.T)
 		t.Fatalf("successfully delivered email remains queued: count=%d", pending)
 	}
 
-	messageID, textBody := waitForSMTPVerificationMessage(t, ctx, sinkURL, proofEmail)
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cleanupCancel()
-		request, err := http.NewRequestWithContext(cleanupCtx, http.MethodDelete, sinkURL+"/api/v1/message/"+url.PathEscape(messageID), nil)
-		if err == nil {
-			response, err := http.DefaultClient.Do(request)
-			if err == nil {
-				_ = response.Body.Close()
-			}
-		}
-	})
+	textBody := waitForSMTPVerificationMessage(t, ctx, sinkURL, proofEmail)
 	verificationToken := verificationTokenFromMessage(t, textBody)
 	if err := service.VerifyEmail(ctx, verificationToken); err != nil {
 		t.Fatal("verification link from delivered message was rejected")
@@ -142,36 +170,54 @@ func TestVerificationOutboxRetriesThenDeliversThroughLocalSMTPSink(t *testing.T)
 	}
 }
 
-func waitForSMTPVerificationMessage(t *testing.T, ctx context.Context, sinkURL, recipient string) (string, string) {
+func reportDBCleanupFailure(t *testing.T, operation string, err error) {
 	t.Helper()
-	type messageSummary struct {
-		ID string
-		To []struct {
-			Address string
-		}
+	var databaseError *pgconn.PgError
+	if errors.As(err, &databaseError) {
+		t.Errorf("%s failed (SQLSTATE %s)", operation, databaseError.Code)
+		return
 	}
+	t.Errorf("%s failed (%T)", operation, err)
+}
+
+func createAuthEmailOutboxShadow(ctx context.Context, t *testing.T, pool *pgxpool.Pool) error {
+	t.Helper()
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer connection.Release()
+	if _, err := connection.Exec(ctx, `CREATE TEMP TABLE auth_email_outbox (LIKE public.auth_email_outbox INCLUDING ALL) ON COMMIT PRESERVE ROWS`); err != nil {
+		return err
+	}
+	var shadowExists bool
+	if err := connection.QueryRow(ctx, `SELECT to_regclass('pg_temp.auth_email_outbox') IS NOT NULL`).Scan(&shadowExists); err != nil {
+		return err
+	}
+	if !shadowExists {
+		return errors.New("session-local auth outbox shadow is unavailable")
+	}
+	return nil
+}
+
+type smtpMessageSummary struct {
+	ID string
+	To []struct {
+		Address string
+	}
+}
+
+func waitForSMTPVerificationMessage(t *testing.T, ctx context.Context, sinkURL, recipient string) string {
+	t.Helper()
 	client := &http.Client{Timeout: 3 * time.Second}
 	for {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, sinkURL+"/api/v1/messages?limit=100", nil)
-		if err != nil {
-			t.Fatal("create local SMTP sink query")
-		}
-		response, err := client.Do(request)
+		messageIDs, err := listSMTPMessagesForRecipient(ctx, client, sinkURL, recipient)
 		if err == nil {
-			var page struct {
-				Messages []messageSummary
-			}
-			decodeErr := json.NewDecoder(response.Body).Decode(&page)
-			_ = response.Body.Close()
-			if decodeErr == nil && response.StatusCode == http.StatusOK {
-				for _, message := range page.Messages {
-					for _, to := range message.To {
-						if strings.EqualFold(to.Address, recipient) {
-							text, fetchErr := fetchSMTPMessageText(ctx, client, sinkURL, message.ID)
-							if fetchErr == nil {
-								return message.ID, text
-							}
-						}
+			for _, messageID := range messageIDs {
+				text, fetchErr := fetchSMTPMessageText(ctx, client, sinkURL, messageID)
+				if fetchErr == nil {
+					if _, ok := verificationTokenFromText(text); ok {
+						return text
 					}
 				}
 			}
@@ -181,6 +227,88 @@ func waitForSMTPVerificationMessage(t *testing.T, ctx context.Context, sinkURL, 
 			t.Fatal("verification email was not received by the local SMTP sink")
 		case <-time.After(200 * time.Millisecond):
 		}
+	}
+}
+
+func listSMTPMessagesForRecipient(ctx context.Context, client *http.Client, sinkURL, recipient string) ([]string, error) {
+	const pageSize = 100
+	var messageIDs []string
+	for start := 0; ; {
+		pageURL, err := url.Parse(sinkURL + "/api/v1/messages")
+		if err != nil {
+			return messageIDs, fmt.Errorf("invalid local SMTP sink URL (%T)", err)
+		}
+		query := pageURL.Query()
+		query.Set("start", strconv.Itoa(start))
+		query.Set("limit", strconv.Itoa(pageSize))
+		pageURL.RawQuery = query.Encode()
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL.String(), nil)
+		if err != nil {
+			return messageIDs, fmt.Errorf("create local SMTP sink query failed (%T)", err)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			return messageIDs, fmt.Errorf("query local SMTP sink failed (%T)", err)
+		}
+		if response.StatusCode != http.StatusOK {
+			_ = response.Body.Close()
+			return messageIDs, fmt.Errorf("local SMTP sink query returned HTTP %d", response.StatusCode)
+		}
+		var page struct {
+			Total    int                  `json:"total"`
+			Messages []smtpMessageSummary `json:"messages"`
+		}
+		decodeErr := json.NewDecoder(response.Body).Decode(&page)
+		_ = response.Body.Close()
+		if decodeErr != nil {
+			return messageIDs, fmt.Errorf("decode local SMTP sink query failed (%T)", decodeErr)
+		}
+		for _, message := range page.Messages {
+			for _, to := range message.To {
+				if strings.EqualFold(to.Address, recipient) {
+					messageIDs = append(messageIDs, message.ID)
+					break
+				}
+			}
+		}
+		start += len(page.Messages)
+		if len(page.Messages) == 0 || start >= page.Total {
+			return messageIDs, nil
+		}
+	}
+}
+
+func deleteSMTPMessagesForRecipient(t *testing.T, ctx context.Context, sinkURL, recipient string) {
+	t.Helper()
+	client := &http.Client{Timeout: 3 * time.Second}
+	messageIDs, listErr := listSMTPMessagesForRecipient(ctx, client, sinkURL, recipient)
+	if listErr != nil {
+		t.Errorf("list local SMTP messages for cleanup failed (%T)", listErr)
+	}
+	if len(messageIDs) == 0 {
+		return
+	}
+	body, err := json.Marshal(struct {
+		IDs []string
+	}{IDs: messageIDs})
+	if err != nil {
+		t.Errorf("encode local SMTP sink cleanup request failed (%T)", err)
+		return
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, sinkURL+"/api/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		t.Errorf("create local SMTP sink cleanup request failed (%T)", err)
+		return
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Errorf("delete local SMTP sink messages failed (%T)", err)
+		return
+	}
+	_ = response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		t.Errorf("delete local SMTP sink messages failed with HTTP %d", response.StatusCode)
 	}
 }
 
@@ -195,7 +323,7 @@ func fetchSMTPMessageText(ctx context.Context, client *http.Client, sinkURL, mes
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
 		return "", fmt.Errorf("local SMTP sink returned HTTP %d", response.StatusCode)
 	}
 	var message struct {
@@ -209,13 +337,20 @@ func fetchSMTPMessageText(ctx context.Context, client *http.Client, sinkURL, mes
 
 func verificationTokenFromMessage(t *testing.T, text string) string {
 	t.Helper()
+	if token, ok := verificationTokenFromText(text); ok {
+		return token
+	}
+	t.Fatal("delivered email did not contain a verification link")
+	return ""
+}
+
+func verificationTokenFromText(text string) (string, bool) {
 	for _, field := range strings.Fields(text) {
 		candidate := strings.TrimRight(field, ".,);]")
 		parsed, err := url.Parse(candidate)
 		if err == nil && parsed.Query().Get("token") != "" {
-			return parsed.Query().Get("token")
+			return parsed.Query().Get("token"), true
 		}
 	}
-	t.Fatal("delivered email did not contain a verification link")
-	return ""
+	return "", false
 }

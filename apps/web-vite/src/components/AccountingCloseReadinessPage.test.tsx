@@ -44,7 +44,6 @@ function stubAccounting(taskList = readiness(2026, 8).tasks) {
 
 describe("AccountingCloseReadinessPage", () => {
   it("loads readiness through accounting.periodCloseWorkbench when the Go selector is enabled", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_PERIOD_CLOSE_READS__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") {
@@ -81,7 +80,9 @@ describe("AccountingCloseReadinessPage", () => {
     expect(screen.getByText(/Review note: Reviewed with controller/)).toBeTruthy();
     expect(screen.getByText("3", { selector: "dd" })).toBeTruthy();
     expect(screen.getByText("EUR, KES", { selector: "dd" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open full period close workspace" }).getAttribute("href")).toContain("/accounting/close");
+    const workspaceLink = screen.getByRole("link", { name: "Open Accounting workspace" }) as HTMLAnchorElement;
+    expect(workspaceLink.getAttribute("href")).toBe("/accounting");
+    expect(new URL(workspaceLink.href).origin).toBe(window.location.origin);
     expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/accounting\/close\?year=\d{4}&month=\d{1,2}$/), expect.objectContaining({
       method: "GET",
       credentials: "same-origin",

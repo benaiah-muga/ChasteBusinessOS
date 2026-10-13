@@ -53,6 +53,24 @@ export const MEMBER_DEBOUNCE_MS = 200;
 export const NEAR_BOTTOM_PX = 80;
 export const FOCUS_FLASH_MS = 2_500;
 
+function readWorkmatePrompt(): string | null {
+  const prompts = new URLSearchParams(window.location.search).getAll("workmatePrompt");
+  if (prompts.length !== 1) return null;
+  const prompt = prompts[0] ?? "";
+  return prompt.trim().length > 0 && prompt.length <= 4000 ? prompt : null;
+}
+
+function clearWorkmatePromptFromUrl(): boolean {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("workmatePrompt");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export type Notice = { tone: "pending" | "error" | "success"; text: string };
 export type ListFilter = "active" | "archived";
 export type SearchMode = "conversations" | "messages";
@@ -929,6 +947,7 @@ function ChannelName({ conversation }: { conversation: Conversation }) {
 }
 
 export function MessagesPage({ actorId = null, organizationId = null }: { actorId?: string | null; organizationId?: string | null } = {}) {
+  const [workmatePrompt, setWorkmatePrompt] = useState(readWorkmatePrompt);
   const wide = useWideViewport();
   const [moduleState, setModuleState] = useState<ModuleState>({ status: "checking" });
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -998,6 +1017,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const autoScrollRef = useRef(false);
   const draftOwnerRef = useRef<string | null>(null);
+  const workmatePromptAppliedRef = useRef(false);
   const createIntentRef = useRef<PendingCreateIntent | null>(null);
   const creatingRef = useRef(false);
   const lifecycleBusyRef = useRef(false);
@@ -1259,13 +1279,36 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
       return;
     }
     draftOwnerRef.current = activeId;
+    const storageKey = draftStorageKey(me, activeId);
+    let storedDraft: string | null = null;
     try {
-      setDraft(window.localStorage.getItem(draftStorageKey(me, activeId)) ?? "");
+      storedDraft = window.localStorage.getItem(storageKey);
       setDraftStatus("saved");
     } catch {
       setDraftStatus("unavailable");
     }
-  }, [activeId, me]);
+    if (workmatePrompt && !workmatePromptAppliedRef.current) {
+      workmatePromptAppliedRef.current = true;
+      let canClearPromptFromUrl = false;
+      if (!storedDraft?.trim()) {
+        try {
+          window.localStorage.setItem(storageKey, workmatePrompt);
+          setDraft(workmatePrompt);
+          setDraftStatus("saved");
+          canClearPromptFromUrl = true;
+        } catch {
+          setDraftStatus("unavailable");
+        }
+      } else {
+        setDraft(storedDraft);
+      }
+      if (canClearPromptFromUrl && clearWorkmatePromptFromUrl()) {
+        setWorkmatePrompt(null);
+      }
+      return;
+    }
+    setDraft(storedDraft ?? "");
+  }, [activeId, me, workmatePrompt]);
 
   useEffect(() => {
     if (!activeId || draftOwnerRef.current !== activeId) return;
@@ -2397,6 +2440,45 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
                           </button>
                         </span>
                       ))}
+                    </div>
+                  )}
+                  {workmatePrompt && (
+                    <div className="messages-notice messages-notice-pending" role="group" aria-label="Dashboard prompt">
+                      <p>This dashboard prompt is waiting. Keep your draft and append it, or replace your draft with it.</p>
+                      <p>{workmatePrompt}</p>
+                      <button type="button" onClick={() => {
+                        if (!activeId) return;
+                        const trimmedDraft = draft.trimEnd();
+                        const promptAlreadyAppended = trimmedDraft === workmatePrompt || trimmedDraft.endsWith(`\n\n${workmatePrompt}`);
+                        const nextDraft = promptAlreadyAppended ? draft : [trimmedDraft, workmatePrompt].filter(Boolean).join("\n\n");
+                        try {
+                          window.localStorage.setItem(draftStorageKey(me, activeId), nextDraft);
+                        } catch {
+                          setComposerError("Could not save the dashboard prompt. It is still waiting here.");
+                          return;
+                        }
+                        setDraft(nextDraft);
+                        setDraftStatus("saved");
+                        setComposerError(null);
+                        if (clearWorkmatePromptFromUrl()) setWorkmatePrompt(null);
+                        workmatePromptAppliedRef.current = true;
+                        composerRef.current?.focus();
+                      }}>Append to draft</button>
+                      <button type="button" onClick={() => {
+                        if (!activeId) return;
+                        try {
+                          window.localStorage.setItem(draftStorageKey(me, activeId), workmatePrompt);
+                        } catch {
+                          setComposerError("Could not save the dashboard prompt. It is still waiting here.");
+                          return;
+                        }
+                        setDraft(workmatePrompt);
+                        setDraftStatus("saved");
+                        setComposerError(null);
+                        if (clearWorkmatePromptFromUrl()) setWorkmatePrompt(null);
+                        workmatePromptAppliedRef.current = true;
+                        composerRef.current?.focus();
+                      }}>Replace draft</button>
                     </div>
                   )}
                   <textarea

@@ -26,6 +26,7 @@ function detail(id: string, title: string, status: string, parsedMarkdown: strin
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.history.replaceState(null, "", "/");
 });
 
 describe("Vite documents page", () => {
@@ -63,6 +64,58 @@ describe("Vite documents page", () => {
     expect(await screen.findByText("Text extraction is in progress.")).not.toBeNull();
   });
 
+  it("selects the document identified by the Vite documentId query", async () => {
+    window.history.replaceState(null, "", "/documents?documentId=doc-2");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/documents") return Response.json({ documents: rows, vendors: [] });
+      if (url === "/api/documents?id=doc-2&preview=1") return Response.json(detail("doc-2", "Warehouse notes", "queued", null));
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Warehouse notes" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Warehouse notes/ }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("button", { name: /Supplier invoice/ }).getAttribute("aria-current")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("/api/documents?id=doc-2&preview=1", expect.any(Object));
+  });
+
+  it("validates documentId and shows a not-found state without selecting the first row", async () => {
+    window.history.replaceState(null, "", "/documents?documentId=unsafe%2Fid");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/documents") return Response.json({ documents: rows, vendors: [] });
+      return Response.json({ error: "unexpected detail request" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Invalid document link" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Back to document library" }).getAttribute("href")).toBe("/documents");
+    expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("preview=1"))).toBe(false);
+
+    cleanup();
+    window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
+    const notFoundFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/documents") return Response.json({ documents: rows, vendors: [] });
+      return Response.json({ error: "unexpected detail request" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", notFoundFetch);
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Document not found" })).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
+    expect(notFoundFetch.mock.calls.some(([url]) => String(url).includes("preview=1"))).toBe(false);
+  });
+
   it("shows the library and preview from Go with uploaded content links owned by the Go route", async () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const goRow = { ...rows[0]!, id: goDocumentId };
@@ -82,6 +135,7 @@ describe("Vite documents page", () => {
         : Response.json({ ok: true, data: { document: goDocument } });
     });
     vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
     render(<DocumentsPage />);
 
     expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
@@ -114,9 +168,12 @@ describe("Vite documents page", () => {
       return Response.json({ error: "The document was not found." }, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
     render(<DocumentsPage />);
 
-    expect(await screen.findByRole("heading", { name: "Could not load this document" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Document not found" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Back to document library" }).getAttribute("href")).toBe("/documents");
+    expect(screen.getByRole("button", { name: /Supplier invoice/ }).getAttribute("aria-current")).toBe("true");
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       "/api/modules",
       "/api/capabilities/execute",
@@ -143,7 +200,7 @@ describe("Vite documents page", () => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
       if (url === "/api/documents") return Response.json({ documents: [], vendors: [] });
-      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", email: "ada@example.test" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z" } });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
       if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
@@ -169,7 +226,7 @@ describe("Vite documents page", () => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
       if (url === "/api/documents") return Response.json({ documents: [], vendors: [] });
-      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", email: "ada@example.test" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z" } });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
       if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
@@ -200,7 +257,7 @@ describe("Vite documents page", () => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
       if (url === "/api/documents") return Response.json({ documents: [], vendors: [] });
-      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", email: "ada@example.test" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z" } });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
       if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };

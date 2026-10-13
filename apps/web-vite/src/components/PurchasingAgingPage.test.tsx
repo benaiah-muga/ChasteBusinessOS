@@ -30,7 +30,9 @@ describe("PurchasingAgingPage", () => {
     expect(screen.getByText(/BHD\s+0\.600/)).toBeTruthy();
     expect(screen.getByRole("row", { name: /31-60 days.*BHD\s+0\.300/ })).toBeTruthy();
     expect(screen.getByRole("img", { name: /Payables by age: Current BHD\s+1\.200/ })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open full Purchasing workspace" }).getAttribute("href")).toContain("/purchasing?tab=bills");
+    const workspaceLink = screen.getByRole("link", { name: "Open full Purchasing workspace" }) as HTMLAnchorElement;
+    expect(workspaceLink.getAttribute("href")).toBe("/purchasing?tab=bills");
+    expect(new URL(workspaceLink.href).origin).toBe(window.location.origin);
     expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({ credentials: "same-origin" }));
   });
 

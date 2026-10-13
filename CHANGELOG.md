@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite dashboard, approvals, close-readiness, and purchasing-aging handoffs now
+  remain inside React routes. Dashboard workmate prompts arrive in the Messages
+  composer, and document links load the requested Go document directly with
+  recovery states for invalid or missing records.
+- Vite auth now uses a schema-validated Go HTTP client with same-origin cookie
+  sessions and rejects unexpected browser tokens or mutation responses.
 - Go Messaging agent sessions now advertise only the CRM capabilities with
   authored tool descriptions and input schemas. Broader Go capabilities remain
   unavailable to model tool calls until their contracts are authored.
