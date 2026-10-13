@@ -3,12 +3,60 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/jackc/pgx/v5"
 )
+
+type marketingRowsFixture struct {
+	remaining int
+	err       error
+}
+
+func (r *marketingRowsFixture) Next() bool {
+	if r.remaining == 0 {
+		return false
+	}
+	r.remaining--
+	return true
+}
+
+func (r *marketingRowsFixture) Err() error { return r.err }
+
+func TestMarketingSpendConvertsPersistedInvoiceCurrencies(t *testing.T) {
+	baseSpend := int64(6_000)
+	euroSpend := int64(3_200)
+	rateNum, rateDen := int64(5), int64(4)
+	got, err := marketingSpendByCustomer([]marketingInvoiceSpend{
+		{customerID: "customer", totalMinor: baseSpend, currency: "USD"},
+		{customerID: "customer", totalMinor: euroSpend, currency: "EUR", rateNum: &rateNum, rateDen: &rateDen},
+	}, "USD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["customer"] != 10_000 {
+		t.Fatalf("base-currency spend = %d, want 10000 minor units", got["customer"])
+	}
+
+	if _, err := marketingSpendByCustomer([]marketingInvoiceSpend{{customerID: "customer", totalMinor: 1, currency: "EUR"}}, "USD"); err == nil {
+		t.Fatal("foreign-currency spend without its persisted FX basis was accepted")
+	}
+}
+
+func TestCollectMarketingRowsReturnsIterationError(t *testing.T) {
+	iterationErr := errors.New("iteration failed")
+	rows := &marketingRowsFixture{remaining: 1, err: iterationErr}
+	collected, err := collectMarketingRows(rows, func() (string, error) { return "row", nil })
+	if !errors.Is(err, iterationErr) {
+		t.Fatalf("iteration error = %v, want %v", err, iterationErr)
+	}
+	if collected != nil {
+		t.Fatalf("partially collected rows = %v, want nil on iteration failure", collected)
+	}
+}
 
 func TestMarketingCampaignsParsersMirrorZodContracts(t *testing.T) {
 	segment, err := ParseMarketingCreateSegmentInput(json.RawMessage(`{"name":"Loyal","minSpendMinor":500000}`))
@@ -133,3 +181,76 @@ func TestMarketingCampaignsLifecycle(t *testing.T) {
 		t.Fatalf("deliveries=%d, want one", got)
 	}
 }
+
+func TestMarketingCampaignSpendUsesPersistedInvoiceFX(t *testing.T) {
+	fx := newExecutorFixture(t)
+	t.Cleanup(func() {
+		for _, stmt := range []string{
+			`DELETE FROM marketing_deliveries WHERE org_id=$1::uuid`,
+			`DELETE FROM outbox_messages WHERE org_id=$1::uuid AND dedupe_key LIKE 'marketing:%'`,
+			`DELETE FROM marketing_campaigns WHERE org_id=$1::uuid`,
+			`DELETE FROM marketing_segments WHERE org_id=$1::uuid`,
+			`DELETE FROM invoices WHERE org_id=$1::uuid`,
+			`DELETE FROM customers WHERE org_id=$1::uuid`,
+		} {
+			if _, err := fx.owner.Exec(fx.ctx, stmt, fx.orgID); err != nil {
+				t.Errorf("marketing FX cleanup %q: %v", stmt, err)
+			}
+		}
+	})
+
+	var convertedCustomer, belowThresholdCustomer string
+	for _, customer := range []struct {
+		name  string
+		email string
+		id    *string
+	}{
+		{name: "Converted", email: "converted@fixture.test", id: &convertedCustomer},
+		{name: "Below threshold", email: "below@fixture.test", id: &belowThresholdCustomer},
+	} {
+		if err := fx.owner.QueryRow(fx.ctx, `INSERT INTO customers (org_id, name, email) VALUES ($1::uuid, $2, $3) RETURNING id::text`, fx.orgID, customer.name, customer.email).Scan(customer.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, invoice := range []struct {
+		customer string
+		number   int64
+		currency string
+		total    int64
+		rateNum  *int64
+		rateDen  *int64
+	}{
+		{customer: convertedCustomer, number: 1, currency: "USD", total: 6_000},
+		{customer: convertedCustomer, number: 2, currency: "EUR", total: 3_200, rateNum: marketingTestInt64(5), rateDen: marketingTestInt64(4)},
+		{customer: belowThresholdCustomer, number: 3, currency: "USD", total: 9_999},
+	} {
+		if _, err := fx.owner.Exec(fx.ctx, `
+			INSERT INTO invoices (org_id, customer_id, number, status, currency, subtotal_minor, tax_minor, total_minor, paid_minor, credited_minor, fx_rate_num, fx_rate_den)
+			VALUES ($1::uuid, $2::uuid, $3, 'sent', $4, $5, 0, $5, 0, 0, $6, $7)`, fx.orgID, invoice.customer, invoice.number, invoice.currency, invoice.total, invoice.rateNum, invoice.rateDen); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.owner, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
+		segment, err := marketingCreateSegment(fx.ctx, tx, fx.orgID, MarketingCreateSegmentInput{Name: "Converted spend", MinSpendMinor: 10_000})
+		if err != nil {
+			return struct{}{}, err
+		}
+		campaign, err := marketingCreateCampaign(fx.ctx, tx, fx.orgID, MarketingCreateCampaignInput{SegmentID: segment.SegmentID, Name: "FX test", Subject: "Hello", Body: "Body"})
+		if err != nil {
+			return struct{}{}, err
+		}
+		result, err := marketingSendCampaign(fx.ctx, tx, fx.orgID, MarketingSendCampaignInput{CampaignID: campaign.CampaignID}, time.Now().UTC())
+		if err != nil {
+			return struct{}{}, err
+		}
+		if result.Recipients != 1 {
+			return struct{}{}, errors.New("campaign did not include only the customer whose converted spend meets the threshold")
+		}
+		return struct{}{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func marketingTestInt64(value int64) *int64 { return &value }

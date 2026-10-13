@@ -27,13 +27,13 @@ function modules(enabled = true) {
 }
 
 function snapshot(overrides: Record<string, unknown> = {}) {
-  return Response.json({
+  return Response.json({ ok: true, data: {
     segments: [segment],
     campaigns: [draftCampaign],
     sendCounts: [],
     recentSends: [],
     ...overrides,
-  });
+  } });
 }
 
 beforeEach(() => {
@@ -61,7 +61,7 @@ describe("Vite marketing page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing") {
+      if (path === "/api/capabilities/execute") {
         return snapshot({
           campaigns: [{ ...draftCampaign, queuedAt: "2026-09-20T09:30:00.000Z" }],
           sendCounts: [{ campaignId, count: 1 }],
@@ -91,7 +91,7 @@ describe("Vite marketing page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketingPage baseCurrency="USD" />);
+    render(<MarketingPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "Marketing", level: 1 })).not.toBeNull();
     expect(screen.getByText(/1 provider-confirmed/)).not.toBeNull();
@@ -104,18 +104,18 @@ describe("Vite marketing page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
         const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
-        expect(payload).toMatchObject({ action: "createSegment", name: "Wholesale", minSpendMinor: 125_050 });
+        if (payload.capabilityId === "marketing.overviewSnapshot") return snapshot();
+        expect(payload).toMatchObject({ capabilityId: "marketing.createSegment", input: { name: "Wholesale", minSpendMinor: 125_050 } });
         expect(payload.intentId).toEqual(expect.any(String));
         return Response.json({ ok: true, data: { segmentId } });
       }
-      if (path === "/api/marketing") return snapshot();
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketingPage baseCurrency="USD" />);
+    render(<MarketingPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
     await screen.findByRole("heading", { name: "Marketing", level: 1 });
 
     fireEvent.change(screen.getByLabelText("Segment name"), { target: { value: "Wholesale" } });
@@ -123,18 +123,17 @@ describe("Vite marketing page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create segment" }));
 
     expect(await screen.findByText(/Segment saved\./)).not.toBeNull();
-    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
-    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ minSpendMinor: 125_050 });
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST" && JSON.parse(String(init.body)).capabilityId === "marketing.createSegment");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ input: { minSpendMinor: 125_050 } });
   }, PAGE_TEST_TIMEOUT);
 
   it("creates Go segments with the authenticated user and organization retry scope", async () => {
-    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing") return snapshot();
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
         const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
+        if (payload.capabilityId === "marketing.overviewSnapshot") return snapshot();
         expect(payload).toMatchObject({
           capabilityId: "marketing.createSegment",
           input: { name: "Wholesale", minSpendMinor: 125_050 },
@@ -164,7 +163,7 @@ describe("Vite marketing page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => (String(input) === "/api/modules" ? modules() : snapshot()));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketingPage baseCurrency="USD" />);
+    render(<MarketingPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
     await screen.findByRole("heading", { name: "Marketing", level: 1 });
 
     fireEvent.change(screen.getByLabelText("Segment name"), { target: { value: "Broken" } });
@@ -172,23 +171,25 @@ describe("Vite marketing page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create segment" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain("Enter the minimum lifetime spend");
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST" && JSON.parse(String(init.body)).capabilityId !== "marketing.overviewSnapshot")).toBe(false);
   }, PAGE_TEST_TIMEOUT);
 
   it("surfaces an approval-pending send as pending, never as a delivery", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
+        if (payload.capabilityId === "marketing.overviewSnapshot") return snapshot();
         return Response.json({ ok: false, pendingApproval: true, reason: "marketing.write needs approval" }, { status: 202 });
       }
-      if (path === "/api/marketing") return snapshot();
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketingPage baseCurrency="USD" />);
+    render(<MarketingPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
     await screen.findByRole("heading", { name: "Marketing", level: 1 });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(await screen.findByText("marketing.write needs approval")).not.toBeNull();
@@ -199,18 +200,19 @@ describe("Vite marketing page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing" && init?.method === "POST") {
-        const payload = JSON.parse(String(init.body)) as { action?: string };
-        if (payload.action !== "sendCampaign") return Response.json({ error: "unexpected" }, { status: 400 });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as { capabilityId?: string };
+        if (payload.capabilityId === "marketing.overviewSnapshot") return snapshot();
+        if (payload.capabilityId !== "marketing.sendCampaign") return Response.json({ error: "unexpected" }, { status: 400 });
         return Response.json({ ok: true, data: { recipients: 3, skippedOptOut: 1, skippedNoAddress: 2, alreadySent: 0 } });
       }
-      if (path === "/api/marketing") return snapshot();
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketingPage baseCurrency="USD" />);
+    render(<MarketingPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
     await screen.findByRole("heading", { name: "Marketing", level: 1 });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(await screen.findByText(/Those rows are queued, not delivered: only the send log below can say a provider acknowledged them\./)).not.toBeNull();
@@ -221,16 +223,18 @@ describe("Vite marketing page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing" && init?.method === "POST") {
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as { capabilityId?: string };
+        if (payload.capabilityId === "marketing.overviewSnapshot") return snapshot();
         return Response.json({ ok: true, data: { campaignName: "Spring renewal", sentCount: 2, queuedAt: "2026-09-20T09:30:00.000Z" } });
       }
-      if (path === "/api/marketing") return snapshot();
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketingPage baseCurrency="USD" />);
+    render(<MarketingPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
     await screen.findByRole("heading", { name: "Marketing", level: 1 });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Analytics" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Analytics" }));
 
     expect(await screen.findByText(/2 provider-confirmed deliveries/)).not.toBeNull();
@@ -243,27 +247,28 @@ describe("Vite marketing page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing" && init?.method === "POST") {
-        return Response.json({ ok: true, data: { campaignName: "Org A analytics", sentCount: 1, queuedAt: null } });
-      }
-      if (path === "/api/marketing") {
-        marketingReads += 1;
-        if (marketingReads <= 2) {
-          return snapshot({
-            campaigns: [{ ...draftCampaign, name: "Org A campaign" }],
-            recentSends: [{
-              id: "9b4fae02-ccbf-4c53-9b4d-a9a25b99ca8f",
-              campaignId,
-              customerName: "Org A contact",
-              customerEmail: "a@example.test",
-              queuedAt: "2026-09-20T09:30:00.000Z",
-              status: "sent",
-              sentAt: "2026-09-20T09:31:00.000Z",
-            }],
-          });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as { capabilityId?: string };
+        if (payload.capabilityId === "marketing.overviewSnapshot") {
+          marketingReads += 1;
+          if (marketingReads <= 2) {
+            return snapshot({
+              campaigns: [{ ...draftCampaign, name: "Org A campaign" }],
+              recentSends: [{
+                id: "9b4fae02-ccbf-4c53-9b4d-a9a25b99ca8f",
+                campaignId,
+                customerName: "Org A contact",
+                customerEmail: "a@example.test",
+                queuedAt: "2026-09-20T09:30:00.000Z",
+                status: "sent",
+                sentAt: "2026-09-20T09:31:00.000Z",
+              }],
+            });
+          }
+          if (marketingReads === 3) return nextSnapshot;
+          return snapshot({ campaigns: [{ ...draftCampaign, name: "Org B campaign" }] });
         }
-        if (marketingReads === 3) return nextSnapshot;
-        return snapshot({ campaigns: [{ ...draftCampaign, name: "Org B campaign" }] });
+        return Response.json({ ok: true, data: { campaignName: "Org A analytics", sentCount: 1, queuedAt: null } });
       }
       return new Response(null, { status: 404 });
     });
@@ -271,6 +276,7 @@ describe("Vite marketing page", () => {
     const view = render(<MarketingPage actorId={actorId} organizationId={organizationId} />);
     expect(await screen.findByText("Org A campaign")).not.toBeNull();
     expect(screen.getByText(/Org A contact/)).not.toBeNull();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Analytics" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Analytics" }));
     expect(await screen.findByText(/Org A analytics: 1 provider-confirmed delivery/)).not.toBeNull();
 
@@ -289,13 +295,13 @@ describe("Vite marketing page", () => {
   }, PAGE_TEST_TIMEOUT);
 
   it("restores an uncertain campaign draft after reload and retries with the same intent", async () => {
-    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
     let postAttempts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing" && init?.method !== "POST") return snapshot();
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as { capabilityId?: string };
+        if (payload.capabilityId === "marketing.overviewSnapshot") return snapshot();
         postAttempts += 1;
         if (postAttempts === 1) throw new TypeError("connection lost after submit");
         return Response.json({ ok: false, pendingApproval: true, reason: "Campaign needs approval" }, { status: 202 });
@@ -315,7 +321,7 @@ describe("Vite marketing page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
     expect(await screen.findByText(/Could not reach the marketing service/)).not.toBeNull();
     expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("Spring renewal retry");
-    const firstCall = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST");
+    const firstCall = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST" && JSON.parse(String(init.body)).capabilityId === "marketing.createCampaign");
     const firstBody = JSON.parse(String(firstCall?.[1]?.body)) as Record<string, unknown>;
     expect((screen.getByLabelText("Campaign name") as HTMLInputElement).disabled).toBe(true);
 
@@ -333,7 +339,6 @@ describe("Vite marketing page", () => {
   }, PAGE_TEST_TIMEOUT);
 
   it("gates campaign actions immediately when the active scope changes", async () => {
-    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => (String(input) === "/api/modules" ? modules() : snapshot()));
     vi.stubGlobal("fetch", fetchMock);
     const view = render(<MarketingPage actorId={actorId} organizationId={organizationId} />);
@@ -347,14 +352,14 @@ describe("Vite marketing page", () => {
   }, PAGE_TEST_TIMEOUT);
 
   it("does not let a stale create response overwrite the next organization draft", async () => {
-    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
     const finishCreates: Array<(response: Response) => void> = [];
     let createRequestsStarted = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing" && init?.method !== "POST") return snapshot();
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as { capabilityId?: string };
+        if (payload.capabilityId === "marketing.overviewSnapshot") return snapshot();
         createRequestsStarted += 1;
         return new Promise<Response>((resolve) => { finishCreates.push(resolve); });
       }
@@ -397,15 +402,15 @@ describe("Vite marketing page", () => {
   }, PAGE_TEST_TIMEOUT);
 
   it("keeps an old A response stale after switching A to B to A", async () => {
-    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
     const nextActorId = "aa8c635d-405e-4488-824c-a557b1c1fbe1";
     const finishCreates: Array<(response: Response) => void> = [];
     let createRequestsStarted = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing" && init?.method !== "POST") return snapshot();
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as { capabilityId?: string };
+        if (payload.capabilityId === "marketing.overviewSnapshot") return snapshot();
         createRequestsStarted += 1;
         return new Promise<Response>((resolve) => { finishCreates.push(resolve); });
       }
@@ -443,17 +448,16 @@ describe("Vite marketing page", () => {
   }, PAGE_TEST_TIMEOUT);
 
   it("routes campaign sends through Go and preserves the queued-not-delivered result", async () => {
-    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
     let snapshotCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
-      if (path === "/api/marketing" && init?.method !== "POST") {
-        snapshotCount += 1;
-        return snapshot(snapshotCount > 1 ? { campaigns: [{ ...draftCampaign, queuedAt: "2026-09-20T09:30:00.000Z" }] } : {});
-      }
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        if (body.capabilityId === "marketing.overviewSnapshot") {
+          snapshotCount += 1;
+          return snapshot(snapshotCount > 1 ? { campaigns: [{ ...draftCampaign, queuedAt: "2026-09-20T09:30:00.000Z" }] } : {});
+        }
         expect(body).toMatchObject({ capabilityId: "marketing.sendCampaign", input: { campaignId } });
         return Response.json({ ok: true, data: { recipients: 3, skippedOptOut: 1, skippedNoAddress: 2, alreadySent: 0 } });
       }
@@ -475,7 +479,7 @@ describe("Vite marketing page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => (String(input) === "/api/modules" ? modules(false) : snapshot()));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketingPage baseCurrency="USD" />);
+    render(<MarketingPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
 
     expect(await screen.findByText("Marketing is disabled")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);

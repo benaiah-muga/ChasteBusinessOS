@@ -149,7 +149,6 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
   const [busy, setBusy] = useState(false);
   const [segmentForm, setSegmentForm] = useState({ name: "", minSpend: "0.00" });
   const [campaignForm, setCampaignForm] = useState(EmptyCampaignForm);
-  const goCampaignWritesEnabled = typeof __GO_MARKETING_CAMPAIGN_WRITES__ !== "undefined" && __GO_MARKETING_CAMPAIGN_WRITES__;
   const campaignScopeIdentity = actorId?.trim() && organizationId?.trim()
     ? JSON.stringify({ actorId: actorId.trim(), organizationId: organizationId.trim() })
     : null;
@@ -164,14 +163,13 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
   const [loadedScopeIdentity, setLoadedScopeIdentity] = useState(campaignScopeIdentity);
   const [campaignDraftStorageKey, setCampaignDraftStorageKey] = useState<string | null>(null);
   const [campaignDraftKeyScopeIdentity, setCampaignDraftKeyScopeIdentity] = useState<string | null>(null);
-  const [campaignDraftStatus, setCampaignDraftStatus] = useState<"loading" | "ready" | "failed">(goCampaignWritesEnabled ? "loading" : "ready");
+  const [campaignDraftStatus, setCampaignDraftStatus] = useState<"loading" | "ready" | "failed">("loading");
   const [campaignDraftLocked, setCampaignDraftLocked] = useState(false);
-  const campaignDraftReady = !goCampaignWritesEnabled || Boolean(campaignScopeIdentity && campaignDraftStorageKey && campaignDraftKeyScopeIdentity === campaignScopeIdentity && campaignDraftStatus === "ready");
+  const campaignDraftReady = Boolean(campaignScopeIdentity && campaignDraftStorageKey && campaignDraftKeyScopeIdentity === campaignScopeIdentity && campaignDraftStatus === "ready");
   const [sendResults, setSendResults] = useState<Record<string, SendResult>>({});
   const [analytics, setAnalytics] = useState<Record<string, CampaignAnalytics>>({});
 
   useEffect(() => {
-    if (!goCampaignWritesEnabled) return;
     let active = true;
     setCampaignDraftStorageKey(null);
     setCampaignDraftKeyScopeIdentity(null);
@@ -191,10 +189,10 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
       if (active) setCampaignDraftStatus("failed");
     });
     return () => { active = false; };
-  }, [campaignScopeIdentity, goCampaignWritesEnabled]);
+  }, [campaignScopeIdentity]);
 
   useEffect(() => {
-    if (!goCampaignWritesEnabled || !campaignDraftStorageKey || !campaignScopeIdentity || campaignDraftKeyScopeIdentity !== campaignScopeIdentity) return;
+    if (!campaignDraftStorageKey || !campaignScopeIdentity || campaignDraftKeyScopeIdentity !== campaignScopeIdentity) return;
     try {
       const raw = window.localStorage.getItem(campaignDraftStorageKey);
       if (raw === null) {
@@ -210,10 +208,10 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
     } catch {
       setCampaignDraftStatus("failed");
     }
-  }, [campaignDraftKeyScopeIdentity, campaignDraftStorageKey, campaignScopeIdentity, goCampaignWritesEnabled]);
+  }, [campaignDraftKeyScopeIdentity, campaignDraftStorageKey, campaignScopeIdentity]);
 
   useEffect(() => {
-    if (!goCampaignWritesEnabled || !campaignDraftStorageKey || !campaignScopeIdentity || campaignDraftKeyScopeIdentity !== campaignScopeIdentity || campaignDraftStatus !== "ready") return;
+    if (!campaignDraftStorageKey || !campaignScopeIdentity || campaignDraftKeyScopeIdentity !== campaignScopeIdentity || campaignDraftStatus !== "ready") return;
     try {
       const serialized = JSON.stringify({ campaignForm, unresolved: campaignDraftLocked });
       window.localStorage.setItem(campaignDraftStorageKey, serialized);
@@ -221,7 +219,7 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
     } catch {
       setCampaignDraftStatus("failed");
     }
-  }, [campaignDraftKeyScopeIdentity, campaignDraftStorageKey, campaignDraftStatus, campaignDraftLocked, campaignDraftReady, campaignForm, campaignScopeIdentity, goCampaignWritesEnabled]);
+  }, [campaignDraftKeyScopeIdentity, campaignDraftStorageKey, campaignDraftStatus, campaignDraftLocked, campaignDraftReady, campaignForm, campaignScopeIdentity]);
 
   const load = useCallback(async (signal?: AbortSignal, isCurrent: () => boolean = () => true) => {
     if (!signal && isCurrent()) setDataState({ status: "loading" });
@@ -230,12 +228,12 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
       setAnalytics({});
     }
     try {
-      const snapshot = await fetchMarketingSnapshot(signal);
+      const snapshot = await fetchMarketingSnapshot(signal, { actorId, organizationId });
       if (!signal?.aborted && isCurrent()) setDataState({ status: "ready", snapshot });
     } catch (error) {
       if (!signal?.aborted && isCurrent()) setDataState({ status: "failed", message: messageFor(error) });
     }
-  }, []);
+  }, [actorId, organizationId]);
 
   const loadModules = useCallback(async (
     signal?: AbortSignal,
@@ -246,7 +244,7 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
       && campaignScopeGenerationRef.current === scopeGeneration;
     if (!signal && isCurrentScope()) setModuleState({ status: "loading" });
     try {
-      const enabled = await fetchMarketingEnabled(signal);
+      const enabled = await fetchMarketingEnabled(signal, { actorId, organizationId });
       if (signal?.aborted || !isCurrentScope()) return;
       setModuleState({ status: "ready", enabled });
       if (enabled) await load(signal, isCurrentScope);
@@ -257,7 +255,7 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
       setModuleState({ status: "failed", message: messageFor(error) });
       setLoadedScopeIdentity(scopeIdentity);
     }
-  }, [campaignScopeIdentity, load]);
+  }, [actorId, campaignScopeIdentity, load, organizationId]);
 
   useEffect(() => {
     const scopeIdentity = campaignScopeIdentity;
@@ -337,21 +335,19 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
     const operationScopeGeneration = campaignScopeGenerationRef.current;
     const isCurrentScope = () => campaignScopeIdentityRef.current === operationScopeIdentity
       && campaignScopeGenerationRef.current === operationScopeGeneration;
-    if (goCampaignWritesEnabled) {
-      if (!campaignDraftReady || !campaignDraftStorageKey) {
-        setNotice({ tone: "error", message: "Wait for the scoped campaign draft to finish loading before submitting." });
-        return;
-      }
-      try {
-        const serialized = JSON.stringify({ campaignForm, unresolved: true });
-        window.localStorage.setItem(campaignDraftStorageKey, serialized);
-        if (window.localStorage.getItem(campaignDraftStorageKey) !== serialized) throw new Error("campaign draft did not persist");
-        setCampaignDraftLocked(true);
-      } catch {
-        setCampaignDraftStatus("failed");
-        setNotice({ tone: "error", message: "Browser storage could not save this campaign draft, so it was not submitted." });
-        return;
-      }
+    if (!campaignDraftReady || !campaignDraftStorageKey) {
+      setNotice({ tone: "error", message: "Wait for the scoped campaign draft to finish loading before submitting." });
+      return;
+    }
+    try {
+      const serialized = JSON.stringify({ campaignForm, unresolved: true });
+      window.localStorage.setItem(campaignDraftStorageKey, serialized);
+      if (window.localStorage.getItem(campaignDraftStorageKey) !== serialized) throw new Error("campaign draft did not persist");
+      setCampaignDraftLocked(true);
+    } catch {
+      setCampaignDraftStatus("failed");
+      setNotice({ tone: "error", message: "Browser storage could not save this campaign draft, so it was not submitted." });
+      return;
     }
     const done = await run("Create campaign", () => submitMarketingAction({
       action: "createCampaign",
@@ -361,10 +357,9 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
       body,
     }, crypto.randomUUID(), { actorId, organizationId }), {
       onPending: () => {
-        if (goCampaignWritesEnabled) setCampaignDraftLocked(true);
+        setCampaignDraftLocked(true);
       },
       onError: (error) => {
-        if (!goCampaignWritesEnabled) return;
         const unresolved = error instanceof MarketingApiError && error.requestMayHaveReachedServer;
         setCampaignDraftLocked(unresolved);
         if (!unresolved && campaignDraftStorageKey) {
@@ -383,7 +378,7 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
       setNotice({ tone: "success", message: "Campaign drafted. Nothing goes out until you press Send." });
       setCampaignForm(EmptyCampaignForm);
       setCampaignDraftLocked(false);
-      if (goCampaignWritesEnabled && campaignDraftStorageKey) {
+      if (campaignDraftStorageKey) {
         try {
           const serialized = JSON.stringify({ campaignForm: EmptyCampaignForm, unresolved: false });
           window.localStorage.setItem(campaignDraftStorageKey, serialized);
@@ -412,7 +407,11 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
     const operationScopeGeneration = campaignScopeGenerationRef.current;
     const isCurrentScope = () => campaignScopeIdentityRef.current === operationScopeIdentity
       && campaignScopeGenerationRef.current === operationScopeGeneration;
-    const stats = await run("Campaign analytics", () => submitMarketingAction({ action: "campaignAnalytics", campaignId }), { isCurrent: isCurrentScope });
+    const stats = await run("Campaign analytics", () => submitMarketingAction(
+      { action: "campaignAnalytics", campaignId },
+      crypto.randomUUID(),
+      { actorId, organizationId },
+    ), { isCurrent: isCurrentScope });
     if (stats && isCurrentScope()) setAnalytics((current) => ({ ...current, [campaignId]: stats }));
   }
 
@@ -489,15 +488,15 @@ export function MarketingPage({ baseCurrency = null, actorId = null, organizatio
 
         <section className="mk-panel" aria-labelledby="mk-campaigns-heading">
           <h2 id="mk-campaigns-heading">Campaigns</h2>
-          {goCampaignWritesEnabled && campaignDraftStatus === "loading" && <p role="status" className="mk-form-hint">Loading the scoped campaign draft before enabling campaign actions.</p>}
-          {goCampaignWritesEnabled && campaignDraftStatus === "failed" && (
+          {campaignDraftStatus === "loading" && <p role="status" className="mk-form-hint">Loading the scoped campaign draft before enabling campaign actions.</p>}
+          {campaignDraftStatus === "failed" && (
             <p role="alert" className="mk-error">
               {campaignScopeIdentity
                 ? "Browser storage could not retain this scoped campaign draft. Enable browser storage and reload before submitting campaign actions."
                 : "Wait for the active user and organization to load before using campaign actions."}
             </p>
           )}
-          {goCampaignWritesEnabled && campaignDraftReady && campaignDraftLocked && <p role="status" className="mk-form-hint">This create attempt is pending or uncertain. Its exact draft is locked; submit again to retry with the same intent.</p>}
+          {campaignDraftReady && campaignDraftLocked && <p role="status" className="mk-form-hint">This create attempt is pending or uncertain. Its exact draft is locked; submit again to retry with the same intent.</p>}
           <form className="mk-form" onSubmit={(event) => void createCampaign(event)}>
             <div className="mk-form-row">
               <label htmlFor="mk-campaign-segment">Segment

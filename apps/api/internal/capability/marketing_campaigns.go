@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -58,6 +59,69 @@ type MarketingCampaignAnalyticsOutput struct {
 	CampaignName string  `json:"campaignName"`
 	SentCount    int64   `json:"sentCount"`
 	QueuedAt     *string `json:"queuedAt"`
+}
+
+type marketingRowIterator interface {
+	Next() bool
+	Err() error
+}
+
+func collectMarketingRows[T any](rows marketingRowIterator, scan func() (T, error)) ([]T, error) {
+	items := make([]T, 0)
+	for rows.Next() {
+		item, err := scan()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+type marketingInvoiceSpend struct {
+	customerID string
+	totalMinor int64
+	currency   string
+	rateNum    *int64
+	rateDen    *int64
+}
+
+func marketingSpendByCustomer(invoices []marketingInvoiceSpend, baseCurrency string) (map[string]int64, error) {
+	baseCurrency = strings.ToUpper(baseCurrency)
+	if _, ok := currencyMinorUnits(baseCurrency); !ok {
+		return nil, errors.New("organization base currency is invalid")
+	}
+
+	spendByCustomer := make(map[string]int64)
+	for _, invoice := range invoices {
+		currency := strings.ToUpper(invoice.currency)
+		if invoice.customerID == "" || invoice.totalMinor < 0 || invoice.totalMinor > maxSafeInteger {
+			return nil, errors.New("invoice spend is outside the supported amount range")
+		}
+		if _, ok := currencyMinorUnits(currency); !ok {
+			return nil, errors.New("invoice has an unknown currency")
+		}
+		baseMinor := invoice.totalMinor
+		if currency != baseCurrency {
+			if invoice.rateNum == nil || invoice.rateDen == nil || *invoice.rateNum <= 0 || *invoice.rateDen <= 0 {
+				return nil, errors.New("invoice is missing its persisted FX conversion basis")
+			}
+			converted, err := toBaseMinorExact(invoice.totalMinor, fxRateSnapshot{Num: *invoice.rateNum, Den: *invoice.rateDen}, currency, baseCurrency)
+			if err != nil {
+				return nil, fmt.Errorf("invoice spend FX conversion failed: %w", err)
+			}
+			baseMinor = converted
+		}
+		current := spendByCustomer[invoice.customerID]
+		if baseMinor > maxSafeInteger-current {
+			return nil, errors.New("customer lifetime spend exceeds the supported amount range")
+		}
+		spendByCustomer[invoice.customerID] = current + baseMinor
+	}
+	return spendByCustomer, nil
 }
 
 type MarketingOverviewSnapshotInput struct{}
@@ -257,34 +321,43 @@ func marketingSendCampaign(ctx context.Context, tx pgx.Tx, orgID string, input M
 	if err != nil {
 		return MarketingSendCampaignOutput{}, err
 	}
-	var members []marketingMember
-	for memberRows.Next() {
+	members, err := collectMarketingRows(memberRows, func() (marketingMember, error) {
 		var m marketingMember
 		if err := memberRows.Scan(&m.id, &m.email, &m.optedOut); err != nil {
-			memberRows.Close()
-			return MarketingSendCampaignOutput{}, err
+			return marketingMember{}, err
 		}
-		members = append(members, m)
-	}
+		return m, nil
+	})
 	memberRows.Close()
-
-	spendRows, err := tx.Query(ctx, `
-		SELECT customer_id::text, coalesce(sum(total_minor), 0) FROM invoices
-		WHERE org_id=$1::uuid AND voided_at IS NULL GROUP BY customer_id`, orgID)
 	if err != nil {
 		return MarketingSendCampaignOutput{}, err
 	}
-	spendByCustomer := map[string]int64{}
-	for spendRows.Next() {
-		var customerID string
-		var spend int64
-		if err := spendRows.Scan(&customerID, &spend); err != nil {
-			spendRows.Close()
-			return MarketingSendCampaignOutput{}, err
-		}
-		spendByCustomer[customerID] = spend
+
+	var baseCurrency string
+	if err := tx.QueryRow(ctx, `SELECT base_currency FROM organizations WHERE id=$1::uuid`, orgID).Scan(&baseCurrency); err != nil {
+		return MarketingSendCampaignOutput{}, err
 	}
+	spendRows, err := tx.Query(ctx, `
+		SELECT customer_id::text, total_minor, currency, fx_rate_num, fx_rate_den FROM invoices
+		WHERE org_id=$1::uuid AND customer_id IS NOT NULL AND voided_at IS NULL`, orgID)
+	if err != nil {
+		return MarketingSendCampaignOutput{}, err
+	}
+	invoices, err := collectMarketingRows(spendRows, func() (marketingInvoiceSpend, error) {
+		var invoice marketingInvoiceSpend
+		if err := spendRows.Scan(&invoice.customerID, &invoice.totalMinor, &invoice.currency, &invoice.rateNum, &invoice.rateDen); err != nil {
+			return marketingInvoiceSpend{}, err
+		}
+		return invoice, nil
+	})
 	spendRows.Close()
+	if err != nil {
+		return MarketingSendCampaignOutput{}, err
+	}
+	spendByCustomer, err := marketingSpendByCustomer(invoices, baseCurrency)
+	if err != nil {
+		return MarketingSendCampaignOutput{}, err
+	}
 
 	digestJSON, err := json.Marshal(struct {
 		Subject string `json:"subject"`

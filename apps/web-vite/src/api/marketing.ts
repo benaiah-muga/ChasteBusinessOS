@@ -162,12 +162,20 @@ async function readJson(response: Response, requestMayHaveReachedServer = false)
   }
 }
 
-async function getJson(path: string, signal?: AbortSignal): Promise<unknown> {
+function organizationHeader(scope?: MarketingRetryScope): Record<string, string> {
+  const organizationId = scope?.organizationId?.trim();
+  if (!organizationId || !uuid.safeParse(organizationId).success) {
+    throw new MarketingApiError(0, "Wait for the active organization to load before viewing marketing.");
+  }
+  return { "X-Organization-ID": organizationId };
+}
+
+async function getJson(path: string, signal?: AbortSignal, scope?: MarketingRetryScope): Promise<unknown> {
   let response: Response;
   try {
     response = await fetch(path, {
       credentials: "same-origin",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", ...organizationHeader(scope) },
       cache: "no-store",
       signal: requestSignal(signal),
     });
@@ -182,8 +190,8 @@ async function getJson(path: string, signal?: AbortSignal): Promise<unknown> {
   return readJson(response);
 }
 
-export async function fetchMarketingEnabled(signal?: AbortSignal): Promise<boolean> {
-  const parsed = ModuleResponseSchema.safeParse(await getJson("/api/modules", signal));
+export async function fetchMarketingEnabled(signal?: AbortSignal, scope?: MarketingRetryScope): Promise<boolean> {
+  const parsed = ModuleResponseSchema.safeParse(await getJson("/api/modules", signal, scope));
   if (!parsed.success) throw new MarketingApiError(200, "The module switchboard returned data in an unexpected format.");
   const catalogIds = new Set(parsed.data.catalog.map((module) => module.id));
   if (!catalogIds.has("marketing")) throw new MarketingApiError(200, "The module switchboard omitted the marketing module.");
@@ -193,35 +201,30 @@ export async function fetchMarketingEnabled(signal?: AbortSignal): Promise<boole
   return parsed.data.enabledModules.includes("marketing");
 }
 
-export async function fetchMarketingSnapshot(signal?: AbortSignal): Promise<MarketingSnapshot> {
-  const goReads = typeof __GO_MARKETING_OVERVIEW_READS__ !== "undefined" && __GO_MARKETING_OVERVIEW_READS__;
-  let raw: unknown;
-  if (!goReads) {
-    raw = await getJson("/api/marketing", signal);
-  } else {
-    let response: Response;
-    try {
-      response = await fetch("/api/capabilities/execute", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ capabilityId: "marketing.overviewSnapshot", input: {}, intentId: crypto.randomUUID() }),
-        signal: requestSignal(signal),
-      });
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      if (error instanceof DOMException && error.name === "TimeoutError") {
-        throw new MarketingApiError(0, "The marketing service took too long to respond. Try again.");
-      }
-      throw new MarketingApiError(0, "Could not reach the marketing service. Check your connection and try again.");
+export async function fetchMarketingSnapshot(signal?: AbortSignal, scope?: MarketingRetryScope): Promise<MarketingSnapshot> {
+  const headers = organizationHeader(scope);
+  let response: Response;
+  try {
+    response = await fetch("/api/capabilities/execute", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json", ...headers },
+      cache: "no-store",
+      body: JSON.stringify({ capabilityId: "marketing.overviewSnapshot", input: {}, intentId: crypto.randomUUID() }),
+      signal: requestSignal(signal),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new MarketingApiError(0, "The marketing service took too long to respond. Try again.");
     }
-    const responseBody = await readJson(response);
-    if (!response.ok) throw new MarketingApiError(response.status, errorMessage(response.status, responseBody));
-    const envelope = SuccessSchema.safeParse(responseBody);
-    if (!envelope.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected report response.");
-    raw = envelope.data.data;
+    throw new MarketingApiError(0, "Could not reach the marketing service. Check your connection and try again.");
   }
+  const responseBody = await readJson(response);
+  if (!response.ok) throw new MarketingApiError(response.status, errorMessage(response.status, responseBody));
+  const envelope = SuccessSchema.safeParse(responseBody);
+  if (!envelope.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected report response.");
+  const raw = envelope.data.data;
   const parsed = SnapshotSchema.safeParse(raw);
   if (!parsed.success) throw new MarketingApiError(200, "The marketing service returned data in an unexpected format.");
   return parsed.data;
@@ -241,41 +244,28 @@ export async function submitMarketingAction<Action extends MarketingAction>(
   if (!parsedAction.success) throw new MarketingApiError(0, "The marketing action contains invalid details.");
   if (!intentId.trim()) throw new MarketingApiError(0, "The marketing action needs an intent identity. Try again.");
 
-  const useGoSegment = parsedAction.data.action === "createSegment"
-    && typeof __GO_MARKETING_SEGMENT_SLICE__ !== "undefined"
-    && __GO_MARKETING_SEGMENT_SLICE__;
-  const campaignWritesEnabled = typeof __GO_MARKETING_CAMPAIGN_WRITES__ !== "undefined" && __GO_MARKETING_CAMPAIGN_WRITES__;
-  const useGoCampaign = campaignWritesEnabled
-    && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign");
-  const useGoAnalytics = campaignWritesEnabled && parsedAction.data.action === "campaignAnalytics";
-  const useGo = useGoSegment || useGoCampaign || useGoAnalytics;
   let attempt: MarketingAttempt | null = null;
-  if (useGoCampaign && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign")) {
+  if (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign") {
     attempt = await getMarketingAttempt(parsedAction.data, retryScope);
-  } else if (useGoSegment && parsedAction.data.action === "createSegment") {
+  } else if (parsedAction.data.action === "createSegment") {
     attempt = await getMarketingSegmentAttempt(parsedAction.data, retryScope);
-  } else if (!useGoCampaign && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign")) {
-    await assertNoUnresolvedGoMarketingAttempt(parsedAction.data, retryScope);
-  } else if (!useGoSegment && parsedAction.data.action === "createSegment") {
-    await assertNoUnresolvedGoMarketingSegmentAttempt(retryScope);
   }
+  const headers = organizationHeader(retryScope);
   const activeIntentId = attempt?.intentId ?? intentId;
-  const legacyBody = { ...parsedAction.data, intentId: activeIntentId };
-  const requestPath = useGo ? "/api/capabilities/execute" : "/api/marketing";
-  const requestBody: Record<string, unknown> = useGoSegment && parsedAction.data.action === "createSegment"
+  const requestBody: Record<string, unknown> = parsedAction.data.action === "createSegment"
     ? { capabilityId: "marketing.createSegment", input: { name: parsedAction.data.name, minSpendMinor: parsedAction.data.minSpendMinor }, intentId: activeIntentId }
-    : useGoCampaign && parsedAction.data.action === "createCampaign"
+    : parsedAction.data.action === "createCampaign"
       ? { capabilityId: "marketing.createCampaign", input: { segmentId: parsedAction.data.segmentId, name: parsedAction.data.name, subject: parsedAction.data.subject, body: parsedAction.data.body }, intentId: activeIntentId }
-      : useGoCampaign && parsedAction.data.action === "sendCampaign"
+      : parsedAction.data.action === "sendCampaign"
         ? { capabilityId: "marketing.sendCampaign", input: { campaignId: parsedAction.data.campaignId }, intentId: activeIntentId }
-        : useGoAnalytics && parsedAction.data.action === "campaignAnalytics"
+        : parsedAction.data.action === "campaignAnalytics"
           ? { capabilityId: "marketing.campaignAnalytics", input: { campaignId: parsedAction.data.campaignId }, intentId: activeIntentId }
-          : legacyBody;
+          : (() => { throw new MarketingApiError(0, "The marketing action is unsupported."); })();
 
   const send = (path: string, body: Record<string, unknown>) => fetch(path, {
     method: "POST",
     credentials: "same-origin",
-    headers: { accept: "application/json", "content-type": "application/json" },
+    headers: { accept: "application/json", "content-type": "application/json", ...headers },
     cache: "no-store",
     body: JSON.stringify(body),
     signal: requestSignal(undefined, 20_000),
@@ -283,7 +273,7 @@ export async function submitMarketingAction<Action extends MarketingAction>(
 
   let response: Response;
   try {
-    response = await send(requestPath, requestBody);
+    response = await send("/api/capabilities/execute", requestBody);
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new MarketingApiError(0, "The marketing action took too long. Check the send log before trying again.", true);
@@ -292,7 +282,7 @@ export async function submitMarketingAction<Action extends MarketingAction>(
   }
 
   const retryableStatus = response.status === 408 || response.status === 429;
-  const missingGoRoute = useGo && response.status === 404;
+  const missingGoRoute = response.status === 404;
   const terminalClientError = response.status >= 400 && response.status < 500 && response.status !== 202 && !retryableStatus && !missingGoRoute;
   if (attempt && terminalClientError) clearMarketingAttempt(attempt);
   const raw = await readJson(response, Boolean(attempt && missingGoRoute));
@@ -406,31 +396,6 @@ async function getMarketingSegmentAttempt(action: Extract<MarketingAction, { act
   });
 }
 
-async function assertNoUnresolvedGoMarketingSegmentAttempt(scope?: MarketingRetryScope): Promise<void> {
-  const actorId = normalizeRetryActorId(scope?.actorId);
-  const organizationId = scope?.organizationId?.trim();
-  try {
-    if (actorId && organizationId && uuid.safeParse(organizationId).success) {
-      const storageKey = await marketingSegmentScopeStorageKey(scope);
-      if (window.localStorage.getItem(storageKey) !== null) {
-        throw new MarketingApiError(0, "A Go segment action is still unresolved. Restore Go segment writes and retry that exact action before using the legacy route.");
-      }
-      return;
-    }
-
-    const prefix = "chaste.marketing.segment-intent.v1:";
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (key?.startsWith(prefix) && key.endsWith(":create")) {
-        throw new MarketingApiError(0, "A Go segment action is still unresolved. Restore Go segment writes and retry that exact action before using the legacy route.");
-      }
-    }
-  } catch (error) {
-    if (error instanceof MarketingApiError) throw error;
-    throw new MarketingApiError(0, "Segment retry state could not be checked. Enable browser storage or restore Go segment writes before continuing.");
-  }
-}
-
 async function getMarketingAttempt(action: Extract<MarketingAction, { action: "createCampaign" | "sendCampaign" }>, scope?: MarketingRetryScope): Promise<MarketingAttempt> {
   const { storageKey, fingerprint } = await marketingAttemptStorageKey(action, scope);
   return withMarketingReservationLock(storageKey, async () => {
@@ -456,36 +421,6 @@ async function getMarketingAttempt(action: Extract<MarketingAction, { action: "c
       throw new MarketingApiError(0, "A previous campaign attempt is still unresolved or browser storage could not retain this retry. Restore the exact draft or resolve the earlier attempt before changing it.");
     }
   });
-}
-
-async function assertNoUnresolvedGoMarketingAttempt(
-  action: Extract<MarketingAction, { action: "createCampaign" | "sendCampaign" }>,
-  scope?: MarketingRetryScope,
-): Promise<void> {
-  const actionTarget = action.action === "createCampaign" ? "create" : `send:${action.campaignId}`;
-  try {
-    const actorId = normalizeRetryActorId(scope?.actorId);
-    const organizationId = scope?.organizationId?.trim();
-    if (actorId && organizationId && uuid.safeParse(organizationId).success) {
-      const { storageKey } = await marketingAttemptStorageKey(action, scope);
-      if (window.localStorage.getItem(storageKey) !== null) {
-        throw new MarketingApiError(0, "A Go campaign action is still unresolved. Restore Go campaign writes and retry that exact action before using the legacy route.");
-      }
-      return;
-    }
-
-    const prefix = "chaste.marketing.campaign-intent.v1:";
-    const suffix = `:${actionTarget}`;
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (key?.startsWith(prefix) && key.endsWith(suffix)) {
-        throw new MarketingApiError(0, "A Go campaign action is still unresolved. Restore Go campaign writes and retry that exact action before using the legacy route.");
-      }
-    }
-  } catch (error) {
-    if (error instanceof MarketingApiError) throw error;
-    throw new MarketingApiError(0, "Campaign retry state could not be checked. Enable browser storage or restore Go campaign writes before continuing.");
-  }
 }
 
 function clearMarketingAttempt(attempt: MarketingAttempt): void {
