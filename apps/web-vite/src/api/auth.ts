@@ -2,22 +2,30 @@ import { z } from "zod";
 
 const UserSchema = z.object({
   id: z.string().min(1),
-  name: z.string().nullable().optional(),
+  name: z.string(),
   email: z.string().email(),
-  emailVerified: z.boolean().optional(),
+  emailVerified: z.boolean(),
+  image: z.string().nullable(),
+  createdAt: z.string().datetime({ offset: true }),
+  updatedAt: z.string().datetime({ offset: true }),
 });
 
 const SessionSchema = z.object({
   id: z.string().min(1),
   userId: z.string().min(1),
   expiresAt: z.string().datetime({ offset: true }),
+  createdAt: z.string().datetime({ offset: true }),
+  updatedAt: z.string().datetime({ offset: true }),
 });
 
 const SessionResponseSchema = z.object({ user: UserSchema, session: SessionSchema }).nullable();
-const SignInResponseSchema = z.object({ token: z.string().nullable(), user: UserSchema });
-const SignUpResponseSchema = z.object({ token: z.string().nullable(), user: UserSchema });
-const StatusResponseSchema = z.object({ status: z.boolean() });
-const RecoveryRequestResponseSchema = z.object({ status: z.boolean(), message: z.string() });
+// Vite is a browser client. Go must set the HttpOnly session cookie and must
+// never return a bearer token that application JavaScript could retain.
+const SignInResponseSchema = z.object({ token: z.null(), user: UserSchema });
+const SignUpResponseSchema = z.object({ token: z.null(), user: UserSchema });
+const StatusResponseSchema = z.object({ status: z.literal(true) });
+const RecoveryRequestResponseSchema = z.object({ status: z.literal(true), message: z.string() });
+const SignOutResponseSchema = z.object({ success: z.literal(true) });
 
 type AuthResult<T> = { data: T | null; error: { message: string } | null };
 type Credentials = { email: string; password: string };
@@ -59,8 +67,8 @@ async function request<T>(path: string, schema: z.ZodType<T>, body?: unknown): P
   return { data: parsed.data, error: null };
 }
 
-// The browser talks to Go's documented auth endpoints directly. Keeping this
-// small client local avoids coupling the Vite app to Better Auth's JS client.
+// The browser talks to Go's auth endpoints directly with its same-origin,
+// HttpOnly cookie session. No SDK or bearer token is exposed to application code.
 export const authClient = {
   getSession(): Promise<AuthResult<z.infer<typeof SessionResponseSchema>>> {
     return request("get-session", SessionResponseSchema);
@@ -84,7 +92,7 @@ export const authClient = {
   resetPassword(token: string, newPassword: string): Promise<AuthResult<z.infer<typeof StatusResponseSchema>>> {
     return request("reset-password", StatusResponseSchema, { token, newPassword });
   },
-  async signOut(): Promise<AuthResult<{ success: boolean }>> {
-    return request("sign-out", z.object({ success: z.boolean() }), {});
+  signOut(): Promise<AuthResult<z.infer<typeof SignOutResponseSchema>>> {
+    return request("sign-out", SignOutResponseSchema, {});
   },
 };

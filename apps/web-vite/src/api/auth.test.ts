@@ -2,6 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type CapturedRequest = { path: string; method: string; body: unknown; credentials: RequestCredentials | undefined; cache: RequestCache | undefined };
 
+const goUser = {
+  id: "user-id",
+  name: "Ada Lovelace",
+  email: "ada@example.test",
+  emailVerified: true,
+  image: null,
+  createdAt: "2026-09-01T10:00:00Z",
+  updatedAt: "2026-09-02T10:00:00Z",
+};
+
 function pathnameOf(input: RequestInfo | URL): string {
   if (typeof input === "string") return new URL(input, window.location.origin).pathname;
   if (input instanceof URL) return input.pathname;
@@ -24,10 +34,10 @@ describe("Go auth browser client", () => {
         cache: init?.cache,
       });
       if (pathnameOf(input).endsWith("/sign-up/email")) {
-        return Response.json({ token: null, user: { id: "user-id", email: "ada@example.test", name: "Ada Lovelace" } });
+        return Response.json({ token: null, user: goUser });
       }
       if (pathnameOf(input).endsWith("/sign-in/email")) {
-        return Response.json({ token: null, user: { id: "user-id", email: "ada@example.test", name: "Ada Lovelace" } });
+        return Response.json({ token: null, user: goUser });
       }
       if (pathnameOf(input).endsWith("/sign-out")) return Response.json({ success: true });
       if (pathnameOf(input).endsWith("/send-verification-email") || pathnameOf(input).endsWith("/reset-password")) return Response.json({ status: true });
@@ -74,8 +84,14 @@ describe("Go auth browser client", () => {
 
     expect(result.error).toBeNull();
     expect(result.data).toEqual({
-      user: { id: "user-id", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true },
-      session: { id: "session-id", userId: "user-id", expiresAt: "2026-09-09T10:00:00Z" },
+      user: goUser,
+      session: {
+        id: "session-id",
+        userId: "user-id",
+        expiresAt: "2026-09-09T10:00:00Z",
+        createdAt: "2026-09-02T10:00:00Z",
+        updatedAt: "2026-09-02T10:00:00Z",
+      },
     });
   });
 
@@ -119,6 +135,14 @@ describe("Go auth browser client", () => {
     expect(requests).toEqual([{ path: "/api/auth/sign-out", method: "POST", body: {}, credentials: "same-origin", cache: "no-store" }]);
   });
 
+  it("does not report sign-out as successful unless Go confirms revocation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ success: false })));
+    const { authClient } = await import("./auth");
+
+    await expect(authClient.signOut())
+      .resolves.toEqual({ data: null, error: { message: "The Go authentication service returned an unexpected response" } });
+  });
+
   it("uses Go verification and recovery routes with no-store same-origin requests", async () => {
     const { authClient } = await import("./auth");
     const sendResult = await authClient.sendVerificationEmail("ada@example.test");
@@ -151,6 +175,22 @@ describe("Go auth browser client", () => {
     const { authClient } = await import("./auth");
 
     await expect(authClient.signIn.email({ email: "ada@example.test", password: "long-password" }))
+      .resolves.toEqual({ data: null, error: { message: "The Go authentication service returned an unexpected response" } });
+  });
+
+  it("rejects a bearer token in a browser sign-in response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ token: "must-not-reach-javascript", user: goUser })));
+    const { authClient } = await import("./auth");
+
+    await expect(authClient.signIn.email({ email: "ada@example.test", password: "long-password" }))
+      .resolves.toEqual({ data: null, error: { message: "The Go authentication service returned an unexpected response" } });
+  });
+
+  it("does not treat an unsuccessful auth status as a successful mutation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ status: false })));
+    const { authClient } = await import("./auth");
+
+    await expect(authClient.resetPassword("token", "new-password"))
       .resolves.toEqual({ data: null, error: { message: "The Go authentication service returned an unexpected response" } });
   });
 
