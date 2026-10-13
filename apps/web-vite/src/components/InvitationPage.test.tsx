@@ -46,8 +46,8 @@ describe("InvitationPage", () => {
   it("accepts only for a verified matching account and waits for Go success", async () => {
     vi.mocked(invitationsApi.preview).mockResolvedValue(preview);
     vi.mocked(authClient.getSession).mockResolvedValue({ data: {
-      user: { id: "user-1", email: "ADA@example.test", emailVerified: true },
-      session: { id: "session-1", userId: "user-1", expiresAt: "2026-10-14T10:00:00Z" },
+      user: { id: "user-1", name: "Ada", email: "ADA@example.test", emailVerified: true, image: null, createdAt: "2026-10-13T10:00:00Z", updatedAt: "2026-10-13T10:00:00Z" },
+      session: { id: "session-1", userId: "user-1", expiresAt: "2026-10-14T10:00:00Z", createdAt: "2026-10-13T10:00:00Z", updatedAt: "2026-10-13T10:00:00Z" },
     }, error: null });
     vi.mocked(invitationsApi.accept).mockResolvedValue({ ok: true });
 
@@ -60,8 +60,8 @@ describe("InvitationPage", () => {
   it("does not offer acceptance to mismatched or unverified sessions", async () => {
     vi.mocked(invitationsApi.preview).mockResolvedValue(preview);
     vi.mocked(authClient.getSession).mockResolvedValue({ data: {
-      user: { id: "user-1", email: "grace@example.test", emailVerified: false },
-      session: { id: "session-1", userId: "user-1", expiresAt: "2026-10-14T10:00:00Z" },
+      user: { id: "user-1", name: "Grace", email: "grace@example.test", emailVerified: false, image: null, createdAt: "2026-10-13T10:00:00Z", updatedAt: "2026-10-13T10:00:00Z" },
+      session: { id: "session-1", userId: "user-1", expiresAt: "2026-10-14T10:00:00Z", createdAt: "2026-10-13T10:00:00Z", updatedAt: "2026-10-13T10:00:00Z" },
     }, error: null });
 
     const view = render(<InvitationPage pathname="/invite/opaque-token" />);
@@ -71,8 +71,8 @@ describe("InvitationPage", () => {
 
     view.unmount();
     vi.mocked(authClient.getSession).mockResolvedValue({ data: {
-      user: { id: "user-1", email: "ada@example.test", emailVerified: false },
-      session: { id: "session-1", userId: "user-1", expiresAt: "2026-10-14T10:00:00Z" },
+      user: { id: "user-1", name: "Ada", email: "ada@example.test", emailVerified: false, image: null, createdAt: "2026-10-13T10:00:00Z", updatedAt: "2026-10-13T10:00:00Z" },
+      session: { id: "session-1", userId: "user-1", expiresAt: "2026-10-14T10:00:00Z", createdAt: "2026-10-13T10:00:00Z", updatedAt: "2026-10-13T10:00:00Z" },
     }, error: null });
     render(<InvitationPage pathname="/invite/opaque-token" />);
     expect(await screen.findByText(/verify/i)).toBeTruthy();
