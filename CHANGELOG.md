@@ -19,6 +19,9 @@ The full v1 changelog is preserved at the bottom of this file.
   recovery states for invalid or missing records.
 - Vite auth now uses a schema-validated Go HTTP client with same-origin cookie
   sessions and rejects unexpected browser tokens or mutation responses.
+- Vite HR expense claims use Go capabilities only and preserve each claim's
+  stored currency. Claim and policy inputs follow currency-specific minor units
+  and reject values with excess fractional precision.
 - Go Messaging agent sessions now advertise only the CRM capabilities with
   authored tool descriptions and input schemas. Broader Go capabilities remain
   unavailable to model tool calls until their contracts are authored.

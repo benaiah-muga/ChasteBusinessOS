@@ -5,6 +5,7 @@ const claim = {
   id: "11111111-1111-4111-8111-111111111111",
   claimantUserId: "22222222-2222-4222-8222-222222222222",
   amountMinor: 12500,
+  currency: "USD",
   status: "submitted",
   memo: "Taxi to the client kickoff",
 };
@@ -17,66 +18,7 @@ afterEach(() => {
 });
 
 describe("Expenses API", () => {
-  it("loads validated claims and policy limits through the same-origin session", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ claims: [claim], policies: [{ category: "travel", limitMinor: 25000 }] }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(fetchExpenses()).resolves.toEqual({ claims: [claim], policies: [{ category: "travel", limitMinor: 25000 }] });
-    expect(fetchMock).toHaveBeenCalledWith("/api/expenses", expect.objectContaining({ method: "GET", credentials: "same-origin", cache: "no-store" }));
-  });
-
-  it("rejects malformed read payloads and retains permission-denied responses", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ claims: [{ ...claim, amountMinor: 1.5 }], policies: [] })));
-    await expect(fetchExpenses()).rejects.toMatchObject({ name: "ExpensesApiError", status: 200, message: expect.stringContaining("unexpected format") });
-
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: missing expenses.decide" }, { status: 403 })));
-    await expect(fetchExpenses()).rejects.toMatchObject({ name: "ExpensesApiError", status: 403, message: "forbidden: missing expenses.decide" });
-  });
-
-  it("submits integer minor units with an idempotent intent and validates success", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      expect(payload).toMatchObject({ action: "submit", amountMinor: 12500, memo: "Taxi", intentId: expect.any(String) });
-      expect(payload.intentId).not.toBe("");
-      return Response.json({ ok: true, data: { claimId: claim.id, status: "submitted", category: "travel", overPolicyLimit: false, policyLimitMinor: 25000 } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(submitExpenseAction({ action: "submit", amountMinor: 12500, memo: "Taxi" })).resolves.toMatchObject({ kind: "completed" });
-    expect(fetchMock).toHaveBeenCalledWith("/api/expenses", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store" }));
-  });
-
-  it("surfaces pending approval without treating it as a completed action", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "policy approval required", pendingApproval: true }, { status: 202 })));
-
-    await expect(submitExpenseAction({ action: "pay", claimId: claim.id, amountMinor: 12500 })).resolves.toEqual({ kind: "pending", reason: "policy approval required" });
-  });
-
-  it("reuses the same intent ID when a write response is lost and the action is retried", async () => {
-    const intentIds: string[] = [];
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
-      if (intentIds.length === 1) throw new TypeError("connection dropped");
-      return Response.json({ ok: true, data: { claimId: claim.id, status: "submitted", category: "travel", overPolicyLimit: false, policyLimitMinor: null } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const action = { action: "submit" as const, amountMinor: 12501, memo: "retry identity proof" };
-
-    await expect(submitExpenseAction(action)).rejects.toBeInstanceOf(ExpensesApiError);
-    await expect(submitExpenseAction(action)).resolves.toMatchObject({ kind: "completed" });
-    expect(intentIds[1]).toBe(intentIds[0]);
-  });
-
-  it("reports authorization and rejects malformed pending responses", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: missing accounting.post" }, { status: 403 })));
-    await expect(submitExpenseAction({ action: "pay", claimId: claim.id, amountMinor: 12500 })).rejects.toMatchObject({ name: "ExpensesApiError", status: 403 });
-
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "approval required" }, { status: 202 })));
-    await expect(submitExpenseAction({ action: "pay", claimId: claim.id, amountMinor: 12500 })).rejects.toBeInstanceOf(ExpensesApiError);
-  });
-
-  it("loads claims and policies directly through their Go read capabilities", async () => {
-    vi.stubGlobal("__GO_HR_EXPENSES__", true);
+  it("loads validated claims and policy limits through Go capabilities", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: true, data: { claims: [claim] } }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { policies: [{ category: "travel", limitMinor: 25000 }] } }));
@@ -89,8 +31,59 @@ describe("Expenses API", () => {
     ]);
   });
 
+  it("rejects malformed Go read payloads and retains permission-denied responses", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { claims: [{ ...claim, amountMinor: 1.5 }] } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { policies: [] } })));
+    await expect(fetchExpenses()).rejects.toMatchObject({ name: "ExpensesApiError", status: 200, message: expect.stringContaining("unexpected format") });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: missing expenses.decide" }, { status: 403 })));
+    await expect(fetchExpenses()).rejects.toMatchObject({ name: "ExpensesApiError", status: 403, message: "forbidden: missing expenses.decide" });
+  });
+
+  it("submits integer minor units with an idempotent intent and validates success", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(payload).toMatchObject({ capabilityId: "accounting.submitExpenseClaim", input: { amountMinor: 12500, memo: "Taxi" }, intentId: expect.any(String) });
+      expect(payload.intentId).not.toBe("");
+      return Response.json({ ok: true, data: { claimId: claim.id, status: "submitted", category: "travel", overPolicyLimit: false, policyLimitMinor: 25000 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitExpenseAction({ action: "submit", amountMinor: 12500, memo: "Taxi" }, undefined, scope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store" }));
+  });
+
+  it("surfaces pending approval without treating it as a completed action", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "policy approval required", pendingApproval: true }, { status: 202 })));
+
+    await expect(submitExpenseAction({ action: "pay", claimId: claim.id, amountMinor: 12500 }, undefined, scope)).resolves.toEqual({ kind: "pending", reason: "policy approval required" });
+  });
+
+  it("reuses the same intent ID when a write response is lost and the action is retried", async () => {
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+      if (intentIds.length === 1) throw new TypeError("connection dropped");
+      return Response.json({ ok: true, data: { claimId: claim.id, status: "submitted", category: "travel", overPolicyLimit: false, policyLimitMinor: null } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "submit" as const, amountMinor: 12501, memo: "retry identity proof" };
+
+    await expect(submitExpenseAction(action, undefined, scope)).rejects.toBeInstanceOf(ExpensesApiError);
+    await expect(submitExpenseAction(action, undefined, scope)).resolves.toMatchObject({ kind: "completed" });
+    expect(intentIds[1]).toBe(intentIds[0]);
+  });
+
+  it("reports authorization and rejects malformed pending responses", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: missing accounting.post" }, { status: 403 })));
+    await expect(submitExpenseAction({ action: "pay", claimId: claim.id, amountMinor: 12500 }, undefined, scope)).rejects.toMatchObject({ name: "ExpensesApiError", status: 403 });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "approval required" }, { status: 202 })));
+    await expect(submitExpenseAction({ action: "pay", claimId: claim.id, amountMinor: 12500 }, undefined, scope)).rejects.toBeInstanceOf(ExpensesApiError);
+  });
+
   it("maps all expense writes to Go capabilities with their exact input contracts", async () => {
-    vi.stubGlobal("__GO_HR_EXPENSES__", true);
     const actions: Array<{ action: ExpenseAction; capabilityId: string; input: Record<string, unknown>; data: Record<string, unknown> }> = [
       { action: { action: "submit", amountMinor: 12500, memo: "Taxi", accountCode: "6900" }, capabilityId: "accounting.submitExpenseClaim", input: { amountMinor: 12500, memo: "Taxi", accountCode: "6900" }, data: { claimId: claim.id, status: "submitted", category: "travel", overPolicyLimit: false, policyLimitMinor: null } },
       { action: { action: "decide", claimId: claim.id, decision: "approved" }, capabilityId: "accounting.decideExpenseClaim", input: { claimId: claim.id, decision: "approved" }, data: { claimId: claim.id, status: "approved" } },
@@ -113,7 +106,6 @@ describe("Expenses API", () => {
   });
 
   it("supports opaque Better Auth actors and fails closed for invalid retry scopes", async () => {
-    vi.stubGlobal("__GO_HR_EXPENSES__", true);
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { set: true, category: "travel", limitMinor: 25000 } }));
     vi.stubGlobal("fetch", fetchMock);
     const action: ExpenseAction = { action: "setPolicy", category: "travel", limitMinor: 25000 };
@@ -133,7 +125,6 @@ describe("Expenses API", () => {
   });
 
   it("matches Go memo and policy category length boundaries before sending a write", async () => {
-    vi.stubGlobal("__GO_HR_EXPENSES__", true);
     const fetchMock = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: { category?: string } };
       return body.capabilityId === "accounting.submitExpenseClaim"
@@ -161,8 +152,7 @@ describe("Expenses API", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
-  it("retains an actor/org-scoped exact retry through pending, Go 404, and selector rollback", async () => {
-    vi.stubGlobal("__GO_HR_EXPENSES__", true);
+  it("retains an actor/org-scoped exact retry through pending and Go 404 responses", async () => {
     const action: ExpenseAction = { action: "pay", claimId: claim.id, amountMinor: 12500 };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 }))
@@ -175,11 +165,6 @@ describe("Expenses API", () => {
     await expect(submitExpenseAction({ action: "setPolicy", category: "travel", limitMinor: 20000 }, undefined, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
     await expect(submitExpenseAction(action, undefined, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
 
-    vi.stubGlobal("__GO_HR_EXPENSES__", false);
-    await expect(submitExpenseAction(action, undefined, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-
-    vi.stubGlobal("__GO_HR_EXPENSES__", true);
     await expect(submitExpenseAction(action, undefined, scope)).resolves.toMatchObject({ kind: "completed" });
     const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string });
     expect(bodies.map((body) => body.intentId)).toEqual([bodies[0]?.intentId, bodies[0]?.intentId, bodies[0]?.intentId]);
@@ -187,7 +172,6 @@ describe("Expenses API", () => {
   });
 
   it("isolates pending expense actions between organizations and actors", async () => {
-    vi.stubGlobal("__GO_HR_EXPENSES__", true);
     const action: ExpenseAction = { action: "pay", claimId: claim.id, amountMinor: 12500 };
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "connection lost" }, { status: 503 })));
     await expect(submitExpenseAction(action, undefined, scope)).rejects.toMatchObject({ status: 503, requestMayHaveReachedServer: true });

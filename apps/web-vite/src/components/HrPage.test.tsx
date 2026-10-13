@@ -36,6 +36,7 @@ const expenseClaim = {
   id: "11111111-1111-4111-8111-111111111111",
   claimantUserId: "22222222-2222-4222-8222-222222222222",
   amountMinor: 12500,
+  currency: "USD",
   status: "submitted",
   memo: "Taxi to the client kickoff",
 };
@@ -507,6 +508,7 @@ describe("Vite People page", () => {
 
     expect(await screen.findByRole("heading", { name: "Submit an expense claim" })).not.toBeNull();
     expect(screen.getByRole("tab", { name: "Expenses" }).getAttribute("aria-selected")).toBe("true");
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/capabilities/execute" && init?.method === "POST" && JSON.parse(String(init.body)).capabilityId === "accounting.listExpenseClaims")).toBe(true));
     const capabilities = fetchMock.mock.calls
       .filter(([path]) => path === "/api/capabilities/execute")
       .map(([, init]) => (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId);
@@ -526,6 +528,118 @@ describe("Vite People page", () => {
     const category = screen.getByRole("textbox", { name: "Policy category" }) as HTMLInputElement;
     expect([memo.minLength, memo.maxLength]).toEqual([3, 500]);
     expect([category.minLength, category.maxLength]).toEqual([2, 40]);
+  });
+
+  it("rejects expense amounts that exceed safe integer minor units", async () => {
+    window.history.replaceState(null, "", "/hr?tab=expenses");
+    const fetchMock = hrFetch();
+    stubFetchWithGoTimeReads(fetchMock);
+    render(<HrPage baseCurrency="USD" actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
+    await screen.findByRole("heading", { name: "Submit an expense claim" });
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Expense amount" }), { target: { value: "999999999999999999999999" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Expense explanation" }), { target: { value: "Client travel" } });
+    const submitButton = screen.getByRole("button", { name: "Submit claim" });
+    const claimForm = submitButton.closest("form");
+    if (!claimForm) throw new Error("Expense form was not found");
+    fireEvent.submit(claimForm);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Enter a valid amount");
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/capabilities/execute" && init?.method === "POST" && JSON.parse(String(init.body)).capabilityId === "accounting.submitExpenseClaim")).toBe(false);
+  });
+
+  it.each([
+    { currency: "JPY", amount: "1250", amountMinor: 1250, limit: "2500", limitMinor: 2500 },
+    { currency: "BHD", amount: "1.234", amountMinor: 1234, limit: "2.500", limitMinor: 2500 },
+  ])("converts expense and policy amounts using $currency minor units", async ({ currency, amount, amountMinor, limit, limitMinor }) => {
+    window.history.replaceState(null, "", "/hr?tab=expenses");
+    const baseFetch = hrFetch();
+    const writes: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { capabilityId: string; input: Record<string, unknown> };
+        if (body.capabilityId === "accounting.submitExpenseClaim" || body.capabilityId === "accounting.setExpensePolicy") {
+          writes.push(body);
+          return body.capabilityId === "accounting.submitExpenseClaim"
+            ? Response.json({ ok: true, data: { claimId: "33333333-3333-4333-8333-333333333333", status: "submitted", category: "travel", overPolicyLimit: false, policyLimitMinor: null } })
+            : Response.json({ ok: true, data: { set: true, category: "travel", limitMinor } });
+        }
+      }
+      return baseFetch(input, init);
+    });
+    stubFetchWithGoTimeReads(fetchMock);
+    render(<HrPage baseCurrency={currency} actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
+    await screen.findByRole("heading", { name: "Submit an expense claim" });
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Expense amount" }), { target: { value: amount } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Expense explanation" }), { target: { value: "Client travel" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit claim" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Expense claim done."));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Policy category" }), { target: { value: "travel" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Policy scrutiny limit" }), { target: { value: limit } });
+    fireEvent.click(screen.getByRole("button", { name: "Set limit" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Set travel limit done."));
+
+    expect(writes.map(({ capabilityId, input }) => [capabilityId, input])).toEqual([
+      ["accounting.submitExpenseClaim", expect.objectContaining({ amountMinor })],
+      ["accounting.setExpensePolicy", expect.objectContaining({ limitMinor })],
+    ]);
+  });
+
+  it.each([
+    { currency: "JPY", amount: "1.1" },
+    { currency: "BHD", amount: "1.2345" },
+  ])("rejects over-precision in both expense forms for $currency", async ({ currency, amount }) => {
+    window.history.replaceState(null, "", "/hr?tab=expenses");
+    const fetchMock = hrFetch();
+    stubFetchWithGoTimeReads(fetchMock);
+    render(<HrPage baseCurrency={currency} actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
+    await screen.findByRole("heading", { name: "Submit an expense claim" });
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Expense amount" }), { target: { value: amount } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Expense explanation" }), { target: { value: "Client travel" } });
+    const claimForm = screen.getByRole("button", { name: "Submit claim" }).closest("form");
+    if (!claimForm) throw new Error("Expense form was not found");
+    fireEvent.submit(claimForm);
+    expect((await screen.findByRole("alert")).textContent).toContain("Enter a valid amount");
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Policy category" }), { target: { value: "travel" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Policy scrutiny limit" }), { target: { value: amount } });
+    const policyForm = screen.getByRole("button", { name: "Set limit" }).closest("form");
+    if (!policyForm) throw new Error("Expense policy form was not found");
+    fireEvent.submit(policyForm);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("valid non-negative scrutiny limit"));
+
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/capabilities/execute" && init?.method === "POST" && ["accounting.submitExpenseClaim", "accounting.setExpensePolicy"].includes((JSON.parse(String(init.body)) as { capabilityId?: string }).capabilityId ?? ""))).toBe(false);
+  });
+
+  it("displays and pays each claim in its stored currency", async () => {
+    window.history.replaceState(null, "", "/hr?tab=expenses");
+    const baseFetch = hrFetch();
+    const paymentRequests: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { capabilityId: string; input: Record<string, unknown> };
+        if (body.capabilityId === "accounting.listExpenseClaims") {
+          return Response.json({ ok: true, data: { claims: [{ ...expenseClaim, currency: "JPY", status: "approved" }] } });
+        }
+        if (body.capabilityId === "accounting.payExpenseClaim") {
+          paymentRequests.push(body);
+          return Response.json({ ok: true, data: { claimId: expenseClaim.id, entryId: "55555555-5555-4555-8555-555555555555", paidMinor: 12500 } });
+        }
+      }
+      return baseFetch(input, init);
+    });
+    stubFetchWithGoTimeReads(fetchMock);
+    render(<HrPage baseCurrency="BHD" actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
+
+    const payoutText = new Intl.NumberFormat(undefined, { style: "currency", currency: "JPY" }).format(12500);
+    const payButton = await screen.findByRole("button", { name: `Pay ${payoutText}` });
+    expect(screen.getByText(payoutText)).not.toBeNull();
+    fireEvent.click(payButton);
+    await waitFor(() => expect(paymentRequests).toHaveLength(1));
+    expect(paymentRequests[0]).toEqual(expect.objectContaining({ capabilityId: "accounting.payExpenseClaim", input: { claimId: expenseClaim.id, amountMinor: 12500 } }));
   });
 
   it("keeps expense review data behind the existing expenses permission", async () => {
@@ -552,7 +666,6 @@ describe("Vite People page", () => {
 
   it("routes Vite expenses to Go and recovers the exact pending claim action", async () => {
     window.history.replaceState(null, "", "/hr?tab=expenses");
-    vi.stubGlobal("__GO_HR_EXPENSES__", true);
     let pendingFirstSubmit = true;
     const readCapabilities: string[] = [];
     const requests: Array<{ capabilityId: string; intentId: string; input: Record<string, unknown> }> = [];
@@ -577,7 +690,7 @@ describe("Vite People page", () => {
       return Response.json({ error: `Unexpected route: ${path}` }, { status: 404 });
     });
     stubFetchWithGoTimeReads(fetchMock);
-    const page = render(<HrPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
+    const page = render(<HrPage baseCurrency="USD" actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     await screen.findByRole("heading", { name: "Submit an expense claim" });
     expect(readCapabilities).toEqual(["hr.report"]);
@@ -589,7 +702,7 @@ describe("Vite People page", () => {
     expect(screen.getByRole("button", { name: "Retry exact expense action" })).not.toBeNull();
 
     page.unmount();
-    render(<HrPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
+    render(<HrPage baseCurrency="USD" actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await screen.findByRole("button", { name: "Retry exact expense action" });
     fireEvent.click(screen.getByRole("button", { name: "Retry exact expense action" }));
 

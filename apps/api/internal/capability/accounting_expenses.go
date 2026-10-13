@@ -70,6 +70,7 @@ type ListExpenseClaimSummary struct {
 	ID             string `json:"id"`
 	ClaimantUserID string `json:"claimantUserId"`
 	AmountMinor    int64  `json:"amountMinor"`
+	Currency       string `json:"currency"`
 	Status         string `json:"status"`
 	Memo           string `json:"memo"`
 }
@@ -401,7 +402,7 @@ func sliceUTF16CodeUnits(value string, limit int) string {
 
 func listExpenseClaims(ctx context.Context, tx pgx.Tx, orgID string, input ListExpenseClaimsInput) (ListExpenseClaimsOutput, error) {
 	query := `
-		SELECT id::text, claimant_user_id::text, amount_minor, status, memo
+		SELECT id::text, claimant_user_id::text, amount_minor, currency, status, memo
 		FROM expense_claims
 		WHERE org_id = $1::uuid`
 	args := []any{orgID}
@@ -418,7 +419,7 @@ func listExpenseClaims(ctx context.Context, tx pgx.Tx, orgID string, input ListE
 	claims := make([]ListExpenseClaimSummary, 0)
 	for rows.Next() {
 		var claim ListExpenseClaimSummary
-		if err := rows.Scan(&claim.ID, &claim.ClaimantUserID, &claim.AmountMinor, &claim.Status, &claim.Memo); err != nil {
+		if err := rows.Scan(&claim.ID, &claim.ClaimantUserID, &claim.AmountMinor, &claim.Currency, &claim.Status, &claim.Memo); err != nil {
 			return ListExpenseClaimsOutput{}, err
 		}
 		claims = append(claims, claim)

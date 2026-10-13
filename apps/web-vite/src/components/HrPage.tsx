@@ -474,7 +474,7 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
 
   const loadClaims = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     try {
-      const data = await fetchExpenses(signal, true);
+      const data = await fetchExpenses(signal);
       if (signal?.aborted) return false;
       setClaims(data.claims);
       setPolicies(data.policies);
@@ -510,7 +510,7 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitExpenseAction(action, undefined, retryScope, true);
+      const result = await submitExpenseAction(action, undefined, retryScope);
       if (result.kind === "pending") {
         setRecoveryAction(action);
         setNotice({ tone: "pending", text: `${label} is above the payment threshold and is in the Approvals inbox. ${result.reason}` });
@@ -534,9 +534,9 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
 
   async function submitClaim(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const amountMinor = Math.round(Number(form.amount || "0") * 100);
+    const amountMinor = expenseAmountMinor(form.amount, currency);
     const memo = form.memo.trim();
-    if (memo.length < 3 || memo.length > 500 || !Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
+    if (memo.length < 3 || memo.length > 500 || amountMinor === null || amountMinor <= 0) {
       setNotice({ tone: "error", text: "Enter a valid amount and an explanation between 3 and 500 characters." });
       return;
     }
@@ -548,8 +548,8 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
   async function setPolicy(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const category = policyForm.category.trim();
-    const limitMinor = Math.round(Number(policyForm.limit || "0") * 100);
-    if (category.length < 2 || category.length > 40 || !policyForm.limit || !Number.isSafeInteger(limitMinor) || limitMinor < 0) {
+    const limitMinor = expenseAmountMinor(policyForm.limit, currency);
+    if (category.length < 2 || category.length > 40 || !policyForm.limit || limitMinor === null || limitMinor < 0) {
       setNotice({ tone: "error", text: "Enter a category between 2 and 40 characters and a valid non-negative scrutiny limit." });
       return;
     }
@@ -569,13 +569,14 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
   const pendingCount = claims?.filter((claim) => claim.status === "submitted").length ?? 0;
   const approvedCount = claims?.filter((claim) => claim.status === "approved").length ?? 0;
   const displayCurrency = currency ?? "USD";
+  const displayMinorUnits = currencyMinorUnits(displayCurrency) ?? 2;
 
   return <div className="hr-content hr-expenses">
     {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}{notice.tone === "pending" && <> <a href="/approvals">Open approvals</a></>}{recoveryAction && <button type="button" disabled={busy} onClick={() => void post(recoveryAction, "Expense action", true)}>Retry exact expense action</button>}</p>}
     <section className="hr-card">
       <div className="hr-section-heading"><div><p className="hr-eyebrow">Reimbursement</p><h2>Submit an expense claim</h2></div></div>
       <form className="hr-expense-form" onSubmit={(event) => void submitClaim(event)}>
-        <label>Amount<input aria-label="Expense amount" inputMode="decimal" type="number" min="0.01" step="0.01" placeholder="120.00" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+        <label>Amount<input aria-label="Expense amount" inputMode="decimal" type="number" min={displayMinorUnits === 0 ? "1" : (1 / 10 ** displayMinorUnits).toString()} step={10 ** -displayMinorUnits} placeholder={displayMinorUnits === 0 ? "120" : `120.${"0".repeat(displayMinorUnits)}`} value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
         <label className="hr-expense-memo">What &amp; why<input aria-label="Expense explanation" minLength={3} maxLength={500} placeholder="Taxi to the client kickoff" value={form.memo} onChange={(event) => setForm({ ...form, memo: event.target.value })} /></label>
         <label>Account <span className="hr-muted">(optional)</span><input aria-label="Expense account code" placeholder="6900" value={form.accountCode} onChange={(event) => setForm({ ...form, accountCode: event.target.value })} /></label>
         <button className="hr-primary-button" type="submit" disabled={busy || Boolean(recoveryAction) || !form.amount || !form.memo.trim()}>{busy ? "Working…" : "Submit claim"}</button>
@@ -587,7 +588,7 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
       <div className="hr-section-heading"><div><p className="hr-eyebrow">Controls</p><h2>Expense policy limits</h2></div><span className="hr-muted">{policies.length} cap{policies.length === 1 ? "" : "s"} set</span></div>
       <form className="hr-expense-form hr-expense-policy-form" onSubmit={(event) => void setPolicy(event)}>
         <label>Category<input aria-label="Policy category" minLength={2} maxLength={40} placeholder="e.g. travel" value={policyForm.category} onChange={(event) => setPolicyForm({ ...policyForm, category: event.target.value })} /></label>
-        <label>Scrutiny limit<input aria-label="Policy scrutiny limit" inputMode="decimal" type="number" min="0" step="0.01" placeholder="250.00" value={policyForm.limit} onChange={(event) => setPolicyForm({ ...policyForm, limit: event.target.value })} /></label>
+        <label>Scrutiny limit<input aria-label="Policy scrutiny limit" inputMode="decimal" type="number" min="0" step={10 ** -displayMinorUnits} placeholder={displayMinorUnits === 0 ? "250" : `250.${"0".repeat(displayMinorUnits)}`} value={policyForm.limit} onChange={(event) => setPolicyForm({ ...policyForm, limit: event.target.value })} /></label>
         <button className="hr-primary-button" type="submit" disabled={busy || Boolean(recoveryAction) || !policyForm.category.trim() || !policyForm.limit}>{busy ? "Working…" : "Set limit"}</button>
       </form>
       {policies.length > 0 && <ul className="hr-expense-policies">{policies.map((policy) => <li key={policy.category}><span>{policy.category}</span><span>Over {formatMoney(policy.limitMinor, displayCurrency)} gets a harder look</span></li>)}</ul>}
@@ -600,14 +601,30 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
         : error ? <div className="hr-error" role="alert"><div><h3>{error.status === 401 ? "Sign in again" : error.status === 403 ? "Access denied" : "Could not load expense claims"}</h3><p>{error.message}</p></div><div className="hr-error-actions">{error.status === 401 && <a href="/login">Sign in again</a>}<button type="button" onClick={() => void loadClaims()}>Try again</button></div></div>
           : (claims ?? []).length === 0 ? <div className="hr-empty"><h2>No expense claims yet</h2><p>Filed claims appear here with their decision and payment state.</p></div>
             : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Claim</th><th scope="col">Filed by</th><th scope="col" className="hr-expense-number">Amount</th><th scope="col">Status</th><th scope="col"><span className="hr-visually-hidden">Actions</span></th></tr></thead><tbody>
-              {(claims ?? []).map((claim) => <tr key={claim.id}><th scope="row" className="hr-expense-claim">{claim.memo}</th><td title={claim.claimantUserId} className="hr-expense-claimant">{claim.claimantUserId.slice(0, 8)}</td><td className="hr-expense-number">{formatMoney(claim.amountMinor, displayCurrency)}</td><td><span className={`hr-pill hr-expense-${claim.status}`}>{claim.status}</span></td><td><div className="hr-row-actions hr-expense-actions">
+              {(claims ?? []).map((claim) => <tr key={claim.id}><th scope="row" className="hr-expense-claim">{claim.memo}</th><td title={claim.claimantUserId} className="hr-expense-claimant">{claim.claimantUserId.slice(0, 8)}</td><td className="hr-expense-number">{formatMoney(claim.amountMinor, claim.currency)}</td><td><span className={`hr-pill hr-expense-${claim.status}`}>{claim.status}</span></td><td><div className="hr-row-actions hr-expense-actions">
                 {claim.status === "submitted" && <><button type="button" disabled={busy || Boolean(recoveryAction)} onClick={() => void decide(claim, "approved")}>Approve</button><button type="button" disabled={busy || Boolean(recoveryAction)} onClick={() => void decide(claim, "rejected")}>Reject</button></>}
-                {claim.status === "approved" && <button type="button" disabled={busy || Boolean(recoveryAction)} onClick={() => void pay(claim)}>Pay {formatMoney(claim.amountMinor, displayCurrency)}</button>}
+                {claim.status === "approved" && <button type="button" disabled={busy || Boolean(recoveryAction)} onClick={() => void pay(claim)}>Pay {formatMoney(claim.amountMinor, claim.currency)}</button>}
               </div></td></tr>)}
             </tbody></table></div>}
       {claims && (pendingCount > 0 || approvedCount > 0) && <p className="hr-muted hr-expense-help">{pendingCount > 0 && `${pendingCount} awaiting decision. `}{approvedCount > 0 && `${approvedCount} approved and awaiting reimbursement.`}</p>}
     </section>
   </div>;
+}
+
+function expenseAmountMinor(value: string, currency: string | null): number | null {
+  const normalized = value.trim();
+  const units = currency ? currencyMinorUnits(currency) : null;
+  if (units === null || normalized.length > 32) return null;
+  const match = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))$/.exec(normalized);
+  if (!match) return null;
+  const whole = match[1] ?? "0";
+  const fraction = match[2] ?? match[3] ?? "";
+  if (fraction.length > units) return null;
+  const factor = 10n ** BigInt(units);
+  const retained = fraction.padEnd(units, "0");
+  const minor = BigInt(whole) * factor + BigInt(retained || "0");
+  if (minor > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(minor);
 }
 
 function Overview({ report, timeRows, currency, onTabChange }: { report: HrReport; timeRows: HrTimeReport["rows"]; currency: string | null; onTabChange: (tab: TabId) => void }) {

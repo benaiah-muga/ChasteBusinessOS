@@ -6,6 +6,7 @@ const ClaimSchema = z.object({
   id: uuid,
   claimantUserId: z.string().min(1),
   amountMinor: z.number().int().safe().nonnegative(),
+  currency: z.string().regex(/^[A-Z]{3}$/),
   status: z.enum(["submitted", "approved", "rejected", "paid"]),
   memo: z.string(),
 });
@@ -13,7 +14,6 @@ const ClaimSchema = z.object({
 const PolicySchema = z.object({ category: z.string(), limitMinor: z.number().int().safe().nonnegative() });
 const ListClaimsSchema = z.object({ claims: z.array(ClaimSchema) });
 const ListPoliciesSchema = z.object({ policies: z.array(PolicySchema) });
-const ListSchema = z.object({ claims: z.array(ClaimSchema), policies: z.array(PolicySchema) });
 const ErrorSchema = z.object({ error: z.string() });
 const PendingSchema = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() });
 const SubmitActionSchema = z.object({ action: z.literal("submit"), amountMinor: z.number().int().safe().positive(), memo: z.string().min(3).max(500), accountCode: z.string().optional() }).strict();
@@ -47,11 +47,6 @@ export class ExpensesApiError extends Error {
 }
 
 const EXPENSE_ATTEMPT_PREFIX = "chaste:expenses:go:attempt:v1:";
-const legacyRetryIntentIds = new Map<string, string>();
-
-function goExpensesUseGo(): boolean {
-  return typeof __GO_HR_EXPENSES__ !== "undefined" && __GO_HR_EXPENSES__;
-}
 
 function requestSignal(signal?: AbortSignal, timeout = 15_000): AbortSignal {
   const timeoutSignal = AbortSignal.timeout(timeout);
@@ -100,20 +95,12 @@ async function executeRead<T>(capabilityId: string, input: Record<string, never>
   return parsed.data.data;
 }
 
-export async function fetchExpenses(signal?: AbortSignal, useGoOverride?: boolean): Promise<{ claims: ExpenseClaim[]; policies: ExpensePolicy[] }> {
-  if (useGoOverride ?? goExpensesUseGo()) {
-    const [claims, policies] = await Promise.all([
-      executeRead("accounting.listExpenseClaims", {}, ListClaimsSchema, signal),
-      executeRead("accounting.listExpensePolicies", {}, ListPoliciesSchema, signal),
-    ]);
-    return { claims: claims.claims, policies: policies.policies };
-  }
-
-  const { response, body } = await request("/api/expenses", { method: "GET" }, signal);
-  if (!response.ok) throw new ExpensesApiError(response.status, errorMessage(response.status, body));
-  const parsed = ListSchema.safeParse(body);
-  if (!parsed.success) throw new ExpensesApiError(response.status, "The expenses service returned data in an unexpected format.");
-  return parsed.data;
+export async function fetchExpenses(signal?: AbortSignal): Promise<{ claims: ExpenseClaim[]; policies: ExpensePolicy[] }> {
+  const [claims, policies] = await Promise.all([
+    executeRead("accounting.listExpenseClaims", {}, ListClaimsSchema, signal),
+    executeRead("accounting.listExpensePolicies", {}, ListPoliciesSchema, signal),
+  ]);
+  return { claims: claims.claims, policies: policies.policies };
 }
 
 export async function readPendingExpenseAction(scope: ExpenseRetryScope): Promise<ExpenseAction | null> {
@@ -131,7 +118,6 @@ export async function submitExpenseAction(
   action: ExpenseAction,
   signal?: AbortSignal,
   retryScope?: ExpenseRetryScope,
-  useGoOverride?: boolean,
 ): Promise<ExpenseActionOutcome> {
   if (!ExpenseActionSchema.safeParse(action).success) {
     const message = action.action === "submit"
@@ -141,29 +127,6 @@ export async function submitExpenseAction(
         : "The expense action is invalid.";
     throw new ExpensesApiError(0, message);
   }
-  const useGo = useGoOverride ?? goExpensesUseGo();
-  if (!useGo) {
-    if (retryScope?.actorId && retryScope.organizationId) {
-      const unresolved = await readPendingExpenseAction(retryScope);
-      if (unresolved) throw new ExpensesApiError(0, "A Go expense action is unresolved. Restore the Go expense route and retry that exact action before using the legacy route.", true);
-    }
-    const retryKey = canonicalJSON(action);
-    const intentId = legacyRetryIntentIds.get(retryKey) ?? crypto.randomUUID();
-    try {
-      const { response, body } = await request("/api/expenses", {
-        method: "POST",
-        body: JSON.stringify({ ...action, intentId }),
-      }, signal);
-      const outcome = parseLegacyActionOutcome(response, body, action.action);
-      legacyRetryIntentIds.delete(retryKey);
-      return outcome;
-    } catch (error) {
-      if (error instanceof ExpensesApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) legacyRetryIntentIds.delete(retryKey);
-      else legacyRetryIntentIds.set(retryKey, intentId);
-      throw error;
-    }
-  }
-
   const scope = await expenseScope(retryScope);
   const attempt = await expenseAttempt(action, scope);
   const { capabilityId, input } = capabilityRequest(action);
@@ -282,16 +245,4 @@ function capabilityRequest(action: ExpenseAction): { capabilityId: string; input
       return { capabilityId: "accounting.setExpensePolicy", input };
     }
   }
-}
-
-function parseLegacyActionOutcome(response: Response, body: unknown, action: ExpenseAction["action"]): ExpenseActionOutcome {
-  if (response.status === 202) {
-    const pending = PendingSchema.safeParse(body);
-    if (!pending.success) throw new ExpensesApiError(response.status, "The expenses service returned an unexpected approval response.");
-    return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This action is waiting for approval." };
-  }
-  if (!response.ok) throw new ExpensesApiError(response.status, errorMessage(response.status, body));
-  const parsed = z.object({ ok: z.literal(true), data: ActionSchemas[action] }).safeParse(body);
-  if (response.status !== 200 || !parsed.success) throw new ExpensesApiError(response.status, "The expenses service returned an unexpected action response.");
-  return { kind: "completed", data: parsed.data.data };
 }

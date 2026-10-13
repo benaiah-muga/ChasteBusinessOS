@@ -548,7 +548,7 @@ func TestAccountingExpensesPayPostsBalancedJournalAndMarksPaid(t *testing.T) {
 	claims := expenseTestClaims(fx)
 	now := time.Date(2026, 9, 27, 15, 0, 0, 0, time.UTC)
 	defaultCode := seedExpenseClaim(t, fx, fx.orgID, seedExpenseClaimRow{
-		ClaimantUserID: fx.userID, AmountMinor: 25_000, Memo: "Client site taxi and hotel", Status: "approved", CreatedAt: now.Add(-time.Hour),
+		ClaimantUserID: fx.userID, AmountMinor: 25_000, Currency: "JPY", Memo: "Client site taxi and hotel", Status: "approved", CreatedAt: now.Add(-time.Hour),
 	})
 	overrideCode := seedExpenseClaim(t, fx, fx.orgID, seedExpenseClaimRow{
 		ClaimantUserID: fx.userID, AmountMinor: 8_000, Memo: "Team lunch", AccountCode: crmStringPointer("6000"),
@@ -589,7 +589,7 @@ func TestAccountingExpensesPayPostsBalancedJournalAndMarksPaid(t *testing.T) {
 		t.Fatal(err)
 	}
 	if entryMemo != "Expense reimbursement: Client site taxi and hotel" || sourceType != "expense_claim" ||
-		sourceID == nil || *sourceID != defaultCode || currency != "USD" || !postedAt.Equal(now) ||
+		sourceID == nil || *sourceID != defaultCode || currency != "JPY" || !postedAt.Equal(now) ||
 		actorType != "human" || postedByActorID == nil || *postedByActorID != fx.userID {
 		t.Fatalf("posted entry = memo=%q source=%s/%v currency=%s posted=%v actor=%s/%v",
 			entryMemo, sourceType, sourceID, currency, postedAt, actorType, postedByActorID)
@@ -750,7 +750,7 @@ func TestAccountingExpensesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	base := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
 	oldest := seedExpenseClaim(t, fx, fx.orgID, seedExpenseClaimRow{ClaimantUserID: fx.userID, AmountMinor: 10_000, Memo: "Oldest submitted", CreatedAt: base})
 	middle := seedExpenseClaim(t, fx, fx.orgID, seedExpenseClaimRow{ClaimantUserID: fx.userID, AmountMinor: 20_000, Memo: "Middle approved", Status: "approved", CreatedAt: base.Add(time.Hour)})
-	newest := seedExpenseClaim(t, fx, fx.orgID, seedExpenseClaimRow{ClaimantUserID: fx.userID, AmountMinor: 30_000, Memo: "Newest paid", Status: "paid", CreatedAt: base.Add(2 * time.Hour)})
+	newest := seedExpenseClaim(t, fx, fx.orgID, seedExpenseClaimRow{ClaimantUserID: fx.userID, AmountMinor: 30_000, Currency: "JPY", Memo: "Newest paid", Status: "paid", CreatedAt: base.Add(2 * time.Hour)})
 	seedExpenseClaim(t, fx, fx.otherOrgID, seedExpenseClaimRow{ClaimantUserID: fx.userID, AmountMinor: 99_000, Memo: "Foreign claim", CreatedAt: base.Add(3 * time.Hour)})
 
 	all, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (ListExpenseClaimsOutput, error) {
@@ -766,7 +766,7 @@ func TestAccountingExpensesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantFirst := fmt.Sprintf(`{"id":%q,"claimantUserId":%q,"amountMinor":30000,"status":"paid","memo":"Newest paid"}`, newest, fx.userID)
+	wantFirst := fmt.Sprintf(`{"id":%q,"claimantUserId":%q,"amountMinor":30000,"currency":"JPY","status":"paid","memo":"Newest paid"}`, newest, fx.userID)
 	if string(firstEncoded) != wantFirst {
 		t.Fatalf("listExpenseClaims row JSON = %s, want %s", firstEncoded, wantFirst)
 	}
