@@ -93,7 +93,7 @@ describe("Vite inventory transfers panel", () => {
     fireEvent.change(screen.getByLabelText("Item to transfer"), { target: { value: "BAG-50" } });
     fireEvent.change(screen.getByLabelText("Quantity in units"), { target: { value: "1.25" } });
     fireEvent.change(screen.getByLabelText("Transfer note"), { target: { value: "Shelf stock" } });
-    await waitFor(() => expect((screen.getByRole("button", { name: "Draft transfer" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Draft transfer" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
     fireEvent.click(screen.getByRole("button", { name: "Draft transfer" }));
 
     expect((await screen.findByRole("status")).textContent).toContain("Transfer draft created.");

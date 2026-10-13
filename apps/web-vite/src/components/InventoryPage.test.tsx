@@ -212,7 +212,7 @@ describe("Vite inventory page", () => {
       if (input === "/api/modules") return Response.json(switchboard);
       return Response.json({ ...report, locations: [{ id: "location-1", code: "MAIN", name: "Main warehouse" }], reservations });
     }));
-    render(<InventoryPage />);
+    render(<InventoryPage actorId="actor-inventory-test" organizationId="org-inventory-test" />);
 
     expect(await screen.findByRole("heading", { name: "Locations and reservations" })).not.toBeNull();
     expect(screen.getByRole("heading", { name: "Movement history" })).not.toBeNull();
@@ -310,6 +310,45 @@ describe("Vite inventory page", () => {
       String(input) === "/api/inventory" && (init?.method ?? "GET") !== "POST",
     ).length;
     expect(reportReadsAfterUnmount).toBe(reportReadsBeforeUnmount);
+  });
+
+  it("does not let an old organization's child refresh supersede the active organization's load", async () => {
+    const actorId = "actor-1";
+    const oldOrganizationId = "org-1";
+    const newOrganizationId = "org-2";
+    let resolveAction: ((response: Response) => void) | undefined;
+    let resolveNewReport: ((response: Response) => void) | undefined;
+    const requests: Array<{ path: string; org: string | null }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const org = new Headers(init?.headers).get("X-Organization-ID");
+      requests.push({ path, org });
+      if (path === "/api/modules") return Response.json(switchboard);
+      if (init?.method === "POST") return new Promise<Response>((resolve) => { resolveAction = resolve; });
+      if (org === newOrganizationId) return new Promise<Response>((resolve) => { resolveNewReport = resolve; });
+      return Response.json(report);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<InventoryPage actorId={actorId} organizationId={oldOrganizationId} />);
+    expect(await screen.findByRole("heading", { name: "Create a stock location" })).not.toBeNull();
+
+    const locationForm = screen.getByRole("heading", { name: "Create a stock location" }).closest("form");
+    if (!locationForm) throw new Error("Expected stock location form");
+    fireEvent.change(within(locationForm).getByLabelText("Location code"), { target: { value: "SHOP" } });
+    fireEvent.change(within(locationForm).getByLabelText("Location name"), { target: { value: "Retail shop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create location" }));
+    await waitFor(() => expect(resolveAction).toBeTypeOf("function"));
+
+    rerender(<InventoryPage actorId={actorId} organizationId={newOrganizationId} />);
+    await waitFor(() => expect(requests.filter((request) => request.path === "/api/inventory" && request.org === newOrganizationId)).toHaveLength(1));
+    await act(async () => { resolveAction?.(Response.json({ ok: true, data: { locationId: "location-2" } })); });
+
+    expect(requests.filter((request) => request.path === "/api/modules")).toEqual([
+      { path: "/api/modules", org: oldOrganizationId },
+      { path: "/api/modules", org: newOrganizationId },
+    ]);
+    await act(async () => { resolveNewReport?.(Response.json(report)); });
+    expect(await screen.findByRole("heading", { name: "Inventory" })).not.toBeNull();
   });
 
   it("shows movement costs in organization currency when the display preference differs", async () => {

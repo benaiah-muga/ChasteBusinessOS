@@ -31,6 +31,7 @@ describe("inventory transfer API client", () => {
     const requests = fetchMock.mock.calls.map(([url, init]) => ({
       url,
       body: JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string },
+      headers: init?.headers as Record<string, string>,
     }));
     expect(requests.map((request) => request.url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
     expect(requests.map((request) => request.body.capabilityId)).toEqual(["inventory.createTransfer", "inventory.confirmTransfer"]);
@@ -39,18 +40,19 @@ describe("inventory transfer API client", () => {
     });
     expect(requests[1]?.body.input).toEqual({ transferId, lines: [{ lineId, quantityThousandths: 1000 }] });
     expect(requests[0]?.body.intentId).not.toBe(requests[1]?.body.intentId);
+    expect(requests.map((request) => request.headers["X-Organization-ID"])).toEqual([retryScope.organizationId, retryScope.organizationId]);
   });
 
-  it("fails closed without sending legacy writes when Go is disabled", async () => {
-    const fetchMock = vi.fn();
+  it("fails closed when the Go endpoint is unavailable without trying a legacy route", async () => {
+    const fetchMock = vi.fn((_url: string) => Promise.resolve(jsonResponse({ error: "route unavailable" }, 404)));
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", false);
 
     await expect(createInventoryTransfer({ fromLocationCode: "MAIN", toLocationCode: "SHOP", sku: "ITEM-1", quantityThousandths: 2500 }, retryScope))
-      .rejects.toThrow("Go inventory transfer writes are not enabled");
-    await expect(confirmInventoryTransfer(transferId, retryScope))
-      .rejects.toThrow("Go inventory transfer writes are not enabled");
-    expect(fetchMock).not.toHaveBeenCalled();
+      .rejects.toMatchObject({ status: 404 });
+    await expect(confirmInventoryTransfer(transferId, { ...retryScope, organizationId: `${retryScope.organizationId}-confirm` }))
+      .rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(Array(2).fill("/api/capabilities/execute"));
   });
 
   it("fails closed for Go when actor or organization scope is unresolved", async () => {
@@ -164,28 +166,20 @@ describe("inventory transfer API client", () => {
     await expect(createInventoryTransfer(input, retryScope)).rejects.toThrow("unexpected transfer response");
   });
 
-  it("never falls back from a missing Go route and preserves Go-only exact retries", async () => {
+  it("never falls back from a missing Go route and preserves exact retries", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ error: "route missing" }, 404))
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId, number: 12, status: "pending" } }))
       .mockResolvedValueOnce(jsonResponse({ error: "route missing" }, 404))
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId, status: "confirmed", confirmedNowThousandths: 1000 } }));
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
     const input = { fromLocationCode: "MAIN", toLocationCode: "SHOP", sku: "ITEM-1", quantityThousandths: 2500 };
 
     await expect(createInventoryTransfer(input, retryScope)).rejects.toMatchObject({ status: 404, message: "route missing" });
-    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", false);
-    await expect(createInventoryTransfer(input, retryScope)).rejects.toThrow("Go inventory transfer writes are not enabled");
-    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
     await expect(createInventoryTransfer(input, retryScope)).resolves.toEqual({ kind: "completed" });
 
     await expect(confirmInventoryTransfer(transferId, retryScope, [{ lineId, quantityThousandths: 1000 }]))
       .rejects.toMatchObject({ status: 404, message: "route missing" });
-    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", false);
-    await expect(confirmInventoryTransfer(transferId, retryScope, [{ lineId, quantityThousandths: 1000 }]))
-      .rejects.toThrow("Go inventory transfer writes are not enabled");
-    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
     await expect(confirmInventoryTransfer(transferId, retryScope, [{ lineId, quantityThousandths: 1000 }]))
       .resolves.toEqual({ kind: "completed" });
 

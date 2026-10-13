@@ -12,28 +12,22 @@ afterEach(() => {
 describe("products API", () => {
   it("validates and returns the catalog response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ totalValueMinor: 800, reorderAlerts: [], items: [{ sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", onHandThousandths: 2000, valueMinor: 800, avgUnitCostMinor: 400, reorderPointThousandths: 1000, reorderNeeded: false }] })));
-    await expect(fetchProducts()).resolves.toMatchObject({ items: [{ sku: "MUG-1", salePriceMinor: 0, tags: [] }], totalValueMinor: 800 });
+    await expect(fetchProducts(undefined, retryScope.organizationId)).resolves.toMatchObject({ items: [{ sku: "MUG-1", salePriceMinor: 0, tags: [] }], totalValueMinor: 800 });
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).toEqual({ "X-Organization-ID": retryScope.organizationId });
   });
 
-  it("uses the governed Go stock report for the Products catalog when the Go slice is enabled", async () => {
-    const stock = { items: [{ sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", salePriceMinor: 500, tags: ["kitchen"], barcode: null, imageUrl: null, onHandThousandths: 500, valueMinor: 200, avgUnitCostMinor: 400, reorderPointThousandths: 1000, reorderNeeded: true }], totalValueMinor: 200 };
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: stock }));
-    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+  it("uses the Go inventory reader for the Products catalog", async () => {
+    const catalog = { items: [{ sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", salePriceMinor: 500, tags: ["kitchen"], barcode: null, imageUrl: null, onHandThousandths: 500, valueMinor: 200, totalValueMinor: 200, avgUnitCostMinor: 400, reorderPointThousandths: 1000, reorderNeeded: true, reservedThousandths: 0, availableThousandths: 500 }], reorderAlerts: [{ sku: "MUG-1", name: "Mug", onHandThousandths: 500, reorderPointThousandths: 1000, shortfallThousandths: 500, avgUnitCostMinor: 400 }], totalValueMinor: 200, locations: [], lots: [], cycleCounts: [], transfers: [], reservations: [] };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(catalog));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchProducts()).resolves.toMatchObject({
       items: [{ sku: "MUG-1", salePriceMinor: 500, tags: ["kitchen"] }],
-      reorderAlerts: [{
-        sku: "MUG-1", name: "Mug", onHandThousandths: 500, reorderPointThousandths: 1000,
-        shortfallThousandths: 500, avgUnitCostMinor: 400,
-      }],
+      reorderAlerts: [{ sku: "MUG-1", name: "Mug", onHandThousandths: 500, reorderPointThousandths: 1000, shortfallThousandths: 500, avgUnitCostMinor: 400 }],
       totalValueMinor: 200,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      capabilityId: "inventory.stockReport", input: { belowReorderOnly: false }, intentId: expect.any(String),
-    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/inventory", expect.objectContaining({ credentials: "same-origin", cache: "no-store" }));
   });
 
   it("checks the inventory module switchboard before displaying products", async () => {
@@ -117,16 +111,15 @@ describe("products API", () => {
     });
   });
 
-  it("keeps inventory defaults and batch imports on their legacy routes", async () => {
-    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
-    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", false);
+  it("uses the Go capability for product imports while loading inventory defaults", async () => {
+    const createdID = "10000000-0000-4000-8000-000000000091";
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ module: "inventory", settings: { defaultUnitLabel: "box" } }))
-      .mockResolvedValueOnce(Response.json({ inserted: 0, skippedDuplicates: 0, errors: [] }));
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { createdIds: [createdID], imported: 1, skippedDuplicateRows: [] } }));
     vi.stubGlobal("fetch", fetchMock);
     await fetchProductDefaults();
-    await importProducts([{ rowNumber: 2, name: "Tea", type: "goods", salePrice: "3.25", tags: [] }], undefined, retryScope);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/module-settings?module=inventory", "/api/import"]);
+    await importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-91", type: "goods", salePrice: "3.25", tags: [] }], undefined, retryScope);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/module-settings?module=inventory", "/api/capabilities/execute"]);
   });
 
   it("maps a Go product import contract while preserving row numbers, duplicate rows, and created IDs", async () => {
@@ -297,6 +290,21 @@ describe("products API", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["JPY", "123", 123, "123.1", 0],
+    ["BHD", "1.234", 1234, "1.2345", 3],
+  ])("parses product import prices using the %s minor-unit exponent", (currency, price, expectedMinor, overPrecisionPrice, decimals) => {
+    const request = productImportRequest([
+      { rowNumber: 2, name: "Tea", sku: "TEA-CURRENCY", type: "goods", salePrice: price, tags: [] },
+    ], "intent-12345678901234567890", true, currency);
+    expect(request.body).toMatchObject({ input: { rows: [{ salePriceMinor: expectedMinor }] } });
+    expect(request.errors).toEqual([]);
+    const rejected = productImportRequest([
+      { rowNumber: 3, name: "Tea", sku: "TEA-CURRENCY-OVER", type: "goods", salePrice: overPrecisionPrice, tags: [] },
+    ], "intent-12345678901234567891", true, currency);
+    expect(rejected.errors).toMatchObject([{ row: 3, field: "salePrice", message: `Enter a non-negative amount with at most ${decimals} decimals.` }]);
+  });
+
   it("uses the Go undo capability and maps archived counts and approval responses", async () => {
     const ids = ["10000000-0000-4000-8000-000000000001", "10000000-0000-4000-8000-000000000002"];
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { itemIds: [ids[0]], archived: 1 } }));
@@ -382,13 +390,14 @@ describe("products API", () => {
 
   it("uses the governed batch import and supports approval aware undo", async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({ inserted: 1, skippedDuplicates: 0, errors: [], createdIds: ["10000000-0000-4000-8000-000000000001"] }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { imported: 1, skippedDuplicateRows: [], createdIds: ["10000000-0000-4000-8000-000000000001"] } }))
       .mockResolvedValueOnce(Response.json({ error: "Owner review" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
     const imported = await importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", unit: "box", salePrice: "3.25", tags: ["Pantry"] }], undefined, retryScope);
     expect(imported.inserted).toBe(1);
     await expect(undoProductImport(imported.createdIds ?? [], undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Owner review" });
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ entity: "products", rows: [{ sku: "TEA-1" }] });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "inventory.importItems", input: { rows: [{ sku: "TEA-1" }] } });
   });
 
   it("recovers exact import IDs only inside their actor and organization scope", async () => {

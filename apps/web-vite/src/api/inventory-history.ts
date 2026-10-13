@@ -44,6 +44,7 @@ function requestSignal(signal?: AbortSignal): AbortSignal {
 export async function fetchInventoryHistory(
   sku: string,
   signal?: AbortSignal,
+  organizationId?: string,
 ): Promise<InventoryHistoryResult> {
   let response: Response;
   try {
@@ -51,6 +52,7 @@ export async function fetchInventoryHistory(
       method: "GET",
       credentials: "same-origin",
       cache: "no-store",
+      headers: { accept: "application/json", ...(organizationId ? { "X-Organization-ID": organizationId } : {}) },
       signal: requestSignal(signal),
     });
   } catch (error) {

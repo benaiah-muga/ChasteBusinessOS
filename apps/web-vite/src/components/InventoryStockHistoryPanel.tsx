@@ -8,9 +8,11 @@ type HistoryItem = { sku: string; name: string; unitLabel: string };
 export function InventoryStockHistoryPanel({
   items,
   currency = "USD",
+  organizationId,
 }: {
   items: HistoryItem[];
   currency?: string;
+  organizationId?: string;
 }) {
   const [sku, setSku] = useState(items[0]?.sku ?? "");
   const [movements, setMovements] = useState<InventoryMovement[] | null>(null);
@@ -24,7 +26,7 @@ export function InventoryStockHistoryPanel({
     setNotice(null);
     setMovements(null);
     try {
-      const result = await fetchInventoryHistory(selectedItem.sku);
+      const result = await fetchInventoryHistory(selectedItem.sku, undefined, organizationId);
       if (result.kind === "pending") {
         setNotice({ kind: "pending", message: result.reason });
         return;

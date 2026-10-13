@@ -111,8 +111,8 @@ export class InventoryApiError extends Error {
   }
 }
 
-export async function fetchInventoryEnabled(signal?: AbortSignal): Promise<boolean> {
-  const response = await fetchJson("/api/modules", signal);
+export async function fetchInventoryEnabled(signal?: AbortSignal, organizationId?: string): Promise<boolean> {
+  const response = await fetchJson("/api/modules", signal, organizationId);
   if (!response.ok) throw new InventoryApiError(response.status, "Could not check whether the inventory module is enabled.");
   const parsed = SwitchboardSchema.safeParse(response.body);
   if (!parsed.success) throw new InventoryApiError(response.status, "The module switchboard returned data in an unexpected format.");
@@ -123,8 +123,8 @@ export async function fetchInventoryEnabled(signal?: AbortSignal): Promise<boole
   return parsed.data.enabledModules.includes("inventory");
 }
 
-export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[]; transfers: InventoryTransfer[]; reservations: InventoryReservation[] }> {
-  const response = await fetchJson("/api/inventory", signal);
+export async function fetchInventoryReport(signal?: AbortSignal, organizationId?: string): Promise<{ items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[]; transfers: InventoryTransfer[]; reservations: InventoryReservation[] }> {
+  const response = await fetchJson("/api/inventory", signal, organizationId);
   if (!response.ok) {
     const error = z.object({ error: z.string() }).safeParse(response.body);
     if (response.status === 401) throw new InventoryApiError(401, "Your session has ended. Sign in again to continue.");
@@ -135,16 +135,7 @@ export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ item
   }
   const parsed = InventoryReportSchema.safeParse(response.body);
   if (!parsed.success) throw new InventoryApiError(response.status, "The inventory service returned data in an unexpected format.");
-  if (typeof __GO_INVENTORY_ITEM_SLICE__ === "undefined" || !__GO_INVENTORY_ITEM_SLICE__) return parsed.data;
-  const stock = await fetchGoStockReport(signal);
-  return {
-    ...parsed.data,
-    totalValueMinor: stock.totalValueMinor,
-    items: stock.items.map((item) => ({
-      ...item,
-      totalValueMinor: item.valueMinor,
-    })),
-  };
+  return parsed.data;
 }
 
 export async function fetchGoStockReport(signal?: AbortSignal): Promise<z.infer<typeof GoStockReportSchema>> {
@@ -175,12 +166,12 @@ export async function fetchGoStockReport(signal?: AbortSignal): Promise<z.infer<
   return parsed.data.data;
 }
 
-async function fetchJson(path: string, signal?: AbortSignal): Promise<{ ok: boolean; status: number; body: unknown }> {
+async function fetchJson(path: string, signal?: AbortSignal, organizationId?: string): Promise<{ ok: boolean; status: number; body: unknown }> {
   let response: Response;
   try {
     response = await fetch(path, {
       credentials: "same-origin",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", ...(organizationId ? { "X-Organization-ID": organizationId } : {}) },
       cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });

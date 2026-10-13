@@ -88,11 +88,6 @@ async function postAction<T extends z.ZodType>(
   successSchema: T,
   retryScope?: InventoryLocationRetryScope,
 ): Promise<InventoryLocationActionResult> {
-  const goEnabled = typeof __GO_INVENTORY_LOCATION_RESERVATION_WRITES__ !== "undefined"
-    && __GO_INVENTORY_LOCATION_RESERVATION_WRITES__;
-  if (!goEnabled) {
-    throw new InventoryLocationActionError(503, "Go location and reservation writes are not enabled. Ask an administrator to enable the inventory capability route.");
-  }
   const intentId = await stableIntentId(input, retryScope);
   const { action, ...capabilityInput } = input;
   const url = "/api/capabilities/execute";
@@ -102,7 +97,7 @@ async function postAction<T extends z.ZodType>(
     response = await fetch(url, {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...(retryScope?.organizationId ? { "X-Organization-ID": retryScope.organizationId } : {}) },
       cache: "no-store",
       body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(20_000),

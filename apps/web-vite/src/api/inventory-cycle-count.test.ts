@@ -10,7 +10,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("inventory barcode lookup", () => {
-  it("fails closed without sending a legacy request when Go is disabled", async () => {
+  it("fails closed when a request explicitly disables the Go capability", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -22,9 +22,10 @@ describe("inventory barcode lookup", () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true, data: { item: null } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(lookupInventoryBarcode("12345", undefined, true)).resolves.toBeNull();
+    await expect(lookupInventoryBarcode("12345", undefined, true, "org-inventory-test")).resolves.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect((fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>)["X-Organization-ID"]).toBe("org-inventory-test");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       capabilityId: "inventory.lookupByBarcode",
       input: { barcode: "12345" },

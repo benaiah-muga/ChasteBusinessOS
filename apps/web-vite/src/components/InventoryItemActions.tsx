@@ -21,10 +21,6 @@ type AdjustmentValues = { sku: string; direction: "increase" | "decrease"; quant
 type Notice = { tone: "success" | "pending" | "error"; message: string };
 type RetryState = "loading" | "clear" | "unresolved" | "failed";
 
-function goItemWritesEnabled(): boolean {
-  return typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
-}
-
 function adjustmentValuesFromAction(action: { sku: string; quantityDelta: number; note: string; lotCode?: string; locationCode?: string }): AdjustmentValues {
   const quantity = (Math.abs(action.quantityDelta) / 1000).toFixed(3).replace(/\.?0+$/, "");
   return {
@@ -68,7 +64,7 @@ export function InventoryItemActions({
   const [form, setForm] = useState<FormValues>(blankForm);
   const [createRetryLocked, setCreateRetryLocked] = useState(false);
   const [adjustment, setAdjustment] = useState<AdjustmentValues>({ sku: "", direction: "increase", quantity: "", note: "", lotCode: "", locationCode: "" });
-  const [retryState, setRetryState] = useState<RetryState>(() => goItemWritesEnabled() ? "loading" : "clear");
+  const [retryState, setRetryState] = useState<RetryState>("loading");
   const [retryStateScopeIdentity, setRetryStateScopeIdentity] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -83,7 +79,6 @@ export function InventoryItemActions({
   }
   retryScopeIdentityRef.current = retryScopeIdentity;
   const retryScopeChecked = retryStateScopeIdentity === retryScopeIdentity;
-  const retryBlockedByRoute = retryState === "unresolved" && !goItemWritesEnabled();
 
   useEffect(() => {
     setBusy(false);
@@ -124,7 +119,7 @@ export function InventoryItemActions({
   useEffect(() => {
     const actorId = retryActorId;
     const organizationId = retryOrganizationId;
-    if (!actorId || !organizationId || !goItemWritesEnabled()) return;
+    if (!actorId || !organizationId) return;
     let active = true;
     void getPendingInventoryItemCreation({ actorId, organizationId }).then((action) => {
       if (!active || !action || createSubmittedScopeIdentityRef.current === retryScopeIdentity) return;
@@ -232,7 +227,7 @@ export function InventoryItemActions({
         if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
         if (opening.kind === "pending") {
           setAdjustment(adjustmentValuesFromAction({ sku: form.sku.trim(), quantityDelta: openingQuantity, note: "Opening stock" }));
-          setRetryState(goItemWritesEnabled() ? "unresolved" : "clear");
+          setRetryState("unresolved");
           setNotice({ tone: "pending", message: "Item created. Opening stock is waiting for approval." });
         } else {
           await onChanged();
@@ -276,7 +271,7 @@ export function InventoryItemActions({
       const result = await submitItemAction(action, undefined, retryScope);
       if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       if (result.kind === "pending") {
-        setRetryState(goItemWritesEnabled() ? "unresolved" : "clear");
+        setRetryState("unresolved");
         setNotice({ tone: "pending", message: result.reason });
         return;
       }
@@ -334,7 +329,7 @@ export function InventoryItemActions({
               <label>Location code<input maxLength={20} value={adjustment.locationCode} disabled={busy || !retryScopeChecked || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, locationCode: event.currentTarget.value })} /></label>
               <label className="inventory-item-field-wide">Reason<input required minLength={3} value={adjustment.note} disabled={busy || !retryScopeChecked || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, note: event.currentTarget.value })} /></label>
             </div>
-            <button className="shell-button" type="submit" disabled={busy || !retryScopeChecked || retryState === "loading" || retryState === "failed" || retryBlockedByRoute || items.every((item) => item.kind === "service")}>{retryBlockedByRoute ? "Restore Go writes to retry" : busy ? "Saving…" : retryState === "unresolved" ? "Retry saved adjustment" : "Record adjustment"}</button>
+            <button className="shell-button" type="submit" disabled={busy || !retryScopeChecked || retryState === "loading" || retryState === "failed" || items.every((item) => item.kind === "service")}>{busy ? "Saving…" : retryState === "unresolved" ? "Retry saved adjustment" : "Record adjustment"}</button>
           </>}
         </form>
       </div>

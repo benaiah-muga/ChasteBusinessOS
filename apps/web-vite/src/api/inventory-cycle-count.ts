@@ -56,13 +56,12 @@ export async function submitInventoryCycleCountAction(
   useGoOverride?: boolean,
   retryScope?: InventoryCycleCountRetryScope,
 ): Promise<InventoryCycleCountActionResult> {
-  const useGo = useGoOverride ?? (typeof __GO_INVENTORY_CYCLE_COUNT_WRITES__ !== "undefined" && __GO_INVENTORY_CYCLE_COUNT_WRITES__);
-  if (!useGo) {
-    throw new InventoryCycleCountApiError(503, "Go cycle-count writes are not enabled. Ask an administrator to enable the inventory capability route.");
+  if (useGoOverride === false) {
+    throw new InventoryCycleCountApiError(503, "Go cycle-count writes are not enabled for this request.");
   }
   const intentId = await stableGoCycleCountIntent(input, retryScope);
   const request = inventoryCycleCountActionRequest(input, intentId);
-  const body = await postInventory(request.url, request.body, signal);
+  const body = await postInventory(request.url, request.body, signal, retryScope?.organizationId);
   if (body.response.status === 202) {
     if (!PendingResponseSchema.safeParse(body.data).success) {
       throw new InventoryCycleCountApiError(202, "The inventory service returned an unexpected approval response.");
@@ -246,15 +245,15 @@ export async function lookupInventoryBarcode(
   barcode: string,
   signal?: AbortSignal,
   useGoOverride?: boolean,
+  organizationId?: string,
 ): Promise<{ sku: string; name: string } | null> {
-  const useGo = useGoOverride ?? (typeof __GO_INVENTORY_BARCODE_LOOKUP__ !== "undefined" && __GO_INVENTORY_BARCODE_LOOKUP__);
-  if (!useGo) {
-    throw new InventoryCycleCountApiError(503, "Go barcode lookup is not enabled. Ask an administrator to enable the inventory capability route.");
+  if (useGoOverride === false) {
+    throw new InventoryCycleCountApiError(503, "Go barcode lookup is not enabled for this request.");
   }
   const body = await postInventory("/api/capabilities/execute", {
     capabilityId: "inventory.lookupByBarcode",
     input: { barcode },
-  }, signal);
+  }, signal, organizationId);
   if (!body.response.ok || body.response.status !== 200) {
     throw new InventoryCycleCountApiError(body.response.status, errorMessage(body.data));
   }
@@ -266,13 +265,13 @@ export async function lookupInventoryBarcode(
   return item ? { sku: item.sku, name: item.name } : null;
 }
 
-async function postInventory(path: string, input: object, signal?: AbortSignal): Promise<{ response: Response; data: unknown }> {
+async function postInventory(path: string, input: object, signal?: AbortSignal, organizationId?: string): Promise<{ response: Response; data: unknown }> {
   let response: Response;
   try {
     response = await fetch(path, {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...(organizationId ? { "X-Organization-ID": organizationId } : {}) },
       cache: "no-store",
       body: JSON.stringify(input),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),

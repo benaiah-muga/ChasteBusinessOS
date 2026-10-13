@@ -184,7 +184,7 @@ describe("InventoryItemActions", () => {
     expect(bodies[1]?.input).toMatchObject({ sku: item.sku, quantityDelta: -500, note: "Damaged in storage" });
   });
 
-  it("keeps an unresolved Go adjustment locked when the selector is rolled back", async () => {
+  it("keeps an unresolved Go adjustment locked and exposes its exact retry", async () => {
     const retryScope = newRetryScope();
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -192,11 +192,10 @@ describe("InventoryItemActions", () => {
     await expect(submitInventoryItemAction({ action: "adjustStock", sku: item.sku, quantityDelta: -500, note: "Damaged in storage" }, undefined, retryScope))
       .resolves.toMatchObject({ kind: "pending" });
 
-    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
     render(<InventoryItemActions items={[item]} onChanged={vi.fn()} retryScope={retryScope} />);
     expect(await screen.findByText("A stock adjustment is unresolved. Retry the saved adjustment to confirm its outcome.")).not.toBeNull();
     expect((screen.getByLabelText("Quantity") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Restore Go writes to retry" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Retry saved adjustment" }) as HTMLButtonElement).disabled).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

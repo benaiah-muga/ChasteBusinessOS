@@ -230,10 +230,6 @@ export async function submitInventoryItemAction(
     : AdjustStockSchema.safeParse(action);
   if (!parsedAction.success) throw new InventoryItemActionError(0, "Check the item details and try again.");
 
-  const useGo = typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
-  if (!useGo) {
-    throw new InventoryItemActionError(503, "Go inventory item writes are not enabled. Ask an administrator to enable the inventory capability route.");
-  }
   let attempt: InventoryAdjustmentAttempt | null = null;
   let createAttempt: InventoryCreateAttempt | null = null;
   const scope = retryScope ?? { actorId: null, organizationId: null };
@@ -256,7 +252,7 @@ export async function submitInventoryItemAction(
     const send = (url: string, body: Record<string, unknown>) => fetch(url, {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...(scope.organizationId ? { "X-Organization-ID": scope.organizationId } : {}) },
       cache: "no-store",
       body: JSON.stringify(body),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { currencyMinorUnits } from "@chaste/erp-core";
 import { normalizeRetryActorId } from "./retry-scope";
 
 const ProductSchema = z.object({
@@ -22,11 +23,6 @@ const CatalogSchema = z.object({
   reorderAlerts: z.array(z.object({ sku: z.string(), name: z.string(), shortfallThousandths: z.number().int().safe() }).passthrough()).default([]),
   totalValueMinor: z.number().int().safe(),
 });
-const GoCatalogSchema = z.object({
-  items: z.array(ProductSchema),
-  totalValueMinor: z.number().int().safe(),
-}).strict();
-const GoCatalogResponseSchema = z.object({ ok: z.literal(true), data: GoCatalogSchema }).strict();
 const ModuleSwitchboardSchema = z.object({
   catalog: z.array(z.object({ id: z.string() })),
   enabledModules: z.array(z.string()),
@@ -97,7 +93,6 @@ const ImportResultSchema = z.object({
   skippedDuplicateRows: z.array(z.number().int()).optional(), errors: z.array(ImportRowSchema),
   createdIds: z.array(z.string().uuid()).optional(),
 }).passthrough();
-const UndoResultSchema = z.object({ undone: z.number().int().nonnegative(), remaining: z.number().int().nonnegative() }).strict();
 const GoImportOutputSchema = z.object({
   createdIds: z.array(z.string().uuid()),
   imported: z.number().int().nonnegative(),
@@ -108,6 +103,11 @@ const GoRestoreImportOutputSchema = z.object({ itemIds: z.array(z.string().uuid(
 const GoPendingSchema = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string(), approvalId: z.string().optional() }).strict();
 
 const GO_SESSION_CAPABILITY_BODY_LIMIT = 64 * 1024;
+
+function organizationHeaders(organizationId?: string | null): Record<string, string> {
+  const organization = organizationId?.trim();
+  return organization ? { "X-Organization-ID": organization } : {};
+}
 
 function isDefinitiveNoEffectGoRejection(status: number): boolean {
   return [400, 401, 403, 413, 415, 422, 429].includes(status);
@@ -163,7 +163,7 @@ type PreparedProductImport = {
   tags: string[];
 };
 
-function prepareProductImportRows(rows: ProductImportRow[], intentId: string): { rows: PreparedProductImport[]; errors: z.infer<typeof ImportRowSchema>[]; goCompatible: boolean; unsupportedReason: string | null } {
+function prepareProductImportRows(rows: ProductImportRow[], intentId: string, currency: string): { rows: PreparedProductImport[]; errors: z.infer<typeof ImportRowSchema>[]; goCompatible: boolean; unsupportedReason: string | null } {
   const errors: z.infer<typeof ImportRowSchema>[] = [];
   const prepared: PreparedProductImport[] = [];
   let goCompatible = true;
@@ -178,11 +178,14 @@ function prepareProductImportRows(rows: ProductImportRow[], intentId: string): {
       return;
     }
     const cleanedPrice = row.salePrice.replace(/[\s,]/g, "");
-    const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(cleanedPrice);
-    const parsedSalePriceMinor = match ? Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0")) : -1;
+    const minorUnits = currencyMinorUnits(currency) ?? 2;
+    const decimalPattern = minorUnits > 0 ? `(?:\\.(\\d{1,${minorUnits}}))?` : "";
+    const match = new RegExp(`^(\\d+)${decimalPattern}$`).exec(cleanedPrice);
+    const scale = 10 ** minorUnits;
+    const parsedSalePriceMinor = match ? Number(match[1]) * scale + Number((match[2] ?? "").padEnd(minorUnits, "0")) : -1;
     const salePriceMinor = row.salePriceMinor ?? parsedSalePriceMinor;
     if (!Number.isSafeInteger(salePriceMinor) || salePriceMinor < 0) {
-      errors.push({ row: rowNumber, field: "salePrice", message: "Enter a non-negative amount with at most two decimals." });
+      errors.push({ row: rowNumber, field: "salePrice", message: `Enter a non-negative amount with at most ${currencyMinorUnits(currency) ?? 2} decimals.` });
       return;
     }
     const tags = row.tags.map((tag) => tag.trim());
@@ -219,69 +222,23 @@ function prepareProductImportRows(rows: ProductImportRow[], intentId: string): {
   return { rows: prepared, errors, goCompatible, unsupportedReason };
 }
 
-export function productImportRequest(rows: ProductImportRow[], intentId: string, useGo: boolean): { url: string; body: Record<string, unknown>; errors: z.infer<typeof ImportRowSchema>[]; preparedCount: number; submittedRowNumbers: number[]; unsupportedReason: string | null } {
-  const prepared = prepareProductImportRows(rows, intentId);
+export function productImportRequest(rows: ProductImportRow[], intentId: string, _useGo = true, currency = "USD"): { url: string; body: Record<string, unknown>; errors: z.infer<typeof ImportRowSchema>[]; preparedCount: number; submittedRowNumbers: number[]; unsupportedReason: string | null } {
+  const prepared = prepareProductImportRows(rows, intentId, currency);
   const capabilityBody = { capabilityId: "inventory.importItems", input: { rows: prepared.rows }, intentId };
   const bodyBytes = new TextEncoder().encode(JSON.stringify(capabilityBody)).byteLength;
-  if (useGo && bodyBytes > GO_SESSION_CAPABILITY_BODY_LIMIT) {
+  if (bodyBytes > GO_SESSION_CAPABILITY_BODY_LIMIT) {
     prepared.unsupportedReason ??= "This import exceeds the 64 KiB Go capability request limit. Split the CSV into smaller files.";
   }
-  if (useGo) {
-    return { url: "/api/capabilities/execute", body: capabilityBody, errors: prepared.errors, preparedCount: prepared.rows.length, submittedRowNumbers: prepared.rows.map((row) => row.rowNumber), unsupportedReason: prepared.unsupportedReason };
-  }
-  return { url: "/api/import", body: { entity: "products", rows }, errors: [], preparedCount: prepared.rows.length, submittedRowNumbers: prepared.rows.map((row) => row.rowNumber), unsupportedReason: null };
+  return { url: "/api/capabilities/execute", body: capabilityBody, errors: prepared.errors, preparedCount: prepared.rows.length, submittedRowNumbers: prepared.rows.map((row) => row.rowNumber), unsupportedReason: prepared.unsupportedReason };
 }
 
-export function productUndoImportRequest(importIds: string[], intentId: string, useGo: boolean): { url: string; body: Record<string, unknown> } {
+export function productUndoImportRequest(importIds: string[], intentId: string, _useGo = true): { url: string; body: Record<string, unknown> } {
   const capabilityBody = { capabilityId: "inventory.undoItemImport", input: { itemIds: importIds }, intentId };
-  if (!useGo) return { url: "/api/import", body: { entity: "products", action: "undo", importIds } };
   return { url: "/api/capabilities/execute", body: capabilityBody };
 }
 
 export function productRestoreImportRequest(importIds: string[], intentId: string): { url: string; body: Record<string, unknown> } {
   return { url: "/api/capabilities/execute", body: { capabilityId: "inventory.restoreItemImport", input: { itemIds: importIds }, intentId } };
-}
-
-function intentFingerprint(value: unknown): string {
-  let hash = 14695981039346656037n;
-  for (const byte of new TextEncoder().encode(JSON.stringify(value))) {
-    hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 1099511628211n);
-  }
-  return hash.toString(16);
-}
-
-function stableLegacyProductIntentId(operation: "import" | "undo", payload: unknown): { id: string; fingerprint: string } {
-  const fingerprint = intentFingerprint(payload);
-  const key = `chaste:products:${operation}:pending-intent`;
-  try {
-    const previous = sessionStorage.getItem(key);
-    if (previous) {
-      const parsed: unknown = JSON.parse(previous);
-      if (typeof parsed === "object" && parsed !== null && "fingerprint" in parsed && parsed.fingerprint === fingerprint &&
-        "intentId" in parsed && typeof parsed.intentId === "string") {
-        return { id: parsed.intentId, fingerprint };
-      }
-    }
-    const id = crypto.randomUUID();
-    sessionStorage.setItem(key, JSON.stringify({ fingerprint, intentId: id }));
-    return { id, fingerprint };
-  } catch {
-    return { id: crypto.randomUUID(), fingerprint };
-  }
-}
-
-function clearLegacyProductIntent(operation: "import" | "undo", fingerprint: string): void {
-  try {
-    const key = `chaste:products:${operation}:pending-intent`;
-    const previous = sessionStorage.getItem(key);
-    if (!previous) return;
-    const parsed: unknown = JSON.parse(previous);
-    if (typeof parsed === "object" && parsed !== null && "fingerprint" in parsed && parsed.fingerprint === fingerprint) {
-      sessionStorage.removeItem(key);
-    }
-  } catch {
-    return;
-  }
 }
 
 const productGoRetryPrefix = "chaste:products:go:v1:";
@@ -511,73 +468,10 @@ export async function recoverProductImport(scope: ProductImportRetryScope): Prom
 
 const ProductImportRowSchema = z.object({ rowNumber: z.number().int().positive(), name: z.string(), sku: z.string().optional(), type: z.enum(["goods", "service"]), unit: z.string().optional(), salePrice: z.string(), salePriceMinor: z.number().int().nonnegative().optional(), barcode: z.string().optional(), tags: z.array(z.string()) }).strict();
 
-async function assertNoUnresolvedGoProductIntent(scope?: ProductImportRetryScope): Promise<void> {
-  const keys = await productScopeKeys(scope);
-  try {
-    for (const operation of ["import", "undo", "restore"] as const) {
-      const raw = sessionStorage.getItem(keys.operationKey(operation));
-      if (!raw) continue;
-      if (!ProductImportAttemptSchema.safeParse(JSON.parse(raw)).success) {
-        throw new ProductsApiError(0, "A saved product import retry marker is malformed. Verify the catalog before retrying.");
-      }
-      throw new ProductsApiError(0, "A product import action is unresolved for this account and organization. Retry that exact action first.");
-    }
-    if (sessionStorage.getItem(keys.operationKey("action"))) {
-      throw new ProductsApiError(0, "A product action is unresolved for this account and organization. Retry its exact saved details first.");
-    }
-  } catch (error) {
-    if (error instanceof ProductsApiError) throw error;
-    throw new ProductsApiError(0, "Product import retry protection is unavailable. Verify the catalog before using the legacy route.");
-  }
-}
-
-function useGoInventoryItemSlice(): boolean {
-  return typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
-}
-
-export function goProductImportEnabled(): boolean {
-  return typeof __GO_INVENTORY_IMPORT_SLICE__ !== "undefined" && __GO_INVENTORY_IMPORT_SLICE__;
-}
-
-async function fetchGoProductCatalog(signal?: AbortSignal): Promise<z.infer<typeof CatalogSchema>> {
+export async function fetchProductsEnabled(signal?: AbortSignal, organizationId?: string): Promise<boolean> {
   let response: Response;
   try {
-    response = await fetch("/api/capabilities/execute", {
-      method: "POST", credentials: "same-origin", cache: "no-store",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ capabilityId: "inventory.stockReport", input: { belowReorderOnly: false }, intentId: crypto.randomUUID() }),
-      signal,
-    });
-  } catch {
-    throw new ProductsApiError(0, "Could not reach the product catalog. Check your connection and try again.");
-  }
-
-  const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    const error = ErrorSchema.safeParse(body);
-    throw new ProductsApiError(response.status, error.success ? error.data.error : "Could not load the product catalog.");
-  }
-  const catalog = GoCatalogResponseSchema.safeParse(body);
-  if (response.status !== 200 || !catalog.success) {
-    throw new ProductsApiError(response.status, "The product catalog returned data in an unexpected format.");
-  }
-  return {
-    ...catalog.data.data,
-    reorderAlerts: catalog.data.data.items.filter((item) => item.reorderNeeded).map((item) => ({
-      sku: item.sku,
-      name: item.name,
-      onHandThousandths: item.onHandThousandths,
-      reorderPointThousandths: item.reorderPointThousandths,
-      shortfallThousandths: Math.max(0, item.reorderPointThousandths - item.onHandThousandths),
-      avgUnitCostMinor: item.avgUnitCostMinor,
-    })),
-  };
-}
-
-export async function fetchProductsEnabled(signal?: AbortSignal): Promise<boolean> {
-  let response: Response;
-  try {
-    response = await fetch("/api/modules", { credentials: "same-origin", cache: "no-store", signal });
+    response = await fetch("/api/modules", { credentials: "same-origin", cache: "no-store", signal, headers: organizationHeaders(organizationId) });
   } catch {
     throw new ProductsApiError(0, "Could not check whether the inventory module is enabled.");
   }
@@ -591,10 +485,10 @@ export async function fetchProductsEnabled(signal?: AbortSignal): Promise<boolea
   return parsed.data.enabledModules.includes("inventory");
 }
 
-export async function fetchProductDefaults(signal?: AbortSignal): Promise<{ defaultUnitLabel?: string; defaultReorderPointUnits?: number }> {
+export async function fetchProductDefaults(signal?: AbortSignal, organizationId?: string): Promise<{ defaultUnitLabel?: string; defaultReorderPointUnits?: number }> {
   let response: Response;
   try {
-    response = await fetch("/api/module-settings?module=inventory", { credentials: "same-origin", cache: "no-store", signal });
+    response = await fetch("/api/module-settings?module=inventory", { credentials: "same-origin", cache: "no-store", signal, headers: organizationHeaders(organizationId) });
   } catch {
     throw new ProductsApiError(0, "Could not load inventory defaults.");
   }
@@ -604,11 +498,10 @@ export async function fetchProductDefaults(signal?: AbortSignal): Promise<{ defa
   return parsed.data.settings;
 }
 
-export async function fetchProducts(signal?: AbortSignal): Promise<{ items: Product[]; reorderAlerts: z.infer<typeof CatalogSchema>["reorderAlerts"]; totalValueMinor: number }> {
-  if (useGoInventoryItemSlice()) return fetchGoProductCatalog(signal);
+export async function fetchProducts(signal?: AbortSignal, organizationId?: string): Promise<{ items: Product[]; reorderAlerts: z.infer<typeof CatalogSchema>["reorderAlerts"]; totalValueMinor: number }> {
   let response: Response;
   try {
-    response = await fetch("/api/inventory", { credentials: "same-origin", cache: "no-store", signal });
+    response = await fetch("/api/inventory", { credentials: "same-origin", cache: "no-store", signal, headers: organizationHeaders(organizationId) });
   } catch {
     throw new ProductsApiError(0, "Could not reach the product catalog. Check your connection and try again.");
   }
@@ -631,7 +524,7 @@ export async function submitProductAction(action: ProductAction, retryScope: Pro
   try {
     response = await fetch(request.url, {
       method: "POST", credentials: "same-origin", cache: "no-store",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...organizationHeaders(retryScope.organizationId) },
       body: JSON.stringify(request.body), signal,
     });
   } catch {
@@ -657,40 +550,35 @@ export async function submitProductAction(action: ProductAction, retryScope: Pro
   return { kind: "completed" };
 }
 
-export async function importProducts(rows: ProductImportRow[], signal?: AbortSignal, retryScope?: ProductImportRetryScope, useGoOverride?: boolean): Promise<ProductImportResult> {
-  const useGo = useGoOverride ?? goProductImportEnabled();
-  const preview = productImportRequest(rows, "00000000-0000-4000-8000-000000000000", useGo);
-  if (useGo && preview.unsupportedReason) throw new ProductsApiError(413, preview.unsupportedReason);
-  if (useGo && preview.preparedCount === 0) {
+export async function importProducts(rows: ProductImportRow[], signal?: AbortSignal, retryScope?: ProductImportRetryScope, currencyOrUnusedSelector: string | boolean = "USD"): Promise<ProductImportResult> {
+  const currency = typeof currencyOrUnusedSelector === "string" ? currencyOrUnusedSelector : "USD";
+  const preview = productImportRequest(rows, "00000000-0000-4000-8000-000000000000", true, currency);
+  if (preview.unsupportedReason) throw new ProductsApiError(413, preview.unsupportedReason);
+  if (preview.preparedCount === 0) {
     if (preview.errors.length) return { inserted: 0, skippedDuplicates: 0, errors: preview.errors, createdIds: [] };
     throw new ProductsApiError(422, "Add at least one valid product row before importing.");
   }
-  let attempt: { id: string; fingerprint: string; keys?: Awaited<ReturnType<typeof productScopeKeys>> };
-  if (useGo) attempt = await stableGoProductIntentId("import", rows, retryScope);
-  else {
-    await assertNoUnresolvedGoProductIntent(retryScope);
-    attempt = stableLegacyProductIntentId("import", rows);
-  }
-  const request = productImportRequest(rows, attempt.id, useGo);
+  const attempt = await stableGoProductIntentId("import", rows, retryScope);
+  const request = productImportRequest(rows, attempt.id, true, currency);
   let response: Response;
   try {
-    response = await fetch(request.url, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(request.body), signal });
+    response = await fetch(request.url, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json", "content-type": "application/json", ...organizationHeaders(retryScope?.organizationId) }, body: JSON.stringify(request.body), signal });
   } catch {
     throw new ProductsApiError(0, "The product import could not reach the server. Your preview is still available.");
   }
   const body: unknown = await response.json().catch(() => null);
   if (response.status === 202) {
     const pending = GoPendingSchema.safeParse(body);
-    if (request.url === "/api/capabilities/execute" && pending.success) throw new ProductsApiError(202, pending.data.reason);
+    if (pending.success) throw new ProductsApiError(202, pending.data.reason);
     const error = ErrorSchema.safeParse(body);
     throw new ProductsApiError(202, error.success ? error.data.error : "The import is waiting for approval.");
   }
   if (!response.ok) {
     const error = ErrorSchema.safeParse(body);
-    if (useGo && isDefinitiveNoEffectGoRejection(response.status) && attempt.keys) clearGoProductIntent(attempt.keys, "import", attempt.id);
+    if (isDefinitiveNoEffectGoRejection(response.status) && attempt.keys) clearGoProductIntent(attempt.keys, "import", attempt.id);
     throw new ProductsApiError(response.status, error.success ? error.data.error : "The product import could not be completed.");
   }
-  if (request.url === "/api/capabilities/execute") {
+  {
     const envelope = z.object({ ok: z.literal(true), data: GoImportOutputSchema }).strict().safeParse(body);
     if (!envelope.success) throw new ProductsApiError(response.status, "The product import returned data in an unexpected format.");
     const data = envelope.data.data;
@@ -714,46 +602,36 @@ export async function importProducts(rows: ProductImportRow[], signal?: AbortSig
     clearGoProductIntent(attempt.keys, "import", attempt.id);
     return result;
   }
-  const parsed = ImportResultSchema.safeParse(body);
-  if (!parsed.success) throw new ProductsApiError(response.status, "The product import returned data in an unexpected format.");
-  clearLegacyProductIntent("import", attempt.fingerprint);
-  return parsed.data;
 }
 
-export async function undoProductImport(importIds: string[], signal?: AbortSignal, retryScope?: ProductImportRetryScope, useGoOverride?: boolean): Promise<{ kind: "completed"; undone: number; remaining: number; itemIds: string[] } | { kind: "pending"; reason: string }> {
-  const useGo = useGoOverride ?? goProductImportEnabled();
-  if (useGo && (importIds.length === 0 || importIds.length > 5000 || importIds.some((id) => !z.string().uuid().safeParse(id).success) || new Set(importIds).size !== importIds.length)) {
+export async function undoProductImport(importIds: string[], signal?: AbortSignal, retryScope?: ProductImportRetryScope, _unusedGoSelector?: boolean): Promise<{ kind: "completed"; undone: number; remaining: number; itemIds: string[] } | { kind: "pending"; reason: string }> {
+  if (importIds.length === 0 || importIds.length > 5000 || importIds.some((id) => !z.string().uuid().safeParse(id).success) || new Set(importIds).size !== importIds.length) {
     throw new ProductsApiError(422, "Undo requires between 1 and 5,000 valid imported item IDs.");
   }
-  if (useGo && new TextEncoder().encode(JSON.stringify({ capabilityId: "inventory.undoItemImport", input: { itemIds: importIds }, intentId: crypto.randomUUID() })).byteLength > GO_SESSION_CAPABILITY_BODY_LIMIT) {
+  if (new TextEncoder().encode(JSON.stringify({ capabilityId: "inventory.undoItemImport", input: { itemIds: importIds }, intentId: crypto.randomUUID() })).byteLength > GO_SESSION_CAPABILITY_BODY_LIMIT) {
     throw new ProductsApiError(413, "This undo exceeds the 64 KiB Go capability request limit.");
   }
-  let attempt: { id: string; fingerprint: string; keys?: Awaited<ReturnType<typeof productScopeKeys>> };
-  if (useGo) attempt = await stableGoProductIntentId("undo", importIds, retryScope);
-  else {
-    await assertNoUnresolvedGoProductIntent(retryScope);
-    attempt = stableLegacyProductIntentId("undo", importIds);
-  }
-  const request = productUndoImportRequest(importIds, attempt.id, useGo);
+  const attempt = await stableGoProductIntentId("undo", importIds, retryScope);
+  const request = productUndoImportRequest(importIds, attempt.id);
   let response: Response;
   try {
-    response = await fetch(request.url, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(request.body), signal });
+    response = await fetch(request.url, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json", "content-type": "application/json", ...organizationHeaders(retryScope?.organizationId) }, body: JSON.stringify(request.body), signal });
   } catch {
     throw new ProductsApiError(0, "Undo could not reach the server. The imported products are unchanged.");
   }
   const body: unknown = await response.json().catch(() => null);
   if (response.status === 202) {
     const pending = GoPendingSchema.safeParse(body);
-    if (request.url === "/api/capabilities/execute" && pending.success) return { kind: "pending", reason: pending.data.reason };
+    if (pending.success) return { kind: "pending", reason: pending.data.reason };
     const error = ErrorSchema.safeParse(body);
     return { kind: "pending", reason: error.success ? error.data.error : "Undo is waiting for approval." };
   }
   if (!response.ok) {
     const error = ErrorSchema.safeParse(body);
-    if (useGo && isDefinitiveNoEffectGoRejection(response.status) && attempt.keys) clearGoProductIntent(attempt.keys, "undo", attempt.id);
+    if (isDefinitiveNoEffectGoRejection(response.status) && attempt.keys) clearGoProductIntent(attempt.keys, "undo", attempt.id);
     throw new ProductsApiError(response.status, error.success ? error.data.error : "The import could not be undone.");
   }
-  if (request.url === "/api/capabilities/execute") {
+  {
     const envelope = z.object({ ok: z.literal(true), data: GoUndoImportOutputSchema }).strict().safeParse(body);
     if (!envelope.success) throw new ProductsApiError(response.status, "The import undo returned data in an unexpected format.");
     const { archived: undone, itemIds } = envelope.data.data;
@@ -777,10 +655,6 @@ export async function undoProductImport(importIds: string[], signal?: AbortSigna
     clearGoProductIntent(attempt.keys, "undo", attempt.id);
     return { kind: "completed", undone, remaining: Math.max(0, importIds.length - undone), itemIds };
   }
-  const parsed = UndoResultSchema.safeParse(body);
-  if (!parsed.success) throw new ProductsApiError(response.status, "The import undo returned data in an unexpected format.");
-  clearLegacyProductIntent("undo", attempt.fingerprint);
-  return { kind: "completed", ...parsed.data, itemIds: [] };
 }
 
 export async function restoreProductImport(importIds: string[], signal?: AbortSignal, retryScope?: ProductImportRetryScope): Promise<{ kind: "completed"; restored: number; itemIds: string[] } | { kind: "pending"; reason: string }> {
@@ -795,7 +669,7 @@ export async function restoreProductImport(importIds: string[], signal?: AbortSi
   const request = productRestoreImportRequest(importIds, attempt.id);
   let response: Response;
   try {
-    response = await fetch(request.url, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(request.body), signal });
+    response = await fetch(request.url, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json", "content-type": "application/json", ...organizationHeaders(retryScope?.organizationId) }, body: JSON.stringify(request.body), signal });
   } catch {
     throw new ProductsApiError(0, "Restore could not reach the server. The imported products are unchanged.");
   }

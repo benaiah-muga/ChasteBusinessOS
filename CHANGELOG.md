@@ -34,6 +34,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite purchasing vendor and bill creation, bill payment, and bill credits now
   use Go capabilities. Credits on foreign-currency bills fail closed until an
   exchange rate is available.
+- Vite inventory catalog, stock, cycle counts, transfers, locations,
+  reservations, and history now use Go-backed APIs. Product imports preserve
+  currency-specific price precision and reject unsupported fractional units.
 - Vite CRM task creation, completion, and detail updates now use Go capabilities
   with organization-bound, retry-safe requests across tabs and workspace
   changes.

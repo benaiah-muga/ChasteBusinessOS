@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryCycleCount, type InventoryItem, type InventoryLocation, type InventoryLot, type InventoryReservation, type InventoryTransfer } from "../api/inventory";
 import { InventoryCycleCountPanel } from "./InventoryCycleCountPanel";
@@ -69,24 +69,31 @@ export function InventoryPage({
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const reportRequestId = useRef(0);
   const mountedRef = useRef(false);
+  const scopeIdentity = JSON.stringify([actorId?.trim() ?? "", organizationId?.trim() ?? ""]);
+  const activeScopeIdentity = useRef(scopeIdentity);
+  useLayoutEffect(() => {
+    activeScopeIdentity.current = scopeIdentity;
+    reportRequestId.current += 1;
+  }, [scopeIdentity]);
+  const isScopeCurrent = useCallback((scope: string) => activeScopeIdentity.current === scope, []);
   const currency = useMemo(() => displayCurrency(baseCurrency), [baseCurrency]);
-  const locationReservationGoWritesEnabled = typeof __GO_INVENTORY_LOCATION_RESERVATION_WRITES__ !== "undefined"
-    && __GO_INVENTORY_LOCATION_RESERVATION_WRITES__;
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const scope = scopeIdentity;
+    if (!isScopeCurrent(scope)) return;
     const requestId = ++reportRequestId.current;
     setState({ status: "loading" });
     try {
-      const enabled = await fetchInventoryEnabled(signal);
-      if (signal?.aborted || reportRequestId.current !== requestId) return;
+      const enabled = await fetchInventoryEnabled(signal, organizationId ?? undefined);
+      if (signal?.aborted || !isScopeCurrent(scope) || reportRequestId.current !== requestId) return;
       if (!enabled) {
         setState({ status: "disabled" });
         return;
       }
-      const report = await fetchInventoryReport(signal);
-      if (!signal?.aborted && reportRequestId.current === requestId) setState({ status: "ready", ...report });
+      const report = await fetchInventoryReport(signal, organizationId ?? undefined);
+      if (!signal?.aborted && isScopeCurrent(scope) && reportRequestId.current === requestId) setState({ status: "ready", ...report });
     } catch (error) {
-      if (signal?.aborted || reportRequestId.current !== requestId) return;
+      if (signal?.aborted || !isScopeCurrent(scope) || reportRequestId.current !== requestId) return;
       setState({
         status: "failed",
         error: error instanceof InventoryApiError
@@ -94,28 +101,29 @@ export function InventoryPage({
           : new InventoryApiError(0, "Could not reach the inventory service. Check your connection and try again."),
       });
     }
-  }, []);
+  }, [isScopeCurrent, organizationId, scopeIdentity]);
 
   const refresh = useCallback(async () => {
-    if (!mountedRef.current) return;
+    const scope = scopeIdentity;
+    if (!mountedRef.current || !isScopeCurrent(scope)) return;
     const requestId = ++reportRequestId.current;
     setRefreshError(null);
     try {
-      const enabled = await fetchInventoryEnabled();
-      if (reportRequestId.current !== requestId) return;
+      const enabled = await fetchInventoryEnabled(undefined, organizationId ?? undefined);
+      if (!isScopeCurrent(scope) || reportRequestId.current !== requestId) return;
       if (!enabled) {
         setState({ status: "disabled" });
         return;
       }
-      const report = await fetchInventoryReport();
-      if (reportRequestId.current !== requestId) return;
+      const report = await fetchInventoryReport(undefined, organizationId ?? undefined);
+      if (!isScopeCurrent(scope) || reportRequestId.current !== requestId) return;
       setState({ status: "ready", ...report });
     } catch (error) {
-      if (reportRequestId.current === requestId) {
+      if (isScopeCurrent(scope) && reportRequestId.current === requestId) {
         setRefreshError(error instanceof InventoryApiError ? error.message : "The action completed, but inventory could not refresh. Reload the page to see the latest status.");
       }
     }
-  }, []);
+  }, [isScopeCurrent, organizationId, scopeIdentity]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -218,12 +226,12 @@ export function InventoryPage({
         </>
       )}
       {state.status === "ready" && <InventoryItemActions items={state.items} currency={currency} onChanged={refresh} retryScope={{ actorId, organizationId }} />}
-      {state.status === "ready" && locationReservationGoWritesEnabled && (!actorId || !organizationId)
+      {state.status === "ready" && (!actorId || !organizationId)
         ? <p className="inventory-empty" role="status">Loading the active workspace before location and reservation actions are available.</p>
         : state.status === "ready" && <InventoryLocationsReservationsPanel items={state.items} locations={state.locations} reservations={state.reservations} onChanged={refresh} retryScope={actorId && organizationId ? { actorId, organizationId } : undefined} />}
       {state.status === "ready" && <InventoryCycleCountPanel items={state.items} locations={state.locations} counts={state.cycleCounts} onChanged={refresh} retryScope={actorId && organizationId ? { actorId, organizationId } : undefined} />}
       {state.status === "ready" && <InventoryTransfersPanel items={state.items} locations={state.locations} transfers={state.transfers} onChanged={refresh} retryScope={{ actorId, organizationId }} />}
-      {state.status === "ready" && <InventoryStockHistoryPanel items={state.items} currency={baseCurrency ?? currency} />}
+      {state.status === "ready" && <InventoryStockHistoryPanel items={state.items} currency={baseCurrency ?? currency} organizationId={organizationId ?? undefined} />}
       {state.status === "ready" && (
         <section className="inventory-lots" aria-labelledby="inventory-lots-title">
           <div className="inventory-lots-heading">

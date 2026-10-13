@@ -21,10 +21,11 @@ describe("fetchInventoryHistory", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ movements: [movement] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchInventoryHistory("SKU-1")).resolves.toEqual({ kind: "loaded", movements: [movement] });
+    await expect(fetchInventoryHistory("SKU-1", undefined, "org-history-test")).resolves.toEqual({ kind: "loaded", movements: [movement] });
     expect(fetchMock).toHaveBeenCalledWith("/api/inventory?sku=SKU-1", expect.objectContaining({
       method: "GET",
       credentials: "same-origin",
+      headers: { accept: "application/json", "X-Organization-ID": "org-history-test" },
     }));
   });
 

@@ -77,7 +77,7 @@ export function InventoryCycleCountPanel({ items, locations, counts, onChanged, 
     setBusy(true);
     setNotice(null);
     try {
-      const item = await lookupInventoryBarcode(code);
+      const item = await lookupInventoryBarcode(code, undefined, undefined, retryScope?.organizationId);
       if (!item) {
         setNotice({ tone: "error", text: "No item carries that barcode. Check the code or add a barcode in Products & Services." });
         return;

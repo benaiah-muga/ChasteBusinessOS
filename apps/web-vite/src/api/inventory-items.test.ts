@@ -45,6 +45,7 @@ describe("inventory item action API client", () => {
       .rejects.toThrow("A previous item creation is unresolved");
     await expect(submitInventoryItemAction(createAction, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { itemId } });
 
+    expect((fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>)["X-Organization-ID"]).toBe(retryScope.organizationId);
     const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
     const retry = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
     expect(retry.intentId).toBe(first.intentId);
@@ -62,6 +63,7 @@ describe("inventory item action API client", () => {
     await expect(submitInventoryItemAction(action, undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Owner review" });
     await expect(getPendingInventoryAdjustment(retryScope)).resolves.toEqual(action);
     await expect(submitInventoryItemAction(action, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 6500 } });
+    await expect(getPendingInventoryAdjustment(retryScope)).resolves.toBeNull();
 
     const requests = fetchMock.mock.calls.map(([url, init]) => ({
       url,
@@ -119,21 +121,14 @@ describe("inventory item action API client", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
-  it("retains a Go item creation marker on 404 and fails closed when Go is disabled", async () => {
+  it("retains an item creation marker on 404 and retries the same Go intent", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "route not mounted" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId: "40000000-0000-4000-8000-000000000004" } }));
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
 
     await expect(submitInventoryItemAction(createAction, undefined, retryScope)).rejects.toMatchObject({ status: 404 });
     await expect(getPendingInventoryItemCreation(retryScope)).resolves.toEqual(createAction);
-    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
-    await expect(submitInventoryItemAction(createAction, undefined, retryScope))
-      .rejects.toThrow("Go inventory item writes are not enabled");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
     await expect(submitInventoryItemAction(createAction, undefined, retryScope)).resolves.toEqual({
       kind: "completed",
       data: { itemId: "40000000-0000-4000-8000-000000000004" },
@@ -143,25 +138,20 @@ describe("inventory item action API client", () => {
     expect(retry.intentId).toBe(first.intentId);
   });
 
-  it("fails closed for every item write when Go is disabled, including fresh scoped actions", async () => {
+  it("keeps item writes on Go across pending retries and other scopes", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { onHandThousandths: 6500 } }));
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
     await expect(submitInventoryItemAction(action, undefined, retryScope)).resolves.toMatchObject({ kind: "pending" });
-
-    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
-    await expect(submitInventoryItemAction(action, undefined, retryScope))
-      .rejects.toThrow("Go inventory item writes are not enabled");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    await expect(getPendingInventoryAdjustment(retryScope)).resolves.toEqual(action);
+    await expect(submitInventoryItemAction(action, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 6500 } });
+    await expect(getPendingInventoryAdjustment(retryScope)).resolves.toBeNull();
 
     const freshScope = { actorId: retryScope.actorId, organizationId: "org-2" };
-    await expect(submitInventoryItemAction({ ...action, sku: "FRESH-ITEM" }, undefined, freshScope))
-      .rejects.toThrow("Go inventory item writes are not enabled");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
+    fetchMock.mockResolvedValueOnce(Response.json({ ok: true, data: { onHandThousandths: 100 } }));
+    await expect(submitInventoryItemAction({ ...action, sku: "FRESH-ITEM" }, undefined, freshScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(Array(3).fill("/api/capabilities/execute"));
   });
 
   it("clears an adjustment intent after a terminal client error", async () => {

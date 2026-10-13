@@ -204,10 +204,6 @@ export type InventoryTransferWithLineIds = Omit<InventoryTransfer, "lines"> & {
 };
 
 async function submit(payload: InventoryTransferAction, fallback: string, retryScope: InventoryTransferRetryScope): Promise<InventoryTransferActionResult> {
-  const selectedGo = typeof __GO_INVENTORY_TRANSFER_WRITES__ !== "undefined" && __GO_INVENTORY_TRANSFER_WRITES__;
-  if (!selectedGo) {
-    throw new InventoryTransferApiError(503, "Go inventory transfer writes are not enabled. Ask an administrator to enable the inventory capability route.");
-  }
   const attempt = await createTransferAttempt(payload, retryScope);
   const { action, ...input } = payload;
   const request = {
@@ -224,7 +220,7 @@ async function submit(payload: InventoryTransferAction, fallback: string, retryS
     response = await fetch(request.url, {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", ...(retryScope.organizationId ? { "X-Organization-ID": retryScope.organizationId } : {}) },
       cache: "no-store",
       body: JSON.stringify(request.body),
       signal: AbortSignal.timeout(20_000),
