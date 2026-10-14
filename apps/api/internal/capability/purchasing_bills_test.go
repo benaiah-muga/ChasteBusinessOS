@@ -1111,8 +1111,35 @@ func TestPurchasingBillsReverseVendorPaymentMirrorsAndRestores(t *testing.T) {
 	if err := fx.owner.QueryRow(fx.ctx, `SELECT status FROM vendor_payments WHERE id = $1::uuid`, paid.PaymentID).Scan(&paymentStatus); err != nil {
 		t.Fatal(err)
 	}
-	if paymentStatus != "settled" {
-		t.Fatalf("standalone payment status after reversal = %s, want untouched settled row (reversal evidence lives in the journal)", paymentStatus)
+	if paymentStatus != "reversed" {
+		t.Fatalf("standalone payment status after reversal = %s, want reversed", paymentStatus)
+	}
+	var storedReversalID *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT reversal_entry_id::text FROM vendor_payments WHERE id = $1::uuid`, paid.PaymentID).Scan(&storedReversalID); err != nil {
+		t.Fatal(err)
+	}
+	if storedReversalID == nil || *storedReversalID != reversed.ReversalEntryID {
+		t.Fatalf("standalone payment reversal entry = %v, want %s", storedReversalID, reversed.ReversalEntryID)
+	}
+	workspace, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (PurchasingListWorkspaceOutput, error) {
+		return purchasingListWorkspace(fx.ctx, tx, fx.orgID, PurchasingListWorkspaceInput{}, now)
+	})
+	if err != nil {
+		t.Fatalf("purchasingListWorkspace after reversal: %v", err)
+	}
+	var listedPayment *PurchasingWorkspaceBillPayment
+	for _, bill := range workspace.Bills {
+		if bill.Number != created.BillNumber {
+			continue
+		}
+		for index := range bill.Payments {
+			if bill.Payments[index].ID == paid.PaymentID {
+				listedPayment = &bill.Payments[index]
+			}
+		}
+	}
+	if listedPayment == nil || listedPayment.Status != "reversed" || listedPayment.ReversalEntryID == nil || *listedPayment.ReversalEntryID != reversed.ReversalEntryID {
+		t.Fatalf("workspace payment after reversal = %+v, want reversed status and linked reversal evidence", listedPayment)
 	}
 
 	// A bill can receive a corrected payment after the reversal.

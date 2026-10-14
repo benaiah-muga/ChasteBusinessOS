@@ -13,6 +13,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Purchasing can reverse an individual standalone vendor bill payment through Go after entering a reason; payment-run members remain available only through whole-run reversal.
 - Vite Sales can deliver selected quantities from confirmed orders and invoice each delivery through Go, with Go-reported reserved balances and retry-safe line quantities.
 - Vite Payroll can execute and void draft runs and reverse executed postings through Go, with explicit confirmation and actor/org scoped exact retry recovery.
 - Vite People can deactivate active employees through Go after confirmation; deactivated records remain visible and no longer appear as eligible for future payroll runs.
@@ -22,6 +23,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Go standalone vendor payment reversals now persist reversal evidence on the payment; refreshed Purchasing bills no longer offer a second reversal for the same payment.
 - Vite Expenses serializes actor and organization scoped retry marker reservations across tabs and only clears the exact completed intent, preserving newer unresolved actions.
 - Vite Payroll blocks draft creation when a run already exists for the selected period, preventing a duplicate-period request from leaving an unresolved retry marker.
 - Go payroll domain rejections now return definite 422 capability results, so clients can clear retry markers for duplicate periods and invalid lifecycle transitions while internal failures remain retryable.

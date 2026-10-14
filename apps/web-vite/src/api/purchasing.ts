@@ -47,6 +47,13 @@ const BillSchema = z.object({
   status: z.string().min(1),
   dueMinor: SafeIntegerSchema,
   createdAt: TimestampSchema,
+  payments: z.array(z.object({
+    id: z.string().uuid(),
+    amountMinor: NonnegativeSafeIntegerSchema,
+    status: z.string().min(1),
+    paymentRunId: z.string().uuid().nullable(),
+    reversalEntryId: z.string().uuid().nullable(),
+  }).strict()),
 }).strict();
 
 const AgingBucketsSchema = z.object({
@@ -261,6 +268,12 @@ const GoPayBillSchema = PayBillSchema.extend({
   amountMinor: z.number().int().safe().positive().max(2_147_483_647),
 });
 
+const ReverseVendorPaymentSchema = z.object({
+  action: z.literal("reverseVendorPayment"),
+  vendorPaymentId: z.string().uuid(),
+  reason: z.string().min(3).max(500),
+}).strict();
+
 const BillCreditNoteSchema = z.object({
   action: z.literal("billCreditNote"),
   billId: z.string().min(1),
@@ -370,6 +383,13 @@ const PayBillOutputSchema = z.object({
   fullyPaid: z.boolean(),
 }).strict();
 
+const ReverseVendorPaymentOutputSchema = z.object({
+  reversalEntryId: z.string().uuid(),
+  refundedMinor: NonnegativeSafeIntegerSchema,
+  billNumber: z.number().int().safe().positive(),
+  outstandingMinor: NonnegativeSafeIntegerSchema,
+}).strict();
+
 const GoBillCreditNoteOutputSchema = z.object({
   entryId: z.string().uuid(),
   creditedMinor: z.number().int().safe().positive(),
@@ -407,6 +427,7 @@ export type PurchasingAction =
   | z.infer<typeof ClosePurchaseOrderSchema>
   | z.infer<typeof CreateBillSchema>
   | z.infer<typeof PayBillSchema>
+  | z.infer<typeof ReverseVendorPaymentSchema>
   | z.infer<typeof BillCreditNoteSchema>
   | z.infer<typeof CreatePurchaseRequestSchema>
   | z.infer<typeof DecidePurchaseRequestSchema>
@@ -415,6 +436,7 @@ export type PurchasingAction =
   | z.infer<typeof SelectWinningQuoteSchema>;
 export type PurchasingReceiveGoodsResult = { received: true; fullyReceived: boolean; receiptNumber: number };
 export type PurchasingPayBillAction = z.infer<typeof PayBillSchema>;
+export type PurchasingReverseVendorPaymentAction = z.infer<typeof ReverseVendorPaymentSchema>;
 
 export type PurchasingActionOutcome<T = Record<string, unknown>> =
   | { kind: "completed"; data: T }
@@ -784,7 +806,7 @@ async function submitPurchaseLifecycle<T>(
   }
 }
 
-type PurchaseFinanceAction = z.infer<typeof GoCreateVendorSchema> | z.infer<typeof GoCreateBillSchema> | z.infer<typeof GoPayBillSchema> | z.infer<typeof GoBillCreditNoteSchema>;
+type PurchaseFinanceAction = z.infer<typeof GoCreateVendorSchema> | z.infer<typeof GoCreateBillSchema> | z.infer<typeof GoPayBillSchema> | z.infer<typeof GoBillCreditNoteSchema> | z.infer<typeof ReverseVendorPaymentSchema>;
 type PurchaseSourcingAction = z.infer<typeof GoCreatePurchaseRequestSchema> | z.infer<typeof GoDecidePurchaseRequestSchema> | z.infer<typeof GoCreateRfqSchema> | z.infer<typeof GoRecordQuoteSchema> | z.infer<typeof SelectWinningQuoteSchema>;
 export type PendingPurchaseRequestAction = z.infer<typeof GoCreatePurchaseRequestSchema>;
 type PurchaseFinanceAttempt = { storageKey: string; fingerprint: string; intentId: string };
@@ -828,7 +850,7 @@ async function createPurchaseFinanceAttempt(action: PurchaseFinanceAction, scope
       window.localStorage.setItem(storageKey, JSON.stringify({
         fingerprint,
         intentId: attempt.intentId,
-        ...(action.action === "payBill" ? { action } : {}),
+        ...(action.action === "payBill" || action.action === "reverseVendorPayment" ? { action } : {}),
       }));
       const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
       if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
@@ -865,7 +887,7 @@ function clearPurchaseFinanceAttempt(attempt: PurchaseFinanceAttempt): void {
 
 async function submitPurchaseFinanceCapability(
   action: PurchaseFinanceAction,
-  capabilityId: "purchasing.createVendor" | "purchasing.createBill" | "purchasing.payBill" | "purchasing.billCreditNote",
+  capabilityId: "purchasing.createVendor" | "purchasing.createBill" | "purchasing.payBill" | "purchasing.billCreditNote" | "purchasing.reverseVendorPayment",
   output: z.ZodType<Record<string, unknown>>,
   activity: string,
   signal: AbortSignal | undefined,
@@ -1083,6 +1105,16 @@ export async function payPurchasingBill(
   return submitPurchaseFinanceCapability(goAction.data, "purchasing.payBill", PayBillOutputSchema, "paying the bill", signal, retryScope);
 }
 
+export async function reversePurchasingBillPayment(
+  action: unknown,
+  signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
+): Promise<PurchasingActionOutcome> {
+  const parsedAction = ReverseVendorPaymentSchema.safeParse(action);
+  if (!parsedAction.success) throw new PurchasingApiError(0, "Enter a valid vendor payment and a reversal reason between 3 and 500 characters.");
+  return submitPurchaseFinanceCapability(parsedAction.data, "purchasing.reverseVendorPayment", ReverseVendorPaymentOutputSchema, "reversing the vendor payment", signal, retryScope);
+}
+
 export async function readPendingPurchasingBillPayment(
   retryScope: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingPayBillAction | null> {
@@ -1106,6 +1138,28 @@ export async function readPendingPurchasingBillPayment(
   if (fingerprint !== stored.fingerprint) {
     throw new PurchasingApiError(0, "The saved bill payment details failed verification. Check the bill before retrying.", true);
   }
+  return action.data;
+}
+
+export async function readPendingPurchasingPaymentReversal(
+  retryScope: { actorId: string | null; organizationId: string | null },
+): Promise<PurchasingReverseVendorPaymentAction | null> {
+  if (!retryScope.actorId?.trim() || !retryScope.organizationId?.trim()) return null;
+  const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
+  let scopeDigest: string;
+  try { scopeDigest = await digestHex(JSON.stringify(scope)); }
+  catch { throw new PurchasingApiError(0, "Purchasing retry recovery is unavailable in this browser session.", true); }
+  const storageKey = `${purchaseFinanceAttemptPrefix}reverseVendorPayment:${scopeDigest}`;
+  let stored: ReturnType<typeof parsePurchaseOrderAttempt>;
+  try { stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey)); }
+  catch { throw new PurchasingApiError(0, "Could not read the unresolved vendor payment reversal. Enable browser storage and reload.", true); }
+  if (!stored) return null;
+  const action = ReverseVendorPaymentSchema.safeParse(stored.action);
+  if (!action.success) throw new PurchasingApiError(0, "An unresolved vendor payment reversal is missing its saved details and cannot be safely retried.", true);
+  let fingerprint: string;
+  try { fingerprint = await digestHex(JSON.stringify({ ...scope, action: canonicalize(action.data) })); }
+  catch { throw new PurchasingApiError(0, "Could not verify the saved payment reversal. Check the bill before retrying.", true); }
+  if (fingerprint !== stored.fingerprint) throw new PurchasingApiError(0, "The saved payment reversal details failed verification. Check the bill before retrying.", true);
   return action.data;
 }
 

@@ -798,6 +798,15 @@ func reverseVendorPayment(ctx context.Context, tx pgx.Tx, claims authbridge.Capa
 	if err != nil {
 		return ReverseVendorPaymentOutput{}, err
 	}
+	if tag, err := tx.Exec(ctx, `
+		UPDATE vendor_payments
+		SET status = 'reversed', reversed_at = $2, reversal_entry_id = $3::uuid
+		WHERE id = $1::uuid AND org_id = $4::uuid AND status <> 'reversed' AND payment_run_id IS NULL`,
+		input.VendorPaymentID, now, reversalEntryID, orgID); err != nil {
+		return ReverseVendorPaymentOutput{}, err
+	} else if tag.RowsAffected() != 1 {
+		return ReverseVendorPaymentOutput{}, errors.New("vendor payment has already been reversed")
+	}
 	// Bill-state repair (N12): releasing the payment demotes a paid bill back
 	// to open through the one balance contract.
 	released, err := purchasingBalance(totalMinor, paidMinor-amountMinor, creditedMinor)

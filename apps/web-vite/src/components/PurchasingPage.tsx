@@ -19,6 +19,8 @@ import {
   fetchPurchasingSupplierStatement,
   fetchPurchasingWorkspace,
   payPurchasingBill,
+  reversePurchasingBillPayment,
+  readPendingPurchasingPaymentReversal,
   readPendingPurchasingRequest,
   PurchasingApiError,
   recordPurchasingQuote,
@@ -27,6 +29,7 @@ import {
   type PurchasingAction,
   type PurchasingActionOutcome,
   type PendingPurchaseRequestAction,
+  type PurchasingReverseVendorPaymentAction,
   type PurchasingBill,
   type PurchasingOrder,
   type PurchasingPriceHistoryRow,
@@ -254,6 +257,7 @@ async function submitAction(action: PurchasingWrite, retryScope?: { actorId: str
     case "closePurchaseOrder": return closePurchasingOrder(action, undefined, retryScope);
     case "createBill": return createPurchasingBill(action, undefined, retryScope);
     case "payBill": return payPurchasingBill(action, undefined, retryScope);
+    case "reverseVendorPayment": return reversePurchasingBillPayment(action, undefined, retryScope);
     case "billCreditNote": return creditPurchasingBill(action, undefined, retryScope);
     case "createPurchaseRequest": return createPurchasingRequest(action, undefined, retryScope);
     case "decidePurchaseRequest": return decidePurchasingRequest(action, undefined, retryScope);
@@ -325,6 +329,10 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   const [requestEstimateError, setRequestEstimateError] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<Record<string, string>>({});
   const [payAmount, setPayAmount] = useState<Record<string, string>>({});
+  const [reversalTarget, setReversalTarget] = useState<{ bill: PurchasingBill; payment: PurchasingBill["payments"][number] } | null>(null);
+  const [reversalReason, setReversalReason] = useState("");
+  const [reversalLocked, setReversalLocked] = useState(false);
+  const [pendingPaymentReversal, setPendingPaymentReversal] = useState<PurchasingReverseVendorPaymentAction | null>(null);
   const [rfqPick, setRfqPick] = useState<Record<string, string[]>>({});
   const [quoteDraft, setQuoteDraft] = useState<Record<string, { amount: string; leadTime: string; notes: string }>>({});
   const [rejectFor, setRejectFor] = useState<string | null>(null);
@@ -351,6 +359,20 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   const sourcingDraftsReady = !goSourcingWritesEnabled || Boolean(
     sourcingDraftScopeIdentity && sourcingDraftStorageKey && hydratedSourcingDraftScope === sourcingDraftStorageKey && sourcingDraftStorageStatus === "ready",
   );
+
+  useEffect(() => {
+    let active = true;
+    setPendingPaymentReversal(null);
+    void readPendingPurchasingPaymentReversal({ actorId, organizationId }).then((action) => {
+      if (active && action) {
+        setPendingPaymentReversal(action);
+        setNotice({ tone: "pending", text: "A vendor payment reversal is unresolved. Retry the exact saved reason and payment before starting another reversal." });
+      }
+    }).catch((error: unknown) => {
+      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not recover the pending payment reversal." });
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
 
   useEffect(() => {
     let active = true;
@@ -788,9 +810,18 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
             payAmount={payAmount}
             setPayAmount={setPayAmount}
             onRun={runAction}
+            pendingPaymentReversal={pendingPaymentReversal}
+            onRetryPaymentReversal={() => {
+              if (pendingPaymentReversal) void runAction("Retry vendor payment reversal", pendingPaymentReversal, () => setPendingPaymentReversal(null));
+            }}
             onOpenCredit={(bill) => {
               setCreditTarget(bill);
               setCreditForm(creditDrafts[creditDraftKey(bill.id)] ?? { amount: majorToInput(bill.dueMinor, bill.currency), reason: "" });
+            }}
+            onOpenReversal={(bill, payment) => {
+              setReversalTarget({ bill, payment });
+              setReversalReason("");
+              setReversalLocked(false);
             }}
           />
         )}
@@ -895,6 +926,57 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
               />
             </label>
           </div>
+        </Dialog>
+      )}
+
+      {reversalTarget && (
+        <Dialog
+          title={`Reverse payment on bill #${reversalTarget.bill.number}?`}
+          hint={`This creates a linked reversal entry for ${formatMoney(reversalTarget.payment.amountMinor, reversalTarget.bill.currency)} and reopens the bill balance. The payment remains in the audit history.`}
+          onClose={() => setReversalTarget(null)}
+          foot={
+            <>
+              <button type="button" className="purchasing-button is-quiet" disabled={busy} onClick={() => setReversalTarget(null)}>Cancel</button>
+              <button
+                type="button"
+                className="purchasing-button is-danger"
+                disabled={busy || reversalReason.trim().length < 3}
+                onClick={() => {
+                  const action: PurchasingReverseVendorPaymentAction = {
+                    action: "reverseVendorPayment",
+                    vendorPaymentId: reversalTarget.payment.id,
+                    reason: reversalReason.trim(),
+                  };
+                  void runAction(`Reverse payment on bill #${reversalTarget.bill.number}`, action, () => {
+                    setPendingPaymentReversal(null);
+                    setReversalTarget(null);
+                    setReversalReason("");
+                    setReversalLocked(false);
+                  }, {
+                    onPending: () => setPendingPaymentReversal(action),
+                    onError: (error) => {
+                      if (error instanceof PurchasingApiError && error.requestMayHaveReachedServer) {
+                        setPendingPaymentReversal(action);
+                        setReversalLocked(true);
+                      }
+                    },
+                  });
+                }}
+              >Reverse payment</button>
+            </>
+          }
+        >
+          <label className="purchasing-field" htmlFor="purchasing-payment-reversal-reason">
+            Reversal reason
+            <input
+              id="purchasing-payment-reversal-reason"
+              className="purchasing-input"
+              value={reversalReason}
+              maxLength={500}
+              disabled={busy || reversalLocked}
+              onChange={(event) => setReversalReason(event.currentTarget.value)}
+            />
+          </label>
         </Dialog>
       )}
 
@@ -1812,7 +1894,7 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
 
 /* ------------------------------------------------------------------- bills --- */
 
-function BillsTab({ bills, vendors, taxCodes, currency, outstanding, busy, form, setForm, billError, setBillError, payAmount, setPayAmount, onRun, onOpenCredit }: {
+function BillsTab({ bills, vendors, taxCodes, currency, outstanding, busy, form, setForm, billError, setBillError, payAmount, setPayAmount, onRun, onOpenCredit, onOpenReversal, pendingPaymentReversal, onRetryPaymentReversal }: {
   bills: PurchasingBill[];
   vendors: PurchasingVendor[];
   taxCodes: PurchasingTaxCode[];
@@ -1827,6 +1909,9 @@ function BillsTab({ bills, vendors, taxCodes, currency, outstanding, busy, form,
   setPayAmount: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   onRun: (label: string, action: PurchasingWrite, after?: () => void) => Promise<boolean>;
   onOpenCredit: (bill: PurchasingBill) => void;
+  onOpenReversal: (bill: PurchasingBill, payment: PurchasingBill["payments"][number]) => void;
+  pendingPaymentReversal: PurchasingReverseVendorPaymentAction | null;
+  onRetryPaymentReversal: () => void;
 }) {
   const matched = form.poNumber.trim() !== "";
   const built = buildBillLines(form.lines, currency, matched);
@@ -2031,6 +2116,13 @@ function BillsTab({ bills, vendors, taxCodes, currency, outstanding, busy, form,
         <a className="purchasing-link" href="/purchasing/payment-runs">Open payment runs</a>
       </section>
 
+      {pendingPaymentReversal && (
+        <section className="purchasing-card" aria-label="Unresolved payment reversal" role="status">
+          <p className="purchasing-card-hint">A payment reversal may still be processing. Retry the saved action to check its result safely.</p>
+          <button type="button" className="purchasing-button is-primary" disabled={busy} onClick={onRetryPaymentReversal}>Retry saved reversal</button>
+        </section>
+      )}
+
       {bills.length === 0 ? (
         <section className="purchasing-empty" role="status">
           <h2>No bills recorded</h2>
@@ -2103,6 +2195,17 @@ function BillsTab({ bills, vendors, taxCodes, currency, outstanding, busy, form,
                               {bill.creditedMinor > 0 ? "settled" : "paid"}
                             </span>
                           )}
+                          {bill.payments.filter((payment) => payment.status !== "reversed" && payment.reversalEntryId === null && payment.paymentRunId === null).map((payment) => (
+                            <button
+                              key={payment.id}
+                              type="button"
+                              className="purchasing-button is-tiny is-quiet"
+                              disabled={busy}
+                              onClick={() => onOpenReversal(bill, payment)}
+                            >
+                              Reverse {formatMoney(payment.amountMinor, bill.currency)}
+                            </button>
+                          ))}
                         </div>
                       </td>
                     </tr>

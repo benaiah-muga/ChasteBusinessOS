@@ -4333,3 +4333,28 @@ new owners and the manifest shows zero legacy runtime paths.
      #1 with two units, delivered 1.25 units, then reloaded the page. Go
      reported 0.750 units remaining. Capability requests returned HTTP 200, no
      legacy Sales write occurred, and the browser reported no errors.
+
+406. (Implemented and browser verified) Vite Purchasing can reverse an
+     individual standalone vendor bill payment through Go's
+     `purchasing.reverseVendorPayment` capability. The workspace read includes
+     scoped payment IDs and run membership, the UI requires a reason and
+     confirmation, and payment-run members remain reserved for whole-run
+     reversal. Actor/org scoped retry recovery preserves the exact action and
+     intent through pending approval or uncertain transport; strict API output
+     validation and component tests cover the capability request and
+     confirmation gate. Authenticated `agent-browser` proof on 2026-10-14
+     created and paid synthetic bill #1 for UGX 1,000, reversed its standalone
+     payment with a reason, and reloaded the Bills page. The bill reopened
+     with UGX 1,000 due and the Reverse action stayed hidden. Capability
+     requests returned HTTP 200, no legacy Purchasing write occurred, and the
+     browser reported no errors. The Go integration test verified the linked
+     journal reversal entry and persisted payment state.
+
+407. (Fixed and API/component verified) Go standalone vendor payment reversal
+     now records `reversed_at` and `reversal_entry_id` on the payment in the
+     same transaction as its journal reversal and bill balance update. The
+     Purchasing workspace projects the stored or journal-linked reversal
+     evidence, and Vite hides the individual reversal action after refresh.
+     Focused Go projection and Vite component tests cover the persisted state.
+     The authenticated Purchasing proof above also verified the hidden action
+     after reload.

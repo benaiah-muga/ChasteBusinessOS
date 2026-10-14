@@ -61,6 +61,13 @@ func TestPurchasingListWorkspacePermissionIsolationAndProjection(t *testing.T) {
 		VALUES ($1::uuid, $2::uuid, 999, 'foreign', 'USD', 100)`, fx.otherOrgID, foreignVendorID); err != nil {
 		t.Fatal(err)
 	}
+	var standalonePaymentID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO vendor_payments (org_id, bill_id, amount_minor, status, paid_at)
+		SELECT $1::uuid, id, 100, 'settled', now() FROM vendor_bills WHERE org_id=$1::uuid AND number=101
+		RETURNING id::text`, fx.orgID).Scan(&standalonePaymentID); err != nil {
+		t.Fatal(err)
+	}
 	var requestID string
 	if err := fx.owner.QueryRow(fx.ctx, `
 		INSERT INTO purchase_requests (org_id, title, justification, estimated_amount_minor, status)
@@ -110,6 +117,9 @@ func TestPurchasingListWorkspacePermissionIsolationAndProjection(t *testing.T) {
 	}
 	if output.Orders[0].ID == "" || output.Bills[0].ID == "" || output.Bills[0].Currency != "UGX" || output.Bills[0].VendorRef != nil || output.Bills[0].Memo != nil {
 		t.Fatalf("required IDs/currency/nullables missing: order=%+v bill=%+v", output.Orders[0], output.Bills[0])
+	}
+	if len(output.Bills[0].Payments) != 1 || output.Bills[0].Payments[0].ID != standalonePaymentID || output.Bills[0].Payments[0].AmountMinor != 100 || output.Bills[0].Payments[0].Status != "settled" || output.Bills[0].Payments[0].PaymentRunID != nil || output.Bills[0].Payments[0].ReversalEntryID != nil {
+		t.Fatalf("newest bill payment projection=%+v, want the standalone payment and nullable run ID", output.Bills[0].Payments)
 	}
 	if output.APAging.Buckets.TotalOutstanding != 700 {
 		t.Fatalf("apAging=%+v, want total outstanding from all bills using legacy paid-only aging", output.APAging)

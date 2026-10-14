@@ -55,13 +55,14 @@ function billFixture(overrides: Record<string, unknown> = {}) {
     status: "open",
     dueMinor: 12500,
     createdAt: "2026-08-12T09:30:00.000Z",
+    payments: [],
     ...overrides,
   };
 }
 
 type Overrides = {
   modules?: unknown;
-  workspace?: unknown;
+  workspace?: unknown | (() => unknown);
   inventory?: unknown;
   tax?: unknown;
   workflow?: unknown;
@@ -94,7 +95,7 @@ function purchasingFetch(overrides: Overrides = {}) {
         intentId?: string;
       };
       if (body.capabilityId === "purchasing.listWorkspace") {
-        const workspace = overrides.workspace ?? workspaceFixture();
+        const workspace = typeof overrides.workspace === "function" ? overrides.workspace() : overrides.workspace ?? workspaceFixture();
         return resolve(workspace instanceof Response ? workspace : { ok: true, data: workspace });
       }
       if (body.capabilityId === "purchasing.listPurchaseWorkflow") {
@@ -103,7 +104,7 @@ function purchasingFetch(overrides: Overrides = {}) {
       if (body.capabilityId === "accounting.listTaxCodes") {
         return resolve(overrides.tax ?? { ok: true, data: { codes: [] } });
       }
-      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.receiveGoods" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote" && body.capabilityId !== "purchasing.supplierStatement" && body.capabilityId !== "purchasing.priceHistory" && body.capabilityId !== "purchasing.supplierPerformance") || !body.input) {
+      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.receiveGoods" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.reverseVendorPayment" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote" && body.capabilityId !== "purchasing.supplierStatement" && body.capabilityId !== "purchasing.priceHistory" && body.capabilityId !== "purchasing.supplierPerformance") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
       const action = body.capabilityId === "purchasing.createVendor" ? "createVendor"
@@ -118,7 +119,8 @@ function purchasingFetch(overrides: Overrides = {}) {
                       : body.capabilityId === "purchasing.createRfq" ? "createRfq"
                         : body.capabilityId === "purchasing.recordQuote" ? "recordQuote"
                           : body.capabilityId === "purchasing.selectWinningQuote" ? "selectWinningQuote"
-                          : body.capabilityId === "purchasing.supplierStatement" ? "supplierStatement"
+                            : body.capabilityId === "purchasing.reverseVendorPayment" ? "reverseVendorPayment"
+                              : body.capabilityId === "purchasing.supplierStatement" ? "supplierStatement"
                             : body.capabilityId === "purchasing.priceHistory" ? "priceHistory"
                               : body.capabilityId === "purchasing.supplierPerformance" ? "supplierPerformance" : "payBill";
       if (body.capabilityId === "purchasing.receiveGoods") {
@@ -1360,6 +1362,45 @@ describe("PurchasingPage", () => {
       input: { billNumber: 7, amountMinor: 5000 },
       intentId: expect.any(String),
     });
+  });
+
+  it("requires a reason before reversing an individual vendor bill payment", async () => {
+    const paymentId = "3c9e3c30-1e5c-4b3c-9d4b-5b3c4d5e6f70";
+    const reversalEntryId = "4dae4d41-2f6d-4c4d-ae5c-6c4d5e6f7081";
+    let reversed = false;
+    const fetchMock = purchasingFetch({
+      workspace: () => workspaceFixture({ bills: [billFixture({
+        paidMinor: 5000,
+        dueMinor: 7500,
+        payments: [{ id: paymentId, amountMinor: 5000, status: reversed ? "reversed" : "settled", paymentRunId: null, reversalEntryId: reversed ? reversalEntryId : null }],
+      })] }),
+      post: (body) => {
+        if (body.action !== "reverseVendorPayment") return { ok: true, data: {} };
+        reversed = true;
+        return { ok: true, data: { reversalEntryId, refundedMinor: 5000, billNumber: 7, outstandingMinor: 7500 } };
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-bill-reversal" organizationId="org-bill-reversal" />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reverse \$50\.00/ }));
+
+    const confirm = screen.getByRole("button", { name: "Reverse payment" });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    expect(capabilityPosts(fetchMock)).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Reversal reason"), { target: { value: "Duplicate bank transfer" } });
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(1));
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.reverseVendorPayment",
+      input: { vendorPaymentId: paymentId, reason: "Duplicate bank transfer" },
+      intentId: expect.any(String),
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Reverse \$50\.00/ })).toBeNull());
   });
 
   it("points at the ported reports instead of rebuilding them", async () => {

@@ -39,18 +39,27 @@ type PurchasingWorkspaceOrder struct {
 }
 
 type PurchasingWorkspaceBill struct {
-	ID            string    `json:"id"`
-	Number        int64     `json:"number"`
-	VendorName    string    `json:"vendorName"`
-	VendorRef     *string   `json:"vendorRef"`
-	Memo          *string   `json:"memo"`
-	TotalMinor    int64     `json:"totalMinor"`
-	Currency      string    `json:"currency"`
-	PaidMinor     int64     `json:"paidMinor"`
-	CreditedMinor int64     `json:"creditedMinor"`
-	Status        string    `json:"status"`
-	DueMinor      int64     `json:"dueMinor"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID            string                           `json:"id"`
+	Number        int64                            `json:"number"`
+	VendorName    string                           `json:"vendorName"`
+	VendorRef     *string                          `json:"vendorRef"`
+	Memo          *string                          `json:"memo"`
+	TotalMinor    int64                            `json:"totalMinor"`
+	Currency      string                           `json:"currency"`
+	PaidMinor     int64                            `json:"paidMinor"`
+	CreditedMinor int64                            `json:"creditedMinor"`
+	Status        string                           `json:"status"`
+	DueMinor      int64                            `json:"dueMinor"`
+	CreatedAt     time.Time                        `json:"createdAt"`
+	Payments      []PurchasingWorkspaceBillPayment `json:"payments"`
+}
+
+type PurchasingWorkspaceBillPayment struct {
+	ID              string  `json:"id"`
+	AmountMinor     int64   `json:"amountMinor"`
+	Status          string  `json:"status"`
+	PaymentRunID    *string `json:"paymentRunId"`
+	ReversalEntryID *string `json:"reversalEntryId"`
 }
 
 type PurchasingListWorkspaceOutput struct {
@@ -192,6 +201,7 @@ func purchasingListWorkspace(ctx context.Context, tx pgx.Tx, orgID string, _ Pur
 	}
 	for billRows.Next() {
 		var bill PurchasingWorkspaceBill
+		bill.Payments = make([]PurchasingWorkspaceBillPayment, 0)
 		var vendorID string
 		if err := billRows.Scan(&bill.ID, &vendorID, &bill.Number, &bill.VendorRef, &bill.Memo, &bill.TotalMinor, &bill.Currency, &bill.PaidMinor, &bill.CreditedMinor, &bill.Status, &bill.CreatedAt); err != nil {
 			billRows.Close()
@@ -209,6 +219,45 @@ func purchasingListWorkspace(ctx context.Context, tx pgx.Tx, orgID string, _ Pur
 		return PurchasingListWorkspaceOutput{}, err
 	}
 	billRows.Close()
+	if len(output.Bills) > 0 {
+		billIDs := make([]string, 0, len(output.Bills))
+		billIndexes := make(map[string]int, len(output.Bills))
+		for i, bill := range output.Bills {
+			billIDs = append(billIDs, bill.ID)
+			billIndexes[bill.ID] = i
+		}
+		paymentRows, err := tx.Query(ctx, `
+			SELECT vp.id::text, vp.bill_id::text, vp.amount_minor,
+			       CASE WHEN vp.status = 'reversed' OR reversal.id IS NOT NULL THEN 'reversed' ELSE vp.status END,
+			       vp.payment_run_id::text, COALESCE(vp.reversal_entry_id::text, reversal.id::text)
+			FROM vendor_payments vp
+			LEFT JOIN LATERAL (
+				SELECT id FROM journal_entries
+				WHERE org_id = vp.org_id AND reversal_of_id = vp.entry_id
+				ORDER BY posted_at DESC, id DESC LIMIT 1
+			) reversal ON true
+			WHERE vp.org_id=$1::uuid AND vp.bill_id = ANY($2::uuid[])
+			ORDER BY vp.paid_at, vp.id`, orgID, billIDs)
+		if err != nil {
+			return PurchasingListWorkspaceOutput{}, err
+		}
+		for paymentRows.Next() {
+			var payment PurchasingWorkspaceBillPayment
+			var billID string
+			if err := paymentRows.Scan(&payment.ID, &billID, &payment.AmountMinor, &payment.Status, &payment.PaymentRunID, &payment.ReversalEntryID); err != nil {
+				paymentRows.Close()
+				return PurchasingListWorkspaceOutput{}, err
+			}
+			if index, ok := billIndexes[billID]; ok {
+				output.Bills[index].Payments = append(output.Bills[index].Payments, payment)
+			}
+		}
+		if err := paymentRows.Err(); err != nil {
+			paymentRows.Close()
+			return PurchasingListWorkspaceOutput{}, err
+		}
+		paymentRows.Close()
+	}
 	output.APAging, err = purchasingAPAging(ctx, tx, orgID, APAgingInput{}, now)
 	if err != nil {
 		return PurchasingListWorkspaceOutput{}, err

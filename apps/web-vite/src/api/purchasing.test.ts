@@ -16,6 +16,8 @@ import {
   fetchPurchasingSupplierStatement,
   fetchPurchasingWorkspace,
   payPurchasingBill,
+  reversePurchasingBillPayment,
+  readPendingPurchasingPaymentReversal,
   readPendingPurchasingBillPayment,
   readPendingPurchasingRequest,
   PurchasingApiError,
@@ -63,6 +65,7 @@ const workspace = {
     status: "open",
     dueMinor: 12500,
     createdAt: "2026-08-12T09:30:00.000Z",
+    payments: [],
   }],
   apAging: { buckets: { current: 12500, d30: 0, d60: 0, d90plus: 0, totalOutstanding: 12500 } },
   requests: [{
@@ -673,6 +676,30 @@ describe("governed purchasing writes", () => {
     expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(uncertain.intentId);
     await expect(payPurchasingBill(paymentAction, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { paymentId, entryId, fullyPaid: true } });
     expect(postedBody(fetchMock.mock.calls[3]!).intentId).toBe(uncertain.intentId);
+  });
+
+  it("reverses a standalone vendor payment with exact pending recovery and strict output validation", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", false);
+    const paymentId = "3c9e3c30-1e5c-4b3c-9d4b-5b3c4d5e6f70";
+    const reversalEntryId = "4dae4d41-2f6d-4c4d-ae5c-6c4d5e6f7081";
+    const action = { action: "reverseVendorPayment" as const, vendorPaymentId: paymentId, reason: "Duplicate vendor payment" };
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, reason: "Reversal needs approval." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { reversalEntryId, refundedMinor: 5000, billNumber: 73, outstandingMinor: 5000, extra: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { reversalEntryId, refundedMinor: 5000, billNumber: 73, outstandingMinor: 5000 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reversePurchasingBillPayment(action, undefined, retryScope)).rejects.toMatchObject({ status: 0 });
+    const uncertain = postedBody(fetchMock.mock.calls[0]!);
+    expect(uncertain).toMatchObject({ capabilityId: "purchasing.reverseVendorPayment", input: { vendorPaymentId: paymentId, reason: action.reason } });
+    await expect(readPendingPurchasingPaymentReversal(retryScope)).resolves.toEqual(action);
+    await expect(reversePurchasingBillPayment(action, undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Reversal needs approval." });
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(uncertain.intentId);
+    await expect(reversePurchasingBillPayment(action, undefined, retryScope)).rejects.toMatchObject({ status: 200, message: expect.stringContaining("unexpected result") });
+    await expect(reversePurchasingBillPayment(action, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { reversalEntryId, refundedMinor: 5000, billNumber: 73, outstandingMinor: 5000 } });
+    expect(postedBody(fetchMock.mock.calls[3]!).intentId).toBe(uncertain.intentId);
+    await expect(readPendingPurchasingPaymentReversal(retryScope)).resolves.toBeNull();
   });
 
   it("serializes cross-tab bill payment reservations for one actor and organization", async () => {
