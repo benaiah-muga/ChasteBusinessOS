@@ -43,7 +43,7 @@ function profileSnapshot(item: ReturnType<typeof customer>) {
     tags: item.tags,
     notes: item.notes,
     phone: item.phone,
-    preferredContactMethod: item.preferredContactMethod,
+    preferredContactMethod: item.preferredContactMethod as "email" | "phone" | "whatsapp" | "other",
     doNotContact: item.doNotContact,
   };
 }
@@ -777,7 +777,7 @@ describe("Vite CRM page", () => {
         const body = JSON.parse(String(init.body)) as { input: { name?: string } };
         const previous = [profileSnapshot(currentCustomer)];
         currentCustomer = { ...currentCustomer, name: body.input.name ?? currentCustomer.name };
-        return Response.json({ ok: true, data: { updatedCount: 1, previous } });
+        return Response.json({ ok: true, data: { updatedCount: 1, previous, current: [profileSnapshot(currentCustomer)] } });
       }
       return new Response(null, { status: 404 });
     });
@@ -801,6 +801,52 @@ describe("Vite CRM page", () => {
     expect(timelineReads).toBeGreaterThan(1);
   });
 
+  it("undoes a customer profile update through the Go inverse capability", async () => {
+    let currentCustomer = customer();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { capabilityId: string; input: { name?: string; profiles?: Array<ReturnType<typeof profileSnapshot>>; expectedCurrent?: Array<ReturnType<typeof profileSnapshot>> } };
+        const previous = [profileSnapshot(currentCustomer)];
+        if (body.capabilityId === "crm.updateCustomerProfiles") {
+          currentCustomer = { ...currentCustomer, name: body.input.name ?? currentCustomer.name };
+        } else if (body.capabilityId === "crm.restoreCustomerProfiles") {
+          const profile = body.input.profiles?.[0];
+          if (profile) currentCustomer = { ...currentCustomer, ...profile };
+        } else {
+          return new Response(null, { status: 404 });
+        }
+        return Response.json({ ok: true, data: { updatedCount: 1, previous, current: [profileSnapshot(currentCustomer)] } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    const profileButton = await screen.findByRole("button", { name: "Profile" });
+    await waitFor(() => expect(profileButton).toHaveProperty("disabled", false));
+    fireEvent.click(profileButton);
+    let dialog = await screen.findByRole("dialog", { name: "Northwind" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Northwind Ltd" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save profile" }));
+    dialog = await screen.findByRole("dialog", { name: "Northwind Ltd" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Undo last profile update" }));
+
+    expect(await screen.findByRole("heading", { name: "Northwind" })).not.toBeNull();
+    const writes = fetchMock.mock.calls
+      .filter(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId: string; input: { profiles?: unknown[]; expectedCurrent?: unknown[] } });
+    expect(writes.map((write) => write.capabilityId)).toEqual(["crm.updateCustomerProfiles", "crm.restoreCustomerProfiles"]);
+    expect(writes[1]?.input.profiles).toEqual([profileSnapshot(customer())]);
+    expect(writes[1]?.input.expectedCurrent).toEqual([{ ...profileSnapshot(customer()), name: "Northwind Ltd" }]);
+  });
+
   it("restores and retries the exact Go profile update after pending approval, including close and reopen", async () => {
     vi.stubGlobal("__GO_CRM_CUSTOMER_PROFILE_UPDATE__", true);
     const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
@@ -821,7 +867,7 @@ describe("Vite CRM page", () => {
         if (profileAttempts === 1) return pendingResponse;
         const body = JSON.parse(String(init?.body)) as { input: { name: string } };
         currentCustomer = { ...currentCustomer, name: body.input.name };
-        return Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }] } });
+        return Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }], current: [{ customerId, name: "Northwind Ltd", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }] } });
       }
       return new Response(null, { status: 404 });
     });
@@ -880,7 +926,7 @@ describe("Vite CRM page", () => {
         attempts += 1;
         if (attempts === 1) return Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 });
         if (attempts === 2) return Response.json({ error: "The customer name is invalid." }, { status: 422 });
-        return Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }] } });
+        return Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }], current: [{ customerId, name: "Northwind Ltd", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }] } });
       }
       return new Response(null, { status: 404 });
     });
@@ -940,7 +986,7 @@ describe("Vite CRM page", () => {
 
     view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
     await act(async () => {
-      finishUpdate(Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }] } }));
+      finishUpdate(Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }], current: [{ customerId, name: "Northwind Ltd", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }] } }));
     });
 
     expect(screen.queryByText("Updated 1 customer.")).toBeNull();
@@ -967,6 +1013,9 @@ describe("Vite CRM page", () => {
         return Response.json({ ok: true, data: { updatedCount: 2, previous: [
           { customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false },
           { customerId: secondCustomerId, name: "Contoso", ownerUserId: null, tags: [], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false },
+        ], current: [
+          { customerId, name: "Northwind", ownerUserId: ownerId, tags: ["renewal", "vip"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false },
+          { customerId: secondCustomerId, name: "Contoso", ownerUserId: ownerId, tags: ["vip"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false },
         ] } });
       }
       return new Response(null, { status: 404 });
@@ -1015,7 +1064,7 @@ describe("Vite CRM page", () => {
           doNotContact: body.input.doNotContact ?? currentCustomer.doNotContact,
           preferredContactMethod: body.input.preferredContactMethod ?? currentCustomer.preferredContactMethod,
         };
-        return Response.json({ ok: true, data: { updatedCount: 1, previous } });
+        return Response.json({ ok: true, data: { updatedCount: 1, previous, current: [profileSnapshot(currentCustomer)] } });
       }
       return new Response(null, { status: 404 });
     });
@@ -1048,7 +1097,7 @@ describe("Vite CRM page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (isDealsRead(path)) return Response.json({ deals: [] });
-      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { updatedCount: 2, previous: [profileSnapshot(customers[0]!), profileSnapshot(customers[1]!)] } });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { updatedCount: 2, previous: [profileSnapshot(customers[0]!), profileSnapshot(customers[1]!)], current: [profileSnapshot(customers[0]!), profileSnapshot(customers[1]!)] } });
       if (isCustomersRead(path)) return Response.json({ customers });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });

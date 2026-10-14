@@ -22,6 +22,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Go Messaging agents can query organization-scoped receivables aging through the governed `accounting.arAging` capability when the signed-in user has `accounting.read`.
 - Vite Accounting can post period-end foreign receivables revaluations through the approval-gated Go capability, with scoped retry recovery for pending or uncertain submissions.
 - Vite Accounting reports the net base-currency adjustment and number of foreign currencies after a completed Go revaluation.
+- Vite CRM supports undoing the latest single or bulk customer profile update through Go, with scoped recovery after pending or uncertain results.
 
 ### Fixed
 
@@ -31,6 +32,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Go payroll domain rejections now return definite 422 capability results, so clients can clear retry markers for duplicate periods and invalid lifecycle transitions while internal failures remain retryable.
 - Vite POS session history no longer adds the opening float twice after a register closes; the Go closed-session total is shown as-is.
 - Vite Accounting clears an in-flight revaluation confirmation when the active actor or organization changes, preventing a stale dialog from posting under the new scope.
+- Go CRM rejects stale profile undo or reapply snapshots atomically when another client has changed any included customer.
 
 ### Changed
 

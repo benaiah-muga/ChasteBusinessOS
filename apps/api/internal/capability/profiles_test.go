@@ -70,6 +70,18 @@ func TestParseCustomerProfileInputsEnforceLegacySchema(t *testing.T) {
 	if _, err := ParseCustomerProfileSnapshotsInput(duplicateSnapshots); err == nil {
 		t.Fatal("duplicate profile snapshots were accepted")
 	}
+	profileSnapshot := `{"customerId":"01234567-89ab-4cde-8fab-0123456789ab","name":"Customer","ownerUserId":null,"tags":[],"notes":null,"phone":null,"preferredContactMethod":"email","doNotContact":false}`
+	if _, err := ParseCustomerProfileSnapshotsInput(json.RawMessage(`{"profiles":[` + profileSnapshot + `]}`)); err == nil {
+		t.Fatal("profile snapshot action without expectedCurrent was accepted")
+	}
+	validSnapshotAction := json.RawMessage(`{"profiles":[` + profileSnapshot + `],"expectedCurrent":[` + profileSnapshot + `]}`)
+	if _, err := ParseCustomerProfileSnapshotsInput(validSnapshotAction); err != nil {
+		t.Fatalf("valid profile and expectedCurrent snapshots failed parsing: %v", err)
+	}
+	mismatchedCurrent := strings.Replace(profileSnapshot, "01234567-89ab-4cde-8fab-0123456789ab", "11111111-2222-4333-8444-555555555555", 1)
+	if _, err := ParseCustomerProfileSnapshotsInput(json.RawMessage(`{"profiles":[` + profileSnapshot + `],"expectedCurrent":[` + mismatchedCurrent + `]}`)); err == nil {
+		t.Fatal("expectedCurrent snapshot for a different customer was accepted")
+	}
 	input, err := ParseCustomerProfileUpdateInput(json.RawMessage(fmt.Sprintf(`{"customerIds":[%q],"notes":null}`, validID)))
 	if err != nil || !input.NotesSet || input.Notes != nil {
 		t.Fatalf("nullable-only update = %+v err=%v, want explicit null", input, err)
@@ -118,8 +130,8 @@ func TestGoCustomerProfileUpdatesAndInversesMatchLegacy(t *testing.T) {
 	if err := json.Unmarshal(updated.Data, &changed); err != nil {
 		t.Fatal(err)
 	}
-	if changed.UpdatedCount != 1 || len(changed.Previous) != 1 {
-		t.Fatalf("profile update output=%+v, want one previous snapshot", changed)
+	if changed.UpdatedCount != 1 || len(changed.Previous) != 1 || len(changed.Current) != 1 {
+		t.Fatalf("profile update output=%+v, want previous and current snapshots", changed)
 	}
 	previous := changed.Previous[0]
 	if previous.Name == nil || *previous.Name != "Original profile" || previous.OwnerUserID != nil || previous.Notes == nil || *previous.Notes != "Original notes" || previous.Phone != nil || previous.PreferredContactMethod != "email" || previous.DoNotContact {
@@ -129,8 +141,14 @@ func TestGoCustomerProfileUpdatesAndInversesMatchLegacy(t *testing.T) {
 		t.Fatalf("previous tags=%v, want original ordered tags", previous.Tags)
 	}
 	assertProfileRow(t, fx, customerID, "Updated profile", &fx.userID, []string{"Existing", "Mixed Case", "Added", "New"}, nil, stringPointer("+256 700"), "whatsapp", true)
+	current := changed.Current[0]
+	if current.Name == nil || *current.Name != "Updated profile" || current.OwnerUserID == nil || *current.OwnerUserID != fx.userID {
+		t.Fatalf("profile update current snapshot=%+v, want exact post-update profile", current)
+	}
 
-	restoreInput, err := json.Marshal(CustomerProfileSnapshotsInput{Profiles: changed.Previous})
+	changedCurrent := append([]CustomerProfileSnapshot(nil), changed.Current...)
+	changedCurrent[0].CustomerID = strings.ToUpper(changedCurrent[0].CustomerID)
+	restoreInput, err := json.Marshal(CustomerProfileSnapshotsInput{Profiles: changed.Previous, ExpectedCurrent: changedCurrent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,12 +160,14 @@ func TestGoCustomerProfileUpdatesAndInversesMatchLegacy(t *testing.T) {
 	if err := json.Unmarshal(restored.Data, &restoreOutput); err != nil {
 		t.Fatal(err)
 	}
-	if len(restoreOutput.Previous) != 1 || restoreOutput.Previous[0].Name == nil || *restoreOutput.Previous[0].Name != "Updated profile" {
-		t.Fatalf("restore inverse snapshot=%+v, want the changed profile", restoreOutput.Previous)
+	if len(restoreOutput.Previous) != 1 || restoreOutput.Previous[0].Name == nil || *restoreOutput.Previous[0].Name != "Updated profile" || len(restoreOutput.Current) != 1 || restoreOutput.Current[0].Name == nil || *restoreOutput.Current[0].Name != "Original profile" {
+		t.Fatalf("restore inverse snapshots=%+v current=%+v, want changed and restored profiles", restoreOutput.Previous, restoreOutput.Current)
 	}
 	assertProfileRow(t, fx, customerID, "Original profile", nil, []string{"Existing", "Remove", "Mixed Case"}, stringPointer("Original notes"), nil, "email", false)
 
-	reapplyInput, err := json.Marshal(CustomerProfileSnapshotsInput{Profiles: restoreOutput.Previous})
+	restoredCurrent := append([]CustomerProfileSnapshot(nil), restoreOutput.Current...)
+	restoredCurrent[0].CustomerID = strings.ToUpper(restoredCurrent[0].CustomerID)
+	reapplyInput, err := json.Marshal(CustomerProfileSnapshotsInput{Profiles: restoreOutput.Previous, ExpectedCurrent: restoredCurrent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,6 +181,83 @@ func TestGoCustomerProfileUpdatesAndInversesMatchLegacy(t *testing.T) {
 	}
 	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id = $1::uuid AND intent_key IN ($2,$3,$4)`, fx.orgID, fx.orgID+":profile-update", fx.orgID+":profile-restore", fx.orgID+":profile-reapply"); got != 3 {
 		t.Fatalf("profile receipts=%d, want one for each update/restore/reapply", got)
+	}
+}
+
+func TestGoCustomerProfileRestoreRejectsInterleavedEditsAtomically(t *testing.T) {
+	fx := newExecutorFixture(t)
+	firstID := seedProfileCustomer(t, fx, fx.orgID)
+	secondID := seedProfileCustomer(t, fx, fx.orgID)
+	updateInput := json.RawMessage(fmt.Sprintf(`{"customerIds":[%q,%q],"doNotContact":true}`, firstID, secondID))
+	updated := executeProfileCapability(t, fx, updateCustomerProfilesCapabilityID, updateInput, "profile-conflict-update", "human", "")
+	if !updated.OK {
+		t.Fatalf("profile update result=%+v, want success", updated)
+	}
+	var updateOutput CustomerProfileUpdateOutput
+	if err := json.Unmarshal(updated.Data, &updateOutput); err != nil {
+		t.Fatal(err)
+	}
+	if len(updateOutput.Previous) != 2 || len(updateOutput.Current) != 2 {
+		t.Fatalf("profile update output=%+v, want two previous and current snapshots", updateOutput)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE customers SET notes = 'Edited by another client' WHERE id = $1::uuid AND org_id = $2::uuid`, secondID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	restoreInput, err := json.Marshal(CustomerProfileSnapshotsInput{Profiles: updateOutput.Previous, ExpectedCurrent: updateOutput.Current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, executeErr := fx.executor.Execute(fx.ctx, profileCapabilityClaims(fx, restoreCustomerProfilesCapabilityID, restoreInput, "profile-conflict-restore", "human", ""), restoreCustomerProfilesCapabilityID, restoreInput)
+	if executeErr == nil || result.OK {
+		t.Fatalf("stale profile restore result=%+v err=%v, want conflict rejection", result, executeErr)
+	}
+	assertProfileRow(t, fx, firstID, "Original profile", nil, []string{"Existing", "Remove", "Mixed Case"}, stringPointer("Original notes"), nil, "email", true)
+	assertProfileRow(t, fx, secondID, "Original profile", nil, []string{"Existing", "Remove", "Mixed Case"}, stringPointer("Edited by another client"), nil, "email", true)
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id = $1::uuid AND kind = 'capability.executed' AND capability_id = $2`, fx.orgID, restoreCustomerProfilesCapabilityID); got != 0 {
+		t.Fatalf("rejected stale restore appended %d execution events", got)
+	}
+}
+
+func TestGoCustomerProfileReapplyRejectsInterleavedEditsAtomically(t *testing.T) {
+	fx := newExecutorFixture(t)
+	firstID := seedProfileCustomer(t, fx, fx.orgID)
+	secondID := seedProfileCustomer(t, fx, fx.orgID)
+	updateInput := json.RawMessage(fmt.Sprintf(`{"customerIds":[%q,%q],"doNotContact":true}`, firstID, secondID))
+	updated := executeProfileCapability(t, fx, updateCustomerProfilesCapabilityID, updateInput, "profile-reapply-conflict-update", "human", "")
+	if !updated.OK {
+		t.Fatalf("profile update result=%+v, want success", updated)
+	}
+	var updateOutput CustomerProfileUpdateOutput
+	if err := json.Unmarshal(updated.Data, &updateOutput); err != nil {
+		t.Fatal(err)
+	}
+	restoreInput, err := json.Marshal(CustomerProfileSnapshotsInput{Profiles: updateOutput.Previous, ExpectedCurrent: updateOutput.Current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := executeProfileCapability(t, fx, restoreCustomerProfilesCapabilityID, restoreInput, "profile-reapply-conflict-restore", "human", "")
+	if !restored.OK {
+		t.Fatalf("profile restore result=%+v, want success", restored)
+	}
+	var restoreOutput CustomerProfileUpdateOutput
+	if err := json.Unmarshal(restored.Data, &restoreOutput); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE customers SET notes = 'Edited by another client' WHERE id = $1::uuid AND org_id = $2::uuid`, secondID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	reapplyInput, err := json.Marshal(CustomerProfileSnapshotsInput{Profiles: restoreOutput.Previous, ExpectedCurrent: restoreOutput.Current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, executeErr := fx.executor.Execute(fx.ctx, profileCapabilityClaims(fx, reapplyCustomerProfilesCapabilityID, reapplyInput, "profile-reapply-conflict", "human", ""), reapplyCustomerProfilesCapabilityID, reapplyInput)
+	if executeErr == nil || result.OK {
+		t.Fatalf("stale profile reapply result=%+v err=%v, want conflict rejection", result, executeErr)
+	}
+	assertProfileRow(t, fx, firstID, "Original profile", nil, []string{"Existing", "Remove", "Mixed Case"}, stringPointer("Original notes"), nil, "email", false)
+	assertProfileRow(t, fx, secondID, "Original profile", nil, []string{"Existing", "Remove", "Mixed Case"}, stringPointer("Edited by another client"), nil, "email", false)
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id = $1::uuid AND kind = 'capability.executed' AND capability_id = $2`, fx.orgID, reapplyCustomerProfilesCapabilityID); got != 0 {
+		t.Fatalf("rejected stale reapply appended %d execution events", got)
 	}
 }
 
@@ -247,7 +344,9 @@ func TestGoCustomerProfileUpdatesEnforceOrganizationScope(t *testing.T) {
 		Tags:                   []string{},
 		PreferredContactMethod: "email",
 	}
-	foreignSnapshotInput, err := json.Marshal(CustomerProfileSnapshotsInput{Profiles: []CustomerProfileSnapshot{foreignSnapshot}})
+	foreignCurrentSnapshot := foreignSnapshot
+	foreignCurrentSnapshot.Name = stringPointer(foreignName)
+	foreignSnapshotInput, err := json.Marshal(CustomerProfileSnapshotsInput{Profiles: []CustomerProfileSnapshot{foreignSnapshot}, ExpectedCurrent: []CustomerProfileSnapshot{foreignCurrentSnapshot}})
 	if err != nil {
 		t.Fatal(err)
 	}

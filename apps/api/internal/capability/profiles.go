@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -79,12 +80,14 @@ type CustomerProfileSnapshot struct {
 }
 
 type CustomerProfileSnapshotsInput struct {
-	Profiles []CustomerProfileSnapshot `json:"profiles"`
+	Profiles        []CustomerProfileSnapshot `json:"profiles"`
+	ExpectedCurrent []CustomerProfileSnapshot `json:"expectedCurrent"`
 }
 
 type CustomerProfileUpdateOutput struct {
 	UpdatedCount int                       `json:"updatedCount"`
 	Previous     []CustomerProfileSnapshot `json:"previous"`
+	Current      []CustomerProfileSnapshot `json:"current"`
 }
 
 func ParseCustomerProfileUpdateInput(raw json.RawMessage) (CustomerProfileUpdateInput, error) {
@@ -218,6 +221,31 @@ func ParseCustomerProfileSnapshotsInput(raw json.RawMessage) (CustomerProfileSna
 		seenCustomerIDs[canonicalID] = struct{}{}
 		input.Profiles = append(input.Profiles, profile)
 	}
+	expectedCurrentRaw, ok := fields["expectedCurrent"]
+	if !ok || bytes.Equal(bytes.TrimSpace(expectedCurrentRaw), []byte("null")) {
+		return CustomerProfileSnapshotsInput{}, errors.New("expectedCurrent must be an array")
+	}
+	var expectedEntries []json.RawMessage
+	if err := json.Unmarshal(expectedCurrentRaw, &expectedEntries); err != nil || len(expectedEntries) != len(input.Profiles) {
+		return CustomerProfileSnapshotsInput{}, errors.New("expectedCurrent must contain one snapshot for every profile")
+	}
+	input.ExpectedCurrent = make([]CustomerProfileSnapshot, 0, len(expectedEntries))
+	expectedIDs := make(map[string]struct{}, len(expectedEntries))
+	for _, entry := range expectedEntries {
+		profile, err := parseCustomerProfileSnapshot(entry)
+		if err != nil {
+			return CustomerProfileSnapshotsInput{}, err
+		}
+		canonicalID := strings.ToLower(profile.CustomerID)
+		if _, exists := expectedIDs[canonicalID]; exists {
+			return CustomerProfileSnapshotsInput{}, errors.New("expectedCurrent must not contain duplicate customers")
+		}
+		expectedIDs[canonicalID] = struct{}{}
+		if _, exists := seenCustomerIDs[canonicalID]; !exists {
+			return CustomerProfileSnapshotsInput{}, errors.New("expectedCurrent customers must match profiles")
+		}
+		input.ExpectedCurrent = append(input.ExpectedCurrent, profile)
+	}
 	return input, nil
 }
 
@@ -232,13 +260,15 @@ func parseCustomerProfileSnapshot(raw json.RawMessage) (CustomerProfileSnapshot,
 		return CustomerProfileSnapshot{}, errors.New("customerId must be a UUID")
 	}
 	profile.CustomerID = customerID
-	if value, exists := fields["name"]; exists {
-		name, err := readOptionalString(value)
-		if err != nil || utf16Length(*name) < 1 || utf16Length(*name) > 120 {
-			return CustomerProfileSnapshot{}, errors.New("name must be between 1 and 120 characters")
-		}
-		profile.Name = name
+	value, ok := fields["name"]
+	if !ok {
+		return CustomerProfileSnapshot{}, errors.New("name is required")
 	}
+	name, err := readOptionalString(value)
+	if err != nil || utf16Length(*name) < 1 || utf16Length(*name) > 120 {
+		return CustomerProfileSnapshot{}, errors.New("name must be between 1 and 120 characters")
+	}
+	profile.Name = name
 	ownerRaw, ok := fields["ownerUserId"]
 	if !ok {
 		return CustomerProfileSnapshot{}, errors.New("ownerUserId is required")
@@ -276,7 +306,7 @@ func parseCustomerProfileSnapshot(raw json.RawMessage) (CustomerProfileSnapshot,
 		return CustomerProfileSnapshot{}, errors.New("preferredContactMethod is invalid")
 	}
 	profile.PreferredContactMethod = method
-	value, ok := fields["doNotContact"]
+	value, ok = fields["doNotContact"]
 	if !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) || json.Unmarshal(value, &profile.DoNotContact) != nil {
 		return CustomerProfileSnapshot{}, errors.New("doNotContact must be a boolean")
 	}
@@ -411,10 +441,44 @@ func updateCustomerProfiles(ctx context.Context, tx pgx.Tx, claims authbridge.Ca
 			return CustomerProfileUpdateOutput{}, err
 		}
 	}
-	return CustomerProfileUpdateOutput{UpdatedCount: len(rows), Previous: previous}, nil
+	currentRows, err := selectCustomerProfiles(ctx, tx, claims.OrganizationID, ids)
+	if err != nil {
+		return CustomerProfileUpdateOutput{}, err
+	}
+	current := make([]CustomerProfileSnapshot, len(currentRows))
+	for index, row := range currentRows {
+		current[index] = row.snapshot()
+	}
+	return CustomerProfileUpdateOutput{UpdatedCount: len(rows), Previous: previous, Current: current}, nil
 }
 
 func applyCustomerProfileSnapshots(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CustomerProfileSnapshotsInput, now time.Time) (CustomerProfileUpdateOutput, error) {
+	ids := make([]string, 0, len(input.Profiles))
+	for _, profile := range input.Profiles {
+		ids = append(ids, profile.CustomerID)
+	}
+	ids = uniqueStrings(ids)
+	rows, err := selectCustomerProfiles(ctx, tx, claims.OrganizationID, ids)
+	if err != nil {
+		return CustomerProfileUpdateOutput{}, err
+	}
+	if len(rows) != len(ids) {
+		return CustomerProfileUpdateOutput{}, errors.New("one or more customers were not found in this organization")
+	}
+	currentByID := make(map[string]CustomerProfileSnapshot, len(rows))
+	for _, row := range rows {
+		currentByID[strings.ToLower(row.CustomerID)] = row.snapshot()
+	}
+	for _, expected := range input.ExpectedCurrent {
+		current, exists := currentByID[strings.ToLower(expected.CustomerID)]
+		if !exists {
+			return CustomerProfileUpdateOutput{}, errors.New("customer profile changed since this action; reload before retrying")
+		}
+		expected.CustomerID = current.CustomerID
+		if !reflect.DeepEqual(current, expected) {
+			return CustomerProfileUpdateOutput{}, errors.New("customer profile changed since this action; reload before retrying")
+		}
+	}
 	owners := make([]string, 0, len(input.Profiles))
 	for _, profile := range input.Profiles {
 		if profile.OwnerUserID != nil {
@@ -429,18 +493,6 @@ func applyCustomerProfileSnapshots(ctx context.Context, tx pgx.Tx, claims authbr
 			}
 			return CustomerProfileUpdateOutput{}, err
 		}
-	}
-	ids := make([]string, 0, len(input.Profiles))
-	for _, profile := range input.Profiles {
-		ids = append(ids, profile.CustomerID)
-	}
-	ids = uniqueStrings(ids)
-	rows, err := selectCustomerProfiles(ctx, tx, claims.OrganizationID, ids)
-	if err != nil {
-		return CustomerProfileUpdateOutput{}, err
-	}
-	if len(rows) != len(ids) {
-		return CustomerProfileUpdateOutput{}, errors.New("one or more customers were not found in this organization")
 	}
 	previous := make([]CustomerProfileSnapshot, len(rows))
 	for index, row := range rows {
@@ -465,7 +517,15 @@ func applyCustomerProfileSnapshots(ctx context.Context, tx pgx.Tx, claims authbr
 			return CustomerProfileUpdateOutput{}, err
 		}
 	}
-	return CustomerProfileUpdateOutput{UpdatedCount: len(input.Profiles), Previous: previous}, nil
+	currentRows, err := selectCustomerProfiles(ctx, tx, claims.OrganizationID, ids)
+	if err != nil {
+		return CustomerProfileUpdateOutput{}, err
+	}
+	current := make([]CustomerProfileSnapshot, len(currentRows))
+	for index, row := range currentRows {
+		current[index] = row.snapshot()
+	}
+	return CustomerProfileUpdateOutput{UpdatedCount: len(input.Profiles), Previous: previous, Current: current}, nil
 }
 
 type customerProfileRow struct {

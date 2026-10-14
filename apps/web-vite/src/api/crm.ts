@@ -266,6 +266,8 @@ const CRM_CUSTOMER_IMPORT_INTENT_PREFIX = "chaste.crm.customer-import-intent.v1:
 const CRM_CUSTOMER_IMPORT_UNDO_INTENT_PREFIX = "chaste.crm.customer-import-undo-intent.v1:";
 const CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX = "chaste.crm.customer-import-undo-state.v1:";
 const CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX = "chaste.crm.customer-profile-update-intent.v1:";
+const CRM_CUSTOMER_PROFILE_RESTORE_INTENT_PREFIX = "chaste.crm.customer-profile-restore-intent.v1:";
+const CRM_CUSTOMER_PROFILE_UNDO_STATE_PREFIX = "chaste.crm.customer-profile-undo-state.v1:";
 const CRM_DEAL_CREATE_INTENT_PREFIX = "chaste.crm.deal-create-intent.v1:";
 const CRM_LEAD_CONVERSION_INTENT_PREFIX = "chaste.crm.lead-conversion-intent.v1:";
 const CRM_SAVED_VIEW_WRITE_INTENT_PREFIX = "chaste.crm.saved-view-write-intent.v1:";
@@ -298,6 +300,18 @@ export type CrmCustomerProfileUpdateMutation = {
   preferredContactMethod?: "email" | "phone" | "whatsapp" | "other";
   doNotContact?: boolean;
 };
+export type CrmCustomerProfileSnapshot = {
+  customerId: string;
+  name: string;
+  ownerUserId: string | null;
+  tags: string[];
+  notes: string | null;
+  phone: string | null;
+  preferredContactMethod: "email" | "phone" | "whatsapp" | "other";
+  doNotContact: boolean;
+};
+export type CrmCustomerProfileUndoState = { profiles: CrmCustomerProfileSnapshot[]; expectedCurrent: CrmCustomerProfileSnapshot[] };
+type CrmCustomerProfileRestoreMutation = { action: "restoreProfiles" } & CrmCustomerProfileUndoState;
 export type CrmSavedViewWriteMutation = {
   action: "saveCustomerView";
   id?: string;
@@ -352,7 +366,7 @@ export type CrmCustomerMergeResult = {
 };
 type CrmCustomerMergeMutation = { action: "mergeCustomers"; survivorCustomerId: string; duplicateCustomerId: string };
 type CrmCustomerMergeUndoMutation = { action: "restoreCustomerMerge" } & CrmCustomerMergeResult;
-type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmCustomerImportMutation | CrmCustomerImportUndoMutation | CrmCustomerMergeMutation | CrmCustomerMergeUndoMutation | CrmDealCreateMutation | CrmLeadConversionMutation | CrmCustomerProfileUpdateMutation | CrmSavedViewWriteMutation;
+type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmCustomerImportMutation | CrmCustomerImportUndoMutation | CrmCustomerMergeMutation | CrmCustomerMergeUndoMutation | CrmDealCreateMutation | CrmLeadConversionMutation | CrmCustomerProfileUpdateMutation | CrmCustomerProfileRestoreMutation | CrmSavedViewWriteMutation;
 const CrmCustomerMergeInputSchema = z.object({ survivorCustomerId: uuid, duplicateCustomerId: uuid }).strict().refine((input) => input.survivorCustomerId !== input.duplicateCustomerId);
 const CrmCustomerMergeSnapshotSchema = z.object({
   customerId: uuid,
@@ -618,7 +632,7 @@ const CrmCustomerCreateMutationSchema = z.object({
 const CrmCustomerCreateOutputSchema = z.object({ customerId: uuid, duplicateWarning: z.string().nullable() }).strict();
 const CrmCustomerProfileUpdateMutationSchema = z.object({
   action: z.literal("updateProfile"),
-  customerIds: z.array(uuid).min(1).max(100),
+  customerIds: z.array(uuid).min(1).max(100).refine((ids) => new Set(ids).size === ids.length),
   name: z.string().min(1).max(120).optional(),
   ownerUserId: uuid.nullable().optional(),
   addTags: z.array(z.string().min(1).max(40)).max(20).optional(),
@@ -639,10 +653,37 @@ const CrmCustomerProfileSnapshotSchema = z.object({
   preferredContactMethod: z.enum(["email", "phone", "whatsapp", "other"]),
   doNotContact: z.boolean(),
 }).strict();
+const CrmCustomerProfileUndoStateSchema = z.object({
+  profiles: z.array(CrmCustomerProfileSnapshotSchema).min(1).max(100),
+  expectedCurrent: z.array(CrmCustomerProfileSnapshotSchema).min(1).max(100),
+}).strict().refine((input) => sameProfileSnapshotIds(input.profiles, input.expectedCurrent));
+const CrmCustomerProfileRestoreMutationSchema = z.object({
+  action: z.literal("restoreProfiles"),
+  profiles: z.array(CrmCustomerProfileSnapshotSchema).min(1).max(100),
+  expectedCurrent: z.array(CrmCustomerProfileSnapshotSchema).min(1).max(100),
+}).strict().refine((input) => sameProfileSnapshotIds(input.profiles, input.expectedCurrent));
 const CrmCustomerProfileUpdateOutputSchema = z.object({
   updatedCount: z.number().int().positive().max(100),
   previous: z.array(CrmCustomerProfileSnapshotSchema).min(1).max(100),
+  current: z.array(CrmCustomerProfileSnapshotSchema).min(1).max(100),
 }).strict();
+function sameProfileSnapshotIds(left: CrmCustomerProfileSnapshot[], right: CrmCustomerProfileSnapshot[]): boolean {
+  return sameProfileIds(left.map((profile) => profile.customerId), right.map((profile) => profile.customerId));
+}
+
+function sameProfileIds(leftIds: string[], rightIds: string[]): boolean {
+  const normalizedLeft = leftIds.map((id) => id.toLowerCase());
+  const normalizedRight = rightIds.map((id) => id.toLowerCase());
+  return normalizedLeft.length > 0 && normalizedLeft.length === normalizedRight.length
+    && new Set(normalizedLeft).size === normalizedLeft.length && new Set(normalizedRight).size === normalizedRight.length
+    && normalizedLeft.every((id) => normalizedRight.includes(id));
+}
+
+function sameProfileSnapshots(left: CrmCustomerProfileSnapshot[], right: CrmCustomerProfileSnapshot[]): boolean {
+  if (!sameProfileSnapshotIds(left, right)) return false;
+  const canonical = (profiles: CrmCustomerProfileSnapshot[]) => canonicalCrmTaskJSON([...profiles].sort((a, b) => a.customerId.localeCompare(b.customerId)));
+  return canonical(left) === canonical(right);
+}
 const CrmDealCreateMutationSchema = z.object({
   action: z.literal("createDeal"),
   title: z.string().min(1).max(120),
@@ -1016,27 +1057,121 @@ export async function submitCrmCustomerProfileUpdate(
     throw new CrmApiError(0, "Review the customer profile changes and correct invalid values before submitting.");
   }
   const scope = await crmTaskScope(retryScope);
-  const attempt = await crmTaskAttempt(input, scope, "profiles", CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX);
-  try {
-    const { response, body } = await request("/api/capabilities/execute", {
-      method: "POST",
-      body: JSON.stringify({ capabilityId: "crm.updateCustomerProfiles", input: Object.fromEntries(Object.entries(input).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
-    }, signal);
-    if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
-    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
-    if (outcome.kind === "pending") return outcome;
-    const parsed = CrmCustomerProfileUpdateOutputSchema.safeParse(outcome.data);
-    if (!parsed.success || parsed.data.updatedCount !== input.customerIds.length || parsed.data.previous.length !== input.customerIds.length) {
-      throw new CrmApiError(response.status, "The CRM service returned an unexpected profile update result.", true);
+  return withCrmTaskWriteLock(scope.scopeHash, "profile-write", async () => {
+    if (await readPendingCrmCustomerProfileRestore(retryScope ?? { actorId: scope.actorId, organizationId: scope.organizationId })) {
+      throw new CrmApiError(0, "A customer profile undo is unresolved. Retry that exact undo before starting another profile change.", true);
     }
-    await clearCrmTaskAttempt(attempt);
-    return { kind: "completed", data: parsed.data };
-  } catch (error) {
-    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+    const attempt = await crmTaskAttempt(input, scope, "profiles", CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX);
+    try {
+      const { response, body } = await request("/api/capabilities/execute", {
+        method: "POST",
+        body: JSON.stringify({ capabilityId: "crm.updateCustomerProfiles", input: Object.fromEntries(Object.entries(input).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
+      }, signal);
+      if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
+      const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+      if (outcome.kind === "pending") return outcome;
+      const parsed = CrmCustomerProfileUpdateOutputSchema.safeParse(outcome.data);
+      const requestedIds = input.customerIds;
+      if (!parsed.success || parsed.data.updatedCount !== requestedIds.length || !sameProfileIds(parsed.data.previous.map((profile) => profile.customerId), requestedIds) || !sameProfileIds(parsed.data.current.map((profile) => profile.customerId), requestedIds)) {
+        throw new CrmApiError(response.status, "The CRM service returned an unexpected profile update result.", true);
+      }
+      await persistCrmCustomerProfileUndo(scope, { profiles: parsed.data.previous, expectedCurrent: parsed.data.current });
       await clearCrmTaskAttempt(attempt);
+      return { kind: "completed", data: parsed.data };
+    } catch (error) {
+      if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+        await clearCrmTaskAttempt(attempt);
+      }
+      throw error;
     }
-    throw error;
+  });
+}
+
+export async function readCrmCustomerProfileUndo(scopeInput: CrmTaskRetryScope): Promise<CrmCustomerProfileUndoState | null> {
+  const { scopeHash } = await crmTaskScope(scopeInput);
+  const storageKey = `${CRM_CUSTOMER_PROFILE_UNDO_STATE_PREFIX}${scopeHash}:profiles`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to restore the last customer profile change."); }
+  if (raw === null) return null;
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new CrmApiError(0, "The saved customer profile undo is malformed. Contact an administrator before retrying."); }
+  const parsed = CrmCustomerProfileUndoStateSchema.safeParse(decoded);
+  if (!parsed.success) {
+    throw new CrmApiError(0, "The saved customer profile undo could not be verified. Contact an administrator before retrying.");
   }
+  return parsed.data;
+}
+
+export async function readPendingCrmCustomerProfileRestore(scopeInput: CrmTaskRetryScope): Promise<CrmCustomerProfileUndoState | null> {
+  const { scopeHash } = await crmTaskScope(scopeInput);
+  const storageKey = `${CRM_CUSTOMER_PROFILE_RESTORE_INTENT_PREFIX}${scopeHash}:restore`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to retry an unresolved customer profile undo."); }
+  if (raw === null) return null;
+  const attempt = parseCrmTaskAttempt(raw);
+  const action = CrmCustomerProfileRestoreMutationSchema.safeParse(attempt.action);
+  if (!action.success || await crmTaskFingerprint(action.data) !== attempt.fingerprint) {
+    throw new CrmApiError(0, "An unresolved customer profile undo could not be verified. Contact an administrator before retrying.");
+  }
+  return { profiles: action.data.profiles, expectedCurrent: action.data.expectedCurrent };
+}
+
+export async function submitCrmCustomerProfileUndo(
+  undoState: CrmCustomerProfileUndoState,
+  signal?: AbortSignal,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<z.infer<typeof CrmCustomerProfileUpdateOutputSchema>>> {
+  const action: CrmCustomerProfileRestoreMutation = { action: "restoreProfiles", ...undoState };
+  if (!CrmCustomerProfileRestoreMutationSchema.safeParse(action).success) {
+    throw new CrmApiError(0, "The saved customer profile undo is invalid and cannot be restored.");
+  }
+  const scope = await crmTaskScope(retryScope);
+  return withCrmTaskWriteLock(scope.scopeHash, "profile-write", async () => {
+    if (await readPendingCrmCustomerProfileUpdate(retryScope ?? { actorId: scope.actorId, organizationId: scope.organizationId })) {
+      throw new CrmApiError(0, "A customer profile update is unresolved. Retry that exact update before undoing it.", true);
+    }
+    const attempt = await crmTaskAttempt(action, scope, "restore", CRM_CUSTOMER_PROFILE_RESTORE_INTENT_PREFIX);
+    try {
+      const { response, body } = await request("/api/capabilities/execute", {
+        method: "POST",
+        body: JSON.stringify({ capabilityId: "crm.restoreCustomerProfiles", input: { profiles: undoState.profiles, expectedCurrent: undoState.expectedCurrent }, intentId: attempt.intentId }),
+      }, signal);
+      if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
+      const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+      if (outcome.kind === "pending") return outcome;
+      const parsed = CrmCustomerProfileUpdateOutputSchema.safeParse(outcome.data);
+      if (!parsed.success || parsed.data.updatedCount !== undoState.profiles.length || !sameProfileSnapshots(parsed.data.previous, undoState.expectedCurrent) || !sameProfileSnapshots(parsed.data.current, undoState.profiles)) {
+        throw new CrmApiError(response.status, "The CRM service returned an unexpected profile undo result.", true);
+      }
+      await clearCrmCustomerProfileUndo(scope);
+      await clearCrmTaskAttempt(attempt);
+      return { kind: "completed", data: parsed.data };
+    } catch (error) {
+      if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+        await clearCrmTaskAttempt(attempt);
+      }
+      throw error;
+    }
+  });
+}
+
+async function persistCrmCustomerProfileUndo(scope: { scopeHash: string }, undoState: CrmCustomerProfileUndoState): Promise<void> {
+  const storageKey = `${CRM_CUSTOMER_PROFILE_UNDO_STATE_PREFIX}${scope.scopeHash}:profiles`;
+  try {
+    const serialized = JSON.stringify(undoState);
+    window.localStorage.setItem(storageKey, serialized);
+    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("profile undo snapshot did not persist");
+  } catch {
+    throw new CrmApiError(0, "The profiles were updated, but their undo snapshot could not be saved. Retry the exact update before making another CRM change.", true);
+  }
+}
+
+async function clearCrmCustomerProfileUndo(scope: { scopeHash: string }): Promise<void> {
+  try { window.localStorage.removeItem(`${CRM_CUSTOMER_PROFILE_UNDO_STATE_PREFIX}${scope.scopeHash}:profiles`); }
+  catch { throw new CrmApiError(0, "The profile undo completed, but its saved snapshot could not be cleared. Retry the exact undo before making another CRM change.", true); }
 }
 
 const CrmSavedViewWriteMutationSchema = z.object({

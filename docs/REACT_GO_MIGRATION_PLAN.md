@@ -48,6 +48,16 @@ Accounting reports route had no console or request errors. The live workspace
 had no foreign receivables, so the completed-result text is covered by the
 page test rather than a persisted browser revaluation.
 
+Vite CRM profile undo stores both the previous profile and the expected current
+profile under the signed-in actor and organization. Go locks all target
+customers and rejects the whole undo or reapply if any snapshot has changed,
+so one client's undo cannot overwrite another client's edit. Nine focused
+Go parser and database tests cover immediate undo/reapply, uppercase UUIDs,
+and stale multi-customer conflicts; the CRM API and page suites pass 123 tests.
+An authenticated browser proof created a synthetic customer, edited its name,
+and undid the edit through Go. Both governed writes returned HTTP 200 and the
+browser reported no errors.
+
 The user did not supply a delivery date or speed target. Phase 0 measures the
 current system and locks targets. Until then, the working targets are at least
 2x faster median edit-to-ready time for a representative UI change, no more
