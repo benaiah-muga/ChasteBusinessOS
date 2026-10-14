@@ -580,6 +580,12 @@
       "path": "/marketplace",
       "owner": "vite",
       "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/purchasing",
+      "owner": "vite",
+      "parity": "verified"
     }
   ],
   "goRoutes": [

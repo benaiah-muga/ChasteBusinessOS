@@ -109,6 +109,13 @@ production requests and writes. No production traffic has moved to Go.
   [`MarketplacePage.tsx`](../../apps/web-vite/src/components/MarketplacePage.tsx),
   [`marketplace.ts`](../../apps/web-vite/src/api/marketplace.ts), and
   [`route-ownership-overrides.json`](route-ownership-overrides.json).
+- Authenticated agent-browser loaded Vite `/purchasing` and rendered the
+  procurement summary with zero-state requests, spend, payables, vendors, and
+  bills. Go capability calls and the inventory read returned HTTP 200, no
+  `localhost:3001` request appeared, and agent-browser errors was empty. See
+  [`PurchasingPage.tsx`](../../apps/web-vite/src/components/PurchasingPage.tsx),
+  [`purchasing.ts`](../../apps/web-vite/src/api/purchasing.ts), and
+  [`route-ownership-overrides.json`](route-ownership-overrides.json).
 - Vite Support channel settings use exact `GET` and `POST /api/support/channels`
   requests. Both route directly to Go regardless of the former Vite selectors;
   the Go handler mounts by default, and `GO_SUPPORT_CHANNELS_ROUTE=0` unmounts
@@ -473,7 +480,8 @@ longer requests legacy `GET /api/purchasing`; existing writes and the Next
 application's route remain unchanged. Runtime-role Go coverage verifies
 permission denial, cross-organization isolation, ordering, limits, and each
 section's projection; Vite tests verify rendering with selectors disabled and
-reject the legacy GET. Authenticated browser proof remains pending.
+reject the legacy GET. Full-workspace authenticated interaction proof remains
+pending; the Vite route and initial Go-backed summary are verified above.
 
 The Vite Support conversation picker reads customer options from exact
 `GET /api/support/customers`. Go resolves the signed session and active
