@@ -165,7 +165,7 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: { sessionId: openId } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(openPosSession({ action: "open", openingFloatMinor: 10000 }, undefined, {
+    await expect(openPosSession({ action: "open", register: "Back counter", openingFloatMinor: 10000 }, undefined, {
       scopeId: "open-pending-test",
       organizationId: "40000000-0000-4000-8000-000000000004",
     })).resolves.toEqual({
@@ -176,12 +176,22 @@ describe("POS register session API client", () => {
     expect(new Headers(fetchMock.mock.calls[0]![1]?.headers).get("X-Organization-ID")).toBe("40000000-0000-4000-8000-000000000004");
     expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toEqual(expect.objectContaining({
       capabilityId: "pos.openSession",
-      input: { openingFloatMinor: 10000 },
+      input: { register: "Back counter", openingFloatMinor: 10000 },
       intentId: expect.any(String),
     }));
 
     vi.stubGlobal("fetch", vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: false, pendingApproval: true, reason: "needs a manager" }, { status: 202 })));
     await expect(openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { scopeId: "open-pending-test" })).resolves.toEqual({ kind: "pending", reason: "needs a manager" });
+  });
+
+  it("rejects blank or oversized register names before sending a write", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { sessionId: openId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    for (const register of ["   ", "r".repeat(81)]) {
+      await expect(openPosSession({ action: "open", register, openingFloatMinor: 10000 }, undefined, { scopeId: "invalid-register-name" }))
+        .rejects.toBeInstanceOf(PosApiError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid selected organization before sending a POS write", async () => {
@@ -207,7 +217,7 @@ describe("POS register session API client", () => {
     const goBody = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
     expect(goBody).toEqual({
       capabilityId: "pos.openSession",
-      input: { openingFloatMinor: 2500 },
+      input: { register: "main", openingFloatMinor: 2500 },
       intentId: expect.any(String),
     });
 
@@ -261,10 +271,10 @@ describe("POS register session API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { sessionId: openId } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(openPosSession({ action: "open", openingFloatMinor: 8750 }, undefined, { scopeId }))
+    await expect(openPosSession({ action: "open", register: "Front counter", openingFloatMinor: 8750 }, undefined, { scopeId }))
       .resolves.toEqual({ kind: "pending", reason: "manager review" });
     const saved = await restorePosRegisterAttempt(scopeId);
-    expect(saved).toMatchObject({ action: { action: "open", openingFloatMinor: 8750 }, status: "pending" });
+    expect(saved).toMatchObject({ action: { action: "open", register: "Front counter", openingFloatMinor: 8750 }, status: "pending" });
     expect(saved?.intentId).toMatch(/^[0-9a-f-]{36}$/i);
 
     await expect(openPosSession(saved!.action as { action: "open"; openingFloatMinor: number }, undefined, {

@@ -158,15 +158,26 @@ func TestPosSalesParsersMirrorZodContracts(t *testing.T) {
 	if err != nil || opened.Register != "main" || opened.OpeningFloatMinor != 0 {
 		t.Fatalf("ParsePosOpenSessionInput({}) = %+v, %v, want defaults", opened, err)
 	}
-	if opened, err = ParsePosOpenSessionInput(json.RawMessage(`{"register":"kiosk","openingFloatMinor":2500}`)); err != nil ||
+	if opened, err = ParsePosOpenSessionInput(json.RawMessage(`{"register":" kiosk ","openingFloatMinor":2500}`)); err != nil ||
 		opened.Register != "kiosk" || opened.OpeningFloatMinor != 2500 {
 		t.Fatalf("ParsePosOpenSessionInput(kiosk) = %+v, %v", opened, err)
+	}
+	maxRegister := strings.Repeat("x", 80)
+	if opened, err = ParsePosOpenSessionInput(json.RawMessage(fmt.Sprintf(`{"register":%q}`, maxRegister))); err != nil || opened.Register != maxRegister {
+		t.Fatalf("ParsePosOpenSessionInput(80 characters) = %+v, %v", opened, err)
+	}
+	if opened, err = ParsePosOpenSessionInput(json.RawMessage(fmt.Sprintf(`{"register":%q}`, strings.Repeat("😀", 40)))); err != nil || utf16Length(opened.Register) != 80 {
+		t.Fatalf("ParsePosOpenSessionInput(80 UTF-16 units) = %+v, %v", opened, err)
 	}
 	for _, raw := range []string{
 		`[]`,
 		`null`,
 		`{"register":null}`,
 		`{"register":5}`,
+		`{"register":" "}`,
+		`{"register":"\ufeff"}`,
+		fmt.Sprintf(`{"register":%q}`, strings.Repeat("x", 81)),
+		fmt.Sprintf(`{"register":%q}`, strings.Repeat("😀", 41)),
 		`{"openingFloatMinor":-1}`,
 		`{"openingFloatMinor":1.5}`,
 		`{"openingFloatMinor":null}`,

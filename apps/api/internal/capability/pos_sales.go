@@ -163,7 +163,11 @@ func ParsePosOpenSessionInput(raw json.RawMessage) (PosOpenSessionInput, error) 
 		if readErr != nil {
 			return PosOpenSessionInput{}, errors.New("register must be a string")
 		}
-		input.Register = *value
+		trimmed := strings.TrimFunc(*value, isJSWhitespace)
+		if utf16Length(trimmed) < 1 || utf16Length(trimmed) > 80 {
+			return PosOpenSessionInput{}, errors.New("register must be between 1 and 80 characters")
+		}
+		input.Register = trimmed
 	}
 	openingFloatMinor, err := optionalSafeInteger(fields, "openingFloatMinor")
 	if err != nil || openingFloatMinor != nil && *openingFloatMinor < 0 {

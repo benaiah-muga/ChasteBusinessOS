@@ -164,7 +164,7 @@ describe("Vite POS register page", () => {
     const organizationId = "60000000-0000-4000-8000-000000000007";
     const scopeId = `${organizationId}:${actorId}`;
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 })));
-    await openPosSession({ action: "open", openingFloatMinor: 8750 }, undefined, { scopeId });
+    await openPosSession({ action: "open", register: "Front counter", openingFloatMinor: 8750 }, undefined, { scopeId });
     const saved = await restorePosRegisterAttempt(scopeId);
     expect(saved).not.toBeNull();
 
@@ -188,7 +188,7 @@ describe("Vite POS register page", () => {
       && call[1]?.body && JSON.parse(String(call[1].body)).capabilityId === "pos.openSession");
     expect(JSON.parse(String(retried?.[1]?.body))).toEqual({
       capabilityId: "pos.openSession",
-      input: { openingFloatMinor: 8750 },
+      input: { register: "Front counter", openingFloatMinor: 8750 },
       intentId: saved?.intentId,
     });
     await waitFor(() => expect(screen.queryByText("Register opening needs a retry")).toBeNull());
@@ -300,6 +300,7 @@ describe("Vite POS register page", () => {
     render(<PosPage baseCurrency="USD" />);
 
     expect(await screen.findByRole("heading", { name: "Open the register" })).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("Register name"), { target: { value: "Front counter" } });
     // The label wraps its helper copy, so its accessible name is longer than the visible title.
     fireEvent.change(screen.getByLabelText(/^Opening float/), { target: { value: "120.50" } });
     fireEvent.click(screen.getByRole("button", { name: "Open register" }));
@@ -307,6 +308,7 @@ describe("Vite POS register page", () => {
     await waitFor(() => expect(postedPayloads(fetchMock, "open")).toHaveLength(1));
     expect(postedPayloads(fetchMock, "open")[0]).toEqual({
       action: "open",
+      register: "Front counter",
       openingFloatMinor: 12050,
       intentId: expect.any(String),
     });

@@ -264,6 +264,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
   const catalogInputRef = useRef<HTMLInputElement>(null);
 
   const [float, setFloat] = useState("100");
+  const [registerName, setRegisterName] = useState("main");
   const [line, setLine] = useState({ description: "", price: "" });
   const [customLineOpen, setCustomLineOpen] = useState(false);
   const [lines, setLines] = useState<DraftLine[]>([]);
@@ -760,7 +761,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
     try {
       const action = activeRegisterAttempt?.action.action === "open"
         ? activeRegisterAttempt.action
-        : { action: "open" as const, openingFloatMinor: Math.max(0, toMinor(float, digits)) };
+        : { action: "open" as const, register: registerName.trim(), openingFloatMinor: Math.max(0, toMinor(float, digits)) };
       const outcome = await openPosSession(action, controller.signal, {
         scopeId,
         organizationId,
@@ -2555,6 +2556,19 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                   <div className="pos-card-body">
                     <form className="pos-form-row" onSubmit={(event) => { event.preventDefault(); void openRegister(); }}>
                       <div className="pos-field">
+                        <label htmlFor="register-name"><span>Register name</span></label>
+                        <input
+                          id="register-name"
+                          className="pos-input"
+                          value={registerName}
+                          onChange={(event) => setRegisterName(event.target.value)}
+                          maxLength={80}
+                          required
+                          disabled={busy || Boolean(activeRegisterAttempt) || registerRecoveryBlocked}
+                        />
+                        <small>Identify the till or checkout station for this shift.</small>
+                      </div>
+                      <div className="pos-field">
                         <label htmlFor="float"><span>Opening float</span></label>
                         <input
                           id="float"
@@ -2567,7 +2581,6 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                         />
                         <small>The counted cash this register starts from. It is part of expected drawer cash until you close the shift.</small>
                       </div>
-                      <span aria-hidden="true" />
                       <button type="submit" className="pos-button pos-button-primary" disabled={busy || Boolean(activeRegisterAttempt) || registerRecoveryBlocked}>
                         {busy ? "Opening…" : "Open register"}
                       </button>

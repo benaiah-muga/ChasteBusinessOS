@@ -33,6 +33,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Payroll blocks draft creation when a run already exists for the selected period, preventing a duplicate-period request from leaving an unresolved retry marker.
 - Go payroll domain rejections now return definite 422 capability results, so clients can clear retry markers for duplicate periods and invalid lifecycle transitions while internal failures remain retryable.
 - Vite POS session history no longer adds the opening float twice after a register closes; the Go closed-session total is shown as-is.
+- Vite POS lets staff name a register when opening a shift and sends the normalized name to Go, which validates the same 1-80 character contract.
 - Vite Accounting clears an in-flight revaluation confirmation when the active actor or organization changes, preventing a stale dialog from posting under the new scope.
 - Go CRM rejects stale profile undo or reapply snapshots atomically when another client has changed any included customer.
 

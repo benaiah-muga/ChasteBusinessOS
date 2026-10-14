@@ -4415,3 +4415,13 @@ new owners and the manifest shows zero legacy runtime paths.
      `Migration Proof Role 20261014` opening, then reloaded the Hiring tab and
      confirmed it stayed closed. Capability requests returned HTTP 200, no
      legacy HR write occurred, and the browser error log was empty.
+
+411. (Implemented and verified: focused tests, independent review, and
+     authenticated browser proof) Vite POS now accepts an explicit register
+     name when opening a shift and preserves it in exact retry recovery. Go
+     trims JavaScript whitespace and enforces the same 1-80 UTF-16 code-unit
+     limit at the parser boundary. Focused Vite tests pass 112 cases and the
+     Go parser contract test passes. Authenticated browser proof opened a
+     synthetic named shift through `pos.openSession`, confirmed HTTP 200, then
+     closed it with a balanced zero drawer and reopened the workspace's `main`
+     register. The browser error log was empty.

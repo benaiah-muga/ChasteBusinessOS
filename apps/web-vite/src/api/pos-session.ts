@@ -135,6 +135,7 @@ export const PosTenderPayloadSchema = z.object({
 
 export const PosOpenActionSchema = z.object({
   action: z.literal("open"),
+  register: z.string().trim().min(1).max(80).optional(),
   openingFloatMinor: z.number().int().nonnegative().safe(),
 }).strict();
 export const PosSaleActionSchema = z.object({
@@ -627,7 +628,10 @@ export async function openPosSession(
   const intentId = options.intentId ?? active?.intentId ?? crypto.randomUUID();
   rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "uncertain" }, true);
 
-  const result = await postGoPosCapability("pos.openSession", { openingFloatMinor: payload.openingFloatMinor }, intentId, signal, options.organizationId);
+  const result = await postGoPosCapability("pos.openSession", {
+    register: payload.register ?? "main",
+    openingFloatMinor: payload.openingFloatMinor,
+  }, intentId, signal, options.organizationId);
   if (result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408 && result.status !== 429) clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
   const outcome = interpret(result, OpenOutputSchema, "Could not open the register.");
   if (outcome.kind === "completed") clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
