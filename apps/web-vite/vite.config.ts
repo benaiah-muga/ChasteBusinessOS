@@ -5,7 +5,6 @@ import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountin
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL("../..", import.meta.url)), ["CHASTE_", "GO_"]);
-  const legacyWebOrigin = env.CHASTE_LEGACY_WEB_ORIGIN || "http://localhost:3001";
   const goApiOrigin = env.CHASTE_GO_API_ORIGIN || "http://127.0.0.1:8080";
   const goRouteProxy = createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv(env), goApiOrigin);
   const goInventoryItemSlice = env.CHASTE_GO_INVENTORY_ITEM_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
@@ -137,14 +136,14 @@ export default defineConfig(({ mode }) => {
       port: 3000,
       strictPort: true,
       proxy: {
-        // goRouteProxy intercepts selector-owned routes, including document
-        // workspace ticks; this catch-all remains available for rollback.
+        // Unclaimed API routes stay on Go, where missing handlers return 404.
+        // Vite does not send API traffic to the compatibility app.
         "/api/health": {
           target: goApiOrigin,
         },
         "/api/capabilities/execute": { target: goApiOrigin, changeOrigin: false },
         "/api": {
-          target: legacyWebOrigin,
+          target: goApiOrigin,
           changeOrigin: false,
         },
       },

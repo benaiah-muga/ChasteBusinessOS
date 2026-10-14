@@ -628,3 +628,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests  34 passed|tsc --noEmit|git diff --check/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Focused Vite app tests passed 34 cases, workspace typecheck passed all 27 packages, lint reported 206 existing warnings and no errors, all 25 Turbo test tasks passed, and Go verification passed with runtime integration required. `git diff --check` passed. Authenticated `agent-browser` loaded an unknown URL directly in Vite and showed the app's not-found page with a home link; the page URL stayed on Vite and browser errors were empty. Independent review found no route regressions. The route no longer calls `redirectToLegacy`, and visible rail entries are direct Vite paths.
+
+- [x] G122: Every Vite API request reaches Go, unsupported requests return Go 404, and selector opt-outs do not restore Next routing.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/go-route-proxy.test.ts && pnpm --filter @chaste/web-vite lint && pnpm --filter @chaste/web-vite typecheck && pnpm --filter @chaste/web-vite build && git diff --check
+  EXPECT: /Tests\s+\d+ passed|✓ built in/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: The Vite Go proxy suite passed all 162 tests. It loaded the actual Vite config and verified `/api`, `/api/health`, and `/api/capabilities/execute` share the Go origin; an unknown API request reached the Go 404 recorder and never contacted a separate legacy recorder. Tests also cover exact request body, cookies, headers, and selector opt-outs. Vite lint, typecheck, production build, and `git diff --check` passed.

@@ -136,17 +136,22 @@ The Vite shell now includes the active-organization selector. It reads and
 switches through `/api/org`, which is served by Go and validates membership
 before setting the HttpOnly cookie. Vite listens on
 `localhost` so the browser can send the existing host-scoped session cookie
-across the port change. `CHASTE_LEGACY_WEB_ORIGIN` configures the development
-proxy when the legacy server is not on `http://localhost:3001`.
+across the port change. Vite sends all API requests to Go, including paths not
+yet owned by a specific route selector; unknown Go routes return 404 instead of
+falling back to the compatibility app.
+Route selectors can disable a specialized Go handler, but they do not restore
+Vite-to-Next routing. When a handler is disabled, its request stays on Go and
+returns the Go API's response, typically 404.
 The dashboard setup checklist `GET /api/setup` now routes through the Go
 session handler by default in both the Vite proxy and Go API. Go resolves the
-verified session and active organization and retains the `iam.admin` gate; set
-both `CHASTE_GO_SETUP_ROUTE=0` and `GO_SETUP_ROUTE=0` for explicit rollback.
+verified session and active organization and retains the `iam.admin` gate. Set
+both `CHASTE_GO_SETUP_ROUTE=0` and `GO_SETUP_ROUTE=0` to disable this Go handler;
+Vite still sends the request to Go and does not fall back to Next.
 The dashboard `GET /api/dashboard` also routes through the Go session handler
 by default. Its report-permission fallbacks, tenant-scoped metrics, operations,
 pipeline, trend, activity, and signals response were independently reviewed
 against the legacy and Vite contracts; set both dashboard route selectors to
-`0` for explicit rollback.
+`0` to disable the Go handler. Vite still sends the request to Go.
 The existing Next.js application continues to own production traffic during
 the transition. Vite routes use their paired selectors independently.
 The Vite `/approvals` preview reads the tenant-scoped inbox through Go and
@@ -4072,3 +4077,15 @@ new owners and the manifest shows zero legacy runtime paths.
      reported 206 existing warnings and no errors; all 25 Turbo test tasks and
      `pnpm go:verify` with runtime integration required passed. Independent
      review found no route regressions. This completes item 380.
+
+382. (Complete) Route every Vite `/api` request to the Go API. Keep explicitly
+     selected Go handlers intact, send unclaimed paths through the Go catch-all,
+     and return Go's response, including 404 for unsupported paths. Selector
+     opt-outs no longer restore routing to the legacy Next app.
+
+383. (Runtime verified) The Vite proxy suite loaded the actual Vite config and
+     verified the API catch-all shares the Go origin with health and capability
+     execution. An unsupported path returned the Go 404 response; a separate
+     legacy recorder received no request. Existing proxy checks passed for
+     request data and selector opt-outs. Vite lint, typecheck, production build,
+     and `git diff --check` passed. This completes item 382.

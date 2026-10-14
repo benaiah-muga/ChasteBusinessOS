@@ -1,7 +1,8 @@
 import { createServer as createHttpServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createServer as createViteServer, type ViteDevServer } from "vite";
+import { createServer as createViteServer, loadConfigFromFile, type ViteDevServer } from "vite";
 import {
   createGoRouteProxyPlugin,
   goSupportInboxReadsFromEnv,
@@ -74,7 +75,7 @@ describe("Projects write selector", () => {
 });
 
 describe("Marketing campaign Go selector", () => {
-  it("requires both campaign writes and the session capability route, with legacy rollback", () => {
+  it("requires both campaign writes and the session capability route, with proxy selector opt-out", () => {
     expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_CAMPAIGN_WRITES: "1" })).toBe(true);
     expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_CAMPAIGN_WRITES: "0" })).toBe(false);
     expect(goMarketingCampaignWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MARKETING_CAMPAIGN_WRITES: "1" })).toBe(false);
@@ -83,7 +84,7 @@ describe("Marketing campaign Go selector", () => {
 });
 
 describe("Marketing overview Go selector", () => {
-  it("defaults to Go with the session route and allows an explicit legacy rollback", () => {
+  it("defaults to Go with the session route and allows an explicit proxy selector opt-out", () => {
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_OVERVIEW_READS: "1" })).toBe(true);
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_OVERVIEW_READS: "0" })).toBe(false);
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MARKETING_OVERVIEW_READS: "1" })).toBe(false);
@@ -92,7 +93,7 @@ describe("Marketing overview Go selector", () => {
 });
 
 describe("inventory transfer Go selector", () => {
-  it("enables transfer capabilities with the session route and supports rollback", () => {
+  it("enables transfer capabilities with the session route and supports selector opt-out", () => {
     expect(goInventoryTransferWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goInventoryTransferWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_INVENTORY_TRANSFER_WRITES: "0" })).toBe(false);
     expect(goInventoryTransferWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
@@ -100,7 +101,7 @@ describe("inventory transfer Go selector", () => {
 });
 
 describe("inventory location and reservation Go selector", () => {
-  it("enables the capabilities with the session route and supports rollback", () => {
+  it("enables the capabilities with the session route and supports selector opt-out", () => {
     expect(goInventoryLocationReservationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goInventoryLocationReservationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_INVENTORY_LOCATION_RESERVATION_WRITES: "0" })).toBe(false);
     expect(goInventoryLocationReservationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
@@ -125,7 +126,7 @@ describe("CRM deal stage Go selector", () => {
 });
 
 describe("CRM lead conversion Go selector", () => {
-  it("defaults on with the session capability route and supports explicit legacy rollback", () => {
+  it("defaults on with the session capability route and supports explicit proxy selector opt-out", () => {
     expect(goCrmLeadConversionFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goCrmLeadConversionFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_LEAD_CONVERSION: "1" })).toBe(true);
     expect(goCrmLeadConversionFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_LEAD_CONVERSION: "0" })).toBe(false);
@@ -344,7 +345,7 @@ describe("authored document editor workspace Go route", () => {
 });
 
 describe("messaging conversation-list Go selector", () => {
-  it("requires session capability routing and defaults on with an explicit rollback", () => {
+  it("requires session capability routing and defaults on with an explicit selector opt-out", () => {
     expect(goMessagingConversationListFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingConversationListFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_LIST: "0" })).toBe(false);
     expect(goMessagingConversationListFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
@@ -352,7 +353,7 @@ describe("messaging conversation-list Go selector", () => {
 });
 
 describe("messaging conversation-create Go selector", () => {
-  it("requires session capability routing, defaults on, and supports its own explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports its own explicit selector opt-out", () => {
     expect(goMessagingConversationCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingConversationCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_CREATE: "0" })).toBe(false);
     expect(goMessagingConversationCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_CREATE: "1" })).toBe(false);
@@ -361,7 +362,7 @@ describe("messaging conversation-create Go selector", () => {
 });
 
 describe("messaging conversation-update Go selector", () => {
-  it("requires session capability routing, defaults on, and supports its own rollback", () => {
+  it("requires session capability routing, defaults on, and supports its own selector opt-out", () => {
     expect(goMessagingConversationUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingConversationUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_UPDATE: "0" })).toBe(false);
     expect(goMessagingConversationUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_UPDATE: "1" })).toBe(false);
@@ -370,7 +371,7 @@ describe("messaging conversation-update Go selector", () => {
 });
 
 describe("messaging conversation-archive Go selector", () => {
-  it("requires session capability routing, defaults on, and supports its own rollback", () => {
+  it("requires session capability routing, defaults on, and supports its own selector opt-out", () => {
     expect(goMessagingConversationArchiveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingConversationArchiveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_ARCHIVE: "0" })).toBe(false);
     expect(goMessagingConversationArchiveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_ARCHIVE: "1" })).toBe(false);
@@ -379,7 +380,7 @@ describe("messaging conversation-archive Go selector", () => {
 });
 
 describe("messaging conversation-leave Go selector", () => {
-  it("requires session capability routing, defaults on, and supports its own rollback", () => {
+  it("requires session capability routing, defaults on, and supports its own selector opt-out", () => {
     expect(goMessagingConversationLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingConversationLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_LEAVE: "0" })).toBe(false);
     expect(goMessagingConversationLeaveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_LEAVE: "1" })).toBe(false);
@@ -388,7 +389,7 @@ describe("messaging conversation-leave Go selector", () => {
 });
 
 describe("messaging conversation-add-member Go selector", () => {
-  it("requires session capability routing, defaults on, and supports its own rollback", () => {
+  it("requires session capability routing, defaults on, and supports its own selector opt-out", () => {
     expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER: "0" })).toBe(false);
     expect(goMessagingConversationAddMemberFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER: "1" })).toBe(false);
@@ -397,7 +398,7 @@ describe("messaging conversation-add-member Go selector", () => {
 });
 
 describe("messaging conversation-delete Go selector", () => {
-  it("requires session capability routing, defaults on, and supports its own rollback", () => {
+  it("requires session capability routing, defaults on, and supports its own selector opt-out", () => {
     expect(goMessagingConversationDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingConversationDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_CONVERSATION_DELETE: "0" })).toBe(false);
     expect(goMessagingConversationDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_CONVERSATION_DELETE: "1" })).toBe(false);
@@ -405,7 +406,7 @@ describe("messaging conversation-delete Go selector", () => {
 });
 
 describe("messaging thread-read Go selector", () => {
-  it("requires session capability routing and defaults on with an explicit rollback", () => {
+  it("requires session capability routing and defaults on with an explicit selector opt-out", () => {
     expect(goMessagingThreadReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingThreadReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_THREAD_READ: "0" })).toBe(false);
     expect(goMessagingThreadReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
@@ -413,7 +414,7 @@ describe("messaging thread-read Go selector", () => {
 });
 
 describe("messaging read-cursor Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goMessagingReadCursorFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingReadCursorFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_READ_CURSOR: "0" })).toBe(false);
     expect(goMessagingReadCursorFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_READ_CURSOR: "1" })).toBe(false);
@@ -421,7 +422,7 @@ describe("messaging read-cursor Go selector", () => {
 });
 
 describe("messaging reaction Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goMessagingReactionsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingReactionsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_REACTIONS: "0" })).toBe(false);
     expect(goMessagingReactionsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_REACTIONS: "1" })).toBe(false);
@@ -429,7 +430,7 @@ describe("messaging reaction Go selector", () => {
 });
 
 describe("messaging pin Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goMessagingPinsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingPinsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_PINS: "0" })).toBe(false);
     expect(goMessagingPinsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_PINS: "1" })).toBe(false);
@@ -458,7 +459,7 @@ describe("messaging session routes", () => {
 });
 
 describe("messaging attachment upload Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD: "0" })).toBe(false);
     expect(goMessagingAttachmentUploadFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD: "1" })).toBe(false);
@@ -466,7 +467,7 @@ describe("messaging attachment upload Go selector", () => {
 });
 
 describe("Support inbox Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goSupportInboxReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportInboxReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_INBOX_READS: "0" })).toBe(false);
     expect(goSupportInboxReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_INBOX_READS: "1" })).toBe(false);
@@ -474,7 +475,7 @@ describe("Support inbox Go selector", () => {
 });
 
 describe("Support library Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goSupportLibraryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportLibraryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_LIBRARY_READS: "0" })).toBe(false);
     expect(goSupportLibraryReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_LIBRARY_READS: "1" })).toBe(false);
@@ -482,7 +483,7 @@ describe("Support library Go selector", () => {
 });
 
 describe("Support canned-response write Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goSupportCannedResponseWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportCannedResponseWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE: "0" })).toBe(false);
     expect(goSupportCannedResponseWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_CANNED_RESPONSE_WRITE: "1" })).toBe(false);
@@ -490,7 +491,7 @@ describe("Support canned-response write Go selector", () => {
 });
 
 describe("Support knowledge article Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goSupportKbArticleWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportKbArticleWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_KB_ARTICLE_WRITE: "0" })).toBe(false);
     expect(goSupportKbArticleWriteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_KB_ARTICLE_WRITE: "1" })).toBe(false);
@@ -498,7 +499,7 @@ describe("Support knowledge article Go selector", () => {
 });
 
 describe("Support conversation writes Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goSupportConversationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportConversationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_CONVERSATION_WRITES: "0" })).toBe(false);
     expect(goSupportConversationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_CONVERSATION_WRITES: "1" })).toBe(false);
@@ -506,7 +507,7 @@ describe("Support conversation writes Go selector", () => {
 });
 
 describe("Support ticket writes Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports an explicit selector opt-out", () => {
     expect(goSupportTicketWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportTicketWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_TICKET_WRITES: "0" })).toBe(false);
     expect(goSupportTicketWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_TICKET_WRITES: "1" })).toBe(false);
@@ -514,7 +515,7 @@ describe("Support ticket writes Go selector", () => {
 });
 
 describe("messaging pending attachment delete Go selector", () => {
-  it("requires session capability routing, defaults on, and supports explicit rollback", () => {
+  it("requires session capability routing, defaults on, and supports explicit selector opt-out", () => {
     expect(goMessagingAttachmentDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goMessagingAttachmentDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_ATTACHMENT_DELETE: "0" })).toBe(false);
     expect(goMessagingAttachmentDeleteFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_ATTACHMENT_DELETE: "1" })).toBe(false);
@@ -702,13 +703,66 @@ describe("Vite Go route proxy selection", () => {
     },
   );
 
+  it("sends Vite's catch-all API proxy to the same Go origin as health and capabilities", async () => {
+    const loaded = await loadConfigFromFile(
+      { command: "serve", mode: "test" },
+      resolve(process.cwd(), "vite.config.ts"),
+    );
+    expect(loaded).not.toBeNull();
+    const proxy = loaded?.config.server?.proxy as Record<string, { target?: string }>;
+    expect(proxy["/api"]?.target).toBe(proxy["/api/health"]?.target);
+    expect(proxy["/api"]?.target).toBe(proxy["/api/capabilities/execute"]?.target);
+  });
+
+  it("routes unknown API paths to Go without contacting the legacy recorder", async () => {
+    let goCalls = 0;
+    let legacyCalls = 0;
+    const go = createHttpServer((request, response) => {
+      goCalls += 1;
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ target: "go", method: request.method, url: request.url }));
+    });
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
+    const legacy = createHttpServer((_request, response) => {
+      legacyCalls += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ target: "legacy" }));
+    });
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
+
+    const vite = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({}), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
+      },
+    });
+    await vite.listen();
+    runningServers.push({ close: () => vite.close() });
+    const address = vite.httpServer?.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/not-a-real-route?probe=catch-all`);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      target: "go",
+      method: "GET",
+      url: "/api/not-a-real-route?probe=catch-all",
+    });
+    expect(goCalls).toBe(1);
+    expect(legacyCalls).toBe(0);
+    expect(legacyOrigin).not.toBe(goOrigin);
+  });
+
   it("preserves email request and response data on Go even when a stale rollback env var is set", async () => {
     const go = requestRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
-    const legacy = requestRecorder("legacy");
-    const legacyOrigin = await listen(legacy);
-    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const createEmailServer = async (env: Record<string, string | undefined>) => {
       const vite: ViteDevServer = await createViteServer({
@@ -719,7 +773,7 @@ describe("Vite Go route proxy selection", () => {
           host: "127.0.0.1",
           port: 0,
           strictPort: false,
-          proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+          proxy: { "/api": { target: goOrigin, changeOrigin: false } },
         },
       });
       await vite.listen();
@@ -814,7 +868,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(true);
   });
 
-  it("routes only the setup checklist GET to Go by default and supports rollback", () => {
+  it("routes only the setup checklist GET to Go by default and supports selector opt-out", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(defaults.setup).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/setup")).toBe(true);
@@ -828,7 +882,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(rolledBack, "GET", "/api/setup")).toBe(false);
   });
 
-  it("routes only the dashboard GET to Go by default and supports rollback", () => {
+  it("routes only the dashboard GET to Go by default and supports selector opt-out", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(defaults.dashboard).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/dashboard")).toBe(true);
@@ -841,7 +895,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(rolledBack, "GET", "/api/dashboard")).toBe(false);
   });
 
-  it("routes AI config GET and POST to Go by default and supports an explicit legacy rollback", () => {
+  it("routes AI config GET and POST to Go by default and supports an explicit proxy selector opt-out", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(defaults.aiConfig).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/ai-config")).toBe(true);
@@ -859,9 +913,6 @@ describe("Vite Go route proxy selection", () => {
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
 
-    const legacy = requestRecorder("legacy");
-    const legacyOrigin = await listen(legacy);
-    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const vite = await createViteServer({
       configFile: false,
@@ -871,7 +922,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -903,7 +954,7 @@ describe("Vite Go route proxy selection", () => {
     });
   });
 
-  it("allows explicit legacy rollback for analytics discovery, preview, and report generation", () => {
+  it("allows explicit proxy selector opt-out for analytics discovery, preview, and report generation", () => {
     const flags = goRouteProxyFlagsFromEnv({
       CHASTE_GO_ANALYTICS_ROUTE: "0",
       CHASTE_GO_ANALYTICS_REPORT_ROUTE: "0",
@@ -948,7 +999,7 @@ describe("Vite Go route proxy selection", () => {
     }
   });
 
-  it("routes only exact approvals GET and POST requests to Go by default with independent rollbacks", () => {
+  it("routes exact approvals GET and POST requests through Go with independent selector opt-outs", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(defaults.approvalsRead).toBe(true);
     expect(defaults.approvalsDecision).toBe(true);
@@ -974,9 +1025,6 @@ describe("Vite Go route proxy selection", () => {
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
 
-    const legacy = requestRecorder("legacy");
-    const legacyOrigin = await listen(legacy);
-    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const vite = await createViteServer({
       configFile: false,
@@ -986,7 +1034,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -1017,7 +1065,7 @@ describe("Vite Go route proxy selection", () => {
       body: JSON.stringify({ decision: "approve" }),
     });
 
-    const rollbackVite = await createViteServer({
+    const selectorOptOutVite = await createViteServer({
       configFile: false,
       appType: "custom",
       plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_APPROVALS_DECISION_ROUTE: "0" }), goOrigin)],
@@ -1025,18 +1073,18 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
-    await rollbackVite.listen();
-    runningServers.push({ close: () => rollbackVite.close() });
-    const rollbackAddress = rollbackVite.httpServer?.address() as AddressInfo;
-    const fallback = await fetch(`http://127.0.0.1:${rollbackAddress.port}/api/approvals?id=approval-id`, {
+    await selectorOptOutVite.listen();
+    runningServers.push({ close: () => selectorOptOutVite.close() });
+    const selectorOptOutAddress = selectorOptOutVite.httpServer?.address() as AddressInfo;
+    const selectorOptOutResponse = await fetch(`http://127.0.0.1:${selectorOptOutAddress.port}/api/approvals?id=approval-id`, {
       method: "POST",
       headers: { cookie: "auth.session=verified-browser-session", "content-type": "application/json" },
       body: JSON.stringify({ decision: "reject" }),
     });
-    expect(await fallback.json()).toMatchObject({ target: "legacy", method: "POST", url: "/api/approvals?id=approval-id" });
+    expect(await selectorOptOutResponse.json()).toMatchObject({ target: "go", method: "POST", url: "/api/approvals?id=approval-id" });
   });
 
   it("sends exact authored-document workspace POST and DELETE requests to Go before the legacy API proxy", async () => {
@@ -1044,9 +1092,6 @@ describe("Vite Go route proxy selection", () => {
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
 
-    const legacy = requestRecorder("legacy");
-    const legacyOrigin = await listen(legacy);
-    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const vite = await createViteServer({
       configFile: false,
@@ -1056,7 +1101,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -1101,9 +1146,6 @@ describe("Vite Go route proxy selection", () => {
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
 
-    const legacy = requestRecorder("legacy");
-    const legacyOrigin = await listen(legacy);
-    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const vite = await createViteServer({
       configFile: false,
@@ -1113,7 +1155,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -1154,9 +1196,6 @@ describe("Vite Go route proxy selection", () => {
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
 
-    const legacy = requestRecorder("legacy");
-    const legacyOrigin = await listen(legacy);
-    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const vite = await createViteServer({
       configFile: false,
@@ -1166,7 +1205,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -1220,9 +1259,6 @@ describe("Vite Go route proxy selection", () => {
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
 
-    const legacy = requestRecorder("legacy");
-    const legacyOrigin = await listen(legacy);
-    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const vite = await createViteServer({
       configFile: false,
@@ -1232,7 +1268,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -1287,9 +1323,9 @@ describe("Vite Go route proxy selection", () => {
     for (const request of [
       { method: "PUT", path: "/api/org", target: "go" },
       { method: "PATCH", path: "/api/org", target: "go" },
-      { method: "DELETE", path: "/api/org", target: "legacy" },
-      { method: "PATCH", path: "/api/org/extra", target: "legacy" },
-      { method: "GET", path: "/api/org/extra", target: "legacy" },
+      { method: "DELETE", path: "/api/org", target: "go" },
+      { method: "PATCH", path: "/api/org/extra", target: "go" },
+      { method: "GET", path: "/api/org/extra", target: "go" },
     ]) {
       const response = await fetch(`http://127.0.0.1:${address.port}${request.path}`, { method: request.method });
       const payload = await response.json() as { target: string; method: string; url: string };
@@ -1297,13 +1333,13 @@ describe("Vite Go route proxy selection", () => {
     }
   });
 
-  it("allows the analytics read proxy to be disabled for rollback", () => {
+  it("allows the analytics read selector to be disabled independently of the Go catch-all", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ANALYTICS_ROUTE: "0" });
     expect(flags.analytics).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(false);
   });
 
-  it("routes exact analytics report POSTs by default and allows explicit rollback", () => {
+  it("routes exact analytics report POSTs by default and allows explicit selector opt-out", () => {
     const disabled = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(disabled, "POST", "/api/analytics")).toBe(true);
 
@@ -1342,7 +1378,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/auth/sign-in/email")).toBe(false);
   });
 
-  it("keeps auth on the legacy route when the Go API explicitly disables its auth mount", () => {
+  it("leaves auth unselected when the Go API explicitly disables its auth mount", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_AUTH_ROUTE: "1", GO_AUTH_ROUTE: "0" });
     expect(flags.auth).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/auth/sign-in/email")).toBe(false);
@@ -1431,7 +1467,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_ROUTINES_ROUTE: "0" }), "GET", "/api/routines")).toBe(true);
   });
 
-  it("keeps unsupported memory methods and subpaths on the legacy route", () => {
+  it("leaves unsupported memory paths unselected for the Go catch-all", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(flags, "GET", "/api/memory?q=ledger")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/memory")).toBe(true);
@@ -1441,7 +1477,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_MEMORY_ROUTE: "0" }), "GET", "/api/memory")).toBe(false);
   });
 
-  it("keeps unsupported module settings methods and subpaths on the legacy route", () => {
+  it("leaves unsupported module settings paths unselected for the Go catch-all", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(flags, "GET", "/api/module-settings?module=inventory")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/module-settings")).toBe(true);
@@ -1451,7 +1487,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_MODULE_SETTINGS_ROUTE: "0" }), "GET", "/api/module-settings?module=inventory")).toBe(false);
   });
 
-  it("keeps unsupported policy methods and subpaths on the legacy route", () => {
+  it("leaves unsupported policy paths unselected for the Go catch-all", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(flags, "GET", "/api/policy")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/policy?source=settings")).toBe(true);
@@ -1503,7 +1539,7 @@ describe("Vite Go route proxy selection", () => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ movements: [] }));
     });
-    const legacyOrigin = await listen(legacy);
+    await listen(legacy);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const vite = await createViteServer({
@@ -1514,7 +1550,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -1528,7 +1564,7 @@ describe("Vite Go route proxy selection", () => {
     expect(legacyCalls).toBe(0);
   });
 
-  it("routes supported CRM reads to Go by default and allows a legacy rollback", () => {
+  it("routes supported CRM reads to Go by default and allows a proxy selector opt-out", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(defaults.crmReads).toBe(true);
     for (const query of [
@@ -1581,9 +1617,6 @@ describe("Vite Go route proxy selection", () => {
     const go = requestRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
-    const legacy = requestRecorder("legacy");
-    const legacyOrigin = await listen(legacy);
-    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
     const vite: ViteDevServer = await createViteServer({
       configFile: false,
       appType: "custom",
@@ -1592,7 +1625,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -1603,9 +1636,9 @@ describe("Vite Go route proxy selection", () => {
     const directory = await fetch(`${origin}/api/customers`);
     expect(await directory.json()).toMatchObject({ target: "go", method: "GET", url: "/api/customers" });
     const create = await fetch(`${origin}/api/customers`, { method: "POST", body: "{}" });
-    expect(await create.json()).toMatchObject({ target: "legacy", method: "POST", url: "/api/customers" });
+    expect(await create.json()).toMatchObject({ target: "go", method: "POST", url: "/api/customers" });
     const suffix = await fetch(`${origin}/api/customers/extra`);
-    expect(await suffix.json()).toMatchObject({ target: "legacy", method: "GET", url: "/api/customers/extra" });
+    expect(await suffix.json()).toMatchObject({ target: "go", method: "GET", url: "/api/customers/extra" });
   });
 
   it("keeps the POS namespace on Go for supported and unsupported requests", () => {
@@ -1782,7 +1815,7 @@ describe("Vite Go route proxy selection", () => {
     }
   });
 
-  it("keeps session and durable-run reads on Go with stale rollback selectors", () => {
+  it("keeps session and durable-run reads on Go with stale selector opt-outs", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(defaults, "GET", "/api/sessions")).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/durable-runs")).toBe(true);
@@ -1792,7 +1825,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(disabled, "GET", "/api/durable-runs")).toBe(true);
   });
 
-  it("routes metrics reads by default and allows rollback", () => {
+  it("routes metrics reads by default and allows selector opt-out", () => {
     const metrics = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(metrics, "GET", "/api/metrics")).toBe(true);
     expect(isGoRouteRequest(metrics, "POST", "/api/metrics")).toBe(false);
@@ -1808,9 +1841,6 @@ describe("Vite Go route proxy selection", () => {
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
 
-    const legacy = requestRecorder("legacy");
-    const legacyOrigin = await listen(legacy);
-    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const flags = goRouteProxyFlagsFromEnv({
       CHASTE_GO_SUPPORT_PUBLIC_ROUTE: "1",
@@ -1843,7 +1873,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -1875,7 +1905,7 @@ describe("Vite Go route proxy selection", () => {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
       },
     });
     await onboardingVite.listen();
@@ -1887,7 +1917,7 @@ describe("Vite Go route proxy selection", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "Report", sections: [] }),
     });
-    expect(await reportRouteDisabled.json()).toMatchObject({ target: "legacy", method: "POST", url: "/api/analytics" });
+    expect(await reportRouteDisabled.json()).toMatchObject({ target: "go", method: "POST", url: "/api/analytics" });
     const analyticsGetUnaffected = await fetch(`${onboardingOrigin}/api/analytics?dataset=analytics.pipelineByStage`);
     expect(await analyticsGetUnaffected.json()).toMatchObject({ target: "go", method: "GET" });
     const onboardingBody = JSON.stringify({
@@ -1959,9 +1989,9 @@ describe("Vite Go route proxy selection", () => {
     });
     expect((await supportChannelsWrite.json())).toMatchObject({ target: "go", method: "POST", url: "/api/support/channels" });
     const unsupportedSupportChannelsMethod = await fetch(`${origin}/api/support/channels`, { method: "PUT" });
-    expect((await unsupportedSupportChannelsMethod.json()).target).toBe("legacy");
+    expect((await unsupportedSupportChannelsMethod.json()).target).toBe("go");
     const supportChannelsSuffix = await fetch(`${origin}/api/support/channels/extra`);
-    expect((await supportChannelsSuffix.json()).target).toBe("legacy");
+    expect((await supportChannelsSuffix.json()).target).toBe("go");
 
     const teamRead = await fetch(`${origin}/api/team?view=members`);
     expect((await teamRead.json())).toMatchObject({ target: "go", method: "GET", url: "/api/team?view=members" });
@@ -1979,10 +2009,10 @@ describe("Vite Go route proxy selection", () => {
     });
 
     const teamUnsupportedMethod = await fetch(`${origin}/api/team`, { method: "PATCH" });
-    expect((await teamUnsupportedMethod.json())).toMatchObject({ target: "legacy", method: "PATCH" });
+    expect((await teamUnsupportedMethod.json())).toMatchObject({ target: "go", method: "PATCH" });
 
     const teamUnsupportedPath = await fetch(`${origin}/api/team/invitations`);
-    expect((await teamUnsupportedPath.json())).toMatchObject({ target: "legacy", method: "GET" });
+    expect((await teamUnsupportedPath.json())).toMatchObject({ target: "go", method: "GET" });
 
     const analyticsRead = await fetch(`${origin}/api/analytics?dataset=analytics.pipelineByStage`);
     expect((await analyticsRead.json()).target).toBe("go");
@@ -2013,9 +2043,9 @@ describe("Vite Go route proxy selection", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "createItem" }),
     });
-    expect((await inventoryWrite.json())).toMatchObject({ target: "legacy", method: "POST", url: "/api/inventory" });
+    expect((await inventoryWrite.json())).toMatchObject({ target: "go", method: "POST", url: "/api/inventory" });
     const inventoryNested = await fetch(`${origin}/api/inventory/history`);
-    expect((await inventoryNested.json())).toMatchObject({ target: "legacy", method: "GET", url: "/api/inventory/history" });
+    expect((await inventoryNested.json())).toMatchObject({ target: "go", method: "GET", url: "/api/inventory/history" });
 
     const myWork = await fetch(`${origin}/api/my-work?status=open`);
     expect((await myWork.json()).target).toBe("go");
@@ -2097,20 +2127,20 @@ describe("Vite Go route proxy selection", () => {
     expect((await portalInvoiceWithQuery.json())).toMatchObject({ target: "go", method: "GET", url: "/api/portal/invoice/token?download=1" });
 
     const unsupportedMethod = await fetch(`${origin}/api/portal/invoice/token`, { method: "POST" });
-    expect((await unsupportedMethod.json()).target).toBe("legacy");
+    expect((await unsupportedMethod.json()).target).toBe("go");
 
     const portalSuffixFallback = await fetch(`${origin}/api/portal/invoice/token/extra`);
-    expect((await portalSuffixFallback.json()).target).toBe("legacy");
+    expect((await portalSuffixFallback.json()).target).toBe("go");
 
     const salesOrders = await fetch(`${origin}/api/sales?status=draft`);
     expect((await salesOrders.json())).toMatchObject({ target: "go", method: "GET", url: "/api/sales?status=draft" });
 
     const salesOrdersUnsupportedMethod = await fetch(`${origin}/api/sales`, { method: "POST" });
-    expect((await salesOrdersUnsupportedMethod.json()).target).toBe("legacy");
+    expect((await salesOrdersUnsupportedMethod.json()).target).toBe("go");
 
     for (const path of ["/api/sales/", "/api/sales/extra/parts"]) {
       const fallback = await fetch(`${origin}${path}`);
-      expect((await fallback.json()).target).toBe("legacy");
+      expect((await fallback.json()).target).toBe("go");
     }
 
     const salesInvoice = await fetch(`${origin}/api/sales/aaaaaaaa-0000-4000-8000-000000000001?print=1`);
@@ -2121,11 +2151,11 @@ describe("Vite Go route proxy selection", () => {
       "/api/sales/aaaaaaaa-0000-4000-8000-000000000001/",
     ]) {
       const fallback = await fetch(`${origin}${path}`);
-      expect((await fallback.json()).target).toBe("legacy");
+      expect((await fallback.json()).target).toBe("go");
     }
 
     const salesInvoiceUnsupportedMethod = await fetch(`${origin}/api/sales/aaaaaaaa-0000-4000-8000-000000000001`, { method: "POST" });
-    expect((await salesInvoiceUnsupportedMethod.json()).target).toBe("legacy");
+    expect((await salesInvoiceUnsupportedMethod.json()).target).toBe("go");
 
     const posRead = await fetch(`${origin}/api/pos?status=open`, { headers: { cookie: "auth-session=browser" } });
     expect((await posRead.json())).toMatchObject({ target: "go", method: "GET", url: "/api/pos?status=open", cookie: "auth-session=browser" });
@@ -2167,13 +2197,13 @@ describe("Vite Go route proxy selection", () => {
     }
 
     const prefixFallback = await fetch(`${origin}/api/setup/extra`);
-    expect((await prefixFallback.json()).target).toBe("legacy");
+    expect((await prefixFallback.json()).target).toBe("go");
 
     const analyticsUnsupportedMethod = await fetch(`${origin}/api/analytics`, { method: "DELETE" });
-    expect((await analyticsUnsupportedMethod.json()).target).toBe("legacy");
+    expect((await analyticsUnsupportedMethod.json()).target).toBe("go");
 
     const analyticsSuffixFallback = await fetch(`${origin}/api/analytics/extra`);
-    expect((await analyticsSuffixFallback.json()).target).toBe("legacy");
+    expect((await analyticsSuffixFallback.json()).target).toBe("go");
 
     const myWorkUnsupportedMethod = await fetch(`${origin}/api/my-work`, { method: "POST" });
     expect((await myWorkUnsupportedMethod.json()).target).toBe("go");
