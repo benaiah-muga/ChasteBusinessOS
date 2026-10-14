@@ -334,16 +334,29 @@ describe("Vite marketplace page", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
   });
 
-  it("does not load listing data while Creator Mode is disabled", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  it("loads listings but hides Creator actions while Creator Mode is disabled", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return modules(false);
-      return Response.json({ listings: [] });
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) return marketplaceListings([listing]);
+      if (isCapabilityRequest(input, init, "creator.verifyPlugin")) return Response.json({ ok: true, data: { valid: false, reason: "signature mismatch" } });
+      return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<MarketplacePage {...retryScope} />);
 
-    expect(await screen.findByText("Enable Creator Mode in organization settings to use the marketplace.")).not.toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("heading", { name: listing.name })).not.toBeNull();
+    expect(screen.getByText(/Creator Mode is disabled.*browse and verify packages/i)).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "Publish a plugin" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Install|Uninstall/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish listing" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Plugin manifest (JSON)"), { target: { value: '{"formatVersion":1}' } });
+    fireEvent.change(screen.getByLabelText("Signature (base64)"), { target: { value: "signature" } });
+    fireEvent.change(screen.getByLabelText("Publisher public key (base64)"), { target: { value: "public-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify signature" }));
+    expect(await screen.findByText("Invalid: signature mismatch")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([input, init]) => isCapabilityRequest(input, init, "creator.listMarketplace"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input, init]) => isCapabilityRequest(input, init, "creator.verifyPlugin"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input, init]) => ["creator.publishListing", "creator.installListing", "creator.uninstallListing"].some((id) => isCapabilityRequest(input, init, id)))).toBe(false);
   });
 });

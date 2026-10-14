@@ -456,7 +456,12 @@ const RecordFxRateActionSchema = z.object({
   rate: z.string().regex(/^(?:\d+)(?:\.\d+)?$/).refine((value) => Number.isFinite(Number(value)) && Number(value) > 0),
   effectiveAt: timestamp.optional(),
 }).strict();
-const PeriodFxWriteActionSchema = z.discriminatedUnion("action", [ReopenPeriodActionSchema, RecordFxRateActionSchema]);
+const RevalueForeignReceivablesActionSchema = z.object({
+  action: z.literal("revalueForeignReceivables"),
+  year: z.number().int().safe().min(2000).max(2100),
+  month: z.number().int().safe().min(1).max(12),
+}).strict();
+const PeriodFxWriteActionSchema = z.discriminatedUnion("action", [ReopenPeriodActionSchema, RecordFxRateActionSchema, RevalueForeignReceivablesActionSchema]);
 const StoredPeriodFxWriteSchema = z.object({
   action: PeriodFxWriteActionSchema,
   intentId: z.string().uuid(),
@@ -467,6 +472,21 @@ const RecordFxRateOutputSchema = z.object({
   rateId: z.string().uuid(),
   num: z.number().int().safe().positive(),
   den: z.number().int().safe().positive(),
+}).strict();
+const RevalueForeignReceivablesOutputSchema = z.object({
+  revaluationId: z.string().uuid(),
+  entryId: z.string().uuid().nullable(),
+  totalAdjustmentMinor: z.number().int().safe(),
+  currencies: z.array(z.object({
+    currency: z.string().regex(/^[A-Z]{3}$/),
+    foreignMinor: minor,
+    historicalBaseMinor: minor,
+    closeBaseMinor: minor,
+    adjustmentMinor: z.number().int().safe(),
+    rateNum: z.number().int().safe().positive(),
+    rateDen: z.number().int().safe().positive(),
+  }).strict()),
+  alreadyReviewed: z.boolean(),
 }).strict();
 const PERIOD_FX_WRITE_ATTEMPT_PREFIX = "chaste:accounting:period-fx-write:go:attempt:v1:";
 const StoredCloseYearSchema = z.object({
@@ -968,7 +988,7 @@ export async function submitAccountingAction(
     const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
     return submitGoAccountingCloseYear(action.data, scoped, signal);
   }
-  if (path === "/api/accounting" && (payload.action === "reopenPeriod" || payload.action === "recordFxRate")) {
+  if (path === "/api/accounting" && (payload.action === "reopenPeriod" || payload.action === "recordFxRate" || payload.action === "revalueForeignReceivables")) {
     const action = PeriodFxWriteActionSchema.safeParse(payload);
     if (!action.success) throw new AccountingApiError(400, "Enter a valid Accounting period or FX action before submitting.");
     const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
@@ -1019,7 +1039,11 @@ async function submitGoAccountingPeriodFxWrite(
   signal?: AbortSignal,
 ): Promise<AccountingActionOutcome> {
   const attempt = await accountingPeriodFxWriteAttempt(action, scope.scopeHash);
-  const capabilityId = action.action === "reopenPeriod" ? "accounting.reopenPeriod" : "accounting.recordFxRate";
+  const capabilityId = action.action === "reopenPeriod"
+    ? "accounting.reopenPeriod"
+    : action.action === "recordFxRate"
+      ? "accounting.recordFxRate"
+      : "accounting.revalueForeignReceivables";
   const { action: _action, ...input } = action;
   let response: Response;
   let body: unknown;
@@ -1048,7 +1072,9 @@ async function submitGoAccountingPeriodFxWrite(
   const output = envelope.success
     ? action.action === "reopenPeriod"
       ? ReopenPeriodOutputSchema.safeParse(envelope.data.data)
-      : RecordFxRateOutputSchema.safeParse(envelope.data.data)
+      : action.action === "recordFxRate"
+        ? RecordFxRateOutputSchema.safeParse(envelope.data.data)
+        : RevalueForeignReceivablesOutputSchema.safeParse(envelope.data.data)
     : null;
   if (response.status !== 200 || !output?.success) {
     throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected period or FX action response.", true);

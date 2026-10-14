@@ -568,7 +568,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const actionScopeKey = `${actorId ?? ""}:${organizationId ?? ""}`;
       const actionScopeIsCurrent = () => paymentRetryScopeKeyRef.current === actionScopeKey;
       const isCloseYear = path === "/api/accounting" && payload.action === "closeYear";
-      const isPeriodFxWrite = path === "/api/accounting" && (payload.action === "reopenPeriod" || payload.action === "recordFxRate");
+      const isPeriodFxWrite = path === "/api/accounting" && (payload.action === "reopenPeriod" || payload.action === "recordFxRate" || payload.action === "revalueForeignReceivables");
       const isRecordPayment = path === "/api/accounting" && payload.action === "recordPayment";
       const goRecordPayment = isRecordPayment;
       const isCreateInvoice = path === "/api/accounting" && payload.action === "createInvoice";
@@ -2415,13 +2415,22 @@ function ReportsSection({
   ) => Promise<boolean>;
 }) {
   const [fxForm, setFxForm] = useState({ quoteCurrency: "", rate: "", effectiveAt: "" });
+  const [revaluationPeriod, setRevaluationPeriod] = useState({
+    year: new Date().getUTCFullYear(),
+    month: new Date().getUTCMonth() + 1,
+  });
+  const [revaluationTarget, setRevaluationTarget] = useState<{ year: number; month: number } | null>(null);
   useEffect(() => {
-    if (pendingPeriodFxWrite?.action !== "recordFxRate") return;
-    setFxForm({
-      quoteCurrency: pendingPeriodFxWrite.quoteCurrency,
-      rate: pendingPeriodFxWrite.rate,
-      effectiveAt: pendingPeriodFxWrite.effectiveAt?.slice(0, 10) ?? "",
-    });
+    if (pendingPeriodFxWrite?.action === "recordFxRate") {
+      setFxForm({
+        quoteCurrency: pendingPeriodFxWrite.quoteCurrency,
+        rate: pendingPeriodFxWrite.rate,
+        effectiveAt: pendingPeriodFxWrite.effectiveAt?.slice(0, 10) ?? "",
+      });
+    } else if (pendingPeriodFxWrite?.action === "revalueForeignReceivables") {
+      setRevaluationPeriod({ year: pendingPeriodFxWrite.year, month: pendingPeriodFxWrite.month });
+      setRevaluationTarget({ year: pendingPeriodFxWrite.year, month: pendingPeriodFxWrite.month });
+    }
   }, [pendingPeriodFxWrite]);
   const cashFlow = reports.cashFlow ?? null;
   const exposures = reports.fxExposure?.exposures ?? [];
@@ -2449,6 +2458,11 @@ function ReportsSection({
       {pendingPeriodFxWrite?.action === "recordFxRate" && (
         <p className="accounting-callout" role="status">
           An FX-rate write is unresolved. The saved rate has been restored; retry those exact details to recover its result.
+        </p>
+      )}
+      {pendingPeriodFxWrite?.action === "revalueForeignReceivables" && (
+        <p className="accounting-callout" role="status">
+          This FX revaluation is unresolved. Retry the saved period to recover its result.
         </p>
       )}
       {reports.unsupportedCurrencies === undefined ? (
@@ -2693,7 +2707,75 @@ function ReportsSection({
             Record rate
           </button>
         </div>
+        <div className="accounting-field-row accounting-block-divider">
+          <label className="accounting-label">
+            Revaluation year
+            <input
+              className="accounting-money-input"
+              inputMode="numeric"
+              min={2000}
+              max={2100}
+              type="number"
+              value={revaluationPeriod.year}
+              readOnly={pendingPeriodFxWrite?.action === "revalueForeignReceivables"}
+              onChange={(event) => setRevaluationPeriod({ ...revaluationPeriod, year: Number(event.target.value) })}
+            />
+          </label>
+          <label className="accounting-label">
+            Revaluation month
+            <select
+              value={revaluationPeriod.month}
+              disabled={pendingPeriodFxWrite?.action === "revalueForeignReceivables"}
+              onChange={(event) => setRevaluationPeriod({ ...revaluationPeriod, month: Number(event.target.value) })}
+            >
+              {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                <option key={month} value={month}>{String(month).padStart(2, "0")}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="accounting-button-danger"
+            disabled={busy || !Number.isSafeInteger(revaluationPeriod.year) || revaluationPeriod.year < 2000 || revaluationPeriod.year > 2100}
+            onClick={() => setRevaluationTarget(revaluationPeriod)}
+          >
+            {pendingPeriodFxWrite?.action === "revalueForeignReceivables" ? "Retry unresolved FX revaluation" : "Revalue foreign receivables"}
+          </button>
+        </div>
+        <p className="accounting-hint">
+          Uses each invoice&apos;s historical rate and the latest rate effective at the selected month end. The adjustment posts to FX gain or loss and requires approval.
+        </p>
       </section>
+      <Dialog
+        open={revaluationTarget !== null}
+        title={`Revalue foreign receivables for ${revaluationTarget ? `${revaluationTarget.year}-${String(revaluationTarget.month).padStart(2, "0")}` : ""}`}
+        description="This posts the period-end valuation adjustment to the general ledger. Confirm the closing rates before submitting."
+        onClose={() => setRevaluationTarget(null)}
+        footer={
+          <>
+            <button type="button" disabled={busy} onClick={() => setRevaluationTarget(null)}>Cancel</button>
+            <button
+              type="button"
+              className="accounting-button-danger"
+              disabled={busy || revaluationTarget === null}
+              onClick={() => {
+                if (!revaluationTarget) return;
+                void onAction(
+                  "/api/accounting",
+                  { action: "revalueForeignReceivables", ...revaluationTarget },
+                  `FX revaluation ${revaluationTarget.year}-${String(revaluationTarget.month).padStart(2, "0")}`,
+                ).then((accepted) => {
+                  if (accepted) setRevaluationTarget(null);
+                });
+              }}
+            >
+              Post FX revaluation
+            </button>
+          </>
+        }
+      >
+        <p>Only open foreign-currency receivables issued by the selected month end are included. Missing historical or close rates stop the posting.</p>
+      </Dialog>
     </section>
   );
 }

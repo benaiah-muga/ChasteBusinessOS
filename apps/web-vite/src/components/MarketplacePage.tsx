@@ -14,8 +14,7 @@ import "./MarketplacePage.css";
 type LoadState =
   | { status: "loading" }
   | { status: "failed"; message: string }
-  | { status: "disabled" }
-  | { status: "ready"; listings: MarketplaceListing[] };
+  | { status: "ready"; creatorEnabled: boolean; listings: MarketplaceListing[] };
 type Notice = { tone: "success" | "pending" | "error"; message: string };
 
 function messageFor(error: unknown): string {
@@ -40,12 +39,8 @@ export function MarketplacePage({ actorId, organizationId }: MarketplaceRetrySco
     try {
       const enabled = await fetchMarketplaceEnabled(signal);
       if (signal?.aborted) return;
-      if (!enabled) {
-        setState({ status: "disabled" });
-        return;
-      }
       const listings = await fetchMarketplaceListings(signal);
-      if (!signal?.aborted) setState({ status: "ready", listings });
+      if (!signal?.aborted) setState({ status: "ready", creatorEnabled: enabled, listings });
     } catch (error) {
       if (!signal?.aborted) setState({ status: "failed", message: messageFor(error) });
     }
@@ -141,10 +136,6 @@ export function MarketplacePage({ actorId, organizationId }: MarketplaceRetrySco
       </main>
     );
   }
-  if (state.status === "disabled") {
-    return <main className="marketplace-page"><header className="marketplace-header"><p className="shell-kicker">Creator Mode</p><h1>Marketplace</h1></header><p className="marketplace-empty">Enable Creator Mode in organization settings to use the marketplace.</p></main>;
-  }
-
   const listings = state.listings;
   const payloadReady = publishPayload() !== null;
   return (
@@ -156,8 +147,10 @@ export function MarketplacePage({ actorId, organizationId }: MarketplaceRetrySco
       </header>
       {notice && <div className={`marketplace-notice marketplace-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.message}</div>}
 
+      {!state.creatorEnabled && <p className="marketplace-empty">Creator Mode is disabled. You can browse and verify packages, but an organization admin must enable Creator Mode before publishing or installing.</p>}
+
       <section className="marketplace-panel" aria-labelledby="publish-plugin-heading">
-        <h2 id="publish-plugin-heading">Publish a plugin</h2>
+        <h2 id="publish-plugin-heading">{state.creatorEnabled ? "Publish a plugin" : "Verify a plugin signature"}</h2>
         <label htmlFor="marketplace-manifest">Plugin manifest (JSON)</label>
         <textarea
           id="marketplace-manifest"
@@ -172,7 +165,7 @@ export function MarketplacePage({ actorId, organizationId }: MarketplaceRetrySco
         </div>
         <div className="marketplace-actions">
           <button className="shell-button shell-button-secondary" type="button" disabled={verifying} onClick={() => void verify()}>{verifying ? "Verifying…" : "Verify signature"}</button>
-          <button className="shell-button" type="button" disabled={!payloadReady || publishing} onClick={() => void publish()}>{publishing ? "Publishing…" : "Publish listing"}</button>
+          {state.creatorEnabled && <button className="shell-button" type="button" disabled={!payloadReady || publishing} onClick={() => void publish()}>{publishing ? "Publishing…" : "Publish listing"}</button>}
           {verdict && <span className={verdict.valid ? "marketplace-valid" : "marketplace-invalid"}>{verdict.valid ? "Signature valid" : `Invalid: ${verdict.reason ?? "signature check failed"}`}</span>}
         </div>
         <p className="marketplace-help">Every listing is cryptographically signed by its publisher and re-verified before anyone can install it.</p>
@@ -191,14 +184,14 @@ export function MarketplacePage({ actorId, organizationId }: MarketplaceRetrySco
               <p>{listing.summary}</p>
               <p className="marketplace-metadata">{listing.slug} v{listing.version}</p>
               <p className="marketplace-metadata">Capabilities: {listing.capabilityIds.join(", ")}</p>
-              <button
+              {state.creatorEnabled && <button
                 className="shell-button shell-button-secondary"
                 type="button"
                 disabled={busyListingId !== null}
                 onClick={() => void listingAction(listing, listing.installedHere ? "uninstall" : "install")}
               >
                 {busyListingId === listing.id ? "Working…" : listing.installedHere ? "Uninstall" : "Install (signature-checked)"}
-              </button>
+              </button>}
             </article>
           ))}
         </section>

@@ -91,6 +91,24 @@ func TestModulesHandlerSupportsBearerAndOrganizationHeader(t *testing.T) {
 	}
 }
 
+func TestModulesHandlerAllowsResolverFallbackFromStaleActiveOrganizationCookie(t *testing.T) {
+	identity := directTestIdentity()
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	request := httptest.NewRequest(http.MethodGet, "/api/modules", nil)
+	request.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: "session-cookie"})
+	request.AddCookie(&http.Cookie{Name: session.ActiveOrgCookieName, Value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"})
+	response := httptest.NewRecorder()
+
+	NewModulesHandler(resolver).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want successful resolver fallback", response.Code, response.Body.String())
+	}
+	if resolver.activeOrg != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
+		t.Fatalf("resolver selector=%q, want stale cookie to reach membership validation", resolver.activeOrg)
+	}
+}
+
 func TestModulesHandlerRejectsUnverifiedAndUnmatchedOrganization(t *testing.T) {
 	t.Run("unverified session", func(t *testing.T) {
 		identity := directTestIdentity()
@@ -103,7 +121,7 @@ func TestModulesHandlerRejectsUnverifiedAndUnmatchedOrganization(t *testing.T) {
 		}
 	})
 
-	t.Run("unmatched header selector", func(t *testing.T) {
+	t.Run("explicit mismatched organization header", func(t *testing.T) {
 		identity := directTestIdentity()
 		resolver := &fakeDirectSessionResolver{resolved: identity}
 		request := httptest.NewRequest(http.MethodGet, "/api/modules", nil)

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { submitAccountingAction } from "../api/accounting";
+import { readPendingAccountingPeriodFxWrite, submitAccountingAction } from "../api/accounting";
 import {
   AccountingPage,
   filterByAgingRange,
@@ -270,6 +270,15 @@ function stubAccounting(options: StubOptions = {}) {
       if (capabilityId === "accounting.recordFxRate") {
         return options.goPeriodFxWriteResponse?.() ?? Response.json({ ok: true, data: {
           rateId: "11111111-1111-4111-8111-111111111111", num: 10875, den: 10000,
+        } });
+      }
+      if (capabilityId === "accounting.revalueForeignReceivables") {
+        return options.goPeriodFxWriteResponse?.() ?? Response.json({ ok: true, data: {
+          revaluationId: "11111111-1111-4111-8111-111111111111",
+          entryId: "22222222-2222-4222-8222-222222222222",
+          totalAdjustmentMinor: -1250,
+          currencies: [{ currency: "EUR", foreignMinor: 10000, historicalBaseMinor: 11000, closeBaseMinor: 9750, adjustmentMinor: -1250, rateNum: 975, rateDen: 1000 }],
+          alreadyReviewed: false,
         } });
       }
       if (capabilityId === "accounting.matchBankTransaction") {
@@ -1271,6 +1280,83 @@ describe("AccountingPage tabs", () => {
       });
     });
     expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST")).toBe(false);
+  });
+
+  it("confirms and posts period-end FX revaluation through Go", async () => {
+    const { calls } = stubAccounting();
+    await renderReady();
+
+    fireEvent.click(screen.getByRole("button", { name: /Reports/ }));
+    fireEvent.change(await screen.findByLabelText("Revaluation year"), { target: { value: "2026" } });
+    fireEvent.change(screen.getByLabelText("Revaluation month"), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Revalue foreign receivables" }));
+    expect(await screen.findByRole("heading", { name: "Revalue foreign receivables for 2026-09" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Post FX revaluation" }));
+
+    await waitFor(() => {
+      const write = calls.find((call) => call.body?.includes('"capabilityId":"accounting.revalueForeignReceivables"'));
+      expect(write?.url).toBe("/api/capabilities/execute");
+      expect(JSON.parse(write!.body!)).toMatchObject({
+        capabilityId: "accounting.revalueForeignReceivables",
+        input: { year: 2026, month: 9 },
+        intentId: expect.any(String),
+      });
+    });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST")).toBe(false);
+  });
+
+  it("restores an unresolved FX revaluation and retries the saved period with the same intent", async () => {
+    let attempts = 0;
+    const { calls } = stubAccounting({
+      goPeriodFxWriteResponse: () => {
+        attempts += 1;
+        return attempts === 1
+          ? Response.json({ pendingApproval: true, reason: "Controller review." }, { status: 202 })
+          : Response.json({ ok: true, data: {
+            revaluationId: "11111111-1111-4111-8111-111111111111",
+            entryId: "22222222-2222-4222-8222-222222222222",
+            totalAdjustmentMinor: 0,
+            currencies: [],
+            alreadyReviewed: false,
+          } });
+      },
+    });
+    const props = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    await renderReady(props);
+
+    fireEvent.click(screen.getByRole("button", { name: /Reports/ }));
+    fireEvent.change(await screen.findByLabelText("Revaluation year"), { target: { value: "2025" } });
+    fireEvent.change(screen.getByLabelText("Revaluation month"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Revalue foreign receivables" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Post FX revaluation" }));
+
+    expect(await screen.findByText(/This FX revaluation is unresolved/)).toBeTruthy();
+    const firstWrite = calls.find((call) => call.body?.includes('"capabilityId":"accounting.revalueForeignReceivables"'));
+    expect(firstWrite).toBeTruthy();
+    const firstIntent = JSON.parse(firstWrite!.body!).intentId as string;
+    expect(JSON.parse(firstWrite!.body!)).toMatchObject({ input: { year: 2025, month: 8 } });
+
+    cleanup();
+    render(<AccountingPage {...props} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+    fireEvent.click(screen.getByRole("button", { name: /Reports/ }));
+    expect(await screen.findByRole("heading", { name: "Revalue foreign receivables for 2025-08" })).toBeTruthy();
+    expect((screen.getByLabelText("Revaluation month") as HTMLSelectElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Post FX revaluation" }));
+
+    await waitFor(() => expect(attempts).toBe(2));
+    const writes = calls.filter((call) => call.body?.includes('"capabilityId":"accounting.revalueForeignReceivables"'));
+    expect(writes).toHaveLength(2);
+    expect(JSON.parse(writes[1]!.body!).intentId).toBe(firstIntent);
+    expect(JSON.parse(writes[1]!.body!)).toMatchObject({ input: { year: 2025, month: 8 } });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST")).toBe(false);
+    expect(await screen.findByText("FX revaluation 2025-08 done.")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText(/This FX revaluation is unresolved/)).toBeNull());
+    expect(screen.queryByRole("heading", { name: "Revalue foreign receivables for 2025-08" })).toBeNull();
+    await expect(readPendingAccountingPeriodFxWrite(props)).resolves.toBeNull();
   });
 
   it("restores an unresolved FX-rate draft and labels its exact retry", async () => {

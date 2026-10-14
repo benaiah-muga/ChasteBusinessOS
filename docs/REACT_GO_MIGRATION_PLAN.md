@@ -4187,3 +4187,32 @@ new owners and the manifest shows zero legacy runtime paths.
      again. Both requests were intercepted before reaching the API, no legacy
      `/api/pos` write was issued, the register still showed zero completed
      sales, and the browser error log was empty. This completes item 223.
+
+393. (Complete) Keep Vite Marketplace listing and signature verification
+     available when the Creator module is disabled, matching Go's human
+     organization-member contract. Hide publish and install controls until
+     Creator Mode is enabled.
+
+394. (Complete) The Marketplace page suite proves the disabled-module state
+     still calls Go `creator.listMarketplace` and `creator.verifyPlugin`,
+     renders returned listings, and exposes no Creator mutation controls. An
+     authenticated `agent-browser` proof disabled Creator in Settings, loaded
+     the Go-backed listing, verified a manifest, observed Go return the
+     expected invalid-schema verdict with HTTP 200, and confirmed no publish
+     or install controls were available. Vite typecheck and scoped lint passed.
+     This completes item 393.
+395. (Complete) The Vite Reports screen confirms and posts period-end FX
+     revaluation through `accounting.revalueForeignReceivables`. An authenticated
+     `agent-browser` proof selected October 2026, confirmed the modal, and
+     observed Go return HTTP 200 with a persisted revaluation result and no
+     journal entry for a workspace with no foreign receivables. Component tests
+     also cover restoration of an unresolved period across reload and retry
+     with the same intent ID. The Go integration suite covers nonzero FX
+     postings.
+396. (Complete) `/api/modules` lets a stale `chaste_active_org` cookie reach
+     the membership-safe Go organization resolver while continuing to reject an
+     explicit mismatched `X-Organization-ID`. Focused handler and runtime DB
+     resolver tests passed. An authenticated `agent-browser` request with a
+     deliberately stale organization cookie returned HTTP 200 from Go and
+     `/api/org` confirmed the active workspace remained the signed-in user's
+     actual organization.

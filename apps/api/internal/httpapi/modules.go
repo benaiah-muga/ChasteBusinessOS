@@ -73,6 +73,7 @@ func (h *modulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeModulesError(w, http.StatusBadRequest, "invalid organization selector")
 		return
 	}
+	explicitSelector := len(r.Header.Values("X-Organization-ID")) == 1
 
 	var resolved *session.ResolvedUser
 	var err error
@@ -95,7 +96,7 @@ func (h *modulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeModulesError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	if selector != "" && !strings.EqualFold(selector, *resolved.OrgID) {
+	if explicitSelector && !strings.EqualFold(selector, *resolved.OrgID) {
 		writeModulesError(w, http.StatusForbidden, "organization access denied")
 		return
 	}

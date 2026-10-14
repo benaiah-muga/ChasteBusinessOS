@@ -950,6 +950,44 @@ describe("accounting API: Go Accounting period and FX writes", () => {
     await expect(readPendingAccountingPeriodFxWrite(paymentRetryScope)).resolves.toBeNull();
   });
 
+  it("routes period-end receivables revaluation through the governed Go capability", async () => {
+    const output = {
+      revaluationId: "11111111-1111-4111-8111-111111111111",
+      entryId: "22222222-2222-4222-8222-222222222222",
+      totalAdjustmentMinor: -1250,
+      currencies: [{ currency: "EUR", foreignMinor: 10000, historicalBaseMinor: 11000, closeBaseMinor: 9750, adjustmentMinor: -1250, rateNum: 975, rateDen: 1000 }],
+      alreadyReviewed: false,
+    };
+    const mock = stubFetch(() => Response.json({ ok: true, data: output }));
+    const action = { action: "revalueForeignReceivables", year: 2026, month: 9 };
+
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ "X-Organization-ID": paymentRetryScope.organizationId }),
+    }));
+    expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.revalueForeignReceivables",
+      input: { year: 2026, month: 9 },
+      intentId: expect.any(String),
+    });
+    await expect(readPendingAccountingPeriodFxWrite(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("restores the exact FX revaluation period while approval or transport is unresolved", async () => {
+    const action = { action: "revalueForeignReceivables", year: 2026, month: 9 };
+    const pending = stubFetch(() => Response.json({ pendingApproval: true, reason: "Controller review." }, { status: 202 }));
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "pending", reason: "Controller review." });
+    await expect(readPendingAccountingPeriodFxWrite(paymentRetryScope)).resolves.toMatchObject(action);
+
+    const intentId = JSON.parse(String(pending.mock.calls[0]?.[1]?.body)).intentId;
+    const retry = stubFetch(() => { throw new TypeError("offline"); });
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(JSON.parse(String(retry.mock.calls[0]?.[1]?.body)).intentId).toBe(intentId);
+    await expect(submitAccountingAction("/api/accounting", { ...action, month: 10 }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps exact period or FX details unresolved through pending and transport failures", async () => {
     const action = { action: "recordFxRate", quoteCurrency: "EUR", rate: "1.0875" };
     const pending = stubFetch(() => Response.json({ pendingApproval: true, reason: "Controller review." }, { status: 202 }));

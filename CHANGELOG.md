@@ -14,6 +14,7 @@ The full v1 changelog is preserved at the bottom of this file.
 ### Added
 
 - Go Messaging agents can query organization-scoped receivables aging through the governed `accounting.arAging` capability when the signed-in user has `accounting.read`.
+- Vite Accounting can post period-end foreign receivables revaluations through the approval-gated Go capability, with scoped retry recovery for pending or uncertain submissions.
 
 ### Changed
 
@@ -51,9 +52,15 @@ The full v1 changelog is preserved at the bottom of this file.
 - Go routine listings preserve the legacy webhook URL projection for routines
   with stored tokens, including disabled routines; webhook execution still
   refuses disabled routines.
+- Vite Marketplace browsing and signature verification now use Go when Creator
+  Mode is disabled; publishing and installing remain unavailable until an admin
+  enables it.
 - Go organization switching and persona writes now require a same-origin
   Origin header, with trusted proxy CIDRs honored before the cookie or persona
   mutation proceeds.
+- Go module listings now honor the session resolver's membership fallback when
+  the active-organization cookie is stale, while explicit mismatched
+  `X-Organization-ID` requests remain forbidden.
 - Marketplace signature, ownership, listing-state, and stale-listing refusals
   now return actionable client errors. Vite preserves the same exact actor,
   organization, and action intent through uncertain retries and clears it only
