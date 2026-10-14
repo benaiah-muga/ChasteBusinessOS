@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stubWebLocks } from "../test/web-locks";
 import {
   completeOnboardingSetup,
   createWorkspace,
@@ -29,6 +30,7 @@ function stubFetch(...responses: Response[]) {
   return fetchMock;
 }
 
+beforeEach(stubWebLocks);
 afterEach(() => vi.unstubAllGlobals());
 
 describe("onboarding API", () => {

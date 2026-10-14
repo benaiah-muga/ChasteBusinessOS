@@ -66,7 +66,6 @@ import {
   goBankReconciliationWritesFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
-  goEmailRouteFromEnv,
   isGoRouteRequest,
   type GoRouteProxyFlags,
 } from "./go-route-proxy";
@@ -677,8 +676,6 @@ function requestRecorder(target: string, streamed = false): Server {
 }
 
 const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method: string; url: string }> = [
-  { env: "GO_EMAIL_ROUTE", flag: "email", method: "GET", url: "/api/email?status=ready" },
-  { env: "GO_EMAIL_ROUTE", flag: "email", method: "POST", url: "/api/email" },
   { env: "CHASTE_GO_SUPPORT_PUBLIC_ROUTE", flag: "supportPublic", method: "POST", url: "/api/support/public?widget=1" },
   { env: "CHASTE_GO_APPROVALS_DECISION_ROUTE", flag: "approvalsDecision", method: "POST", url: "/api/approvals?id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
   { env: "CHASTE_GO_AUTH_ROUTE", flag: "auth", method: "POST", url: "/api/auth/sign-in/email" },
@@ -744,26 +741,18 @@ const supportedGoAuthRoutes: Array<{ method: string; url: string }> = [
 ];
 
 describe("Vite Go route proxy selection", () => {
-  it("routes email to Go by default and supports explicit legacy rollback", () => {
+  it("always routes email status and sends to Go", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
-    expect(goEmailRouteFromEnv({})).toBe(true);
-    expect(defaults.email).toBe(true);
     for (const method of ["GET", "POST"]) {
       expect(isGoRouteRequest(defaults, method, "/api/email")).toBe(true);
     }
 
-    const enabled = goRouteProxyFlagsFromEnv({ GO_EMAIL_ROUTE: "1" });
-    expect(goEmailRouteFromEnv({ GO_EMAIL_ROUTE: "1" })).toBe(true);
-    expect(isGoRouteRequest(enabled, "GET", "/api/email?view=settings")).toBe(true);
-    expect(isGoRouteRequest(enabled, "POST", "/api/email")).toBe(true);
-    expect(isGoRouteRequest(enabled, "HEAD", "/api/email")).toBe(false);
-    expect(isGoRouteRequest(enabled, "PUT", "/api/email")).toBe(false);
-    expect(isGoRouteRequest(enabled, "GET", "/api/email/test")).toBe(false);
-
-    const rollback = goRouteProxyFlagsFromEnv({ GO_EMAIL_ROUTE: "0" });
-    expect(goEmailRouteFromEnv({ GO_EMAIL_ROUTE: "0" })).toBe(false);
-    expect(isGoRouteRequest(rollback, "GET", "/api/email")).toBe(false);
-    expect(isGoRouteRequest(rollback, "POST", "/api/email")).toBe(false);
+    const configured = goRouteProxyFlagsFromEnv({ GO_EMAIL_ROUTE: "0" });
+    expect(isGoRouteRequest(configured, "GET", "/api/email?view=settings")).toBe(true);
+    expect(isGoRouteRequest(configured, "POST", "/api/email")).toBe(true);
+    expect(isGoRouteRequest(configured, "HEAD", "/api/email")).toBe(false);
+    expect(isGoRouteRequest(configured, "PUT", "/api/email")).toBe(false);
+    expect(isGoRouteRequest(configured, "GET", "/api/email/test")).toBe(false);
   });
 
   it.each(["http://127.0.0.1:8080/api", "http://user:secret@127.0.0.1:8080", "http://127.0.0.1:8080/?tenant=one"])(
@@ -774,7 +763,7 @@ describe("Vite Go route proxy selection", () => {
     },
   );
 
-  it("preserves email request and response data on Go by default, and supports rollback", async () => {
+  it("preserves email request and response data on Go even when a stale rollback env var is set", async () => {
     const go = requestRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
@@ -813,10 +802,10 @@ describe("Vite Go route proxy selection", () => {
     });
     expect(await write.json()).toMatchObject({ target: "go", method: "POST", url: "/api/email", body });
 
-    const rollbackOrigin = await createEmailServer({ GO_EMAIL_ROUTE: "0" });
+    const configuredOrigin = await createEmailServer({ GO_EMAIL_ROUTE: "0" });
     for (const method of ["GET", "POST"] as const) {
-      const response = await fetch(`${rollbackOrigin}/api/email`, method === "POST" ? { method, body: "{}" } : { method });
-      expect(await response.json()).toMatchObject({ target: "legacy", method, url: "/api/email" });
+      const response = await fetch(`${configuredOrigin}/api/email`, method === "POST" ? { method, body: "{}" } : { method });
+      expect(await response.json()).toMatchObject({ target: "go", method, url: "/api/email" });
     }
   });
 
@@ -832,9 +821,8 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.memory).toBe(true);
     expect(flags.moduleSettings).toBe(true);
     expect(flags.aiConfig).toBe(true);
-    expect(flags.email).toBe(true);
     expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "moduleSettings", "aiConfig", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "crmFollowUpDraft", "supportReplyDraft", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision", "email"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "moduleSettings", "aiConfig", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "crmFollowUpDraft", "supportReplyDraft", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }

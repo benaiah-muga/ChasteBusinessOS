@@ -6,7 +6,9 @@ import {
   submitMarketplaceAction,
   verifyMarketplaceListing,
   type MarketplaceListing,
+  type MarketplacePublishPayload,
 } from "../api/marketplace";
+import type { MarketplaceRetryScope } from "../api/marketplace";
 import "./MarketplacePage.css";
 
 type LoadState =
@@ -22,7 +24,7 @@ function messageFor(error: unknown): string {
     : "Could not reach the marketplace service. Check your connection and try again.";
 }
 
-export function MarketplacePage() {
+export function MarketplacePage({ actorId, organizationId }: MarketplaceRetryScope) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busyListingId, setBusyListingId] = useState<string | null>(null);
@@ -55,15 +57,16 @@ export function MarketplacePage() {
     return () => controller.abort();
   }, [load]);
 
-  function publishPayload(): Record<string, unknown> | null {
+  function publishPayload(): MarketplacePublishPayload | null {
     let parsed: unknown;
     try {
       parsed = JSON.parse(manifest);
     } catch {
       return null;
     }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     if (!signature.trim() || !publisherKey.trim()) return null;
-    return { manifest: parsed, signatureBase64: signature.trim(), publisherPublicKeyBase64: publisherKey.trim() };
+    return { manifest: parsed as Record<string, unknown>, signatureBase64: signature.trim(), publisherPublicKeyBase64: publisherKey.trim() };
   }
 
   async function verify() {
@@ -88,7 +91,7 @@ export function MarketplacePage() {
     setPublishing(true);
     setNotice(null);
     try {
-      const result = await submitMarketplaceAction({ action: "publish", ...payload });
+      const result = await submitMarketplaceAction({ action: "publish", ...payload }, { actorId, organizationId });
       if (result.kind === "pending") {
         setNotice({ tone: "pending", message: result.reason });
       } else {
@@ -110,7 +113,7 @@ export function MarketplacePage() {
     setBusyListingId(listing.id);
     setNotice(null);
     try {
-      const result = await submitMarketplaceAction({ action, listingId: listing.id });
+      const result = await submitMarketplaceAction({ action, listingId: listing.id }, { actorId, organizationId });
       if (result.kind === "pending") {
         setNotice({ tone: "pending", message: result.reason });
       } else {

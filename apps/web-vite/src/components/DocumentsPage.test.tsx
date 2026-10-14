@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentsPage } from "./DocumentsPage";
 
 const rows = [
-  { id: "doc-1", title: "Supplier invoice", status: "parsed", sourceType: "upload", createdAt: "2026-09-28T10:00:00.000Z", folder: "Finance" },
-  { id: "doc-2", title: "Warehouse notes", status: "queued", sourceType: "text", createdAt: "2026-09-27T08:00:00.000Z", folder: null },
+  { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Supplier invoice", status: "parsed", sourceType: "upload", createdAt: "2026-09-28T10:00:00.000Z", folder: "Finance" },
+  { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", title: "Warehouse notes", status: "queued", sourceType: "text", createdAt: "2026-09-27T08:00:00.000Z", folder: null },
 ];
 const goDocumentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
@@ -14,8 +14,8 @@ function detail(id: string, title: string, status: string, parsedMarkdown: strin
       ...rows.find((row) => row.id === id)!,
       title,
       status,
-      mimeType: id === "doc-1" ? "application/pdf" : null,
-      sizeBytes: id === "doc-1" ? 1024 : null,
+      mimeType: id === rows[0]!.id ? "application/pdf" : null,
+      sizeBytes: id === rows[0]!.id ? 1024 : null,
       parseError: null,
       parsedMarkdown,
     },
@@ -40,13 +40,12 @@ describe("Vite documents page", () => {
   });
 
   it("shows the existing library, selected document details, extracted text, and file link", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", false);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      if (url === "/api/documents") return Response.json({ documents: rows, vendors: [] });
-      if (url === "/api/documents?id=doc-2&preview=1") return Response.json(detail("doc-2", "Warehouse notes", "queued", null));
-      return Response.json(detail("doc-1", "Supplier invoice", "parsed", "Invoice number: 42"));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      const request = JSON.parse(String(init?.body ?? "{}")) as { input?: { id?: string } };
+      return request.input?.id === undefined
+        ? Response.json({ ok: true, data: { documents: rows, vendors: [] } })
+        : Response.json({ ok: true, data: { document: detail(request.input.id, request.input.id === rows[1]!.id ? "Warehouse notes" : "Supplier invoice", request.input.id === rows[1]!.id ? "queued" : "parsed", request.input.id === rows[1]!.id ? null : "Invoice number: 42").document } });
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<DocumentsPage />);
@@ -54,8 +53,8 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Documents" })).not.toBeNull();
     expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
     expect(screen.getByText("Invoice number: 42")).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe("/api/go/documents/doc-1/content");
-    expect(fetchMock).toHaveBeenCalledWith("/api/documents?id=doc-1&preview=1", expect.any(Object));
+    expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe(`/api/go/documents/${rows[0]!.id}/content`);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(2);
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search documents" }), { target: { value: "warehouse" } });
     expect(screen.getByRole("button", { name: /Warehouse notes/ })).not.toBeNull();
@@ -65,13 +64,14 @@ describe("Vite documents page", () => {
   });
 
   it("selects the document identified by the Vite documentId query", async () => {
-    window.history.replaceState(null, "", "/documents?documentId=doc-2");
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    window.history.replaceState(null, "", `/documents?documentId=${rows[1]!.id}`);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      if (url === "/api/documents") return Response.json({ documents: rows, vendors: [] });
-      if (url === "/api/documents?id=doc-2&preview=1") return Response.json(detail("doc-2", "Warehouse notes", "queued", null));
-      return Response.json({ error: "not found" }, { status: 404 });
+      const request = JSON.parse(String(init?.body)) as { input: { id?: string } };
+      return request.input.id === undefined
+        ? Response.json({ ok: true, data: { documents: rows, vendors: [] } })
+        : Response.json({ ok: true, data: { document: detail(rows[1]!.id, "Warehouse notes", "queued", null).document } });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -80,15 +80,18 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Warehouse notes" })).not.toBeNull();
     expect(screen.getByRole("button", { name: /Warehouse notes/ }).getAttribute("aria-current")).toBe("true");
     expect(screen.getByRole("button", { name: /Supplier invoice/ }).getAttribute("aria-current")).toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith("/api/documents?id=doc-2&preview=1", expect.any(Object));
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(2);
   });
 
   it("validates documentId and shows a not-found state without selecting the first row", async () => {
     window.history.replaceState(null, "", "/documents?documentId=unsafe%2Fid");
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      if (url === "/api/documents") return Response.json({ documents: rows, vendors: [] });
+      if (url === "/api/capabilities/execute") {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ capabilityId: "documents.listIngestedDocuments", input: {} });
+        return Response.json({ ok: true, data: { documents: rows, vendors: [] } });
+      }
       return Response.json({ error: "unexpected detail request" }, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -98,14 +101,20 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Invalid document link" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Back to document library" }).getAttribute("href")).toBe("/documents");
     expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("preview=1"))).toBe(false);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute")).toHaveLength(1);
 
     cleanup();
     window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
-    const notFoundFetch = vi.fn(async (input: RequestInfo | URL) => {
+    const notFoundFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      if (url === "/api/documents") return Response.json({ documents: rows, vendors: [] });
+      if (url === "/api/capabilities/execute") {
+        const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
+        expect(request.capabilityId).toBe("documents.listIngestedDocuments");
+        return request.input.id === undefined
+          ? Response.json({ ok: true, data: { documents: [{ ...rows[0]!, id: goDocumentId }], vendors: [] } })
+          : Response.json({ error: "The document was not found." }, { status: 404 });
+      }
       return Response.json({ error: "unexpected detail request" }, { status: 404 });
     });
     vi.stubGlobal("fetch", notFoundFetch);
@@ -113,7 +122,12 @@ describe("Vite documents page", () => {
 
     expect(await screen.findByRole("heading", { name: "Document not found" })).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
-    expect(notFoundFetch.mock.calls.some(([url]) => String(url).includes("preview=1"))).toBe(false);
+    const detailRequests = notFoundFetch.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute");
+    expect(detailRequests).toHaveLength(2);
+    expect(JSON.parse(String(detailRequests[1]?.[1]?.body))).toMatchObject({
+      capabilityId: "documents.listIngestedDocuments",
+      input: { id: goDocumentId, preview: true },
+    });
   });
 
   it("shows the library and preview from Go with uploaded content links owned by the Go route", async () => {
@@ -190,7 +204,7 @@ describe("Vite documents page", () => {
 
     expect(screen.getByRole("status").textContent).toContain("Loading documents");
     await waitFor(() => expect(resolveResponse).toBeDefined());
-    resolveResponse?.(Response.json({ documents: [], vendors: [] }));
+    resolveResponse?.(Response.json({ ok: true, data: { documents: [], vendors: [] } }));
     expect(await screen.findByRole("heading", { name: "No documents yet" })).not.toBeNull();
   });
 
@@ -199,11 +213,11 @@ describe("Vite documents page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      if (url === "/api/documents") return Response.json({ documents: [], vendors: [] });
       if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
       if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
         expect(request.capabilityId).toBe("documents.createDoc");
         expect(request.input.title).toBe("Untitled document");
         expect(request.intentId).toBeTruthy();
@@ -225,11 +239,11 @@ describe("Vite documents page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      if (url === "/api/documents") return Response.json({ documents: [], vendors: [] });
       if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
       if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
         expect(request.capabilityId).toBe("documents.createDocument");
         expect(request.input).toEqual({ title: "Supplier invoice #42", folder: "Finance", text: "Invoice due Friday" });
         expect(request.intentId).toBeTruthy();
@@ -256,11 +270,11 @@ describe("Vite documents page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      if (url === "/api/documents") return Response.json({ documents: [], vendors: [] });
       if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
       if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+        if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
         expect(request.capabilityId).toBe("documents.createDocument");
         expect(request.input).toMatchObject({ title: "April bill", mimeType: "application/pdf", fileBase64: btoa("%PDF-1.7 test") });
         return Response.json({ ok: false, pendingApproval: true, reason: "Upload needs approval", approvalId: goDocumentId }, { status: 202 });
@@ -288,7 +302,7 @@ describe("Vite documents page", () => {
       listAttempt += 1;
       return listAttempt === 1
         ? Response.json({ error: "forbidden" }, { status: 403 })
-        : Response.json({ documents: [], vendors: [] });
+        : Response.json({ ok: true, data: { documents: [], vendors: [] } });
     }));
     render(<DocumentsPage />);
 

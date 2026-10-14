@@ -1,22 +1,29 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchMarketplaceListings, MarketplaceApiError, submitMarketplaceAction, verifyMarketplaceListing } from "./marketplace";
 
+const retryScope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "11111111-1111-4111-8111-111111111111" };
+
+beforeEach(() => {
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: (_name: string, _options: unknown, callback: () => Promise<unknown>) => callback() } });
+});
+
 afterEach(() => {
+  window.localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("marketplace read requests", () => {
-  it("loads listings through the Go session capability with the legacy listing contract", async () => {
+  it("loads listings through the Go session capability with strict listing schemas", async () => {
     const listing = {
-      id: "listing-1",
+      id: "7de066f0-4bdb-4f46-9b6a-193064f5b235",
       slug: "sales-dashboard",
       name: "Sales dashboard",
       version: "1.2.0",
       summary: "A sales overview plugin",
       status: "verified",
       capabilityIds: ["sales.read"],
-      installedByOrgIds: ["org-1"],
+      installedByOrgIds: ["11111111-1111-4111-8111-111111111111"],
       installedHere: true,
       updatedAt: "2026-10-10T12:00:00.000Z",
     };
@@ -171,7 +178,7 @@ describe("marketplace read requests", () => {
 
 describe("marketplace publish requests", () => {
   const publishInput = {
-    action: "publish",
+    action: "publish" as const,
     manifest: { formatVersion: 1, slug: "acme-warehouse", version: "1.2.3" },
     signatureBase64: "c2lnbmF0dXJl",
     publisherPublicKeyBase64: "cHVibGljLWtleQ==",
@@ -185,7 +192,7 @@ describe("marketplace publish requests", () => {
     } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitMarketplaceAction(publishInput)).resolves.toEqual({ kind: "completed" });
+    await expect(submitMarketplaceAction(publishInput, retryScope)).resolves.toEqual({ kind: "completed" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
@@ -214,7 +221,7 @@ describe("marketplace publish requests", () => {
     }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitMarketplaceAction(publishInput)).resolves.toEqual({
+    await expect(submitMarketplaceAction(publishInput, retryScope)).resolves.toEqual({
       kind: "pending",
       reason: "A second publisher must review this listing.",
     });
@@ -225,7 +232,7 @@ describe("marketplace publish requests", () => {
   it("rejects malformed Go publish approval and success envelopes without legacy fallback", async () => {
     const pendingFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: false, pendingApproval: true, reason: "review required", extra: true }, { status: 202 }));
     vi.stubGlobal("fetch", pendingFetch);
-    await expect(submitMarketplaceAction(publishInput)).rejects.toMatchObject({
+    await expect(submitMarketplaceAction(publishInput, retryScope)).rejects.toMatchObject({
       name: "MarketplaceApiError",
       status: 202,
       message: "The marketplace returned an unexpected approval response.",
@@ -237,7 +244,7 @@ describe("marketplace publish requests", () => {
       listingId: "not-a-uuid", slug: "acme-warehouse", status: "verified", extra: true,
     } }));
     vi.stubGlobal("fetch", successFetch);
-    await expect(submitMarketplaceAction(publishInput)).rejects.toMatchObject({
+    await expect(submitMarketplaceAction(publishInput, retryScope)).rejects.toMatchObject({
       name: "MarketplaceApiError",
       status: 200,
       message: "The marketplace returned an unexpected action response.",
@@ -250,13 +257,28 @@ describe("marketplace publish requests", () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: false, error: "slug is owned by another publisher" }, { status: 422 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitMarketplaceAction(publishInput)).rejects.toMatchObject({
+    await expect(submitMarketplaceAction(publishInput, retryScope)).rejects.toMatchObject({
       name: "MarketplaceApiError",
       status: 422,
       message: "slug is owned by another publisher",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("rejects invalid Marketplace actions before making a request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketplaceAction({ action: "install", listingId: "not-a-uuid" }, retryScope)).rejects.toMatchObject({
+      name: "MarketplaceApiError",
+      status: 400,
+    });
+    await expect(submitMarketplaceAction({ action: "publish", manifest: {}, signatureBase64: " ", publisherPublicKeyBase64: "key" }, retryScope)).rejects.toMatchObject({
+      name: "MarketplaceApiError",
+      status: 400,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("installs through the Go capability using only the listing ID", async () => {
@@ -266,7 +288,7 @@ describe("marketplace publish requests", () => {
     } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitMarketplaceAction({ action: "install", listingId })).resolves.toEqual({ kind: "completed" });
+    await expect(submitMarketplaceAction({ action: "install", listingId }, retryScope)).resolves.toEqual({ kind: "completed" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
@@ -291,7 +313,7 @@ describe("marketplace publish requests", () => {
     }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitMarketplaceAction({ action: "install", listingId: "7de066f0-4bdb-4f46-9b6a-193064f5b235" })).resolves.toEqual({
+    await expect(submitMarketplaceAction({ action: "install", listingId: "7de066f0-4bdb-4f46-9b6a-193064f5b235" }, retryScope)).resolves.toEqual({
       kind: "pending", reason: "An organization owner must approve this install.",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -303,7 +325,7 @@ describe("marketplace publish requests", () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { uninstalled: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitMarketplaceAction({ action: "uninstall", listingId })).resolves.toEqual({ kind: "completed" });
+    await expect(submitMarketplaceAction({ action: "uninstall", listingId }, retryScope)).resolves.toEqual({ kind: "completed" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
@@ -328,7 +350,7 @@ describe("marketplace publish requests", () => {
       approvalId: "d81d8459-9a20-4c8e-a88c-27866dd552aa",
     }, { status: 202 }));
     vi.stubGlobal("fetch", pendingFetch);
-    await expect(submitMarketplaceAction({ action: "uninstall", listingId })).resolves.toEqual({
+    await expect(submitMarketplaceAction({ action: "uninstall", listingId }, retryScope)).resolves.toEqual({
       kind: "pending", reason: "An owner must approve this uninstall.",
     });
     expect(pendingFetch).toHaveBeenCalledTimes(1);
@@ -336,7 +358,7 @@ describe("marketplace publish requests", () => {
 
     const malformedFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { uninstalled: true, extra: true } }));
     vi.stubGlobal("fetch", malformedFetch);
-    await expect(submitMarketplaceAction({ action: "uninstall", listingId })).rejects.toMatchObject({
+    await expect(submitMarketplaceAction({ action: "uninstall", listingId }, retryScope)).rejects.toMatchObject({
       name: "MarketplaceApiError",
       status: 200,
       message: "The marketplace returned an unexpected action response.",
@@ -351,12 +373,65 @@ describe("marketplace publish requests", () => {
       extra: true,
     }, { status: 202 }));
     vi.stubGlobal("fetch", malformedPendingFetch);
-    await expect(submitMarketplaceAction({ action: "uninstall", listingId })).rejects.toMatchObject({
+    await expect(submitMarketplaceAction({ action: "uninstall", listingId }, retryScope)).rejects.toMatchObject({
       name: "MarketplaceApiError",
       status: 202,
       message: "The marketplace returned an unexpected approval response.",
     });
     expect(malformedPendingFetch).toHaveBeenCalledTimes(1);
     expect(malformedPendingFetch.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("reuses the exact intent through uncertain, pending, and rate-limited responses, then clears after refusal", async () => {
+    const responses = [
+      () => Promise.reject(new Error("connection reset")),
+      () => Promise.resolve(Response.json({ ok: false, pendingApproval: true, reason: "approval required", approvalId: "d81d8459-9a20-4c8e-a88c-27866dd552aa" }, { status: 202 })),
+      () => Promise.resolve(Response.json({ error: "rate limited" }, { status: 429 })),
+      () => Promise.resolve(Response.json({ ok: false, error: "listing is rejected" }, { status: 422 })),
+      () => Promise.resolve(Response.json({ ok: true, data: { listingId: "7de066f0-4bdb-4f46-9b6a-193064f5b235", slug: "acme-warehouse", status: "verified" } })),
+    ];
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+      return responses.shift()?.() ?? Promise.reject(new Error("unexpected request"));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketplaceAction(publishInput, retryScope)).rejects.toMatchObject({ status: 0 });
+    await expect(submitMarketplaceAction(publishInput, retryScope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitMarketplaceAction(publishInput, retryScope)).rejects.toMatchObject({ status: 429 });
+    await expect(submitMarketplaceAction(publishInput, retryScope)).rejects.toMatchObject({ status: 422 });
+    await expect(submitMarketplaceAction(publishInput, retryScope)).resolves.toEqual({ kind: "completed" });
+
+    expect(intentIds).toHaveLength(5);
+    expect(intentIds[0]).toBe(intentIds[1]);
+    expect(intentIds[1]).toBe(intentIds[2]);
+    expect(intentIds[2]).toBe(intentIds[3]);
+    expect(intentIds[4]).not.toBe(intentIds[3]);
+  });
+
+  it("does not let a delayed refusal clear a replacement retry marker", async () => {
+    let finishFirst!: (response: Response) => void;
+    const firstResponse = new Promise<Response>((resolve) => { finishFirst = resolve; });
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+      if (intentIds.length === 1) return firstResponse;
+      return Response.json({ ok: true, data: { listingId: "7de066f0-4bdb-4f46-9b6a-193064f5b235", slug: "acme-warehouse", status: "verified" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstAttempt = submitMarketplaceAction(publishInput, retryScope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const markerKey = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index)).find((key) => key?.startsWith("chaste:marketplace:go:attempt:v1:"));
+    expect(markerKey).toBeDefined();
+    const marker = JSON.parse(window.localStorage.getItem(markerKey!) ?? "{}") as { fingerprint: string; action: unknown };
+    const replacementIntentId = "a2ea29de-a8c5-4c1d-861f-7e6e87b9d3be";
+    window.localStorage.setItem(markerKey!, JSON.stringify({ ...marker, intentId: replacementIntentId }));
+    finishFirst(Response.json({ ok: false, error: "signature refused" }, { status: 422 }));
+    await expect(firstAttempt).rejects.toMatchObject({ status: 422 });
+
+    await expect(submitMarketplaceAction(publishInput, retryScope)).resolves.toEqual({ kind: "completed" });
+    expect(intentIds).toEqual([expect.any(String), replacementIntentId]);
   });
 });

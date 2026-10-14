@@ -1463,7 +1463,7 @@ func creatorVerifyPluginCapability(ctx context.Context, input CreatorVerifyPlugi
 func creatorPublishListing(ctx context.Context, tx pgx.Tx, orgID string, input CreatorPublishListingInput) (CreatorPublishListingOutput, error) {
 	valid, reason, manifest := creatorVerifyPlugin(input.Manifest, input.SignatureBase64, input.PublisherPublicKeyBase64)
 	if !valid {
-		return CreatorPublishListingOutput{}, fmt.Errorf("refused: %s", reason)
+		return CreatorPublishListingOutput{}, CreatorDomainError(fmt.Sprintf("refused: %s", reason))
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, manifest.Slug); err != nil {
 		return CreatorPublishListingOutput{}, err
@@ -1478,10 +1478,10 @@ func creatorPublishListing(ctx context.Context, tx pgx.Tx, orgID string, input C
 		return CreatorPublishListingOutput{}, err
 	}
 	if hasExisting && existingOrgID != orgID {
-		return CreatorPublishListingOutput{}, fmt.Errorf("slug %q is owned by another publisher", manifest.Slug)
+		return CreatorPublishListingOutput{}, CreatorDomainError(fmt.Sprintf("slug %q is owned by another publisher", manifest.Slug))
 	}
 	if hasExisting && existingVersion == manifest.Version {
-		return CreatorPublishListingOutput{}, fmt.Errorf("%s@%s is already published", manifest.Slug, manifest.Version)
+		return CreatorPublishListingOutput{}, CreatorDomainError(fmt.Sprintf("%s@%s is already published", manifest.Slug, manifest.Version))
 	}
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
@@ -1545,17 +1545,17 @@ func creatorInstallListing(ctx context.Context, tx pgx.Tx, orgID string, input C
 		FROM public.chaste_marketplace_lock_listing($1::uuid)`, input.ListingID).Scan(
 		&listingID, &slug, &version, &status, &manifestJSON, &signature, &publisherKey)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return CreatorInstallListingOutput{}, errors.New("listing not found")
+		return CreatorInstallListingOutput{}, CreatorDomainError("listing not found")
 	}
 	if err != nil {
 		return CreatorInstallListingOutput{}, err
 	}
 	if status != "verified" {
-		return CreatorInstallListingOutput{}, fmt.Errorf("listing is %s; refusing install", status)
+		return CreatorInstallListingOutput{}, CreatorDomainError(fmt.Sprintf("listing is %s; refusing install", status))
 	}
 	valid, reason, _ := creatorVerifyPlugin(manifestJSON, signature, publisherKey)
 	if !valid {
-		return CreatorInstallListingOutput{}, fmt.Errorf("signature no longer verifies: %s", reason)
+		return CreatorInstallListingOutput{}, CreatorDomainError(fmt.Sprintf("signature no longer verifies: %s", reason))
 	}
 	var installed bool
 	if err := tx.QueryRow(ctx, `SELECT installed
@@ -1584,7 +1584,7 @@ func creatorUninstallListing(ctx context.Context, tx pgx.Tx, orgID string, input
 		SELECT id::text
 		FROM public.chaste_marketplace_lock_listing($1::uuid)`, input.ListingID).Scan(&listingID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return CreatorUninstallListingOutput{}, errors.New("listing not found")
+		return CreatorUninstallListingOutput{}, CreatorDomainError("listing not found")
 	}
 	if err != nil {
 		return CreatorUninstallListingOutput{}, err

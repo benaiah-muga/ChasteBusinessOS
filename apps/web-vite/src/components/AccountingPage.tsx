@@ -13,7 +13,6 @@ import {
   fetchCashForecast,
   fetchCustomerStatement,
   fetchPaymentReminders,
-  goAccountingCreditNoteUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
@@ -502,11 +501,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     void readPendingAccountingCreditNote(paymentRetryScope).then((action) => {
       if (!active) return;
       setPendingCreditNote(action);
-      if (action) setNotice({ tone: "pending", text: goAccountingCreditNoteUseGo()
-        ? "A credit note is unresolved. Retry the exact credit to recover its result."
-        : "A Go credit note is unresolved. Restore the Go credit note route and retry that exact credit before using the legacy route." });
+      if (action) setNotice({ tone: "pending", text: "A credit note is unresolved. Retry the exact credit to recover its result." });
     }).catch((error) => {
-      if (active && goAccountingCreditNoteUseGo()) {
+      if (active) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved credit note." });
       }
     });
@@ -577,7 +574,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const isCreateInvoice = path === "/api/accounting" && payload.action === "createInvoice";
       const goCreateInvoice = isCreateInvoice;
       const isCreditNote = path === "/api/accounting" && payload.action === "creditNote";
-      const goCreditNote = isCreditNote && goAccountingCreditNoteUseGo();
+      const goCreditNote = isCreditNote;
       const isReverseEntry = path === "/api/accounting" && payload.action === "reverse";
       const goReverseEntry = isReverseEntry;
       const goReversePayment = path === "/api/accounting" && payload.action === "reversePayment";
@@ -802,9 +799,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               {pendingCreditNote && <button
                 type="button"
                 className="accounting-button accounting-button-small"
-                disabled={busy || !goAccountingCreditNoteUseGo()}
+                disabled={busy}
                 onClick={() => void runAction("/api/accounting", { ...pendingCreditNote }, `Credit on invoice`)}
-              >{goAccountingCreditNoteUseGo() ? "Retry exact credit" : "Enable Go credit route to retry"}</button>}
+              >Retry exact credit</button>}
               {pendingReverseEntry && <button
                 type="button"
                 className="accounting-button accounting-button-small"

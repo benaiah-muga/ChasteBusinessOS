@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite invoice and settings email requests always route through the authenticated Go email handler; the legacy route toggle has been removed.
+- Vite Creator proposals now use Go for proposal and capability-gap reads,
+  compare-and-set reviews, and governed release actions. Creator setup no longer
+  reports the server's local coding-agent detection as browser state, and Go
+  surfaces expected evidence and release-state refusals as typed client errors.
+- Vite Creator release actions reuse an exact actor- and organization-scoped
+  intent after pending or uncertain responses, preventing duplicate approvals.
 - Go now owns `/api/docs/assist` for writing suggestions, continuations, template
   prefill, and document questions. It resolves the user session directly and
   loads document, template, and profile facts within the active organization.
@@ -23,6 +30,12 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite governed capability execution now proxies directly to Go regardless of
   legacy slice selector flags, so a missing migration flag cannot send a
   governed request back to the temporary app.
+- POS quick-add and opening-stock writes now fail closed when Go inventory
+  item writes are disabled.
+- Marketplace signature, ownership, listing-state, and stale-listing refusals
+  now return actionable client errors. Vite preserves the same exact actor,
+  organization, and action intent through uncertain retries and clears it only
+  after a definitive refusal or verified completion.
 - Vite Marketing reads, campaign drafting, sending, and analytics now use Go
   capabilities. Segment spend converts persisted invoice currencies to the
   workspace base currency, and incomplete reads cannot mark a campaign sent.
@@ -52,6 +65,8 @@ The full v1 changelog is preserved at the bottom of this file.
   the Go capability API.
 - Vite Accounting period reopening and foreign exchange rate writes now use
   scoped Go capabilities with durable exact-intent recovery.
+- Vite Accounting credit notes now always use the scoped Go capability, with
+  exact retry recovery even when the former migration selector is unset.
 - Vite purchasing vendor and bill creation, bill payment, and bill credits now
   use Go capabilities. Credits on foreign-currency bills fail closed until an
   exchange rate is available.
@@ -283,6 +298,9 @@ The full v1 changelog is preserved at the bottom of this file.
   result; repeat and not-installed requests remain idempotent. The database
   update runs through a narrowly granted helper so publisher-owned columns
   stay protected by RLS.
+- Vite Marketplace action submission now accepts only publish, install, and
+  uninstall contracts and always calls Go's capability API. Invalid action
+  payloads fail before a request, with no `/api/marketplace` fallback.
 
 - Vite Purchasing now loads vendors, recent purchase orders and bills, accounts
   payable aging, requests and RFQs, price history, and supplier performance

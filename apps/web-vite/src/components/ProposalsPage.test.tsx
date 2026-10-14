@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProposalsPage } from "./ProposalsPage";
 
 const proposalId = "1c9a7c31-6a2f-4a1f-9d6a-0f4a2b3c4d5e";
 const gapTicketId = "3e9c9e53-8c41-4c3f-9f8c-2b6c4d5e6f70";
 const digest = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+const retryScope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "11111111-1111-4111-8111-111111111111" };
 
 const verifiedEvidence = JSON.stringify({
   kind: "isolated_creator_candidate",
@@ -47,6 +48,10 @@ function creatorReadResponse(input: RequestInfo | URL, init: RequestInit | undef
   return null;
 }
 
+beforeEach(() => {
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: (_name: string, _options: unknown, callback: () => Promise<unknown>) => callback() } });
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -70,7 +75,7 @@ describe("Vite proposals page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
     await screen.findByRole("tab", { name: "Proposals" });
     fireEvent.click(screen.getByRole("tab", { name: "Setup" }));
 
@@ -80,6 +85,27 @@ describe("Vite proposals page", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls.every(([input]) => ["/api/modules", "/api/capabilities/execute"].includes(String(input)))).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/creator/agent"))).toBe(false);
+  }, PAGE_TEST_TIMEOUT);
+
+  it("shows a failed capability-gap read instead of an empty state", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return modules();
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const payload = JSON.parse(String(init.body)) as { capabilityId?: string };
+        if (payload.capabilityId === "creator.listProposals") return Response.json({ ok: true, data: { proposals: [] } });
+        if (payload.capabilityId === "creator.listCapabilityGaps") return Response.json({ ok: false, error: "forbidden: missing permission: platform.creator" }, { status: 422 });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ProposalsPage {...retryScope} />);
+    await screen.findByRole("tab", { name: "Proposals" });
+    fireEvent.click(screen.getByRole("tab", { name: "Capability gaps" }));
+
+    expect(await screen.findByRole("heading", { name: "Could not load capability gaps" })).not.toBeNull();
+    expect(screen.queryByText(/No capability gaps\./)).toBeNull();
   }, PAGE_TEST_TIMEOUT);
 
   it("offers the release lane only for evidence that verifies in full", async () => {
@@ -98,7 +124,7 @@ describe("Vite proposals page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
     expect(await screen.findByText(/Evidence verified\./)).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Request staging" }));
 
@@ -115,7 +141,7 @@ describe("Vite proposals page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
 
     expect(await screen.findByText("Evidence not verified.")).not.toBeNull();
     expect(screen.getAllByText(/Candidate evidence is not valid JSON, so its digest cannot be trusted\./).length).toBeGreaterThan(0);
@@ -144,7 +170,7 @@ describe("Vite proposals page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
 
     expect(await screen.findByText("Evidence not verified.")).not.toBeNull();
     expect(screen.queryByText(/Evidence verified\./)).toBeNull();
@@ -152,24 +178,30 @@ describe("Vite proposals page", () => {
   }, PAGE_TEST_TIMEOUT);
 
   it("surfaces an approval-pending staging request as pending, not as a staged release", async () => {
+    const intentIds: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return modules();
       const read = creatorReadResponse(input, init, [proposal()]);
       if (read) return read;
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
-        return Response.json({ ok: false, pendingApproval: true, reason: "identity risk needs approval" }, { status: 202 });
+        const payload = JSON.parse(String(init.body)) as { capabilityId?: string; intentId?: string };
+        if (payload.capabilityId === "creator.stageCandidate") intentIds.push(payload.intentId ?? "");
+        return Response.json({ ok: false, pendingApproval: true, reason: "identity risk needs approval", approvalId: "6f765d5a-09d8-4335-a07a-3c60c8d61ea4" }, { status: 202 });
       }
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
     await screen.findByText(/Evidence verified\./);
     fireEvent.click(screen.getByRole("button", { name: "Request staging" }));
 
     expect(await screen.findByText(/Approval requested\..*identity risk needs approval/)).not.toBeNull();
     expect(screen.queryByText(/Candidate staged for controlled release/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Request staging" }));
+    await waitFor(() => expect(intentIds).toHaveLength(2));
+    expect(intentIds[0]).toBe(intentIds[1]);
   }, PAGE_TEST_TIMEOUT);
 
   it("surfaces the capability refusal when the server rejects unverified evidence", async () => {
@@ -185,7 +217,7 @@ describe("Vite proposals page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
     await screen.findByText(/Evidence verified\./);
     fireEvent.click(screen.getByRole("button", { name: "Request staging" }));
 
@@ -209,7 +241,7 @@ describe("Vite proposals page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
     fireEvent.click(await screen.findByRole("button", { name: /Approve/ }));
 
     expect(await screen.findByText("decision recorded; merge the change through your normal PR flow")).not.toBeNull();
@@ -236,7 +268,7 @@ describe("Vite proposals page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
     await screen.findByText(/Evidence verified\./);
     fireEvent.click(screen.getByRole("button", { name: "Show diff & evidence" }));
 
@@ -254,14 +286,14 @@ describe("Vite proposals page", () => {
       if (path === "/api/modules") return modules();
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
         const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
-        if (payload.capabilityId === "creator.listProposals") return Response.json({ error: "requires platform.creator permission" }, { status: 403 });
+        if (payload.capabilityId === "creator.listProposals") return Response.json({ ok: false, error: "forbidden: missing permission: platform.creator" }, { status: 422 });
         if (payload.capabilityId === "creator.listCapabilityGaps") return Response.json({ ok: true, data: { gaps: [] } });
       }
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
 
     expect(await screen.findByRole("heading", { name: "Could not load proposals" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Try again" })).not.toBeNull();
@@ -272,7 +304,7 @@ describe("Vite proposals page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => (String(input) === "/api/modules" ? modules(false) : new Response(null, { status: 404 })));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ProposalsPage />);
+    render(<ProposalsPage {...retryScope} />);
 
     expect(await screen.findByText("Proposals are disabled")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);

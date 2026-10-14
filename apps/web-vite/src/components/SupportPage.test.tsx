@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SupportPage } from "./SupportPage";
+import { stubWebLocks } from "../test/web-locks";
 
 const conversationId = "3f1b0c6e-2f6a-4a0a-9c9e-6c1a2b3d4e5f";
 const organizationId = "66666666-6666-4666-8666-666666666666";
@@ -133,6 +134,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   window.localStorage.clear();
 });
+
+beforeEach(stubWebLocks);
 
 // The desk renders a full thread plus tab chrome, so each case needs more room
 // than the default 5s on a loaded machine.

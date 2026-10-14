@@ -1288,7 +1288,6 @@ describe("accounting API: Go credit notes", () => {
   beforeEach(stubPaymentLocks);
 
   it("serializes cross-tab credit reservations for one actor and organization", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
     const mock = stubFetch(() => Response.json({ pendingApproval: true }, { status: 202 }));
     const alternateCredit = { ...action, reason: "Correction credit" };
 
@@ -1305,7 +1304,6 @@ describe("accounting API: Go credit notes", () => {
   });
 
   it("fails closed when browser-wide credit locks are unavailable", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
     vi.stubGlobal("navigator", {} as Navigator);
     const mock = stubFetch(() => Response.json({ ok: true, data: output }));
 
@@ -1317,8 +1315,7 @@ describe("accounting API: Go credit notes", () => {
     expect(window.localStorage.length).toBe(0);
   });
 
-  it("routes payment reversal through Go even when credit notes are selected", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+  it("routes payment reversal through Go independently of credit-note routing", async () => {
     const mock = stubFetch(() => Response.json({ ok: true, data: {
       reversalEntryIds: ["55555555-5555-4555-8555-555555555555"], refundedMinor: 5_000, invoiceNumber: 1042, outstandingMinor: 5_000,
     } }));
@@ -1327,7 +1324,6 @@ describe("accounting API: Go credit notes", () => {
   });
 
   it("matches the Go parser bounds and keeps invoice balance authority on the server", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
     const mock = stubFetch(() => Response.json({ ok: true, data: output }));
     await expect(submitAccountingAction("/api/accounting", { ...action, reason: "abc" }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
@@ -1336,6 +1332,7 @@ describe("accounting API: Go credit notes", () => {
     expect((payload.input as Record<string, unknown>).action).toBeUndefined();
     expect(payload).not.toHaveProperty("actorId");
     expect(payload).not.toHaveProperty("organizationId");
+    expect(mock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": paymentRetryScope.organizationId });
 
     for (const invalid of [
       { ...action, invoiceId: "not-a-uuid" },
@@ -1350,18 +1347,18 @@ describe("accounting API: Go credit notes", () => {
   });
 
   it("uses Go's live balance rejection and never falls back to the legacy writer", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
     const mock = stubFetch(() => Response.json({ error: "credit 9000 exceeds the open balance 5000" }, { status: 422 }));
     await expect(submitAccountingAction("/api/accounting", { ...action, amountMinor: 9000 }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 422, message: "credit 9000 exceeds the open balance 5000" });
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
   });
 
-  it("retains the exact actor/org intent through pending and 404, blocking rollback", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
-    const mock = stubFetch(() => mock.mock.calls.length === 1
-      ? Response.json({ pendingApproval: true, reason: "Credit approval required" }, { status: 202 })
-      : Response.json({ error: "capability not found" }, { status: 404 }));
+  it("retains the exact actor/org intent and retries Go after the former selector is off", async () => {
+    const mock = stubFetch(() => {
+      if (mock.mock.calls.length === 1) return Response.json({ pendingApproval: true, reason: "Credit approval required" }, { status: 202 });
+      if (mock.mock.calls.length === 2) return Response.json({ error: "capability not found" }, { status: 404 });
+      return Response.json({ ok: true, data: output });
+    });
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toMatchObject({ kind: "pending" });
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     await expect(readPendingAccountingCreditNote(paymentRetryScope)).resolves.toEqual(action);
@@ -1369,12 +1366,42 @@ describe("accounting API: Go credit notes", () => {
     const calls = mock.mock.calls;
     expect(JSON.parse(String(calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(calls[1]?.[1]?.body)).intentId);
     vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", false);
-    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(mock).toHaveBeenCalledTimes(2);
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    expect(JSON.parse(String(mock.mock.calls[2]?.[1]?.body)).intentId).toBe(JSON.parse(String(calls[0]?.[1]?.body)).intentId);
+    expect(mock).toHaveBeenCalledTimes(3);
+    await expect(readPendingAccountingCreditNote(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("does not let a delayed duplicate response clear a newer credit note marker", async () => {
+    const newerAction = { ...action, amountMinor: 3000, reason: "Updated credit" };
+    const deferred: Array<(response: Response) => void> = [];
+    const mock = stubFetch(() => new Promise((resolve) => deferred.push(resolve)));
+
+    const original = submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(1));
+    const duplicate = submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(2));
+    const originalIntent = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const duplicateIntent = JSON.parse(String(mock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(duplicateIntent.intentId).toBe(originalIntent.intentId);
+
+    deferred[0]!(Response.json({ error: "credit rejected" }, { status: 422 }));
+    await expect(original).rejects.toMatchObject({ status: 422 });
+    await expect(readPendingAccountingCreditNote(paymentRetryScope)).resolves.toBeNull();
+
+    const newer = submitAccountingAction("/api/accounting", newerAction, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(3));
+    const newerIntent = JSON.parse(String(mock.mock.calls[2]?.[1]?.body)) as { intentId: string };
+    expect(newerIntent.intentId).not.toBe(originalIntent.intentId);
+    deferred[2]!(Response.json({ pendingApproval: true, reason: "Review required" }, { status: 202 }));
+    await expect(newer).resolves.toMatchObject({ kind: "pending" });
+
+    deferred[1]!(Response.json({ ok: true, data: output }));
+    await duplicate;
+    await expect(readPendingAccountingCreditNote(paymentRetryScope)).resolves.toEqual(newerAction);
   });
 
   it("validates the Go response and keeps malformed success retryable", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
     const mock = stubFetch(() => Response.json({ ok: true, data: { ...output, entryId: "invalid" } }));
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
     await expect(readPendingAccountingCreditNote(paymentRetryScope)).resolves.toEqual(action);

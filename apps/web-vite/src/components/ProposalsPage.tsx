@@ -11,6 +11,7 @@ import {
   type CapabilityGap,
   type CreatorProposal,
   type EvolutionAction,
+  type EvolutionRetryScope,
 } from "../api/proposals";
 import "./ProposalsPage.css";
 
@@ -223,7 +224,7 @@ function AgentSetupCard() {
   );
 }
 
-export function ProposalsPage() {
+export function ProposalsPage({ actorId, organizationId }: EvolutionRetryScope) {
   const [moduleState, setModuleState] = useState<ModuleState>({ status: "loading" });
   const [proposalState, setProposalState] = useState<ProposalState>({ status: "loading" });
   const [gapState, setGapState] = useState<GapState>({ status: "loading" });
@@ -332,7 +333,7 @@ export function ProposalsPage() {
 
   async function evolution<Action extends EvolutionAction>(input: Action, completedText: string): Promise<boolean> {
     const accepted = await run(async (): Promise<GovernedOutcome> => {
-      const outcome = await submitEvolutionAction(input);
+      const outcome = await submitEvolutionAction(input, { actorId, organizationId });
       if (outcome.kind === "pending") {
         return { kind: "pending", reason: `Approval requested. Review it in the Approvals inbox before anything changes. ${outcome.reason}` };
       }

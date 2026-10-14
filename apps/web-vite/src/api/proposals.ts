@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRetryActorId } from "./retry-scope";
 
 const uuid = z.string().uuid();
 const instant = z.string().datetime();
@@ -141,9 +142,17 @@ const PendingSchema = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
   reason: z.string().optional(),
+  approvalId: uuid.optional(),
 }).strict();
 const RefusalSchema = z.object({ ok: z.literal(false), error: z.string() }).strict();
 const ApiErrorSchema = z.object({ error: z.string().optional(), message: z.string().optional() });
+const EvolutionAttemptSchema = z.object({
+  fingerprint: z.string().length(64),
+  intentId: uuid,
+  action: EvolutionActionSchema,
+}).strict();
+type EvolutionAttempt = z.infer<typeof EvolutionAttemptSchema> & { storageKey: string };
+const EVOLUTION_ATTEMPT_PREFIX = "chaste:creator:evolution:attempt:v1:";
 
 export type CreatorProposal = z.infer<typeof ProposalSchema>;
 export type EvolutionRelease = z.infer<typeof EvolutionReleaseSchema>;
@@ -151,6 +160,7 @@ export type EvolutionOutcome = z.infer<typeof EvolutionOutcomeSchema>;
 export type CapabilityGap = z.infer<typeof CapabilityGapSchema>;
 export type ReviewDecision = z.infer<typeof ReviewInputSchema>;
 export type EvolutionAction = z.infer<typeof EvolutionActionSchema>;
+export type EvolutionRetryScope = { actorId: string | null; organizationId: string | null };
 export type EvolutionOutput<Action extends EvolutionAction> = z.infer<typeof EvolutionOutputSchemas[Action["action"]]>;
 
 export type EvolutionActionOutcome<Action extends EvolutionAction> =
@@ -311,13 +321,8 @@ export async function fetchProposals(signal?: AbortSignal): Promise<CreatorPropo
 }
 
 export async function fetchCapabilityGaps(signal?: AbortSignal): Promise<CapabilityGap[]> {
-  try {
-    const result = await executeCreatorCapability("creator.listCapabilityGaps", {}, CapabilityGapListSchema, signal);
-    return result.gaps;
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    return [];
-  }
+  const result = await executeCreatorCapability("creator.listCapabilityGaps", {}, CapabilityGapListSchema, signal);
+  return result.gaps;
 }
 
 /**
@@ -358,6 +363,95 @@ export async function submitProposalReview(
   return { kind: "completed", note: result.data.note };
 }
 
+function evolutionScope(scope: EvolutionRetryScope): { actorId: string; organizationId: string } {
+  const actorId = normalizeRetryActorId(scope.actorId);
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!actorId || !uuid.safeParse(organizationId).success) {
+    throw new ProposalsApiError(0, "Wait for your account and organization to finish loading before changing a release.");
+  }
+  return { actorId, organizationId };
+}
+
+async function evolutionDigest(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function withEvolutionAttemptLock<T>(storageKey: string, action: () => Promise<T>): Promise<T> {
+  const lockManager = navigator.locks;
+  if (!lockManager) throw new ProposalsApiError(0, "Release retry protection is unavailable in this browser. Update the browser before changing release state.");
+  try {
+    return await lockManager.request(`chaste:creator-evolution-attempt-lock:${storageKey}`, { mode: "exclusive" }, action);
+  } catch (error) {
+    if (error instanceof ProposalsApiError) throw error;
+    throw new ProposalsApiError(0, "The browser could not safely coordinate this release action across tabs. Close other Proposals tabs and try again.");
+  }
+}
+
+function parseEvolutionAttempt(raw: string, storageKey: string): EvolutionAttempt {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    throw new ProposalsApiError(0, "A saved release retry marker is damaged. Check the release before trying again.");
+  }
+  const parsed = EvolutionAttemptSchema.safeParse(value);
+  if (!parsed.success) throw new ProposalsApiError(0, "A saved release retry marker is invalid. Check the release before trying again.");
+  return { ...parsed.data, storageKey };
+}
+
+async function createEvolutionAttempt(action: EvolutionAction, scope: EvolutionRetryScope): Promise<EvolutionAttempt> {
+  const scoped = evolutionScope(scope);
+  let scopeHash: string;
+  let fingerprint: string;
+  try {
+    [scopeHash, fingerprint] = await Promise.all([
+      evolutionDigest(JSON.stringify(scoped)),
+      evolutionDigest(JSON.stringify({ ...scoped, action })),
+    ]);
+  } catch {
+    throw new ProposalsApiError(0, "Release retry protection is unavailable. Check browser security settings and try again.");
+  }
+  const storageKey = `${EVOLUTION_ATTEMPT_PREFIX}${scopeHash}:${fingerprint}`;
+  return withEvolutionAttemptLock(storageKey, async () => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw !== null) {
+        const saved = parseEvolutionAttempt(raw, storageKey);
+        if (saved.fingerprint !== fingerprint || JSON.stringify(saved.action) !== JSON.stringify(action)) {
+          throw new ProposalsApiError(0, "A saved release action does not match this request. Check the release before trying again.");
+        }
+        return saved;
+      }
+      const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID(), action };
+      window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, action }));
+      const persisted = parseEvolutionAttempt(window.localStorage.getItem(storageKey) ?? "", storageKey);
+      if (persisted.fingerprint !== fingerprint || persisted.intentId !== attempt.intentId || JSON.stringify(persisted.action) !== JSON.stringify(action)) {
+        throw new Error("saved attempt did not persist");
+      }
+      return persisted;
+    } catch (error) {
+      if (error instanceof ProposalsApiError) throw error;
+      throw new ProposalsApiError(0, "Enable browser storage before changing release state so an uncertain action can be retried safely.");
+    }
+  });
+}
+
+async function clearEvolutionAttempt(attempt: EvolutionAttempt): Promise<void> {
+  try {
+    await withEvolutionAttemptLock(attempt.storageKey, async () => {
+      const raw = window.localStorage.getItem(attempt.storageKey);
+      if (raw === null) return;
+      const saved = parseEvolutionAttempt(raw, attempt.storageKey);
+      if (saved.fingerprint === attempt.fingerprint && saved.intentId === attempt.intentId) {
+        window.localStorage.removeItem(attempt.storageKey);
+      }
+    });
+  } catch {
+    // Keep the marker when storage cannot verify which attempt completed.
+  }
+}
+
 /**
  * Every release transition is a governed capability: an approval requirement
  * comes back as 202 and is reported as pending, a refusal comes back as 422
@@ -366,11 +460,13 @@ export async function submitProposalReview(
  */
 export async function submitEvolutionAction<Action extends EvolutionAction>(
   action: Action,
-  intentId: string = crypto.randomUUID(),
+  scope: EvolutionRetryScope,
+  signal?: AbortSignal,
 ): Promise<EvolutionActionOutcome<Action>> {
   const parsedAction = EvolutionActionSchema.safeParse(action);
   if (!parsedAction.success) throw new ProposalsApiError(0, "The release action contains invalid details.");
-  if (!intentId.trim()) throw new ProposalsApiError(0, "The release action needs an intent identity. Try again.");
+  const normalizedScope = evolutionScope(scope);
+  const attempt = await createEvolutionAttempt(parsedAction.data, normalizedScope);
 
   const { action: actionName, ...input } = parsedAction.data;
   const capabilityId = {
@@ -381,8 +477,9 @@ export async function submitEvolutionAction<Action extends EvolutionAction>(
   }[actionName];
   const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
-    body: JSON.stringify({ capabilityId, input, intentId }),
-  });
+    headers: { "X-Organization-ID": normalizedScope.organizationId },
+    body: JSON.stringify({ capabilityId, input, intentId: attempt.intentId }),
+  }, signal);
   if (response.status === 202) {
     const pending = PendingSchema.safeParse(body);
     if (!pending.success) throw new ProposalsApiError(response.status, "The Creator service returned an unexpected approval response.");
@@ -390,11 +487,15 @@ export async function submitEvolutionAction<Action extends EvolutionAction>(
   }
   if (!response.ok) {
     const refusal = RefusalSchema.safeParse(body);
+    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+      await clearEvolutionAttempt(attempt);
+    }
     throw new ProposalsApiError(response.status, errorMessage(response.status, refusal.success ? refusal.data : body, "The release action could not be completed.", "release"));
   }
   const envelope = SuccessSchema.safeParse(body);
   if (!envelope.success) throw new ProposalsApiError(response.status, "The Go Creator service returned an unexpected release response.");
   const output = EvolutionOutputSchemas[actionName].safeParse(envelope.data.data);
   if (!output.success) throw new ProposalsApiError(response.status, "The Go Creator service returned an unexpected release result.");
+  await clearEvolutionAttempt(attempt);
   return { kind: "completed", data: output.data as EvolutionOutput<Action> };
 }

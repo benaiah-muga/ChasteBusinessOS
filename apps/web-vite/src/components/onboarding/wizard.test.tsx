@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { OnboardingWizard, screenForResume } from "./Wizard";
 import { CsvImportPanel, guessMapping, parseCsv, parseCurrencyMinor } from "./CsvImport";
+import { stubWebLocks } from "../../test/web-locks";
 
 // The wizard renders a large tree in development React, and this file shares a
 // loaded machine with the rest of the suite, so the default 5s per test is not
@@ -44,6 +45,7 @@ function jsonResponse(status: number, body: Record<string, unknown>) {
 }
 
 beforeEach(() => {
+  stubWebLocks();
   calls = [];
   productImportSequence = 0;
   respond = (call) => {

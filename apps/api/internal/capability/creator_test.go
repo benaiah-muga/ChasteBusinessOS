@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -8,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -231,6 +233,18 @@ func TestCreatorVerifyPluginMatchesPluginKitSignatureAndConsistencyRules(t *test
 				t.Errorf("creatorVerifyPlugin() = (%v, %q), want malformed material rejection", valid, reason)
 			}
 		})
+	}
+}
+
+func TestCreatorPublishListingTreatsInvalidSignatureAsDomainRefusal(t *testing.T) {
+	_, err := creatorPublishListing(context.Background(), nil, "11111111-1111-4111-8111-111111111111", CreatorPublishListingInput{
+		Manifest:                 json.RawMessage(creatorTestManifest),
+		SignatureBase64:          "invalid-signature",
+		PublisherPublicKeyBase64: "invalid-public-key",
+	})
+	var refusal CreatorDomainError
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.Error(), "refused:") {
+		t.Fatalf("invalid signature refusal error=%v, want typed CreatorDomainError", err)
 	}
 }
 

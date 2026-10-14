@@ -225,6 +225,9 @@ export async function submitInventoryItemAction(
   signal?: AbortSignal,
   retryScope?: InventoryAdjustmentRetryScope,
 ): Promise<InventoryItemActionResult> {
+  if (typeof __GO_INVENTORY_ITEM_SLICE__ === "undefined" || !__GO_INVENTORY_ITEM_SLICE__) {
+    throw new InventoryItemActionError(503, "Go inventory item writes are not enabled for this Vite deployment.");
+  }
   const parsedAction = action.action === "createItem"
     ? CreateItemSchema.safeParse(action)
     : AdjustStockSchema.safeParse(action);

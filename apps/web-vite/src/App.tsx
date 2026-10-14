@@ -263,7 +263,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                       : teamPage
                         ? <TeamPage key={organizationRevision} />
                       : marketplacePage
-                          ? <MarketplacePage key={organizationRevision} />
+                          ? <MarketplacePage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                           : documentsPage
                             ? <DocumentsPage key={organizationRevision} />
                             : hrPage
@@ -305,7 +305,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                                           : marketingPage
                                                             ? <MarketingPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                                             : proposalsPage
-                                                              ? <ProposalsPage key={organizationRevision} />
+                                                              ? <ProposalsPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                                                               : documentsEditorPage
                                                                 ? <DocumentsEditorPage key={organizationRevision} documentId={pathname.split("/").pop()} actorId={currentUserId} organizationId={activeOrgId} />
                                                                 : posPage

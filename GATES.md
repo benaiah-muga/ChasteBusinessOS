@@ -596,3 +596,8 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests  .* passed|PASS.*TestAccountingInvoiceOpsCreditNoteMirrorsLedgerAndBalance/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: The focused Vite Accounting API, page, and proxy suite passed 338 tests; the DB-backed Go credit-note executor test passed. Authenticated agent-browser applied a synthetic UGX 5,000 credit to invoice #2. Go returned HTTP 200, the outstanding balance fell to zero and stayed zero after reload, with no legacy accounting API request or browser error.
+
+- [x] G116: Vite email status and invoice-send requests always route through the authenticated Go email handler, even when a stale rollback environment variable is set.
+  CHECK: pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/go-route-proxy.test.ts
+  EXPECT: /Tests\s+\d+ passed/
+  EVIDENCE: Direct run exited 0; all 169 Go route proxy tests passed, including GET and POST `/api/email` with `GO_EMAIL_ROUTE=0` still reaching the Go upstream.

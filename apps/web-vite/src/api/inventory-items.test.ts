@@ -121,11 +121,33 @@ describe("inventory item action API client", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
+  it("fails closed when Go item writes are disabled without changing a saved retry", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      ok: false,
+      pendingApproval: true,
+      reason: "Owner review",
+    }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+
+    await expect(submitInventoryItemAction(action, undefined, retryScope)).resolves.toMatchObject({ kind: "pending" });
+    const savedBefore = Object.entries(localStorage).sort(([left], [right]) => left.localeCompare(right));
+    await expect(getPendingInventoryAdjustment(retryScope)).resolves.toEqual(action);
+
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
+    await expect(submitInventoryItemAction(action, undefined, retryScope)).rejects.toMatchObject({ status: 503 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(Object.entries(localStorage).sort(([left], [right]) => left.localeCompare(right))).toEqual(savedBefore);
+    await expect(getPendingInventoryAdjustment(retryScope)).resolves.toEqual(action);
+  });
+
   it("retains an item creation marker on 404 and retries the same Go intent", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "route not mounted" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId: "40000000-0000-4000-8000-000000000004" } }));
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
 
     await expect(submitInventoryItemAction(createAction, undefined, retryScope)).rejects.toMatchObject({ status: 404 });
     await expect(getPendingInventoryItemCreation(retryScope)).resolves.toEqual(createAction);
@@ -143,6 +165,7 @@ describe("inventory item action API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { onHandThousandths: 6500 } }));
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
     await expect(submitInventoryItemAction(action, undefined, retryScope)).resolves.toMatchObject({ kind: "pending" });
     await expect(submitInventoryItemAction(action, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 6500 } });
     await expect(getPendingInventoryAdjustment(retryScope)).resolves.toBeNull();

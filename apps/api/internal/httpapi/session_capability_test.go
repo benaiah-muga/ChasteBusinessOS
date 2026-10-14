@@ -551,6 +551,23 @@ func TestSessionCapabilityHandlerRejectsInvalidAuthOriginAndCallerClaims(t *test
 			t.Fatalf("status=%d refusal=%+v body=%s", response.Code, refusal, response.Body.String())
 		}
 	})
+
+	t.Run("marketplace domain refusals are definitive client errors", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{err: capability.CreatorDomainError("refused: signature does not match the manifest")}
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"creator.publishListing","input":{"manifest":{},"signatureBase64":"bad","publisherPublicKeyBase64":"bad"},"intentId":"marketplace-publish-refusal"}`))
+		var refusal struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil {
+			t.Fatalf("decode marketplace refusal: %v body=%s", err, response.Body.String())
+		}
+		if response.Code != http.StatusUnprocessableEntity || refusal.OK || refusal.Error != "refused: signature does not match the manifest" {
+			t.Fatalf("status=%d refusal=%+v body=%s, want 422 refusal envelope", response.Code, refusal, response.Body.String())
+		}
+	})
 }
 
 func TestSessionCapabilityHandlerReturnsApprovalPendingEnvelope(t *testing.T) {

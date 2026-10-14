@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketplacePage } from "./MarketplacePage";
 
 const listing = {
@@ -42,13 +42,20 @@ function fillPublishForm() {
   fireEvent.change(screen.getByLabelText("Publisher public key (base64)"), { target: { value: "public-key" } });
 }
 
+const retryScope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "11111111-1111-4111-8111-111111111111" };
+
+beforeEach(() => {
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: (_name: string, _options: unknown, callback: () => Promise<unknown>) => callback() } });
+});
+
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
 describe("Vite marketplace page", () => {
-  it("accepts legacy JSON arrays and opaque installation metadata", async () => {
+  it("rejects malformed listing rows instead of rendering untrusted metadata", async () => {
     const legacyListing = {
       ...listing,
       capabilityIds: ["inventory.cycleCount", { legacy: true }],
@@ -60,10 +67,9 @@ describe("Vite marketplace page", () => {
       return new Response(null, { status: 404 });
     }));
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
 
-    expect(await screen.findByRole("heading", { name: legacyListing.name })).not.toBeNull();
-    expect(screen.getByText("Capabilities: inventory.cycleCount, [object Object]")).not.toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain("unexpected format");
   });
 
   it("loads full marketplace rows and installs through Go before refreshing installed state", async () => {
@@ -83,7 +89,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
 
     expect(await screen.findByRole("heading", { name: "Acme Warehouse Tools" })).not.toBeNull();
     expect(screen.getByText("Capabilities: inventory.cycleCount, inventory.transfer")).not.toBeNull();
@@ -120,7 +126,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
     await screen.findByRole("heading", { name: "Publish a plugin" });
     fillPublishForm();
     fireEvent.click(screen.getByRole("button", { name: "Publish listing" }));
@@ -151,7 +157,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
     await screen.findByRole("heading", { name: "Publish a plugin" });
     fillPublishForm();
     fireEvent.click(screen.getByRole("button", { name: "Publish listing" }));
@@ -173,7 +179,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
     await screen.findByRole("heading", { name: "Publish a plugin" });
     fillPublishForm();
     fireEvent.click(screen.getByRole("button", { name: "Publish listing" }));
@@ -201,7 +207,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
     expect(await screen.findByRole("heading", { name: listing.name })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Uninstall" }));
 
@@ -223,7 +229,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
     expect(await screen.findByRole("heading", { name: listing.name })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Install (signature-checked)" }));
 
@@ -244,7 +250,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
     expect(await screen.findByRole("heading", { name: listing.name })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Install (signature-checked)" }));
 
@@ -265,7 +271,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
     await screen.findByRole("heading", { name: "Publish a plugin" });
     fireEvent.change(screen.getByLabelText("Plugin manifest (JSON)"), { target: { value: '{"formatVersion":1}' } });
     fireEvent.change(screen.getByLabelText("Signature (base64)"), { target: { value: "signature" } });
@@ -293,7 +299,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
     await screen.findByRole("heading", { name: "Publish a plugin" });
     fireEvent.change(screen.getByLabelText("Plugin manifest (JSON)"), { target: { value: '{"formatVersion":1}' } });
     fireEvent.change(screen.getByLabelText("Signature (base64)"), { target: { value: "signature" } });
@@ -317,7 +323,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
     await screen.findByRole("heading", { name: "Publish a plugin" });
     fireEvent.change(screen.getByLabelText("Plugin manifest (JSON)"), { target: { value: '{"formatVersion":1}' } });
     fireEvent.change(screen.getByLabelText("Signature (base64)"), { target: { value: "signature" } });
@@ -335,7 +341,7 @@ describe("Vite marketplace page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MarketplacePage />);
+    render(<MarketplacePage {...retryScope} />);
 
     expect(await screen.findByText("Enable Creator Mode in organization settings to use the marketplace.")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);

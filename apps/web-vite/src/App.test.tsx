@@ -159,26 +159,30 @@ beforeEach(() => {
     });
     if (path === "/api/crm?deals=1") return Response.json({ deals: [] });
     if (path === "/api/customers") return Response.json({ customers: [] });
-    if (path.startsWith("/api/documents?id=")) return Response.json({ document: {
-      id: "document-1",
-      title: "Supplier agreement",
-      status: "ready",
-      sourceType: "upload",
-      mimeType: "application/pdf",
-      sizeBytes: 100,
-      parseError: null,
-      parsedMarkdown: "Terms for supplier orders.",
-      createdAt: "2026-09-29T09:00:00.000Z",
-      folder: "Suppliers",
-    }, suggestions: [] });
-    if (path === "/api/documents") return Response.json({ documents: [{
-      id: "document-1",
-      title: "Supplier agreement",
-      status: "ready",
-      sourceType: "upload",
-      createdAt: "2026-09-29T09:00:00.000Z",
-      folder: "Suppliers",
-    }] });
+    if (path === "/api/capabilities/execute" && init?.method === "POST") {
+      const request = JSON.parse(String(init.body)) as { capabilityId: string; input: { id?: string } };
+      if (request.capabilityId === "documents.listIngestedDocuments") return Response.json(request.input.id === undefined
+        ? { ok: true, data: { documents: [{
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          title: "Supplier agreement",
+          status: "parsed",
+          sourceType: "upload",
+          createdAt: "2026-09-29T09:00:00.000Z",
+          folder: "Suppliers",
+        }], vendors: [] } }
+        : { ok: true, data: { document: {
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          title: "Supplier agreement",
+          status: "parsed",
+          sourceType: "upload",
+          mimeType: "application/pdf",
+          sizeBytes: 100,
+          parseError: null,
+          parsedMarkdown: "Terms for supplier orders.",
+          createdAt: "2026-09-29T09:00:00.000Z",
+          folder: "Suppliers",
+        } } });
+    }
     if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
     if (path === "/api/crm?views=1") return Response.json({ views: [] });
     if (path === "/api/inventory") return Response.json({

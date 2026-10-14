@@ -989,7 +989,7 @@ describe("AccountingPage governed writes", () => {
   });
 
   it("routes credit notes to Go and restores the exact pending credit after reload", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
+    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", false);
     const ids = {
       actorId: "55555555-5555-4555-8555-555555555555",
       organizationId: "66666666-6666-4666-8666-666666666666",
@@ -1029,7 +1029,6 @@ describe("AccountingPage governed writes", () => {
   });
 
   it("closes the credit form after same-session exact recovery", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
     const sent: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
     let attempt = 0;
     const { calls } = stubAccounting({
@@ -1057,7 +1056,6 @@ describe("AccountingPage governed writes", () => {
   });
 
   it("surfaces Go's live balance rejection when the displayed invoice balance is stale", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREDIT_NOTE__", true);
     const { calls } = stubAccounting({
       goCreditNoteResponse: () => Response.json({ error: "credit 9000 exceeds the open balance 5000" }, { status: 422 }),
     });

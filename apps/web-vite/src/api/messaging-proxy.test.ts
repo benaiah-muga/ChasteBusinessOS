@@ -219,7 +219,7 @@ describe("Messaging capability proxy", () => {
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("false");
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_PRESENCE__).toBe("false");
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_ATTACHMENT_UPLOAD__).toBe("false");
-    const legacyResponse = await fetch(`${legacyProxy.origin}/api/capabilities/execute`, { method: "POST" });
-    expect(await legacyResponse.json()).toEqual({ target: "legacy", path: "/api/capabilities/execute" });
+    const capabilityResponse = await fetch(`${legacyProxy.origin}/api/capabilities/execute`, { method: "POST" });
+    expect(await capabilityResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
   });
 });

@@ -595,10 +595,6 @@ export type AccountingReversePaymentAction = z.infer<typeof ReversePaymentAction
 export type AccountingBankReconciliationWriteAction = z.infer<typeof BankReconciliationWriteActionSchema>;
 export type AccountingPeriodFxWriteAction = z.infer<typeof PeriodFxWriteActionSchema>;
 
-export function goAccountingCreditNoteUseGo(): boolean {
-  return typeof __GO_ACCOUNTING_CREDIT_NOTE__ !== "undefined" && __GO_ACCOUNTING_CREDIT_NOTE__;
-}
-
 export async function readPendingAccountingBankReconciliationWrite(scope: AccountingPaymentRetryScope): Promise<AccountingBankReconciliationWriteAction | null> {
   const { scopeHash } = await accountingPaymentScope(scope);
   const storageKey = `${BANK_RECONCILIATION_WRITE_ATTEMPT_PREFIX}${scopeHash}`;
@@ -994,10 +990,7 @@ export async function submitAccountingAction(
     const action = CreditNoteActionSchema.safeParse(payload);
     if (!action.success) throw new AccountingApiError(400, "Enter a valid credit note before submitting.");
     const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
-    if (goAccountingCreditNoteUseGo()) return submitGoAccountingCreditNote(action.data, scoped, signal);
-    if (await readPendingAccountingCreditNote(retryScope ?? { actorId: null, organizationId: null })) {
-      throw new AccountingApiError(0, "A Go credit note is unresolved. Restore the Go credit note route and retry that exact credit before using the legacy route.", true);
-    }
+    return submitGoAccountingCreditNote(action.data, scoped, signal);
   }
   if (path === "/api/accounting" && payload.action === "createInvoice") {
     const action = CreateInvoiceActionSchema.safeParse(payload);
@@ -1263,6 +1256,7 @@ async function submitGoAccountingCreditNote(
   try {
     ({ response, body } = await getJson("/api/capabilities/execute", {
       method: "POST",
+      headers: { "X-Organization-ID": scope.organizationId },
       body: JSON.stringify({ capabilityId: "accounting.creditNote", input: creditNoteCapabilityInput(action), intentId: attempt.intentId }),
     }, signal));
   } catch (error) {
@@ -1276,7 +1270,7 @@ async function submitGoAccountingCreditNote(
   }
   if (!response.ok) {
     const uncertain = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
-    if (!uncertain) await clearAccountingCreditNoteAttempt(attempt.storageKey);
+    if (!uncertain) await clearAccountingCreditNoteAttempt(attempt);
     throw new AccountingApiError(response.status, errorMessage(response.status, body, "create this credit note"), uncertain);
   }
   const envelope = EnvelopeSchema.safeParse(body);
@@ -1284,7 +1278,7 @@ async function submitGoAccountingCreditNote(
   if (response.status !== 200 || !output?.success) {
     throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected credit note response.", true);
   }
-  await clearAccountingCreditNoteAttempt(attempt.storageKey);
+  await clearAccountingCreditNoteAttempt(attempt);
   return { kind: "completed" };
 }
 
@@ -1465,7 +1459,7 @@ async function withAccountingReservationLock<T>(
   }
 }
 
-async function accountingCreditNoteAttempt(action: AccountingCreditNoteAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
+async function accountingCreditNoteAttempt(action: AccountingCreditNoteAction, scopeHash: string): Promise<{ storageKey: string; intentId: string; fingerprint: string }> {
   const storageKey = `${CREDIT_NOTE_ATTEMPT_PREFIX}${scopeHash}`;
   const fingerprint = await accountingPaymentFingerprint(action);
   return withAccountingReservationLock(
@@ -1479,7 +1473,7 @@ async function accountingCreditNoteAttempt(action: AccountingCreditNoteAction, s
       if (raw !== null) {
         const stored = parseStoredCreditNote(raw);
         if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous credit note is unresolved. Retry its exact details before creating another credit.", true);
-        return { storageKey, intentId: stored.intentId };
+        return { storageKey, intentId: stored.intentId, fingerprint: stored.fingerprint };
       }
       const stored = { action, intentId: crypto.randomUUID(), fingerprint };
       const serialized = JSON.stringify(stored);
@@ -1489,7 +1483,7 @@ async function accountingCreditNoteAttempt(action: AccountingCreditNoteAction, s
       } catch {
         throw new AccountingApiError(0, "Enable browser storage before applying a credit so it can be retried safely.");
       }
-      return { storageKey, intentId: stored.intentId };
+      return { storageKey, intentId: stored.intentId, fingerprint: stored.fingerprint };
     },
   );
 }
@@ -1735,9 +1729,24 @@ async function clearAccountingCreateInvoiceAttempt(storageKey: string): Promise<
   catch { throw new AccountingApiError(0, "The invoice completed, but its retry marker could not be cleared. Reload before creating another invoice.", true); }
 }
 
-async function clearAccountingCreditNoteAttempt(storageKey: string): Promise<void> {
-  try { window.localStorage.removeItem(storageKey); }
-  catch { throw new AccountingApiError(0, "The credit note completed, but its retry marker could not be cleared. Reload before creating another credit.", true); }
+async function clearAccountingCreditNoteAttempt(attempt: { storageKey: string; intentId: string; fingerprint: string }): Promise<void> {
+  await withAccountingReservationLock(
+    attempt.storageKey,
+    "This browser cannot safely clear a credit note marker. Open Accounting in a browser with Web Locks enabled before continuing.",
+    "The browser could not safely clear the credit note marker. Reload before creating another credit.",
+    async () => {
+      try {
+        const raw = window.localStorage.getItem(attempt.storageKey);
+        if (raw === null) return;
+        const current = parseStoredCreditNote(raw);
+        if (current.intentId === attempt.intentId && current.fingerprint === attempt.fingerprint) {
+          window.localStorage.removeItem(attempt.storageKey);
+        }
+      } catch {
+        throw new AccountingApiError(0, "The credit note result was received, but its retry marker could not be verified and cleared. Reload before creating another credit.", true);
+      }
+    },
+  );
 }
 
 async function clearAccountingReverseEntryAttempt(attempt: { storageKey: string; intentId: string; fingerprint: string }): Promise<void> {

@@ -505,6 +505,12 @@
     },
     {
       "kind": "page",
+      "path": "/proposals",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
       "path": "/print/invoice/[orderId]",
       "owner": "vite",
       "parity": "verified"

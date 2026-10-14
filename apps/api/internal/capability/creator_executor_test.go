@@ -162,6 +162,23 @@ func TestGoCreatorPublishListingUsesGovernedTenantScopedExecutor(t *testing.T) {
 			FencingToken: 1, LeaseExtensionMillis: 180_000,
 		}
 	}
+	var refusedInput CreatorPublishListingInput
+	if err := json.Unmarshal(input, &refusedInput); err != nil {
+		t.Fatal(err)
+	}
+	refusedInput.SignatureBase64 = "invalid-signature"
+	refusedJSON, err := json.Marshal(refusedInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusedResult, refusedErr := fx.executor.ExecuteSystem(fx.ctx, claimsForOrg(fx.orgID, executorUUID(t)), refusedJSON)
+	var publishRefusal CreatorDomainError
+	if !errors.As(refusedErr, &publishRefusal) || refusedResult.OK || !strings.Contains(publishRefusal.Error(), "refused:") {
+		t.Fatalf("invalid signature publish result=%+v err=%v, want typed domain refusal", refusedResult, refusedErr)
+	}
+	if got := fx.count(`SELECT count(*) FROM marketplace_listings WHERE slug=$1`, slug); got != 0 {
+		t.Fatalf("invalid signature created %d listings, want none", got)
+	}
 	result, err := fx.executor.ExecuteSystem(fx.ctx, claimsForOrg(fx.orgID, executorUUID(t)), input)
 	if err != nil || !result.OK || result.PendingApproval {
 		t.Fatalf("creator.publishListing execution=%+v err=%v, want a completed governed write", result, err)
@@ -182,7 +199,8 @@ func TestGoCreatorPublishListingUsesGovernedTenantScopedExecutor(t *testing.T) {
 	}
 
 	otherOrgResult, err := fx.executor.ExecuteSystem(fx.ctx, claimsForOrg(fx.otherOrgID, executorUUID(t)), input)
-	if err == nil || otherOrgResult.OK || !strings.Contains(err.Error(), "owned by another publisher") {
+	var ownershipRefusal CreatorDomainError
+	if !errors.As(err, &ownershipRefusal) || otherOrgResult.OK || !strings.Contains(ownershipRefusal.Error(), "owned by another publisher") {
 		t.Fatalf("foreign org publish result=%+v err=%v, want slug ownership refusal", otherOrgResult, err)
 	}
 	if err := fx.owner.QueryRow(fx.ctx, `SELECT submitted_by_org_id::text FROM marketplace_listings WHERE id=$1::uuid`, output.ListingID).Scan(&ownerOrgID); err != nil {
@@ -259,7 +277,8 @@ func TestGoCreatorMarketplaceHumanInstallIsSignedIdempotentAndTenantScoped(t *te
 		return fx.executor.Execute(fx.ctx, claims, creatorInstallListingCapabilityID, input)
 	}
 	missing, err := install(executorUUID(t), "marketplace-human-install-missing")
-	if err == nil || !strings.Contains(err.Error(), "listing not found") || missing.OK {
+	var missingRefusal CreatorDomainError
+	if !errors.As(err, &missingRefusal) || !strings.Contains(missingRefusal.Error(), "listing not found") || missing.OK {
 		t.Fatalf("install missing listing result=%+v err=%v, want not-found error", missing, err)
 	}
 	first, err := install(validListing.id, "marketplace-human-install-first")
@@ -381,7 +400,8 @@ func TestGoCreatorMarketplaceHumanInstallIsSignedIdempotentAndTenantScoped(t *te
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			result, err := install(test.listing.id, "marketplace-human-install-"+strings.ReplaceAll(test.name, " ", "-"))
-			if err == nil || result.OK || !strings.Contains(err.Error(), test.message) {
+			var refusal CreatorDomainError
+			if !errors.As(err, &refusal) || result.OK || !strings.Contains(refusal.Error(), test.message) {
 				t.Fatalf("install result=%+v err=%v, want refusal %q", result, err, test.message)
 			}
 			if got := readInstalled(test.listing.id); !reflect.DeepEqual(got, []string{fx.otherOrgID}) {
@@ -453,6 +473,11 @@ func TestGoCreatorMarketplaceHumanUninstallIsIdempotentAndTenantScoped(t *testin
 		}
 		claims := waveModuleClaims(fx, creatorUninstallListingCapabilityID, "platform.creator", input, "human", "", intent)
 		return fx.executor.Execute(fx.ctx, claims, creatorUninstallListingCapabilityID, input)
+	}
+	stale, staleErr := uninstall(executorUUID(t), "marketplace-human-uninstall-missing")
+	var staleRefusal CreatorDomainError
+	if !errors.As(staleErr, &staleRefusal) || stale.OK || !strings.Contains(staleRefusal.Error(), "listing not found") {
+		t.Fatalf("uninstall missing listing result=%+v err=%v, want typed not-found refusal", stale, staleErr)
 	}
 	initialUpdatedAt := installedListing.updatedAt
 	first, err := uninstall(installedListing.id, "marketplace-human-uninstall-first")
