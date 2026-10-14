@@ -2562,7 +2562,7 @@ new owners and the manifest shows zero legacy runtime paths.
      on a Go 404, allow retry only through Go, and block selector rollback until
      resolution. Keep legacy requests when their corresponding Go selector is
      off. Focused Vite API tests cover all listed action families.
-223. (Implemented; browser proof pending) Remove selected-Go 404 fallback for Vite POS sale submission through
+223. (Complete; authenticated browser proof recorded in item 392) Remove selected-Go 404 fallback for Vite POS sale submission through
      `pos.completeSale`. Persist the route alongside its exact sale intent,
      preserve the marker on 404, and block retry through legacy after selector
      rollback. Retry the same payload and intent through Go only; explicit
@@ -4179,3 +4179,11 @@ new owners and the manifest shows zero legacy runtime paths.
      HTTP 200. The Runs & lots page displayed the production record, consumed
      component quantity, and completed state after a full reload; the browser
      error log was empty. This completes item 271.
+
+392. (Runtime verified) On 2026-10-14, authenticated Vite submitted the
+     synthetic POS cart to `pos.completeSale` with a simulated Go HTTP 404.
+     The UI kept the sale attempt locked, showed recovery instructions, and
+     retained the cart. Retrying sent the same payload and intent ID to Go
+     again. Both requests were intercepted before reaching the API, no legacy
+     `/api/pos` write was issued, the register still showed zero completed
+     sales, and the browser error log was empty. This completes item 223.
