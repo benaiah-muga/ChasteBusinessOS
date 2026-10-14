@@ -4529,3 +4529,15 @@ new owners and the manifest shows zero legacy runtime paths.
      after loading older movements; both Go cursor reads returned HTTP 200 and
      the browser reported no page errors. The local verification stock quantity
      was restored through Go after the proof.
+
+419. (Runtime verified) Vite CRM deal creation now captures
+     the lead source and assigns an organization member through Go's existing
+     `crm.createDeal` capability. The Go `crm.listDeals` projection returns
+     source and owner details under tenant scope, and the pipeline displays
+     them after a fresh read. Owner identity is resolved only when the deal
+     owner remains an organization member; a Go regression test covers stale
+     nonmember owner data. Exact actor/org retry recovery retains both fields.
+     Go CRM parser, creation, and list integration tests plus focused Vite CRM
+     API and page tests pass. Authenticated browser proof created a deal with
+     source and owner, reloaded the pipeline, and confirmed both values; Go
+     capability calls returned HTTP 200 and the browser reported no errors.

@@ -23,6 +23,9 @@ export const CrmDealSchema = z.object({
   title: z.string(),
   stage,
   valueMinor: z.number().int().safe(),
+  source: z.string().nullable().optional(),
+  ownerUserId: uuid.nullable().optional(),
+  ownerName: z.string().nullable().optional(),
   note: z.string().nullable().optional(),
   customerId: uuid.nullable().optional(),
   customerName: z.string().nullable().optional(),
@@ -321,7 +324,7 @@ export type CrmSavedViewWriteMutation = {
   isPinned: boolean;
 };
 export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
-type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string };
+type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string; source?: string; ownerUserId?: string };
 export type CrmDealCreateInput = Omit<CrmDealCreateMutation, "action">;
 export type CrmLeadConversionInput =
   | { dealId: string; customerId: string }
@@ -689,6 +692,8 @@ const CrmDealCreateMutationSchema = z.object({
   title: z.string().min(1).max(120),
   valueMinor: z.number().int().nonnegative().refine(Number.isSafeInteger),
   customerId: uuid.optional(),
+  source: z.string().max(200).optional(),
+  ownerUserId: uuid.optional(),
 }).strict();
 const CrmDealCreateOutputSchema = z.object({ dealId: uuid }).strict();
 const CrmLeadConversionInputSchema = z.union([
@@ -716,6 +721,8 @@ export async function readPendingCrmDealCreate(scope: CrmTaskRetryScope): Promis
     title: action.data.title,
     valueMinor: action.data.valueMinor,
     ...(action.data.customerId ? { customerId: action.data.customerId } : {}),
+    ...(action.data.source ? { source: action.data.source } : {}),
+    ...(action.data.ownerUserId ? { ownerUserId: action.data.ownerUserId } : {}),
   };
 }
 

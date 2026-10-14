@@ -30,6 +30,9 @@ type CRMDealRow struct {
 	Title        string  `json:"title"`
 	Stage        string  `json:"stage"`
 	ValueMinor   int64   `json:"valueMinor"`
+	Source       *string `json:"source"`
+	OwnerUserID  *string `json:"ownerUserId"`
+	OwnerName    *string `json:"ownerName"`
 	Note         *string `json:"note"`
 	CustomerID   *string `json:"customerId"`
 	CustomerName *string `json:"customerName"`
@@ -50,10 +53,13 @@ func ParseListDealsInput(raw json.RawMessage) (ListDealsInput, error) {
 
 func listDeals(ctx context.Context, tx pgx.Tx, orgID string) (ListDealsOutput, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT d.id::text, d.title, d.stage, d.value_minor, d.note,
+		SELECT d.id::text, d.title, d.stage, d.value_minor, d.source,
+		       m.user_id::text, COALESCE(u.name, u.email), d.note,
 		       d.customer_id::text, c.name, d.created_at, d.updated_at
 		FROM deals d
 		LEFT JOIN customers c ON c.id = d.customer_id AND c.org_id = d.org_id
+		LEFT JOIN memberships m ON m.org_id = d.org_id AND m.user_id = d.owner_user_id
+		LEFT JOIN users u ON u.id = m.user_id
 		WHERE d.org_id = $1::uuid
 		LIMIT 200`, orgID)
 	if err != nil {
@@ -64,7 +70,8 @@ func listDeals(ctx context.Context, tx pgx.Tx, orgID string) (ListDealsOutput, e
 	for rows.Next() {
 		var deal CRMDealRow
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&deal.ID, &deal.Title, &deal.Stage, &deal.ValueMinor, &deal.Note,
+		if err := rows.Scan(&deal.ID, &deal.Title, &deal.Stage, &deal.ValueMinor, &deal.Source,
+			&deal.OwnerUserID, &deal.OwnerName, &deal.Note,
 			&deal.CustomerID, &deal.CustomerName, &createdAt, &updatedAt); err != nil {
 			return ListDealsOutput{}, err
 		}

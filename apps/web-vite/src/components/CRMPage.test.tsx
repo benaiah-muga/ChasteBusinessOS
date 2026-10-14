@@ -14,7 +14,13 @@ type CrmFetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Re
 
 function routeGoCrmReadsToFixtures(fetchMock: CrmFetchMock): CrmFetchMock {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input) !== "/api/capabilities/execute") return fetchMock(input, init);
+    if (String(input) !== "/api/capabilities/execute") {
+      const response = await fetchMock(input, init);
+      if (String(input) === "/api/team" && init?.method !== "POST" && response.status === 404) {
+        return Response.json({ members: [] });
+      }
+      return response;
+    }
     let body: { capabilityId?: string; input?: { openOnly?: boolean; customerId?: string; [key: string]: unknown } };
     try { body = JSON.parse(String(init?.body)) as typeof body; }
     catch { return fetchMock(input, init); }
@@ -298,6 +304,7 @@ describe("Vite CRM page", () => {
       if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [{ userId: customerId, name: "Ada Lovelace", email: "ada@example.test" }] });
       if (path === "/api/capabilities/execute") {
         createCalls += 1;
         return createCalls === 1
@@ -314,6 +321,9 @@ describe("Vite CRM page", () => {
     fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: " Renewal " } });
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: "255.00" } });
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customerId } });
+    fireEvent.change(screen.getByLabelText("Source"), { target: { value: "Website" } });
+    await waitFor(() => expect((screen.getByLabelText("Owner") as HTMLSelectElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Owner"), { target: { value: customerId } });
     fireEvent.click(screen.getByRole("button", { name: "Add deal" }));
 
     expect(await screen.findByText("Manager approval required")).not.toBeNull();
@@ -327,7 +337,7 @@ describe("Vite CRM page", () => {
     await waitFor(() => expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe(""));
     const submissions = fetchMock.mock.calls.filter(([path]) => String(path) === "/api/capabilities/execute");
     expect(submissions).toHaveLength(2);
-    expect(JSON.parse(String(submissions[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createDeal", input: { title: "Renewal", valueMinor: 25_500, customerId }, intentId: expect.any(String) });
+    expect(JSON.parse(String(submissions[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createDeal", input: { title: "Renewal", valueMinor: 25_500, customerId, source: "Website", ownerUserId: customerId }, intentId: expect.any(String) });
     expect(JSON.parse(String(submissions[1]?.[1]?.body))).toEqual(JSON.parse(String(submissions[0]?.[1]?.body)));
     expect(legacyCreateCalls).toBe(0);
   });
@@ -342,6 +352,7 @@ describe("Vite CRM page", () => {
       if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
       if (path === "/api/capabilities/execute") {
         createCalls += 1;
         return createCalls === 1

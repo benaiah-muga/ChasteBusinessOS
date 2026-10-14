@@ -279,7 +279,26 @@ func TestGoCRMListDealsCapabilityIsReadScopedTenantSafeAndLimited(t *testing.T) 
 	customerID := seedCRMDealCustomer(t, fx, fx.orgID, "Deal list customer")
 	localDealID := seedCRMDeal(t, fx, fx.orgID, "Deal list with customer", "qualified", &customerID)
 	nullCustomerDealID := seedCRMDeal(t, fx, fx.orgID, "Deal list without customer", "lead", nil)
+	nonMemberOwnerID := executorUUID(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO users (id, email, name) VALUES ($1::uuid, $2, 'Nonmember owner')`, nonMemberOwnerID, "deal-nonmember-"+nonMemberOwnerID[:8]+"@fixture.test"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(context.Background(), `UPDATE deals SET owner_user_id=NULL WHERE owner_user_id=$1::uuid`, nonMemberOwnerID); err != nil {
+			t.Errorf("clear nonmember deal owner fixture: %v", err)
+		}
+		if _, err := fx.owner.Exec(context.Background(), `DELETE FROM users WHERE id=$1::uuid`, nonMemberOwnerID); err != nil {
+			t.Errorf("delete nonmember deal owner fixture: %v", err)
+		}
+	})
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE deals SET owner_user_id=$2::uuid WHERE id=$1::uuid`, nullCustomerDealID, nonMemberOwnerID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := fx.owner.Exec(fx.ctx, `UPDATE deals SET note='follow-up', value_minor=12345 WHERE id=$1::uuid`, localDealID); err != nil {
+		t.Fatal(err)
+	}
+	dealOwnerID := fx.userID
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE deals SET source='website', owner_user_id=$2::uuid WHERE id=$1::uuid`, localDealID, dealOwnerID); err != nil {
 		t.Fatal(err)
 	}
 	seedCRMDeal(t, fx, fx.otherOrgID, "Other organization deal", "won", nil)
@@ -296,10 +315,12 @@ func TestGoCRMListDealsCapabilityIsReadScopedTenantSafeAndLimited(t *testing.T) 
 		if deal.ID == localDealID {
 			localWithCustomer = deal.Title == "Deal list with customer" && deal.Stage == "qualified" && deal.ValueMinor == 12345 &&
 				deal.Note != nil && *deal.Note == "follow-up" && deal.CustomerID != nil && *deal.CustomerID == customerID &&
+				deal.Source != nil && *deal.Source == "website" && deal.OwnerUserID != nil && *deal.OwnerUserID == dealOwnerID &&
+				deal.OwnerName != nil && *deal.OwnerName == "Go capability user" &&
 				deal.CustomerName != nil && *deal.CustomerName == "Deal list customer" && deal.CreatedAt != "" && deal.UpdatedAt != ""
 		}
 		if deal.ID == nullCustomerDealID {
-			localWithoutCustomer = deal.CustomerID == nil && deal.CustomerName == nil && deal.Note == nil
+			localWithoutCustomer = deal.CustomerID == nil && deal.CustomerName == nil && deal.Note == nil && deal.Source == nil && deal.OwnerUserID == nil && deal.OwnerName == nil
 		}
 	}
 	if !localWithCustomer || !localWithoutCustomer {

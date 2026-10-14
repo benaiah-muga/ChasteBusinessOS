@@ -40,7 +40,7 @@ describe("CRM API client", () => {
   beforeEach(() => { stubCrmDealStageLocks(); });
 
   it("reads and validates deals through the authenticated Go capability route", async () => {
-    const deal = { id: dealId, title: "Renewal", stage: "proposal", valueMinor: 250000, note: null, customerId, customerName: "Northwind", updatedAt: "2026-09-29T12:00:00.000Z" };
+    const deal = { id: dealId, title: "Renewal", stage: "proposal", valueMinor: 250000, source: "website", ownerUserId: customerId, ownerName: "Ada Lovelace", note: null, customerId, customerName: "Northwind", updatedAt: "2026-09-29T12:00:00.000Z" };
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { deals: [deal] } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -356,7 +356,7 @@ describe("CRM API client", () => {
   });
 
   it("routes deal creation through Go and strictly validates the deal ID", async () => {
-    const input = { title: "Renewal", valueMinor: 25_500, customerId };
+    const input = { title: "Renewal", valueMinor: 25_500, customerId, source: "website", ownerUserId: customerId };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -370,7 +370,7 @@ describe("CRM API client", () => {
 
   it("restores exact deal drafts and keeps intent through pending, uncertainty, and Go 404 without legacy fallback", async () => {
     const scope = { actorId: customerId, organizationId: dealId };
-    const input = { title: "Renewal", valueMinor: 25_500, customerId };
+    const input = { title: "Renewal", valueMinor: 25_500, customerId, source: "referral", ownerUserId: customerId };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }))
       .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 }))
       .mockRejectedValueOnce(new TypeError("connection reset"));
