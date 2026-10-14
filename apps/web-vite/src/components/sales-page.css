@@ -577,6 +577,38 @@
   font-weight: 700;
 }
 
+.sales-order-lines {
+  margin-top: 0.35rem;
+  color: #68665d;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: normal;
+}
+
+.sales-order-lines summary {
+  cursor: pointer;
+  width: fit-content;
+  color: #315f53;
+}
+
+.sales-order-lines ul {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 15rem;
+  margin: 0.45rem 0 0;
+  padding-left: 1rem;
+}
+
+.sales-order-lines li strong,
+.sales-order-lines li span {
+  display: block;
+  white-space: normal;
+}
+
+.sales-order-lines li span {
+  margin-top: 0.1rem;
+}
+
 .sales-table td {
   color: #68665d;
   font-size: 0.86rem;

@@ -39,6 +39,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Hiring can hire offer-stage applicants as employees through Go `hr.hireApplicant`.
 - Vite Purchasing shows receipt progress per order line and prevents entries above the remaining quantity.
 - Vite Projects can delete and undo tasks through Go using a guarded task snapshot.
+- Vite Sales shows order-line fulfillment details from Go and validates CRM deal lists against the Go response contract.
 
 ### Fixed
 

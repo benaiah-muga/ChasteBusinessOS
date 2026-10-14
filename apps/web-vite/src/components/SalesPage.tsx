@@ -72,6 +72,10 @@ function formatStatus(status: string): string {
   return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function formatQuantity(thousandths: number): string {
+  return (thousandths / 1000).toLocaleString("en-US", { maximumFractionDigits: 3 });
+}
+
 function minorFromInput(value: string, minorUnits: number): number | null {
   const parsed = Number(value.trim() || "0");
   if (!Number.isFinite(parsed) || parsed < 0) return null;
@@ -877,7 +881,18 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
               <thead><tr><th scope="col">Order</th><th scope="col">Customer</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Total</th><th scope="col">Actions</th></tr></thead>
               <tbody>{filtered.map((order) => (
                 <tr key={order.id}>
-                  <th scope="row">#{order.number}</th>
+                  <th scope="row">
+                    <span>#{order.number}</span>
+                    {order.lines.length > 0 && <details className="sales-order-lines">
+                      <summary>{order.lines.length} line {order.lines.length === 1 ? "item" : "items"}</summary>
+                      <ul>
+                        {order.lines.map((line) => <li key={line.lineId}>
+                          <strong>{line.description}</strong>
+                          <span>Ordered {formatQuantity(line.quantityThousandths)}, delivered {formatQuantity(line.deliveredThousandths)}, reserved to deliver {formatQuantity(line.deliverableThousandths)}</span>
+                        </li>)}
+                      </ul>
+                    </details>}
+                  </th>
                   <td><span className="sales-customer-id">{customerNames.get(order.customerId) ?? "Unknown customer"}</span>{order.backordered && <span className="sales-backorder">Backordered</span>}</td>
                   <td><span className="sales-status">{formatStatus(order.status)}</span></td>
                   <td><time dateTime={order.createdAt}>{new Date(order.createdAt).toLocaleDateString()}</time></td>

@@ -4566,3 +4566,12 @@ new owners and the manifest shows zero legacy runtime paths.
      is included in the full verification run. Authenticated browser proof
      created a synthetic task, deleted it, and restored it with Undo. Go
      capability calls returned HTTP 200 and the browser reported no errors.
+
+423. (Runtime verified) Vite Sales order rows now expand to show the Go-provided
+     item descriptions and ordered, delivered, and reserved-to-deliver
+     quantities. The strict Vite CRM deal schema now includes Go's nullable
+     source and owner fields, fixing a 200 response that previously rendered as
+     an unavailable Sales workspace. Focused Sales suites pass 47 cases;
+     typecheck and lint pass. Authenticated browser proof showed the order
+     disclosure values, loaded Quotes and Deals without a shape error, and
+     recorded no console errors or failed requests.

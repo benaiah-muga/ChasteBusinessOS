@@ -43,6 +43,22 @@ const customers = {
     { id: "20000000-0000-4000-8000-000000000002", name: "Benaiah Market" },
   ],
 };
+const goDeals = {
+  deals: [{
+    id: "60000000-0000-4000-8000-000000000001",
+    title: "Website renewal",
+    stage: "proposal",
+    valueMinor: 250000,
+    source: "Referral",
+    ownerUserId: "70000000-0000-4000-8000-000000000001",
+    ownerName: "Morgan Lee",
+    note: null,
+    customerId: customers.customers[0]!.id,
+    customerName: customers.customers[0]!.name,
+    createdAt: "2026-10-01T10:00:00.000Z",
+    updatedAt: "2026-10-02T10:00:00.000Z",
+  }],
+};
 const confirmAttemptKey = (actorId: string, organizationId: string, orderId: string) =>
   `chaste:sales-confirm-attempt:${encodeURIComponent(JSON.stringify([actorId, organizationId]))}:${orderId}`;
 
@@ -63,7 +79,7 @@ function goAwareFetch(fetcher: (input: RequestInfo | URL, init?: RequestInit) =>
       catch { /* The application validates the request before the mock handles it. */ }
       if (capabilityId === "accounting.listQuotes") return Response.json({ ok: true, data: { quotes: [] } });
       if (capabilityId === "crm.listCustomers") return Response.json({ ok: true, data: { customers: [] } });
-      if (capabilityId === "crm.listDeals") return Response.json({ ok: true, data: { deals: [] } });
+      if (capabilityId === "crm.listDeals") return Response.json({ ok: true, data: goDeals });
       if (capabilityId === "crm.listTasks") return Response.json({ ok: true, data: { tasks: [] } });
       if (capabilityId === "crm.listCustomerViews") return Response.json({ ok: true, data: { views: [] } });
       if (capabilityId === "sales.listOrders") {
@@ -256,6 +272,14 @@ describe("Vite sales page", () => {
     expect(screen.getByRole("cell", { name: "Delivered" })).not.toBeNull();
     expect(screen.getByRole("cell", { name: "Draft" })).not.toBeNull();
     expect(screen.getByText("$1,299.00")).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "Sales workspace unavailable" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Deals" }));
+    expect(await screen.findByText("Website renewal")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Quotes" }));
+    fireEvent.click(screen.getByText("2 line items"));
+    expect(screen.getByText("Desk")).not.toBeNull();
+    expect(screen.getByText("Ordered 3, delivered 0, reserved to deliver 2")).not.toBeNull();
+    expect(screen.getByText("Assembly service")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({
       headers: expect.objectContaining({ "X-Organization-ID": "40000000-0000-4000-8000-000000000004" }),
     }));

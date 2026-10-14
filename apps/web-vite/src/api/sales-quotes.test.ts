@@ -41,6 +41,26 @@ describe("Vite Sales quote Go APIs", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: "same-origin", cache: "no-store" });
   });
 
+  it("accepts the full crm.listDeals output shape returned by Go", async () => {
+    const goDeal = {
+      id: "60000000-0000-4000-8000-000000000001",
+      title: "Website renewal",
+      stage: "proposal",
+      valueMinor: 250000,
+      source: "Referral",
+      ownerUserId: "70000000-0000-4000-8000-000000000001",
+      ownerName: "Morgan Lee",
+      note: null,
+      customerId,
+      customerName: "Acme",
+      createdAt: "2026-10-01T10:00:00.000Z",
+      updatedAt: "2026-10-02T10:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ deals: [goDeal] })));
+
+    await expect(fetchSalesQuoteDeals()).resolves.toEqual([goDeal]);
+  });
+
   it("fails closed when Go read outputs contain invalid UUIDs", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ quotes: [{ id: "bad-id", number: 1, status: "sent", totalMinor: 1, customerId, createdAt: null, expiresAt: null, invoiceId: null }] })));
     await expect(fetchSalesQuotes()).rejects.toMatchObject({ name: "SalesQuoteApiError", status: 200 });

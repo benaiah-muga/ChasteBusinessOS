@@ -28,6 +28,7 @@ beforeEach(() => {
   vi.mocked(fetchSalesQuoteCustomers).mockResolvedValue([customer]);
   vi.mocked(fetchSalesQuoteDeals).mockResolvedValue([{
     id: "60000000-0000-4000-8000-000000000001", title: "Website renewal", stage: "proposal", valueMinor: 250000,
+    source: "Referral", ownerUserId: "70000000-0000-4000-8000-000000000001", ownerName: "Morgan Lee",
     note: null, customerId, customerName: customer.name, createdAt: "2026-10-01T10:00:00.000Z", updatedAt: "2026-10-02T10:00:00.000Z",
   }]);
   vi.mocked(createSalesQuote).mockResolvedValue({ kind: "completed", data: { quoteId: "30000000-0000-4000-8000-000000000002", quoteNumber: 26, totalMinor: 22500 } });
