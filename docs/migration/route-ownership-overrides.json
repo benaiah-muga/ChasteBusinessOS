@@ -568,6 +568,12 @@
       "path": "/sales",
       "owner": "vite",
       "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/hr",
+      "owner": "vite",
+      "parity": "verified"
     }
   ],
   "goRoutes": [

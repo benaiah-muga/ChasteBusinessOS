@@ -92,6 +92,15 @@ production requests and writes. No production traffic has moved to Go.
   [`sales.ts`](../../apps/web-vite/src/api/sales.ts),
   [`sales_customers_session.go`](../../apps/api/internal/httpapi/sales_customers_session.go),
   and [`route-ownership-overrides.json`](route-ownership-overrides.json).
+- Vite `/hr` renders the React People workspace. Its overview loads through
+  authenticated Go capabilities `hr.report`, `hr.timeReport`, and
+  `hr.pendingTimeEntries`. Authenticated agent-browser proof showed the empty
+  employee, leave, openings, approved-time, and payroll states; all three
+  capability requests returned HTTP 200, no `localhost:3001` requests
+  appeared, and agent-browser errors was empty. See
+  [`HRPage.tsx`](../../apps/web-vite/src/components/HrPage.tsx),
+  [`hr.ts`](../../apps/web-vite/src/api/hr.ts), and
+  [`route-ownership-overrides.json`](route-ownership-overrides.json).
 - Vite Support channel settings use exact `GET` and `POST /api/support/channels`
   requests. Both route directly to Go regardless of the former Vite selectors;
   the Go handler mounts by default, and `GO_SUPPORT_CHANNELS_ROUTE=0` unmounts
