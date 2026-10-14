@@ -4549,3 +4549,12 @@ new owners and the manifest shows zero legacy runtime paths.
      pass. An authenticated browser proof created an opening and applicant,
      moved the applicant to offer, and hired them at UGX 1,000 monthly. Go
      capability calls returned HTTP 200 and the browser reported no errors.
+421. (Runtime verified) Vite Purchasing now shows accepted, rejected, returned,
+     and remaining quantity for each purchase order line from Go receipt
+     history. Receipt inputs are capped at the remaining quantity and the
+     action disables over-entry. The Go workspace projection integration test,
+     five focused Vite suites, typecheck, and lint pass. Authenticated browser
+     proof created a synthetic 2.5-unit purchase order, confirmed 2.6-unit
+     receipt entry was disabled, then recorded 1.25 units and saw 1.25 accepted
+     with 1.25 remaining. Go capability calls returned HTTP 200 and the browser
+     reported no errors.

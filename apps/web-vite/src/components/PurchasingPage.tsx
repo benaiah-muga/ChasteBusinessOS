@@ -1790,7 +1790,7 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
             >
               Create order
             </button>
-            <p className="purchasing-inline-note">Quantities are in whole units. Linking a stocked SKU is what makes a receipt update stock.</p>
+            <p className="purchasing-inline-note">Quantities support up to three decimal places. Linking a stocked SKU is what makes a receipt update stock.</p>
           </div>
         </form>
       </section>
@@ -1820,6 +1820,10 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
                     <th scope="col">#</th>
                     <th scope="col">Description</th>
                     <th scope="col" className="is-numeric">Qty</th>
+                    <th scope="col" className="is-numeric">Accepted</th>
+                    <th scope="col" className="is-numeric">Rejected</th>
+                    <th scope="col" className="is-numeric">Returned</th>
+                    <th scope="col" className="is-numeric">Remaining</th>
                     <th scope="col" className="is-numeric">Unit price</th>
                     <th scope="col" className="is-numeric">Receive qty</th>
                   </tr>
@@ -1830,6 +1834,10 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
                       <td className="is-numeric">{line.lineNumber}</td>
                       <th scope="row">{line.description}</th>
                       <td className="is-numeric">{formatThousandths(line.quantity)}</td>
+                      <td className="is-numeric">{formatThousandths(line.acceptedThousandths)}</td>
+                      <td className="is-numeric">{formatThousandths(line.rejectedThousandths)}</td>
+                      <td className="is-numeric">{formatThousandths(line.returnedThousandths)}</td>
+                      <td className="is-numeric">{formatThousandths(line.remainingThousandths)}</td>
                       <td className="is-amount">{formatMoney(line.unitPriceMinor, currency)}</td>
                       <td className="is-numeric">
                         {receivable && (
@@ -1837,6 +1845,7 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
                             className="purchasing-input purchasing-input-narrow"
                             inputMode="decimal"
                             placeholder={formatThousandths(line.quantity)}
+                            max={formatThousandths(line.remainingThousandths)}
                             aria-label={`Receive quantity for line ${line.lineNumber} of purchase order ${order.number}`}
                             value={receipts[`${order.id}:${line.lineNumber}`] ?? ""}
                             onChange={(event) => {
@@ -1866,7 +1875,7 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
                     <button
                       type="button"
                       className="purchasing-button is-primary"
-                      disabled={busy}
+                      disabled={busy || order.lines.some((line) => parseThousandths(receipts[`${order.id}:${line.lineNumber}`] ?? "0") > line.remainingThousandths)}
                       onClick={() => {
                         const lines = aggregateReceiveLines(order.lines.map((line) => ({
                           lineNumber: line.lineNumber,

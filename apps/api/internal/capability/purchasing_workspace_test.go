@@ -40,6 +40,19 @@ func TestPurchasingListWorkspacePermissionIsolationAndProjection(t *testing.T) {
 		VALUES ($1::uuid, 2, 'half minor', 500, 1), ($1::uuid, 1, 'four and a half', 1500, 3)`, newestPOID); err != nil {
 		t.Fatal(err)
 	}
+	var receiptID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO goods_receipts (org_id, po_id, number, received_by_actor_type)
+		VALUES ($1::uuid, $2::uuid, 1, 'human') RETURNING id::text`, fx.orgID, newestPOID).Scan(&receiptID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO goods_receipt_lines (org_id, receipt_id, po_line_id, position, accepted_thousandths, rejected_thousandths, returned_thousandths)
+		SELECT $1::uuid, $2::uuid, id, position, CASE WHEN position=1 THEN 500 ELSE 0 END,
+		       CASE WHEN position=1 THEN 250 ELSE 0 END, CASE WHEN position=1 THEN 100 ELSE 0 END
+		FROM po_lines WHERE po_id=$3::uuid`, fx.orgID, receiptID, newestPOID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := fx.owner.Exec(fx.ctx, `
 		INSERT INTO purchase_orders (org_id, vendor_id, number, status, created_at)
 		VALUES ($1::uuid, $2::uuid, 999, 'foreign', now())`, fx.otherOrgID, foreignVendorID); err != nil {
@@ -111,6 +124,12 @@ func TestPurchasingListWorkspacePermissionIsolationAndProjection(t *testing.T) {
 	newestOrder := output.Orders[0]
 	if newestOrder.VendorName != "Alpha" || newestOrder.OrderedMinor != 6 || len(newestOrder.Lines) != 2 || newestOrder.Lines[0].LineNumber != 1 || newestOrder.Lines[1].LineNumber != 2 {
 		t.Fatalf("newest order projection=%+v, want sorted lines and JS Math.round total 6", newestOrder)
+	}
+	if newestOrder.Lines[0].AcceptedThousandths != 500 || newestOrder.Lines[0].RejectedThousandths != 250 || newestOrder.Lines[0].ReturnedThousandths != 100 || newestOrder.Lines[0].RemainingThousandths != 750 {
+		t.Fatalf("first order line receiving projection=%+v, want accepted 500, rejected 250, returned 100, remaining 750", newestOrder.Lines[0])
+	}
+	if newestOrder.Lines[1].AcceptedThousandths != 0 || newestOrder.Lines[1].RejectedThousandths != 0 || newestOrder.Lines[1].ReturnedThousandths != 0 || newestOrder.Lines[1].RemainingThousandths != 500 {
+		t.Fatalf("second order line receiving projection=%+v, want untouched 500 remaining", newestOrder.Lines[1])
 	}
 	if len(output.Bills) != 100 || output.Bills[0].Number != 101 || output.Bills[0].Status != "void" || output.Bills[0].DueMinor != 500 || output.Bills[0].VendorName != "Alpha" {
 		t.Fatalf("bills[0]=%+v (total %d), want newest local bill and due amount 500", output.Bills[0], len(output.Bills))

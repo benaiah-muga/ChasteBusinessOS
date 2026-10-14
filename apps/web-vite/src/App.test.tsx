@@ -278,7 +278,7 @@ beforeEach(() => {
           status: "partially_received",
           memo: null,
           orderedMinor: 150000,
-          lines: [{ lineNumber: 1, description: "Steel rods", quantity: 10000, unitPriceMinor: 15000 }],
+          lines: [{ lineNumber: 1, description: "Steel rods", quantity: 10000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 10000, unitPriceMinor: 15000 }],
         }],
       } });
       if (capabilityId === "purchasing.listReceipts") return Response.json({ ok: true, data: {
@@ -344,7 +344,7 @@ beforeEach(() => {
       status: "partially_received",
       memo: null,
       orderedMinor: 150000,
-      lines: [{ lineNumber: 1, description: "Steel rods", quantity: 10000, unitPriceMinor: 15000 }],
+      lines: [{ lineNumber: 1, description: "Steel rods", quantity: 10000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 10000, unitPriceMinor: 15000 }],
     }] });
     if (path === "/api/pos/shift-summary" && init?.method === "POST") return Response.json({ ok: true, data: {
       register: "Main register",

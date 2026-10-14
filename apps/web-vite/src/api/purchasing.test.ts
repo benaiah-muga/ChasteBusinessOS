@@ -50,7 +50,7 @@ const workspace = {
     status: "ordered",
     memo: null,
     orderedMinor: 12500,
-    lines: [{ lineNumber: 1, description: "Canvas bag", quantity: 2500, unitPriceMinor: 5000 }],
+    lines: [{ lineNumber: 1, description: "Canvas bag", quantity: 2500, acceptedThousandths: 1000, rejectedThousandths: 250, returnedThousandths: 100, remainingThousandths: 1250, unitPriceMinor: 5000 }],
   }],
   bills: [{
     id: "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f",
@@ -180,6 +180,14 @@ describe("purchasing workspace reads", () => {
       input: {},
       intentId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
     });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      ok: true,
+      data: {
+        ...workspace,
+        orders: [{ ...workspace.orders[0]!, lines: [{ lineNumber: 1, description: "Canvas bag", quantity: 2500, unitPriceMinor: 5000 }] }],
+      },
+    })));
+    await expect(fetchPurchasingWorkspace("org-test")).rejects.toMatchObject({ status: 200 });
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { ...workspace, orders: [{ number: 1 }] } })));
     await expect(fetchPurchasingWorkspace("org-test")).rejects.toMatchObject({

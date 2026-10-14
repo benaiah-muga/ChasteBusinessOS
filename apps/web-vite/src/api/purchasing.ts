@@ -21,6 +21,10 @@ const PurchaseOrderLineSchema = z.object({
   lineNumber: z.number().int().safe().positive(),
   description: z.string(),
   quantity: NonnegativeSafeIntegerSchema,
+  acceptedThousandths: NonnegativeSafeIntegerSchema,
+  rejectedThousandths: NonnegativeSafeIntegerSchema,
+  returnedThousandths: NonnegativeSafeIntegerSchema,
+  remainingThousandths: NonnegativeSafeIntegerSchema,
   unitPriceMinor: NonnegativeSafeIntegerSchema,
 }).strict();
 

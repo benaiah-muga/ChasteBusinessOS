@@ -22,10 +22,14 @@ type PurchasingWorkspaceVendor struct {
 }
 
 type PurchasingWorkspaceOrderLine struct {
-	LineNumber     int64  `json:"lineNumber"`
-	Description    string `json:"description"`
-	Quantity       int64  `json:"quantity"`
-	UnitPriceMinor int64  `json:"unitPriceMinor"`
+	LineNumber           int64  `json:"lineNumber"`
+	Description          string `json:"description"`
+	Quantity             int64  `json:"quantity"`
+	AcceptedThousandths  int64  `json:"acceptedThousandths"`
+	RejectedThousandths  int64  `json:"rejectedThousandths"`
+	ReturnedThousandths  int64  `json:"returnedThousandths"`
+	RemainingThousandths int64  `json:"remainingThousandths"`
+	UnitPriceMinor       int64  `json:"unitPriceMinor"`
 }
 
 type PurchasingWorkspaceOrder struct {
@@ -162,8 +166,19 @@ func purchasingListWorkspace(ctx context.Context, tx pgx.Tx, orgID string, _ Pur
 
 	if len(orderVendorIDs) > 0 {
 		lineRows, err := tx.Query(ctx, `
-			SELECT po_id::text, position, description, quantity, unit_price_minor
-			FROM po_lines WHERE po_id = ANY($1::uuid[]) ORDER BY position ASC`, orderVendorIDs)
+			SELECT line.po_id::text, line.position, line.description, line.quantity, line.unit_price_minor,
+			       COALESCE(received.accepted_thousandths, 0),
+			       COALESCE(received.rejected_thousandths, 0),
+			       COALESCE(received.returned_thousandths, 0)
+			FROM po_lines line
+			LEFT JOIN LATERAL (
+				SELECT SUM(receipt_line.accepted_thousandths)::bigint AS accepted_thousandths,
+				       SUM(receipt_line.rejected_thousandths)::bigint AS rejected_thousandths,
+				       SUM(receipt_line.returned_thousandths)::bigint AS returned_thousandths
+				FROM goods_receipt_lines receipt_line
+				WHERE receipt_line.org_id=$2::uuid AND receipt_line.po_line_id=line.id
+			) received ON true
+			WHERE line.po_id = ANY($1::uuid[]) ORDER BY line.position ASC`, orderVendorIDs, orgID)
 		if err != nil {
 			return PurchasingListWorkspaceOutput{}, err
 		}
@@ -174,9 +189,22 @@ func purchasingListWorkspace(ctx context.Context, tx pgx.Tx, orgID string, _ Pur
 		for lineRows.Next() {
 			var poID string
 			var line PurchasingWorkspaceOrderLine
-			if err := lineRows.Scan(&poID, &line.LineNumber, &line.Description, &line.Quantity, &line.UnitPriceMinor); err != nil {
+			if err := lineRows.Scan(
+				&poID,
+				&line.LineNumber,
+				&line.Description,
+				&line.Quantity,
+				&line.UnitPriceMinor,
+				&line.AcceptedThousandths,
+				&line.RejectedThousandths,
+				&line.ReturnedThousandths,
+			); err != nil {
 				lineRows.Close()
 				return PurchasingListWorkspaceOutput{}, err
+			}
+			line.RemainingThousandths = line.Quantity - line.AcceptedThousandths - line.RejectedThousandths
+			if line.RemainingThousandths < 0 {
+				line.RemainingThousandths = 0
 			}
 			index, ok := orderIndex[poID]
 			if !ok {

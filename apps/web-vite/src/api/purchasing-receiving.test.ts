@@ -22,8 +22,8 @@ const order = {
   memo: "Spring reorder",
   orderedMinor: 12500,
   lines: [
-    { lineNumber: 1, description: "Canvas bag", quantity: 2500, unitPriceMinor: 5000 },
-    { lineNumber: 2, description: "Strap", quantity: 1000, unitPriceMinor: 5000 },
+    { lineNumber: 1, description: "Canvas bag", quantity: 2500, acceptedThousandths: 1000, rejectedThousandths: 250, returnedThousandths: 100, remainingThousandths: 1250, unitPriceMinor: 5000 },
+    { lineNumber: 2, description: "Strap", quantity: 1000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1000, unitPriceMinor: 5000 },
   ],
 };
 

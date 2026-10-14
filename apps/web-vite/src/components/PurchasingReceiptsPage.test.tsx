@@ -19,7 +19,7 @@ const ordersResponse = {
       status: "received",
       memo: null,
       orderedMinor: 12500,
-      lines: [{ lineNumber: 1, description: "Canvas bag", quantity: 2500, unitPriceMinor: 5000 }],
+      lines: [{ lineNumber: 1, description: "Canvas bag", quantity: 2500, acceptedThousandths: 1000, rejectedThousandths: 250, returnedThousandths: 100, remainingThousandths: 1250, unitPriceMinor: 5000 }],
     },
     {
       id: "32c0016b-835f-4d6d-a032-05bf8d81d2a4",
@@ -28,7 +28,7 @@ const ordersResponse = {
       status: "approved",
       memo: null,
       orderedMinor: 10000,
-      lines: [{ lineNumber: 1, description: "Cotton roll", quantity: 1000, unitPriceMinor: 10000 }],
+      lines: [{ lineNumber: 1, description: "Cotton roll", quantity: 1000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1000, unitPriceMinor: 10000 }],
     },
   ],
 };

@@ -17,7 +17,7 @@ const vendor = {
   createdAt: "2026-08-01T10:00:00.000Z",
 };
 
-function orderFixture(lines = [{ lineNumber: 1, description: "Canvas bag", quantity: 10000, unitPriceMinor: 5000 }]) {
+function orderFixture(lines = [{ lineNumber: 1, description: "Canvas bag", quantity: 10000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 10000, unitPriceMinor: 5000 }]) {
   return {
     id: "1a7c1a1e-9c3a-4f1a-9b2f-3f1c2d4e5a6b",
     number: 42,
@@ -298,7 +298,7 @@ describe("three-way matching on a vendor bill", () => {
 });
 
 describe("returns need a stated reason", () => {
-  const order = orderFixture([{ lineNumber: 1, description: "Canvas bag", quantity: 10000, unitPriceMinor: 5000 }]);
+  const order = orderFixture([{ lineNumber: 1, description: "Canvas bag", quantity: 10000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 10000, unitPriceMinor: 5000 }]);
 
   it("keeps a line only when it has both a quantity and a reason", () => {
     expect(buildReturnLines({
@@ -313,8 +313,8 @@ describe("returns need a stated reason", () => {
 describe("receiving prefills from the aggregated rollup", () => {
   it("fills every ordered line with what is still outstanding and no rejection", () => {
     const draft = prefillReceivingDraft(orderFixture([
-      { lineNumber: 1, description: "Canvas bag", quantity: 2500, unitPriceMinor: 5000 },
-      { lineNumber: 2, description: "Strap", quantity: 1000, unitPriceMinor: 5000 },
+      { lineNumber: 1, description: "Canvas bag", quantity: 2500, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 2500, unitPriceMinor: 5000 },
+      { lineNumber: 2, description: "Strap", quantity: 1000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1000, unitPriceMinor: 5000 },
     ]), [
       { position: 1, description: "Canvas bag", orderedThousandths: 2500, acceptedThousandths: 1500, rejectedThousandths: 500, returnedThousandths: 0, remainingThousandths: 500 },
       { position: 2, description: "Strap", orderedThousandths: 1000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1000 },
@@ -1288,9 +1288,9 @@ describe("PurchasingPage", () => {
     const fetchMock = purchasingFetch({
       workspace: workspaceFixture({
         orders: [orderFixture([
-          { lineNumber: 1, description: "Canvas bag", quantity: 10000, unitPriceMinor: 5000 },
-          { lineNumber: 2, description: "Strap", quantity: 10000, unitPriceMinor: 5000 },
-          { lineNumber: 3, description: "Buckle", quantity: 10000, unitPriceMinor: 5000 },
+          { lineNumber: 1, description: "Canvas bag", quantity: 10000, acceptedThousandths: 2000, rejectedThousandths: 1000, returnedThousandths: 500, remainingThousandths: 7000, unitPriceMinor: 5000 },
+          { lineNumber: 2, description: "Strap", quantity: 10000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 10000, unitPriceMinor: 5000 },
+          { lineNumber: 3, description: "Buckle", quantity: 10000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 10000, unitPriceMinor: 5000 },
         ])],
       }),
     });
@@ -1300,8 +1300,18 @@ describe("PurchasingPage", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
 
+    const orderTable = screen.getByRole("table", { name: "Lines ordered on purchase order 42" });
+    const canvasLine = within(orderTable).getByRole("row", { name: /Canvas bag/ });
+    expect(within(canvasLine).getByRole("rowheader").textContent).toBe("Canvas bag");
+    expect(within(canvasLine).getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["1", "10", "2", "1", "0.5", "7", "$50.00", ""]);
+    const canvasReceive = screen.getByLabelText("Receive quantity for line 1 of purchase order 42") as HTMLInputElement;
+    expect(canvasReceive.max).toBe("7");
+    fireEvent.change(canvasReceive, { target: { value: "7.001" } });
+    expect(screen.getByRole("button", { name: "Record receipt" }).hasAttribute("disabled")).toBe(true);
+
     fireEvent.change(screen.getByLabelText("Receive quantity for line 1 of purchase order 42"), { target: { value: "6" } });
     fireEvent.change(screen.getByLabelText("Receive quantity for line 2 of purchase order 42"), { target: { value: "4.5" } });
+    expect(screen.getByRole("button", { name: "Record receipt" }).hasAttribute("disabled")).toBe(false);
     // Line 3 is deliberately left blank and must not reach the executor.
     fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
 
@@ -1477,8 +1487,8 @@ describe("PurchasingReceivingPage", () => {
   const receivingOrders = {
     baseCurrency: "USD",
     orders: [orderFixture([
-      { lineNumber: 1, description: "Canvas bag", quantity: 2500, unitPriceMinor: 5000 },
-      { lineNumber: 2, description: "Strap", quantity: 1000, unitPriceMinor: 5000 },
+      { lineNumber: 1, description: "Canvas bag", quantity: 2500, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 2500, unitPriceMinor: 5000 },
+      { lineNumber: 2, description: "Strap", quantity: 1000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1000, unitPriceMinor: 5000 },
     ])],
   };
 

@@ -15,7 +15,7 @@ const order = {
   status: "received",
   memo: null,
   orderedMinor: 12500,
-  lines: [{ lineNumber: 1, description: "Canvas bag", quantity: 2500, unitPriceMinor: 5000 }],
+  lines: [{ lineNumber: 1, description: "Canvas bag", quantity: 2500, acceptedThousandths: 1000, rejectedThousandths: 250, returnedThousandths: 100, remainingThousandths: 1250, unitPriceMinor: 5000 }],
 };
 
 const receiptData = {
