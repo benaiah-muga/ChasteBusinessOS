@@ -574,6 +574,12 @@
       "path": "/hr",
       "owner": "vite",
       "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/marketplace",
+      "owner": "vite",
+      "parity": "verified"
     }
   ],
   "goRoutes": [

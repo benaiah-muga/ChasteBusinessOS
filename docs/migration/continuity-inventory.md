@@ -101,6 +101,14 @@ production requests and writes. No production traffic has moved to Go.
   [`HRPage.tsx`](../../apps/web-vite/src/components/HrPage.tsx),
   [`hr.ts`](../../apps/web-vite/src/api/hr.ts), and
   [`route-ownership-overrides.json`](route-ownership-overrides.json).
+- Authenticated agent-browser loaded Vite `/marketplace` and rendered the
+  Marketplace workspace with its signed migration-proof listing. The Go
+  capability request returned HTTP 200, no `localhost:3001` request appeared,
+  and agent-browser errors was empty. This records page and read-route runtime
+  ownership; marketplace write-flow proofs are tracked separately below. See
+  [`MarketplacePage.tsx`](../../apps/web-vite/src/components/MarketplacePage.tsx),
+  [`marketplace.ts`](../../apps/web-vite/src/api/marketplace.ts), and
+  [`route-ownership-overrides.json`](route-ownership-overrides.json).
 - Vite Support channel settings use exact `GET` and `POST /api/support/channels`
   requests. Both route directly to Go regardless of the former Vite selectors;
   the Go handler mounts by default, and `GO_SUPPORT_CHANNELS_ROUTE=0` unmounts
