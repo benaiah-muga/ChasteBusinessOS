@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrTime, HrApiError, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeHireAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPayrollRun, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrTime, HrApiError, readPendingHrEmployeeAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPayrollRun, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
 import "./hr-page.css";
 
 type TabId = "overview" | "people" | "hiring" | "leave" | "time" | "payroll" | "expenses";
@@ -65,7 +65,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
   const [busy, setBusy] = useState(false);
   const [leaveRecoveryAction, setLeaveRecoveryAction] = useState<HrLeaveAction | null>(null);
   const [hiringRecoveryAction, setHiringRecoveryAction] = useState<HrHiringAction | null>(null);
-  const [employeeHireRecoveryAction, setEmployeeHireRecoveryAction] = useState<HrEmployeeHireAction | null>(null);
+  const [employeeActionRecovery, setEmployeeActionRecovery] = useState<HrEmployeeAction | null>(null);
   const [payrollRecoveryAction, setPayrollRecoveryAction] = useState<HrPayrollAction | null>(null);
   const [timeRecoveryAction, setTimeRecoveryAction] = useState<HrTimeAction | null>(null);
   const [range, setRange] = useState(monthRange);
@@ -175,16 +175,16 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
 
   useEffect(() => {
     if (tab !== "people") {
-      setEmployeeHireRecoveryAction(null);
+      setEmployeeActionRecovery(null);
       return;
     }
     let active = true;
-    void readPendingHrEmployeeHireAction({ actorId, organizationId }).then((action) => {
+    void readPendingHrEmployeeAction({ actorId, organizationId }).then((action) => {
       if (!active || !isCurrentScope()) return;
-      setEmployeeHireRecoveryAction(action);
-      if (action) setNotice({ tone: "pending", text: "An employee hire is unresolved. Retry the exact details to recover its result before hiring another employee." });
+      setEmployeeActionRecovery(action);
+      if (action) setNotice({ tone: "pending", text: "An employee action is unresolved. Retry the exact details to recover its result before changing another employee record." });
     }).catch((error) => {
-      if (active && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved employee hire." });
+      if (active && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved employee action." });
     });
     return () => { active = false; };
   }, [tab, actorId, organizationId, isCurrentScope]);
@@ -264,30 +264,37 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
     }
   }
 
-  async function runEmployeeHireAction(action: HrEmployeeHireAction, exactRecovery = false): Promise<void> {
-    if (busy || (employeeHireRecoveryAction && !exactRecovery)) return;
+  async function runEmployeeAction(action: HrEmployeeAction, exactRecovery = false): Promise<void> {
+    if (busy || (employeeActionRecovery && !exactRecovery)) return;
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitHrEmployeeHireAction(action, { actorId, organizationId });
+      const result = await submitHrEmployeeAction(action, { actorId, organizationId });
       if (!isCurrentScope()) return;
       if (result.kind === "pending") {
-        setEmployeeHireRecoveryAction(action);
-        setNotice({ tone: "pending", text: "Employee hire is waiting for approval or result recovery. Retry the exact details when ready." });
+        setEmployeeActionRecovery(action);
+        const actionLabel = action.action === "hireEmployee" ? "Employee hire" : "Employee deactivation";
+        setNotice({ tone: "pending", text: `${actionLabel} is waiting for approval or result recovery. Retry the exact details when ready.` });
       } else {
-        setEmployeeHireRecoveryAction(null);
-        setHire({ name: "", email: "", title: "", salary: "" });
-        setNotice({ tone: "success", text: "Employee hire completed." });
+        setEmployeeActionRecovery(null);
+        if (action.action === "hireEmployee") {
+          setHire({ name: "", email: "", title: "", salary: "" });
+          setNotice({ tone: "success", text: "Employee hire completed." });
+        } else if (result.data.deactivated === true) {
+          setNotice({ tone: "success", text: "Employee deactivated." });
+        } else {
+          setNotice({ tone: "error", text: "This employee could not be deactivated. Refresh the directory and check the employee status." });
+        }
         await refreshAll();
       }
     } catch (error) {
       if (!isCurrentScope()) return;
-      let pendingAction: HrEmployeeHireAction | null;
-      try { pendingAction = await readPendingHrEmployeeHireAction({ actorId, organizationId }); }
+      let pendingAction: HrEmployeeAction | null;
+      try { pendingAction = await readPendingHrEmployeeAction({ actorId, organizationId }); }
       catch { pendingAction = action; }
       if (!isCurrentScope()) return;
-      setEmployeeHireRecoveryAction(pendingAction);
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Employee hire failed." });
+      setEmployeeActionRecovery(pendingAction);
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Employee action failed." });
     } finally {
       if (isCurrentScope()) setBusy(false);
     }
@@ -378,7 +385,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
     if (tab !== "people") return null;
     return <>
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-      {employeeHireRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeHireAction(employeeHireRecoveryAction, true)}>Retry exact employee hire</button></div>}
+      {employeeActionRecovery && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeAction(employeeActionRecovery, true)}>{employeeActionRecovery.action === "hireEmployee" ? "Retry exact employee hire" : "Retry exact employee deactivation"}</button></div>}
     </>;
   }
 
@@ -478,16 +485,16 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
       {tab === "leave" && leaveRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runLeaveAction(leaveRecoveryAction, "Leave action")}>Retry exact leave action</button></div>}
       {tab === "hiring" && hiringRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runHiringAction(hiringRecoveryAction, "Hiring action", true)}>Retry exact Hiring action</button></div>}
-      {tab === "people" && employeeHireRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeHireAction(employeeHireRecoveryAction, true)}>Retry exact employee hire</button></div>}
+      {tab === "people" && employeeActionRecovery && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeAction(employeeActionRecovery, true)}>{employeeActionRecovery.action === "hireEmployee" ? "Retry exact employee hire" : "Retry exact employee deactivation"}</button></div>}
       {tab === "payroll" && payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll action</button></div>}
       {timeRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void submitTimeAction(timeRecoveryAction, "Time action", undefined, true)}>Retry exact time action</button></div>}
       <section id="hr-tab-panel" className="hr-content" role="tabpanel" aria-labelledby={`hr-tab-${tab}`}>
         {tab === "overview" && <Overview report={data} timeRows={timeRows} currency={currency} onTabChange={changeTab} />}
-        {tab === "people" && <People employees={data.employees} currency={currency} hire={hire} setHire={setHire} busy={busy || Boolean(employeeHireRecoveryAction)} onHire={() => {
+        {tab === "people" && <People employees={data.employees} currency={currency} hire={hire} setHire={setHire} busy={busy || Boolean(employeeActionRecovery)} onDeactivate={(employee) => void runEmployeeAction({ action: "deactivateEmployee", employeeId: employee.id })} onHire={() => {
           if (!currency) return;
           const salaryMinor = Math.round(Number(hire.salary) * (10 ** (currencyMinorUnits(currency) ?? 2)));
           if (!hire.name.trim() || !Number.isSafeInteger(salaryMinor) || salaryMinor <= 0) return;
-          void runEmployeeHireAction({ action: "hireEmployee", name: hire.name.trim(), email: hire.email.trim() || undefined, title: hire.title.trim() || undefined, monthlySalaryMinor: salaryMinor });
+          void runEmployeeAction({ action: "hireEmployee", name: hire.name.trim(), email: hire.email.trim() || undefined, title: hire.title.trim() || undefined, monthlySalaryMinor: salaryMinor });
         }} />}
         {tab === "hiring" && <Hiring openings={openings} applicants={data.applicants} busy={busy || Boolean(hiringRecoveryAction)} openingTitle={openingTitle} setOpeningTitle={setOpeningTitle} applicantForm={applicantForm} setApplicantForm={setApplicantForm} onCreateOpening={() => {
           if (!openingTitle.trim()) return;
@@ -728,7 +735,8 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
   return <article className="hr-metric"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function People({ employees, currency, hire, setHire, busy, onHire }: { employees: HrEmployee[]; currency: string | null; hire: { name: string; email: string; title: string; salary: string }; setHire: (value: { name: string; email: string; title: string; salary: string }) => void; busy: boolean; onHire: () => void }) {
+function People({ employees, currency, hire, setHire, busy, onHire, onDeactivate }: { employees: HrEmployee[]; currency: string | null; hire: { name: string; email: string; title: string; salary: string }; setHire: (value: { name: string; email: string; title: string; salary: string }) => void; busy: boolean; onHire: () => void; onDeactivate: (employee: HrEmployee) => void }) {
+  const [deactivateTarget, setDeactivateTarget] = useState<HrEmployee | null>(null);
   const currencyReady = Boolean(currency);
   const minorUnits = currencyMinorUnits(currency ?? "USD") ?? 2;
   return <>
@@ -743,8 +751,9 @@ function People({ employees, currency, hire, setHire, busy, onHire }: { employee
       </form>
     </section>
     <section className="hr-card hr-table-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Directory</p><h2>People</h2></div><span className="hr-count">{employees.length} records</span></div>
-      {employees.length === 0 ? <p className="hr-muted">No employee records yet.</p> : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Employee</th><th scope="col">Department</th><th scope="col">Monthly salary</th><th scope="col">Status</th></tr></thead><tbody>{employees.map((employee) => <tr key={employee.id}><th scope="row"><span className="hr-table-person">{employee.name}</span><small>{employee.email || employee.title || "No contact details"}</small></th><td>{employee.department || "Not set"}</td><td>{currency ? formatMoney(employee.monthlySalaryMinor, currency) : "Loading currency"}</td><td><span className={`hr-pill ${employee.active ? "is-active" : "is-muted"}`}>{employee.active ? "Active" : "Inactive"}</span></td></tr>)}</tbody></table></div>}
+      {employees.length === 0 ? <p className="hr-muted">No employee records yet.</p> : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Employee</th><th scope="col">Department</th><th scope="col">Monthly salary</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>{employees.map((employee) => <tr key={employee.id}><th scope="row"><span className="hr-table-person">{employee.name}</span><small>{employee.email || employee.title || "No contact details"}</small></th><td>{employee.department || "Not set"}</td><td>{currency ? formatMoney(employee.monthlySalaryMinor, currency) : "Loading currency"}</td><td><span className={`hr-pill ${employee.active ? "is-active" : "is-muted"}`}>{employee.active ? "Active" : "Inactive"}</span></td><td>{employee.active ? <button type="button" disabled={busy} onClick={() => setDeactivateTarget(employee)}>Deactivate</button> : <span className="hr-muted">No actions</span>}</td></tr>)}</tbody></table></div>}
     </section>
+    {deactivateTarget && <div className="hr-confirm-backdrop"><section className="hr-card hr-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-deactivate-title"><p className="hr-eyebrow">Confirm employee change</p><h2 id="hr-deactivate-title">Deactivate {deactivateTarget.name}?</h2><p>This removes the employee from active team work and excludes them from future payroll runs. Their historical records remain available.</p><div className="hr-actions"><button type="button" onClick={() => setDeactivateTarget(null)}>Cancel</button><button type="button" className="hr-primary-button" disabled={busy} onClick={() => { onDeactivate(deactivateTarget); setDeactivateTarget(null); }}>Confirm deactivation</button></div></section></div>}
   </>;
 }
 

@@ -4299,3 +4299,18 @@ new owners and the manifest shows zero legacy runtime paths.
      duplicate and invalid lifecycle rejections to definite HTTP 422 results,
      with integration coverage confirming a duplicate cannot create another
      run. No browser runtime errors were observed.
+
+404. (Implemented and API/component verified) Vite People can deactivate an
+     active employee through Go's `hr.deactivateEmployee` capability after
+     explicit confirmation. The directory retains the employee as inactive,
+     while Go excludes deactivated employees from new payroll runs. The exact
+     employee action is scoped by actor and organization, pending approval
+     survives reload, and its retry marker clears only when intent ID and
+     fingerprint still match. Focused API and component tests cover capability
+     input/output, pending recovery, confirmation gating, and removal of the
+     active action after refresh. Authenticated `agent-browser` proof on
+     2026-10-14 deactivated a synthetic employee, reloaded the People page,
+     and confirmed inactive status with no available action. The Go Payroll
+     page then reported zero active people and disabled draft creation. The
+     capability request returned HTTP 200, no legacy HR write occurred, and
+     the browser reported no errors.

@@ -247,6 +247,46 @@ describe("Vite People page", () => {
     expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
   });
 
+  it("requires confirmation before Go deactivation and removes the employee from active actions", async () => {
+    window.history.replaceState(null, "", "/hr?tab=people");
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    stubHrWriteLocks();
+    let currentEmployee = employee;
+    const currentReport = { ...report, employees: [currentEmployee] };
+    const writes: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: currentReport });
+        if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [] } });
+        if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [] } });
+        writes.push({ capabilityId: body.capabilityId, input: body.input });
+        currentEmployee = { ...currentEmployee, active: false };
+        currentReport.employees = [currentEmployee];
+        return Response.json({ ok: true, data: { deactivated: true } });
+      }
+      throw new Error(`Unexpected employee route: ${path}`);
+    });
+    stubFetchWithGoTimeReads(fetchMock);
+    render(<HrPage baseCurrency="UGX" actorId="22222222-2222-4222-8222-222222222222" organizationId="33333333-3333-4333-8333-333333333333" />);
+
+    await screen.findByRole("heading", { name: "Hire an employee" });
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+    expect(screen.getByRole("dialog", { name: "Deactivate Amina Wanjiru?" })).not.toBeNull();
+    expect(screen.getByText(/excludes them from future payroll runs/)).not.toBeNull();
+    expect(writes).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deactivation" }));
+
+    expect(await screen.findByText("Employee deactivated.")).not.toBeNull();
+    expect(writes).toEqual([{ capabilityId: "hr.deactivateEmployee", input: { employeeId: employee.id } }]);
+    await waitFor(() => expect(screen.getByText("Inactive")).not.toBeNull());
+    expect(screen.queryByRole("button", { name: "Deactivate" })).toBeNull();
+  });
+
   it("drops employee hire recovery state immediately when the active organization changes", async () => {
     stubHrWriteLocks();
     window.history.replaceState(null, "", "/hr?tab=people");

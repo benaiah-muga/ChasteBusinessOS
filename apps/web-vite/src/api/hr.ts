@@ -93,6 +93,7 @@ export type HrPendingEntry = z.infer<typeof GoPendingEntriesSchema>["entries"][n
 
 export type HrAction =
   | { action: "hireEmployee"; name: string; email?: string; title?: string; monthlySalaryMinor: number; taxRateBps?: number; annualLeaveDays?: number }
+  | { action: "deactivateEmployee"; employeeId: string }
   | { action: "requestLeave"; employeeId: string; kind: string; startDate: string; endDate: string }
   | { action: "createOpening"; title: string; department?: string; note?: string }
   | { action: "addApplicant"; openingId: string; name: string; email?: string; note?: string }
@@ -109,6 +110,8 @@ export type HrActionResult = { kind: "success" | "pending"; data: Record<string,
 export type HrPayrollAction = Extract<HrAction, { action: "createPayrollRun" | "executePayrollRun" | "voidPayrollRun" | "reversePayrollPosting" }>;
 export type HrHiringAction = Extract<HrAction, { action: "createOpening" | "addApplicant" | "moveApplicant" }>;
 export type HrEmployeeHireAction = Extract<HrAction, { action: "hireEmployee" }>;
+export type HrEmployeeDeactivateAction = Extract<HrAction, { action: "deactivateEmployee" }>;
+export type HrEmployeeAction = HrEmployeeHireAction | HrEmployeeDeactivateAction;
 export type HrLeaveAction =
   | { action: "requestLeave"; employeeId: string; kind: string; startDate: string; endDate: string }
   | { action: "decideLeave"; requestId: string; approve: boolean }
@@ -179,8 +182,13 @@ const GoHrEmployeeHireActionSchema = z.object({
   taxRateBps: z.number().int().safe().min(0).max(5000).optional(),
   annualLeaveDays: z.number().int().safe().min(0).max(365).optional(),
 }).strict();
-const GoHrEmployeeHireAttemptSchema = z.object({ intentId: z.string().uuid(), fingerprint: z.string().length(64), action: GoHrEmployeeHireActionSchema }).strict();
-const GoHrEmployeeHireOutputSchema = z.object({ employeeId: z.string().uuid() }).strict();
+const GoHrEmployeeDeactivateActionSchema = z.object({ action: z.literal("deactivateEmployee"), employeeId: z.string().uuid() }).strict();
+const GoHrEmployeeActionSchema = z.discriminatedUnion("action", [GoHrEmployeeHireActionSchema, GoHrEmployeeDeactivateActionSchema]);
+const GoHrEmployeeAttemptSchema = z.object({ intentId: z.string().uuid(), fingerprint: z.string().length(64), action: GoHrEmployeeActionSchema }).strict();
+const GoHrEmployeeOutputSchemas = {
+  hireEmployee: z.object({ employeeId: z.string().uuid() }).strict(),
+  deactivateEmployee: z.object({ deactivated: z.boolean() }).strict(),
+} as const;
 const GoPendingEntriesSchema = z.object({
   entries: z.array(z.object({
     id: z.string().uuid(),
@@ -368,49 +376,52 @@ export async function submitHrHiringAction(
   }
 }
 
-export async function readPendingHrEmployeeHireAction(scope: HrRetryScope): Promise<HrEmployeeHireAction | null> {
+export async function readPendingHrEmployeeAction(scope: HrRetryScope): Promise<HrEmployeeAction | null> {
   const scoped = await hrEmployeeScope(scope);
   let raw: string | null;
   try { raw = window.localStorage.getItem(`${GO_HR_EMPLOYEE_ATTEMPT_PREFIX}${scoped.scopeHash}`); }
-  catch { throw new HrApiError(0, "Enable browser storage to check for an unresolved employee hire."); }
+  catch { throw new HrApiError(0, "Enable browser storage to check for an unresolved employee action."); }
   if (raw === null) return null;
-  return parseGoHrEmployeeHireAttempt(raw).action;
+  return parseGoHrEmployeeAttempt(raw).action;
 }
 
-export async function submitHrEmployeeHireAction(
-  action: HrEmployeeHireAction,
+export async function submitHrEmployeeAction(
+  action: HrEmployeeAction,
   scope: HrRetryScope,
   signal?: AbortSignal,
 ): Promise<HrActionResult> {
-  const parsedAction = GoHrEmployeeHireActionSchema.safeParse(action);
-  if (!parsedAction.success) throw new HrApiError(400, "The employee hire does not match the Go service contract.");
+  const parsedAction = GoHrEmployeeActionSchema.safeParse(action);
+  if (!parsedAction.success) throw new HrApiError(400, "The employee action does not match the Go service contract.");
   const scoped = await hrEmployeeScope(scope);
-  const attempt = await goHrEmployeeHireAttempt(parsedAction.data, scoped.scopeHash);
+  const attempt = await goHrEmployeeAttempt(parsedAction.data, scoped.scopeHash);
+  const capability = parsedAction.data.action === "hireEmployee"
+    ? { capabilityId: "hr.hireEmployee", input: hrEmployeeHireCapabilityInput(parsedAction.data) }
+    : { capabilityId: "hr.deactivateEmployee", input: { employeeId: parsedAction.data.employeeId } };
   try {
     const response = await request("/api/capabilities/execute", {
       method: "POST",
-      body: JSON.stringify({ capabilityId: "hr.hireEmployee", input: hrEmployeeHireCapabilityInput(parsedAction.data), intentId: attempt.intentId }),
+      body: JSON.stringify({ ...capability, intentId: attempt.intentId }),
     }, signal, scoped.organizationId);
     const body = await readJson(response);
     if (response.status === 202) {
       const pending = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() }).safeParse(body);
       if (!pending.success) throw new HrApiError(response.status, "The Go People service returned an unexpected approval response.", true);
-      return { kind: "pending", data: { reason: pending.data.reason ?? pending.data.error ?? "This employee hire is waiting for approval." } };
+      return { kind: "pending", data: { reason: pending.data.reason ?? pending.data.error ?? "This employee action is waiting for approval." } };
     }
     if (!response.ok) {
       const mayHaveReachedServer = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
-      const apiFailure = parseError(response.status, body, "The Go People service could not hire this employee.");
+      const apiFailure = parseError(response.status, body, "The Go People service could not complete this employee action.");
       const failure = new HrApiError(response.status, apiFailure.message, mayHaveReachedServer);
-      if (!mayHaveReachedServer) await clearGoHrEmployeeHireAttempt(attempt.storageKey, attempt.intentId);
+      if (!mayHaveReachedServer) await clearGoHrEmployeeAttempt(attempt.storageKey, attempt.intentId, attempt.fingerprint);
       throw failure;
     }
-    const parsed = z.object({ ok: z.literal(true), data: GoHrEmployeeHireOutputSchema }).strict().safeParse(body);
-    if (response.status !== 200 || !parsed.success) throw new HrApiError(response.status, "The Go People service returned an unexpected employee hire response.", true);
-    await clearGoHrEmployeeHireAttempt(attempt.storageKey, attempt.intentId);
+    const parsed = z.object({ ok: z.literal(true), data: GoHrEmployeeOutputSchemas[parsedAction.data.action] }).strict().safeParse(body);
+    if (response.status !== 200 || !parsed.success) throw new HrApiError(response.status, "The Go People service returned an unexpected employee action response.", true);
+    await clearGoHrEmployeeAttempt(attempt.storageKey, attempt.intentId, attempt.fingerprint);
     return { kind: "success", data: parsed.data.data };
   } catch (error) {
     if (error instanceof HrApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearGoHrEmployeeHireAttempt(attempt.storageKey, attempt.intentId);
+      await clearGoHrEmployeeAttempt(attempt.storageKey, attempt.intentId, attempt.fingerprint);
     }
     throw error;
   }
@@ -425,80 +436,82 @@ async function hrEmployeeScope(scope: HrRetryScope): Promise<{ actorId: string; 
   const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
   if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
-    throw new HrApiError(0, "Employee hires need your account and organization details before they can be submitted.");
+    throw new HrApiError(0, "Employee actions need your account and organization details before they can be submitted.");
   }
   try {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
     return { actorId, organizationId, scopeHash: Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("") };
   } catch {
-    throw new HrApiError(0, "Could not prepare a durable employee hire retry.");
+    throw new HrApiError(0, "Could not prepare a durable employee action retry.");
   }
 }
 
-async function goHrEmployeeHireAttempt(action: HrEmployeeHireAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
+async function goHrEmployeeAttempt(action: HrEmployeeAction, scopeHash: string): Promise<{ storageKey: string; intentId: string; fingerprint: string }> {
   const storageKey = `${GO_HR_EMPLOYEE_ATTEMPT_PREFIX}${scopeHash}`;
-  const fingerprint = await goHrEmployeeHireFingerprint(action);
-  return withHrEmployeeHireReservationLock(storageKey, async () => {
+  const fingerprint = await goHrEmployeeFingerprint(action);
+  return withHrEmployeeReservationLock(storageKey, async () => {
     let raw: string | null;
     try { raw = window.localStorage.getItem(storageKey); }
     catch { throw new HrApiError(0, "Enable browser storage before hiring so uncertain actions can be retried safely."); }
     if (raw !== null) {
-      const stored = parseGoHrEmployeeHireAttempt(raw);
-      if (stored.fingerprint !== fingerprint) throw new HrApiError(0, "A previous employee hire is unresolved. Retry its exact details before starting another hire.", true);
-      return { storageKey, intentId: stored.intentId };
+      const stored = parseGoHrEmployeeAttempt(raw);
+      if (stored.fingerprint !== fingerprint) throw new HrApiError(0, "A previous employee action is unresolved. Retry its exact details before starting another action.", true);
+      return { storageKey, intentId: stored.intentId, fingerprint: stored.fingerprint };
     }
     const attempt = { fingerprint, intentId: crypto.randomUUID(), action };
     const serialized = JSON.stringify(attempt);
     try {
       window.localStorage.setItem(storageKey, serialized);
-      if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("employee hire retry did not persist");
+      if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("employee action retry did not persist");
     } catch {
-      throw new HrApiError(0, "Enable browser storage before hiring so uncertain actions can be retried safely.");
+      throw new HrApiError(0, "Enable browser storage before changing employee records so uncertain actions can be retried safely.");
     }
-    return { storageKey, intentId: attempt.intentId };
+    return { storageKey, intentId: attempt.intentId, fingerprint: attempt.fingerprint };
   });
 }
 
-async function goHrEmployeeHireFingerprint(action: HrEmployeeHireAction): Promise<string> {
+async function goHrEmployeeFingerprint(action: HrEmployeeAction): Promise<string> {
   try {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJSON(action)));
     return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
   } catch {
-    throw new HrApiError(0, "Could not prepare a durable employee hire retry.");
+    throw new HrApiError(0, "Could not prepare a durable employee action retry.");
   }
 }
 
-function parseGoHrEmployeeHireAttempt(raw: string): z.infer<typeof GoHrEmployeeHireAttemptSchema> {
+function parseGoHrEmployeeAttempt(raw: string): z.infer<typeof GoHrEmployeeAttemptSchema> {
   let decoded: unknown;
   try { decoded = JSON.parse(raw); }
-  catch { throw new HrApiError(0, "An unresolved employee hire marker is malformed. Contact an administrator before retrying.", true); }
-  const parsed = GoHrEmployeeHireAttemptSchema.safeParse(decoded);
-  if (!parsed.success) throw new HrApiError(0, "An unresolved employee hire marker is malformed. Contact an administrator before retrying.", true);
+  catch { throw new HrApiError(0, "An unresolved employee action marker is malformed. Contact an administrator before retrying.", true); }
+  const parsed = GoHrEmployeeAttemptSchema.safeParse(decoded);
+  if (!parsed.success) throw new HrApiError(0, "An unresolved employee action marker is malformed. Contact an administrator before retrying.", true);
   return parsed.data;
 }
 
-async function clearGoHrEmployeeHireAttempt(storageKey: string, intentId: string): Promise<void> {
-  await withHrEmployeeHireReservationLock(storageKey, async () => {
+async function clearGoHrEmployeeAttempt(storageKey: string, intentId: string, fingerprint: string): Promise<void> {
+  await withHrEmployeeReservationLock(storageKey, async () => {
     try {
       const raw = window.localStorage.getItem(storageKey);
-      if (raw === null || parseGoHrEmployeeHireAttempt(raw).intentId !== intentId) return;
+      if (raw === null) return;
+      const current = parseGoHrEmployeeAttempt(raw);
+      if (current.intentId !== intentId || current.fingerprint !== fingerprint) return;
       window.localStorage.removeItem(storageKey);
     } catch {
-      throw new HrApiError(0, "The employee hire completed, but its retry marker could not be cleared. Reload before another hire.", true);
+      throw new HrApiError(0, "The employee action completed, but its retry marker could not be cleared. Reload before another employee action.", true);
     }
   });
 }
 
-async function withHrEmployeeHireReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
+async function withHrEmployeeReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
   const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
   if (!lockManager) {
-    throw new HrApiError(0, "This browser cannot safely reserve an employee hire. Open it in a browser with Web Locks enabled before submitting the change.");
+    throw new HrApiError(0, "This browser cannot safely reserve an employee action. Open it in a browser with Web Locks enabled before submitting the change.");
   }
   try {
     return await lockManager.request(`chaste:hr-employee-hire-write-marker-lock:${storageKey}`, { mode: "exclusive" }, reserve);
   } catch (error) {
     if (error instanceof HrApiError) throw error;
-    throw new HrApiError(0, "The browser could not safely coordinate this employee hire across tabs. Close other People tabs and try again.", true);
+    throw new HrApiError(0, "The browser could not safely coordinate this employee action across tabs. Close other People tabs and try again.", true);
   }
 }
 
