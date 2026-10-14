@@ -54,6 +54,8 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite inventory catalog, stock, cycle counts, transfers, locations,
   reservations, and history now use Go-backed APIs. Product imports preserve
   currency-specific price precision and reject unsupported fractional units.
+- Vite Documents library and preview reads now always use Go's authenticated
+  `documents.listIngestedDocuments` capability, without a legacy API fallback.
 - Vite CRM task creation, completion, and detail updates now use Go capabilities
   with organization-bound, retry-safe requests across tabs and workspace
   changes.

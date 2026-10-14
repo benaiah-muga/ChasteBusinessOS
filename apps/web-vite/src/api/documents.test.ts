@@ -31,35 +31,36 @@ describe("documents API client", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({ method: "GET", credentials: "same-origin" }));
   });
 
-  it("loads the existing document library contract with the signed-in same-origin session", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", false);
-    const fetchMock = vi.fn(async () => Response.json({ documents: [row], vendors: [] }));
+  it("loads the document library through Go when no route selector is present", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { documents: [goRow], vendors: [] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchDocuments()).resolves.toEqual([row]);
-    expect(fetchMock).toHaveBeenCalledWith("/api/documents", expect.objectContaining({
-      method: "GET",
+    await expect(fetchDocuments()).resolves.toEqual([goRow]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
       signal: expect.any(AbortSignal),
     }));
   });
 
-  it("encodes the selected document id and validates the existing detail response", async () => {
+  it("keeps document reads on Go even when the former selector is false", async () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", false);
-    const document = {
-      ...row,
-      mimeType: "application/pdf",
-      sizeBytes: 240,
-      parseError: null,
-      parsedMarkdown: "Invoice number: 42",
-    };
-    const fetchMock = vi.fn(async () => Response.json({ document }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { documents: [goRow] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchDocumentDetail("doc / 1")).resolves.toEqual(document);
-    expect(fetchMock).toHaveBeenCalledWith("/api/documents?id=doc%20%2F%201&preview=1", expect.any(Object));
+    await expect(fetchDocuments()).resolves.toEqual([goRow]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
+
+  it("rejects a non-UUID detail id before issuing a request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchDocumentDetail("doc / 1")).rejects.toMatchObject({ name: "DocumentsApiError", status: 400 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("loads the list through the Go capability with exact input and validates its envelope", async () => {
@@ -140,10 +141,10 @@ describe("documents API client", () => {
   });
 
   it("rejects malformed payloads and keeps permission errors understandable", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ documents: [{ id: "doc-1" }] })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { documents: [{ id: "doc-1" }] } })));
     await expect(fetchDocuments()).rejects.toEqual(expect.objectContaining({
       name: "DocumentsApiError",
-      message: "The documents service returned data in an unexpected format.",
+      message: "The Go documents service returned data in an unexpected format.",
     }));
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden" }, { status: 403 })));
