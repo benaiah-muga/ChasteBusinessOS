@@ -445,13 +445,17 @@ describe("Vite projects page", () => {
     expect((screen.getByRole("button", { name: "Archive project" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("loads without team permissions, and recovers from project and board errors", async () => {
+  it("surfaces team directory failures and recovers from project, board, and team errors", async () => {
     let projectReads = 0;
     let boardReads = 0;
+    let teamReads = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path === "/api/modules") return projectModules();
-      if (path === "/api/team") return Response.json({ error: "forbidden" }, { status: 403 });
+      if (path === "/api/team") {
+        teamReads += 1;
+        return teamReads === 1 ? Response.json({ error: "forbidden" }, { status: 403 }) : team();
+      }
       if (path === "/api/projects") {
         projectReads += 1;
         return projectReads === 1 ? Response.json({ error: "unavailable" }, { status: 503 }) : Response.json({ projects: [activeProject] });
@@ -465,15 +469,20 @@ describe("Vite projects page", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<ProjectsPage />);
 
-    expect((await screen.findByRole("alert")).textContent).toContain("The projects service is unavailable. Try again.");
+    expect(await screen.findByText("The projects service is unavailable. Try again.")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "Board · Website relaunch" })).not.toBeNull();
-    expect((await screen.findByRole("alert")).textContent).toContain("The projects service is unavailable. Try again.");
+    expect(screen.getByText(/Team directory unavailable: You do not have permission/)).not.toBeNull();
+    expect((screen.getByRole("combobox", { name: "Assignee" }) as HTMLSelectElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retry team directory" }));
+    expect(await screen.findByRole("option", { name: "Ada Lovelace" })).not.toBeNull();
+    expect((screen.getByRole("combobox", { name: "Assignee" }) as HTMLSelectElement).disabled).toBe(false);
+    expect(await screen.findByText("The projects service is unavailable. Try again.")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("region", { name: "todo task column" })).not.toBeNull();
-    expect(screen.queryByText(/member lookup failed/i)).toBeNull();
     expect(projectReads).toBe(2);
     expect(boardReads).toBe(2);
+    expect(teamReads).toBe(2);
   });
 
   it("shows explicit empty project and board states", async () => {

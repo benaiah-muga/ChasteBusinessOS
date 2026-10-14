@@ -106,14 +106,25 @@ describe("projects API client", () => {
     }));
   });
 
-  it("degrades unauthorized team lookup to an empty assignee list", async () => {
+  it("surfaces unauthorized and malformed team directory responses", async () => {
     const fetchMock = vi.fn(async () => Response.json({ error: "forbidden: missing iam.read" }, { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchProjectMembers()).resolves.toEqual([]);
+    await expect(fetchProjectMembers()).rejects.toEqual(expect.objectContaining({
+      name: "ProjectsApiError",
+      status: 403,
+      message: "You do not have permission to view or change projects.",
+    }));
     expect(fetchMock).toHaveBeenCalledWith("/api/team", expect.objectContaining({
       credentials: "same-origin",
       headers: { accept: "application/json" },
+    }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ members: "not-an-array" })));
+    await expect(fetchProjectMembers()).rejects.toEqual(expect.objectContaining({
+      name: "ProjectsApiError",
+      status: 200,
+      message: "The team directory returned data in an unexpected format.",
     }));
   });
 

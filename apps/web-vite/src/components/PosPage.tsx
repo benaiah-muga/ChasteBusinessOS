@@ -134,6 +134,12 @@ function currencyFor(baseCurrency: string | null): CurrencyStyle {
   return { symbol: symbol ?? `${code} `, minorUnits: currencyMinorUnits(code) ?? 2 };
 }
 
+function expectedDrawerMinor(session: PosRegisterSession): number {
+  return session.status === "open"
+    ? session.openingFloatMinor + session.expectedCashMinor
+    : session.expectedCashMinor;
+}
+
 function formatMoney(minor: number, currency: CurrencyStyle): string {
   const formatted = (Math.abs(minor) / (10 ** currency.minorUnits)).toLocaleString("en-US", {
     minimumFractionDigits: currency.minorUnits,
@@ -1828,7 +1834,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                                 <th scope="row">{session.register}</th>
                                 <td><span className={`pos-pill ${statusPill(session.status)}`}>{formatStatus(session.status)}</span></td>
                                 <td className="is-nowrap" title={session.openedAt}>{timeAgo(session.openedAt)}</td>
-                                <td className="is-numeric">{money(session.openingFloatMinor + (session.expectedCashMinor ?? 0))}</td>
+                                <td className="is-numeric">{money(expectedDrawerMinor(session))}</td>
                                 <td className="is-numeric">{session.countedCashMinor !== null ? money(session.countedCashMinor) : "Not counted"}</td>
                                 <td className="is-numeric is-amount">{session.varianceMinor !== null ? money(session.varianceMinor) : "Not reconciled"}</td>
                                 <td className="is-note" title={session.varianceReason ?? ""}>{session.varianceReason ?? "None recorded"}</td>
@@ -1854,7 +1860,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                           <dl className="pos-session-figures">
                             <div>
                               <dt>Expected in drawer</dt>
-                              <dd>{money(session.openingFloatMinor + (session.expectedCashMinor ?? 0))}</dd>
+                              <dd>{money(expectedDrawerMinor(session))}</dd>
                             </div>
                             <div>
                               <dt>Counted</dt>

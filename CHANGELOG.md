@@ -13,8 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Inventory can reconcile stock value to the General Ledger and reverse recent valuation summaries through Go, with policy-dependent approval handling and exact retry recovery for uncertain actions. Posting remains available to `inventory.write` users when the separate Accounting history read is denied; reversing a prior summary requires `accounting.read`.
 - Go Messaging agents can query organization-scoped receivables aging through the governed `accounting.arAging` capability when the signed-in user has `accounting.read`.
 - Vite Accounting can post period-end foreign receivables revaluations through the approval-gated Go capability, with scoped retry recovery for pending or uncertain submissions.
+
+### Fixed
+
+- Vite POS session history no longer adds the opening float twice after a register closes; the Go closed-session total is shown as-is.
 
 ### Changed
 
@@ -77,6 +82,8 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite HR expense claims use Go capabilities only and preserve each claim's
   stored currency. Claim and policy inputs follow currency-specific minor units
   and reject values with excess fractional precision.
+- Vite Projects now surfaces Go team-directory failures and disables assignment
+  controls until its member list has loaded successfully.
 - Vite accounting invoices, reports, reminders, customer statements, close
   readiness, and cash-basis summaries now use Go capabilities without legacy
   API fallback.

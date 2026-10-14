@@ -280,6 +280,110 @@
   font-weight: 600;
 }
 
+.inventory-valuation {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid #e3dfd5;
+  border-radius: 1rem;
+  padding: 1.25rem;
+  background: #fffefa;
+}
+
+.inventory-valuation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.inventory-valuation-heading h2,
+.inventory-valuation-history h3 {
+  margin: 0.15rem 0 0.45rem;
+}
+
+.inventory-valuation-heading p,
+.inventory-valuation-history p,
+.inventory-valuation-pending p {
+  margin: 0;
+  color: #68665d;
+}
+
+.inventory-valuation-notice,
+.inventory-valuation-pending {
+  border-radius: 0.75rem;
+  padding: 0.85rem 1rem;
+}
+
+.inventory-valuation-notice.is-success {
+  background: #f2f7f0;
+  color: #42633e;
+}
+
+.inventory-valuation-notice.is-pending {
+  background: #fff7e8;
+  color: #795521;
+}
+
+.inventory-valuation-notice.is-error {
+  background: #fff1ee;
+  color: #923f32;
+}
+
+.inventory-valuation-pending {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: #fff7e8;
+}
+
+.inventory-valuation-history ul {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inventory-valuation-history li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid #eeeae1;
+  padding-top: 0.65rem;
+  color: #68665d;
+}
+
+.inventory-valuation-backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(22 23 20 / 48%);
+}
+
+.inventory-valuation-dialog {
+  width: min(100%, 30rem);
+  border-radius: 1rem;
+  padding: 1.4rem;
+  background: #fffefa;
+  box-shadow: 0 1rem 3rem rgb(22 23 20 / 22%);
+}
+
+.inventory-valuation-dialog h3 {
+  margin-top: 0;
+}
+
+.inventory-valuation-dialog > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 1.4rem;
+}
+
 .inventory-loading,
 .inventory-empty {
   margin: 0;
@@ -345,6 +449,13 @@
   }
 
   .inventory-cycle-count-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .inventory-valuation-heading,
+  .inventory-valuation-pending,
+  .inventory-valuation-history li {
     align-items: flex-start;
     flex-direction: column;
   }

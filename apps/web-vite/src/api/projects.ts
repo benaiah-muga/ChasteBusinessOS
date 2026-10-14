@@ -333,13 +333,9 @@ export async function fetchProjectBoard(projectId: string, signal?: AbortSignal)
 }
 
 export async function fetchProjectMembers(signal?: AbortSignal): Promise<ProjectMember[]> {
-  try {
-    const parsed = ProjectMembersSchema.safeParse(await getJson("/api/team", signal));
-    return parsed.success ? parsed.data.members : [];
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    return [];
-  }
+  const parsed = ProjectMembersSchema.safeParse(await getJson("/api/team", signal));
+  if (!parsed.success) throw new ProjectsApiError(200, "The team directory returned data in an unexpected format.");
+  return parsed.data.members;
 }
 
 export async function fetchProjectsEnabled(signal?: AbortSignal): Promise<boolean> {

@@ -35,9 +35,10 @@ const openSession = {
 const closedSession = {
   ...openSession,
   id: closedSessionId,
+  register: "Rear register",
   status: "closed",
-  expectedCashMinor: 2000,
-  countedCashMinor: 1800,
+  expectedCashMinor: 12000,
+  countedCashMinor: 11800,
   varianceMinor: -200,
   varianceReason: "one refund entered after the count",
   closedAt: hoursAgo(3),
@@ -249,7 +250,7 @@ describe("Vite POS register page", () => {
     expect(screen.getByText("Expected in drawer")).not.toBeNull();
     expect(screen.getByText("$145.00")).not.toBeNull();
     expect(screen.getByText("Watch list")).not.toBeNull();
-    expect(screen.getByText(/Front register · closed/)).not.toBeNull();
+    expect(screen.getByText(/Rear register · closed/)).not.toBeNull();
     expect(screen.getByText("−$2.00")).not.toBeNull();
     expect(screen.getByRole("link", { name: "POS shift summary" }).getAttribute("href")).toBe("/pos/shift-summary");
     fireEvent.click(screen.getByRole("tab", { name: "Sell · register open" }));
@@ -1296,6 +1297,7 @@ describe("Vite POS register page", () => {
     expect(await screen.findByRole("heading", { name: "Register history" })).not.toBeNull();
     const flagged = screen.getByRole("row", { name: /−\$2\.00/ });
     expect(flagged.className).toContain("is-variance");
+    expect(within(flagged).getByRole("cell", { name: "$120.00" })).not.toBeNull();
     expect(within(flagged).getByText("one refund entered after the count")).not.toBeNull();
   });
 });

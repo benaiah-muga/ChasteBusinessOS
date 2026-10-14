@@ -35,6 +35,11 @@ type ModuleState =
   | { status: "failed"; message: string }
   | { status: "ready"; enabled: boolean };
 
+type MemberState =
+  | { status: "loading" }
+  | { status: "failed"; message: string }
+  | { status: "ready"; members: ProjectMember[] };
+
 type Notice = { tone: "success" | "pending" | "error"; message: string };
 function errorMessage(error: unknown): string {
   if (error instanceof ProjectsApiError) return error.message;
@@ -63,7 +68,7 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
   const [projectState, setProjectState] = useState<ProjectListState>({ status: "loading" });
   const [boardState, setBoardState] = useState<BoardState>({ status: "idle" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [members, setMembers] = useState<ProjectMember[]>([]);
+  const [memberState, setMemberState] = useState<MemberState>({ status: "loading" });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingActions, setPendingActions] = useState<PendingProjectAction[]>([]);
@@ -79,6 +84,7 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
 
   const projects = projectState.status === "ready" ? projectState.projects : [];
   const selected = projects.find((project) => project.id === selectedId) ?? null;
+  const members = memberState.status === "ready" ? memberState.members : [];
 
   const loadProjects = useCallback(async (signal?: AbortSignal) => {
     if (!signal) setProjectState({ status: "loading" });
@@ -93,6 +99,17 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
     }
   }, []);
 
+  const loadMembers = useCallback(async (signal?: AbortSignal) => {
+    setMemberState({ status: "loading" });
+    try {
+      const rows = await fetchProjectMembers(signal);
+      if (!signal?.aborted) setMemberState({ status: "ready", members: rows });
+    } catch (error) {
+      if (signal?.aborted) return;
+      setMemberState({ status: "failed", message: errorMessage(error) });
+    }
+  }, []);
+
   const loadModules = useCallback(async (signal?: AbortSignal) => {
     if (!signal) setModuleState({ status: "loading" });
     try {
@@ -101,21 +118,17 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
       setModuleState({ status: "ready", enabled });
       if (enabled) {
         void loadProjects(signal);
-        void fetchProjectMembers(signal).then((rows) => {
-          if (!signal?.aborted) setMembers(rows);
-        }).catch(() => {
-          if (!signal?.aborted) setMembers([]);
-        });
+        void loadMembers(signal);
       } else {
         setProjectState({ status: "ready", projects: [] });
         setSelectedId(null);
-        setMembers([]);
+        setMemberState({ status: "ready", members: [] });
       }
     } catch (error) {
       if (signal?.aborted) return;
       setModuleState({ status: "failed", message: errorMessage(error) });
     }
-  }, [loadProjects]);
+  }, [loadMembers, loadProjects]);
 
   const loadBoard = useCallback(async (projectId: string, signal?: AbortSignal) => {
     if (selectedIdRef.current !== projectId) return;
@@ -377,6 +390,12 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
 
       {projectState.status === "ready" && (
         <div className="projects-layout">
+          {memberState.status === "failed" && (
+            <div className="projects-inline-error" role="alert">
+              <span>Team directory unavailable: {memberState.message}</span>
+              <button type="button" onClick={() => void loadMembers()}>Retry team directory</button>
+            </div>
+          )}
           <aside className="projects-sidebar" aria-label="Projects and project creation">
             <section className="projects-card" aria-labelledby="new-project-heading">
               <header className="projects-card-heading"><h2 id="new-project-heading">New project</h2></header>
@@ -455,8 +474,8 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
                     </label>
                     <label className="projects-field projects-task-assignee" htmlFor="task-assignee">
                       <span>Assignee</span>
-                      <select id="task-assignee" value={taskForm.assignee} onChange={(event) => setTaskForm({ ...taskForm, assignee: event.currentTarget.value })}>
-                        <option value="">Unassigned</option>
+                      <select id="task-assignee" value={taskForm.assignee} disabled={memberState.status !== "ready"} onChange={(event) => setTaskForm({ ...taskForm, assignee: event.currentTarget.value })}>
+                        <option value="">{memberState.status === "loading" ? "Loading team…" : members.length === 0 ? "No members available" : "Unassigned"}</option>
                         {members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}
                       </select>
                     </label>
@@ -520,8 +539,8 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
                                   <option value="todo">todo</option><option value="doing">doing</option><option value="done">done</option>
                                 </select>
                                 <label className="sr-only" htmlFor={`assign-${task.id}`}>Assign {task.title}</label>
-                                <select id={`assign-${task.id}`} aria-label={`Assign ${task.title}`} value={task.assigneeUserId ?? ""} disabled={busy || selected.status !== "active"} onChange={(event) => void assignTask(task, event.currentTarget.value)}>
-                                  <option value="">Unassigned</option>
+                                <select id={`assign-${task.id}`} aria-label={`Assign ${task.title}`} value={task.assigneeUserId ?? ""} disabled={busy || selected.status !== "active" || memberState.status !== "ready"} onChange={(event) => void assignTask(task, event.currentTarget.value)}>
+                                  <option value="">{memberState.status === "loading" ? "Loading team…" : members.length === 0 ? "No members available" : "Unassigned"}</option>
                                   {members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}
                                 </select>
                               </div>

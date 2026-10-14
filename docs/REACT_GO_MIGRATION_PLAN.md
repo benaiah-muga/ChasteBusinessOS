@@ -1596,14 +1596,16 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_POS_OPEN_SESSION_SLICE=0` to roll back this individual action;
      only a missing Go route falls back to legacy, reusing the same intent.
      Other POS actions and `/pos` page ownership remain unchanged. Focused
-     selector and client tests pass; authenticated browser proof remains open.
+     selector and client tests pass. Authenticated browser open/close proof is
+     recorded in item 399.
 155. (Implemented) Route Vite POS register closing through the existing Go
      `pos.closeSession` capability by default whenever
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
      `CHASTE_GO_POS_CLOSE_SESSION_SLICE=0` to roll back this individual action;
      only a missing Go route falls back to legacy, reusing the same intent.
      Other POS actions and `/pos` page ownership remain unchanged. Focused
-     selector and client tests pass; authenticated browser proof remains open.
+     selector and client tests pass. Authenticated browser open/close proof is
+     recorded in item 399.
 156. (Implemented) Route only Vite POS customer lookup through a direct Go session-authenticated
      `GET /api/pos/customers` reader, independently of the generic session-
      capability route. Preserve the legacy POS authorization rule:
@@ -1623,7 +1625,8 @@ new owners and the manifest shows zero legacy runtime paths.
      `0` to restore both actions to `/api/inventory`. Keep their POS output
      payloads, approval reasons, and separate fresh intent IDs unchanged.
      Other POS actions and page ownership remain unchanged. Focused Vite API
-     tests pass; browser proof remains open.
+     tests pass. Authenticated quick product and opening-stock browser proof is
+     recorded in item 400.
 158. (Implemented) Route Vite inventory transfer creation and confirmation through the Go
      `inventory.createTransfer` and `inventory.confirmTransfer` capabilities
      when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
@@ -4216,3 +4219,39 @@ new owners and the manifest shows zero legacy runtime paths.
      deliberately stale organization cookie returned HTTP 200 from Go and
      `/api/org` confirmed the active workspace remained the signed-in user's
      actual organization.
+
+397. (Complete) Vite Projects surfaces failed or malformed Go `/api/team`
+     responses and disables task assignment controls until the directory loads.
+     Focused API and component tests cover the failed response, disabled
+     controls, and successful retry. Authenticated `agent-browser` forced the
+     Go team request to fail, confirmed the visible retryable error, removed the
+     failure, and retried successfully. The authenticated member then appeared
+     in task assignment choices. This completes the Projects runtime proof.
+
+398. (Complete) Add Vite Inventory valuation posting and reversal through Go
+     `inventory.postValuationSummary` and `inventory.reverseValuationSummary`.
+     Recent history comes from Go Accounting overview, which requires
+     `accounting.read`; posting remains available to `inventory.write` users if
+     history is denied, while reversing a summary requires Accounting access.
+     Confirmation copy describes approval as dependent on workspace policy.
+     Focused API and component tests cover zero variance, posting, pending
+     approval, reversal, exact retry after an uncertain result, and posting
+     when history returns 403. Authenticated `agent-browser` used a Go
+     purchasing receipt to create UGX 10,000 of stock value against a zero GL
+     balance, posted and reversed the valuation through Vite, then reloaded and
+     confirmed there were no unreversed valuation summaries. Browser errors
+     were empty. This completes the Inventory valuation runtime proof.
+
+399. (Runtime verified) Authenticated Vite opened and closed a Go POS register
+     with a UGX 100 opening float and a UGX 100 counted drawer. Go returned
+     HTTP 200 for both `pos.openSession` and `pos.closeSession`. After reload,
+     Vite Sessions displayed expected cash UGX 100, counted cash UGX 100, and
+     variance UGX 0 without adding the opening float twice. The browser error
+     log was empty and no legacy POS write was issued. This completes items
+     154 and 155.
+
+400. (Runtime verified) Authenticated Vite POS created a synthetic stocked
+     item through `inventory.createItem` and opened its stock through
+     `inventory.adjustStock`, both returning HTTP 200 from Go. POS search showed
+     12 units available at the configured sale price. No legacy inventory write
+     or browser error was observed. This completes item 157.

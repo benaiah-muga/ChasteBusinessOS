@@ -6,6 +6,7 @@ import { InventoryItemActions } from "./InventoryItemActions";
 import { InventoryLocationsReservationsPanel } from "./InventoryLocationsReservationsPanel";
 import { InventoryStockHistoryPanel } from "./InventoryStockHistoryPanel";
 import { InventoryTransfersPanel } from "./InventoryTransfersPanel";
+import { InventoryValuationPanel } from "./InventoryValuationPanel";
 import "./inventory-page.css";
 
 type PageState =
@@ -232,6 +233,7 @@ export function InventoryPage({
       {state.status === "ready" && <InventoryCycleCountPanel items={state.items} locations={state.locations} counts={state.cycleCounts} onChanged={refresh} retryScope={actorId && organizationId ? { actorId, organizationId } : undefined} />}
       {state.status === "ready" && <InventoryTransfersPanel items={state.items} locations={state.locations} transfers={state.transfers} onChanged={refresh} retryScope={{ actorId, organizationId }} />}
       {state.status === "ready" && <InventoryStockHistoryPanel items={state.items} currency={baseCurrency ?? currency} organizationId={organizationId ?? undefined} />}
+      {state.status === "ready" && <InventoryValuationPanel currency={baseCurrency ?? currency} retryScope={{ actorId, organizationId }} />}
       {state.status === "ready" && (
         <section className="inventory-lots" aria-labelledby="inventory-lots-title">
           <div className="inventory-lots-heading">
