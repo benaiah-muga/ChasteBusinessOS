@@ -347,7 +347,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
       } else {
         setHiringRecoveryAction(null);
         const completedLabel = exactRecovery
-          ? action.action === "createOpening" ? "Opening creation" : action.action === "closeOpening" ? "Opening closure" : action.action === "addApplicant" ? "Applicant creation" : "Applicant stage update"
+          ? action.action === "createOpening" ? "Opening creation" : action.action === "closeOpening" ? "Opening closure" : action.action === "addApplicant" ? "Applicant creation" : action.action === "hireApplicant" ? "Applicant hiring" : "Applicant stage update"
           : label;
         setNotice({ tone: "success", text: `${completedLabel} completed.` });
         if (action.action === "createOpening") setOpeningTitle("");
@@ -504,7 +504,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
           if (!hire.name.trim() || !Number.isSafeInteger(salaryMinor) || salaryMinor <= 0) return;
           void runEmployeeAction({ action: "hireEmployee", name: hire.name.trim(), email: hire.email.trim() || undefined, title: hire.title.trim() || undefined, monthlySalaryMinor: salaryMinor });
         }} />}
-        {tab === "hiring" && <Hiring openings={openings} applicants={data.applicants} busy={busy || Boolean(hiringRecoveryAction)} openingTitle={openingTitle} setOpeningTitle={setOpeningTitle} applicantForm={applicantForm} setApplicantForm={setApplicantForm} onCreateOpening={() => {
+        {tab === "hiring" && <Hiring openings={openings} applicants={data.applicants} currency={currency} busy={busy || Boolean(hiringRecoveryAction)} openingTitle={openingTitle} setOpeningTitle={setOpeningTitle} applicantForm={applicantForm} setApplicantForm={setApplicantForm} onCreateOpening={() => {
           if (!openingTitle.trim()) return;
           void runHiringAction({ action: "createOpening", title: openingTitle.trim() }, "Opening creation");
         }} onCloseOpening={(opening) => {
@@ -512,7 +512,12 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
         }} onAddApplicant={() => {
           if (!selectedOpening || !applicantForm.name.trim()) return;
           void runHiringAction({ action: "addApplicant", openingId: selectedOpening.id, name: applicantForm.name.trim(), email: applicantForm.email.trim() || undefined }, "Applicant creation");
-        }} onMove={(applicant, stage) => void runHiringAction({ action: "moveApplicant", applicantId: applicant.id, stage: stage as "applied" | "screening" | "interview" | "offer" | "rejected" }, "Applicant stage update")} />}
+        }} onMove={(applicant, stage) => void runHiringAction({ action: "moveApplicant", applicantId: applicant.id, stage: stage as "applied" | "screening" | "interview" | "offer" | "rejected" }, "Applicant stage update")} onHire={(applicant, monthlySalary) => {
+          const minorUnits = currency ? currencyMinorUnits(currency) ?? 2 : 2;
+          const monthlySalaryMinor = Math.round(Number(monthlySalary) * (10 ** minorUnits));
+          if (!Number.isSafeInteger(monthlySalaryMinor) || monthlySalaryMinor <= 0) return;
+          void runHiringAction({ action: "hireApplicant", applicantId: applicant.id, monthlySalaryMinor }, "Applicant hiring");
+        }} />}
         {tab === "leave" && <Leave employees={activeEmployees} rows={data.leave} form={leaveRequest} setForm={setLeaveRequest} busy={busy || Boolean(leaveRecoveryAction)} onRequest={() => {
           if (!leaveRequest.employeeId || !leaveRequest.startDate || !leaveRequest.endDate || leaveRequest.endDate < leaveRequest.startDate) return;
           void runLeaveAction({ action: "requestLeave", ...leaveRequest }, "Leave request", () => setLeaveRequest({ ...leaveRequest, startDate: "", endDate: "" }));
@@ -770,7 +775,9 @@ function People({ employees, currency, hire, setHire, busy, onHire, onDeactivate
   </>;
 }
 
-function Hiring({ openings, applicants, busy, openingTitle, setOpeningTitle, applicantForm, setApplicantForm, onCreateOpening, onCloseOpening, onAddApplicant, onMove }: { openings: HrOpening[]; applicants: HrApplicant[]; busy: boolean; openingTitle: string; setOpeningTitle: (value: string) => void; applicantForm: { openingId: string; name: string; email: string }; setApplicantForm: (value: { openingId: string; name: string; email: string }) => void; onCreateOpening: () => void; onCloseOpening: (opening: HrOpening) => void; onAddApplicant: () => void; onMove: (applicant: HrApplicant, stage: string) => void }) {
+function Hiring({ openings, applicants, currency, busy, openingTitle, setOpeningTitle, applicantForm, setApplicantForm, onCreateOpening, onCloseOpening, onAddApplicant, onMove, onHire }: { openings: HrOpening[]; applicants: HrApplicant[]; currency: string | null; busy: boolean; openingTitle: string; setOpeningTitle: (value: string) => void; applicantForm: { openingId: string; name: string; email: string }; setApplicantForm: (value: { openingId: string; name: string; email: string }) => void; onCreateOpening: () => void; onCloseOpening: (opening: HrOpening) => void; onAddApplicant: () => void; onMove: (applicant: HrApplicant, stage: string) => void; onHire: (applicant: HrApplicant, monthlySalary: string) => void }) {
+  const [monthlySalaries, setMonthlySalaries] = useState<Record<string, string>>({});
+  const salaryStep = String(1 / (10 ** (currency ? currencyMinorUnits(currency) ?? 2 : 2)));
   const selectableOpenings = openings.filter((opening) => opening.status === "open");
   const openingId = applicantForm.openingId || selectableOpenings[0]?.id || "";
   const pipeline = applicants.filter((applicant) => applicant.openingId === openingId);
@@ -781,7 +788,7 @@ function Hiring({ openings, applicants, busy, openingTitle, setOpeningTitle, app
     </section>
     <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Candidate pipeline</p><h2>Applicants</h2></div>{selectableOpenings.length > 0 && <label className="hr-select-label">Opening<select disabled={busy} value={openingId} onChange={(event) => setApplicantForm({ ...applicantForm, openingId: event.currentTarget.value })}>{selectableOpenings.map((opening) => <option value={opening.id} key={opening.id}>{opening.title}</option>)}</select></label>}</div>
       {selectableOpenings.length > 0 && <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); onAddApplicant(); }}><label className="hr-grow">Candidate name<input required disabled={busy} maxLength={120} value={applicantForm.name} onChange={(event) => setApplicantForm({ ...applicantForm, name: event.currentTarget.value })} /></label><label>Email<input type="email" disabled={busy} maxLength={254} value={applicantForm.email} onChange={(event) => setApplicantForm({ ...applicantForm, email: event.currentTarget.value })} /></label><button className="hr-primary-button" disabled={busy || !applicantForm.name.trim()}>Add applicant</button></form>}
-      {pipeline.length === 0 ? <p className="hr-muted">No applicants are listed for this opening yet.</p> : <div className="hr-applicant-list">{pipeline.map((applicant) => <article className="hr-applicant" key={applicant.id}><span><strong>{applicant.name}</strong><small>{applicant.note || "No notes"}</small></span><label>Stage<select disabled={busy} value={applicant.stage} onChange={(event) => onMove(applicant, event.currentTarget.value)}><option value={applicant.stage}>{applicant.stage}</option>{["applied", "screening", "interview", "offer", "rejected"].filter((stage) => stage !== applicant.stage).map((stage) => <option value={stage} key={stage}>{stage}</option>)}</select></label></article>)}</div>}
+      {pipeline.length === 0 ? <p className="hr-muted">No applicants are listed for this opening yet.</p> : <div className="hr-applicant-list">{pipeline.map((applicant) => <article className="hr-applicant" key={applicant.id}><span><strong>{applicant.name}</strong><small>{applicant.note || "No notes"}</small></span>{applicant.stage === "hired" ? <span className="hr-pill is-muted">hired</span> : <label>Stage<select disabled={busy} value={applicant.stage} onChange={(event) => onMove(applicant, event.currentTarget.value)}><option value={applicant.stage}>{applicant.stage}</option>{["applied", "screening", "interview", "offer", "rejected"].filter((stage) => stage !== applicant.stage).map((stage) => <option value={stage} key={stage}>{stage}</option>)}</select></label>}{applicant.stage === "offer" && <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); onHire(applicant, monthlySalaries[applicant.id] ?? ""); }}><label>Monthly salary for {applicant.name} ({currency ?? "currency"})<input required disabled={busy} type="number" min={salaryStep} step={salaryStep} value={monthlySalaries[applicant.id] ?? ""} onChange={(event) => setMonthlySalaries({ ...monthlySalaries, [applicant.id]: event.currentTarget.value })} /></label><button className="hr-primary-button" disabled={busy || !(Number(monthlySalaries[applicant.id]) > 0)}>Hire {applicant.name}</button></form>}</article>)}</div>}
     </section>
   </>;
 }

@@ -36,6 +36,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Accounting compares a selected budget scenario with posted actuals and open purchase commitments by month through Go.
 - Vite Inventory can page through stock movement history beyond the latest 100 entries using the authenticated Go reader.
 - Vite CRM can record a deal's source and owner through Go, and the pipeline shows those attribution details after reload.
+- Vite Hiring can hire offer-stage applicants as employees through Go `hr.hireApplicant`.
 
 ### Fixed
 

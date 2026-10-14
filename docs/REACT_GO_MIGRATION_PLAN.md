@@ -4541,3 +4541,11 @@ new owners and the manifest shows zero legacy runtime paths.
      API and page tests pass. Authenticated browser proof created a deal with
      source and owner, reloaded the pipeline, and confirmed both values; Go
      capability calls returned HTTP 200 and the browser reported no errors.
+420. (Runtime verified) Vite Hiring can convert an offer-stage applicant into
+     an employee through Go's `hr.hireApplicant` capability. The form collects
+     monthly salary in organization currency and sends integer minor units;
+     exact actor/org retries preserve pending approval behavior, and hired
+     applicants become read-only. Focused Go parser and Vite API/page tests
+     pass. An authenticated browser proof created an opening and applicant,
+     moved the applicant to offer, and hired them at UGX 1,000 monthly. Go
+     capability calls returned HTTP 200 and the browser reported no errors.

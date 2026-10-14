@@ -519,6 +519,32 @@ describe("Vite People API", () => {
     ]);
   });
 
+  it("converts an offer applicant into an employee through Go with exact approval recovery", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "hireApplicant" as const, applicantId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", monthlySalaryMinor: 125_000 };
+    const calls: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      calls.push(body);
+      return calls.length === 1
+        ? Response.json({ pendingApproval: true, reason: "Hiring approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", applicantId: action.applicantId } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(action);
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", applicantId: action.applicantId } });
+    await expect(readPendingHrHiringAction(scope)).resolves.toBeNull();
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ capabilityId: "hr.hireApplicant", input: { applicantId: action.applicantId, monthlySalaryMinor: 125_000 }, intentId: expect.any(String) });
+    expect(calls[1]).toEqual(calls[0]);
+    await expect(submitHrHiringAction({ ...action, monthlySalaryMinor: 0 }, scope)).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("closes an opening through Go with an actor and organization scoped exact retry", async () => {
     vi.stubGlobal("__GO_HR_HIRING__", true);
     stubHrWriteLocks();

@@ -99,6 +99,7 @@ export type HrAction =
   | { action: "closeOpening"; openingId: string }
   | { action: "addApplicant"; openingId: string; name: string; email?: string; note?: string }
   | { action: "moveApplicant"; applicantId: string; stage: string }
+  | { action: "hireApplicant"; applicantId: string; monthlySalaryMinor: number }
   | { action: "createPayrollRun"; year: number; month: number }
   | { action: "executePayrollRun"; runId: string; expectedTotalNetMinor: number }
   | { action: "voidPayrollRun"; runId: string }
@@ -109,7 +110,7 @@ export type HrAction =
 
 export type HrActionResult = { kind: "success" | "pending"; data: Record<string, unknown> };
 export type HrPayrollAction = Extract<HrAction, { action: "createPayrollRun" | "executePayrollRun" | "voidPayrollRun" | "reversePayrollPosting" }>;
-export type HrHiringAction = Extract<HrAction, { action: "createOpening" | "closeOpening" | "addApplicant" | "moveApplicant" }>;
+export type HrHiringAction = Extract<HrAction, { action: "createOpening" | "closeOpening" | "addApplicant" | "moveApplicant" | "hireApplicant" }>;
 export type HrEmployeeHireAction = Extract<HrAction, { action: "hireEmployee" }>;
 export type HrEmployeeDeactivateAction = Extract<HrAction, { action: "deactivateEmployee" }>;
 export type HrEmployeeStructureAction = { action: "updateStructure"; employeeId: string; department?: string; position?: string };
@@ -169,13 +170,15 @@ const GoHrCreateOpeningActionSchema = z.object({ action: z.literal("createOpenin
 const GoHrCloseOpeningActionSchema = z.object({ action: z.literal("closeOpening"), openingId: z.string().uuid() }).strict();
 const GoHrAddApplicantActionSchema = z.object({ action: z.literal("addApplicant"), openingId: z.string().uuid(), name: z.string().min(1).max(120), email: z.string().email().optional(), note: z.string().min(1).max(500).optional() }).strict();
 const GoHrMoveApplicantActionSchema = z.object({ action: z.literal("moveApplicant"), applicantId: z.string().uuid(), stage: z.enum(["applied", "screening", "interview", "offer", "rejected"]) }).strict();
-const GoHrHiringActionSchema = z.discriminatedUnion("action", [GoHrCreateOpeningActionSchema, GoHrCloseOpeningActionSchema, GoHrAddApplicantActionSchema, GoHrMoveApplicantActionSchema]);
+const GoHrHireApplicantActionSchema = z.object({ action: z.literal("hireApplicant"), applicantId: z.string().uuid(), monthlySalaryMinor: z.number().int().safe().positive() }).strict();
+const GoHrHiringActionSchema = z.discriminatedUnion("action", [GoHrCreateOpeningActionSchema, GoHrCloseOpeningActionSchema, GoHrAddApplicantActionSchema, GoHrMoveApplicantActionSchema, GoHrHireApplicantActionSchema]);
 const GoHrHiringAttemptSchema = z.object({ intentId: z.string().uuid(), fingerprint: z.string().length(64), action: GoHrHiringActionSchema }).strict();
 const GoHrHiringOutputSchemas = {
   createOpening: z.object({ openingId: z.string().uuid() }).strict(),
   closeOpening: z.object({ closed: z.literal(true) }).strict(),
   addApplicant: z.object({ applicantId: z.string().uuid() }).strict(),
   moveApplicant: z.object({ moved: z.literal(true), stage: z.enum(["applied", "screening", "interview", "offer", "rejected"]) }).strict(),
+  hireApplicant: z.object({ employeeId: z.string().uuid(), applicantId: z.string().uuid() }).strict(),
 } as const;
 const GoHrEmployeeHireActionSchema = z.object({
   action: z.literal("hireEmployee"),
@@ -540,6 +543,10 @@ function goHrHiringCapabilityInput(action: HrHiringAction): { capabilityId: stri
     case "moveApplicant": {
       const { action: _action, ...input } = action;
       return { capabilityId: "hr.moveApplicant", input };
+    }
+    case "hireApplicant": {
+      const { action: _action, ...input } = action;
+      return { capabilityId: "hr.hireApplicant", input };
     }
   }
 }
