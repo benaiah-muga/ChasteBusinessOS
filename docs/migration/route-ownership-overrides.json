@@ -592,6 +592,36 @@
       "path": "/settings",
       "owner": "vite",
       "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/accounting",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/documents",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/documents/editor/[id]",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/messages",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/support",
+      "owner": "vite",
+      "parity": "verified"
     }
   ],
   "goRoutes": [

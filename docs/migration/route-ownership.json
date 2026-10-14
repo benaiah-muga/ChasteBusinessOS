@@ -1308,8 +1308,8 @@
       "kind": "page",
       "path": "/accounting",
       "source": "apps/web/src/app/(app)/accounting/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",
@@ -1336,15 +1336,15 @@
       "kind": "page",
       "path": "/documents",
       "source": "apps/web/src/app/(app)/documents/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",
       "path": "/documents/editor/[id]",
       "source": "apps/web/src/app/(app)/documents/editor/[id]/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",
@@ -1399,8 +1399,8 @@
       "kind": "page",
       "path": "/messages",
       "source": "apps/web/src/app/(app)/messages/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",
@@ -1490,8 +1490,8 @@
       "kind": "page",
       "path": "/support",
       "source": "apps/web/src/app/(app)/support/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",
