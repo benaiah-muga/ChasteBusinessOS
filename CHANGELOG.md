@@ -49,6 +49,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Vite Purchasing keeps receipt drafts bound to the selected order while Go history loads or retries, preserving edited quantities and reasons.
 - Go standalone vendor payment reversals now persist reversal evidence on the payment; refreshed Purchasing bills no longer offer a second reversal for the same payment.
 - Vite Expenses serializes actor and organization scoped retry marker reservations across tabs and only clears the exact completed intent, preserving newer unresolved actions.
 - Vite Payroll blocks draft creation when a run already exists for the selected period, preventing a duplicate-period request from leaving an unresolved retry marker.

@@ -4628,3 +4628,12 @@ new owners and the manifest shows zero legacy runtime paths.
      cases, with typecheck and lint passing. Authenticated browser proof created
      an opening, reloaded the page, and confirmed both details persisted; the
      browser reported no errors.
+
+430. (Runtime verified) Vite Purchasing keeps receipt drafts bound to the
+     selected order while Go history requests race or retry. Touched accepted,
+     rejected, and reason fields survive an active history refresh; untouched
+     fields use refreshed Go quantities. Focused Purchasing tests pass 72
+     cases, with Vite typecheck and lint passing. Authenticated browser proof
+     delayed the Go receipt-history response, entered a receipt quantity, then
+     confirmed the quantity remained after the response completed. No receipt
+     was submitted and the browser reported no errors.

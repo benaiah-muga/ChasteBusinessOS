@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import {
   fetchReceivingDetail,
@@ -75,6 +75,23 @@ export function prefillReceivingDraft(
   );
 }
 
+function preserveEditedDraft(
+  order: ReceivingOrder,
+  current: Record<number, DraftLine>,
+  serverDraft: Record<number, DraftLine>,
+  editedFields: ReadonlySet<string>,
+): Record<number, DraftLine> {
+  return Object.fromEntries(order.lines.map((line) => {
+    const serverLine = serverDraft[line.lineNumber]!;
+    const currentLine = current[line.lineNumber] ?? serverLine;
+    return [line.lineNumber, {
+      accepted: editedFields.has(`${line.lineNumber}:accepted`) ? currentLine.accepted : serverLine.accepted,
+      rejected: editedFields.has(`${line.lineNumber}:rejected`) ? currentLine.rejected : serverLine.rejected,
+      rejectionNote: editedFields.has(`${line.lineNumber}:rejectionNote`) ? currentLine.rejectionNote : serverLine.rejectionNote,
+    }];
+  }));
+}
+
 /**
  * Repeated references to one order line are folded into a single line: the
  * executor charges them against one ordered quantity, so sending them apart
@@ -144,6 +161,12 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
   const [finding, setFinding] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [lastReceipt, setLastReceipt] = useState<{ number: number; fullyReceived: boolean } | null>(null);
+  const detailRequestSequence = useRef(0);
+  const editedDraftFields = useRef(new Set<string>());
+
+  useEffect(() => () => {
+    detailRequestSequence.current += 1;
+  }, [organizationId]);
 
   const load = useCallback(async ({ signal, quiet = false }: { signal?: AbortSignal; quiet?: boolean } = {}) => {
     if (!organizationId?.trim()) {
@@ -186,6 +209,7 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
     : null), [state, openNumber]);
 
   const openOrder = useCallback(async (rawNumber: string) => {
+    const requestSequence = ++detailRequestSequence.current;
     const number = rawNumber.trim();
     if (!number) return;
     setFinding(true);
@@ -195,27 +219,41 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
     const found = (state.status === "ready" ? state.orders : []).find((entry) => String(entry.number) === number);
     if (!found) {
       setFinding(false);
+      setOpenNumber(null);
+      setDetail(null);
+      setDraft({});
+      editedDraftFields.current.clear();
       setNotice({
         tone: "error",
         text: `No order number ${number}. Check the number on the delivery note; it must be one of this team's purchase orders.`,
       });
       return;
     }
+    const keepDraft = openNumber === found.number;
     setOpenNumber(found.number);
+    setDetail(null);
+    if (!keepDraft) {
+      setDraft(prefillReceivingDraft(found, []));
+      editedDraftFields.current.clear();
+    }
     try {
       const loaded = await fetchReceivingDetail(found.number, organizationId);
+      if (requestSequence !== detailRequestSequence.current) return;
       setDetail(loaded);
-      setDraft(prefillReceivingDraft(found, loaded.orderLines));
+      const serverDraft = prefillReceivingDraft(found, loaded.orderLines);
+      setDraft((current) => preserveEditedDraft(found, current, serverDraft, editedDraftFields.current));
       setDetailError(null);
     } catch (error) {
+      if (requestSequence !== detailRequestSequence.current) return;
       // Receipt history is supporting detail: an order with none yet still receives.
       setDetail(null);
-      setDraft(prefillReceivingDraft(found, []));
+      const fallbackDraft = prefillReceivingDraft(found, []);
+      setDraft((current) => preserveEditedDraft(found, current, fallbackDraft, editedDraftFields.current));
       setDetailError(apiError(error, "Could not load receipt history. The order can still be received.").message);
     } finally {
-      setFinding(false);
+      if (requestSequence === detailRequestSequence.current) setFinding(false);
     }
-  }, [state, organizationId]);
+  }, [state, organizationId, openNumber]);
 
   const rollupFor = useCallback((position: number): ReceivingOrderLineRollup | undefined =>
     detail?.orderLines.find((line) => line.position === position), [detail]);
@@ -471,6 +509,7 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
                         value={entry.accepted}
                         onChange={(event) => {
                           const value = digitsOnly(event.currentTarget.value);
+                          editedDraftFields.current.add(`${line.lineNumber}:accepted`);
                           setDraft((current) => ({
                             ...current,
                             [line.lineNumber]: { ...entry, accepted: value },
@@ -487,6 +526,7 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
                         value={entry.rejected}
                         onChange={(event) => {
                           const value = digitsOnly(event.currentTarget.value);
+                          editedDraftFields.current.add(`${line.lineNumber}:rejected`);
                           setDraft((current) => ({
                             ...current,
                             [line.lineNumber]: { ...entry, rejected: value },
@@ -504,6 +544,7 @@ export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, o
                           value={entry.rejectionNote}
                           onChange={(event) => {
                             const value = event.currentTarget.value;
+                          editedDraftFields.current.add(`${line.lineNumber}:rejectionNote`);
                             setDraft((current) => ({
                               ...current,
                               [line.lineNumber]: { ...entry, rejectionNote: value },

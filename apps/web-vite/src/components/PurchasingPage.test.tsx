@@ -1502,7 +1502,8 @@ describe("PurchasingReceivingPage", () => {
 
   function receivingFetch(
     post?: (body: Record<string, unknown>) => unknown,
-    receiptHistory?: (input: Record<string, unknown>) => unknown,
+    receiptHistory?: (input: Record<string, unknown>) => unknown | Promise<unknown>,
+    orders = receivingOrders.orders,
   ) {
     let latestRollup = rollup;
     return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1510,9 +1511,9 @@ describe("PurchasingReceivingPage", () => {
       if (url === "/api/modules") return Response.json(switchboard);
       if (url === "/api/capabilities/execute" && init?.method === "POST") {
         const body = JSON.parse(String(init.body ?? "{}")) as { capabilityId?: string; input?: Record<string, unknown>; intentId?: string };
-        if (body.capabilityId === "purchasing.listWorkspace") return Response.json({ ok: true, data: receivingOrders });
+        if (body.capabilityId === "purchasing.listWorkspace") return Response.json({ ok: true, data: { ...receivingOrders, orders } });
         if (body.capabilityId === "purchasing.listReceipts" && body.input) {
-          return resolve(receiptHistory ? receiptHistory(body.input) : { ok: true, data: latestRollup });
+          return resolve(receiptHistory ? await receiptHistory(body.input) : { ok: true, data: latestRollup });
         }
         if (body.capabilityId !== "purchasing.receiveGoods" || !body.input) throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
         const response = resolve(post ? post({ ...body.input, action: "receiveGoods", intentId: body.intentId }) : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 4 } });
@@ -1570,6 +1571,93 @@ describe("PurchasingReceivingPage", () => {
     expect(fetchMock.mock.calls.some(([input]) => input === "/api/purchasing")).toBe(false);
   });
 
+  it("keeps the receipt draft bound to the most recently selected order when history reads race", async () => {
+    let resolveFirstHistory!: (value: unknown) => void;
+    const firstHistory = new Promise<unknown>((resolve) => { resolveFirstHistory = resolve; });
+    const otherOrder = {
+      ...orderFixture([{
+        lineNumber: 1,
+        description: "Steel buckle",
+        quantity: 1000,
+        acceptedThousandths: 0,
+        rejectedThousandths: 0,
+        returnedThousandths: 0,
+        remainingThousandths: 1000,
+        unitPriceMinor: 1200,
+      }]),
+      id: "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f",
+      number: 43,
+    };
+    const fetchMock = receivingFetch(undefined, (input) => input.poNumber === 42
+      ? firstHistory
+      : {
+        ok: true,
+        data: {
+          receipts: [],
+          orderLines: [{ ...rollup.orderLines[0]!, description: "Steel buckle", remainingThousandths: 750 }],
+        },
+      }, [receivingOrders.orders[0]!, otherOrder]);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingReceivingPage actorId="actor-test" organizationId="org-test" />);
+
+    const orderPicker = await screen.findByLabelText("Open orders");
+    fireEvent.change(orderPicker, { target: { value: "42" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string; input?: { poNumber?: number } };
+      return body.capabilityId === "purchasing.listReceipts" && body.input?.poNumber === 42;
+    })).toBe(true));
+
+    fireEvent.change(orderPicker, { target: { value: "43" } });
+    await waitFor(() => expect((screen.getByLabelText("accepted on line 1") as HTMLInputElement).value).toBe("750"));
+    expect(screen.getByText("Line 1: Steel buckle")).toBeTruthy();
+
+    await act(async () => {
+      resolveFirstHistory({
+        ok: true,
+        data: {
+          receipts: [],
+          orderLines: [{ ...rollup.orderLines[0]!, remainingThousandths: 125 }],
+        },
+      });
+    });
+
+    expect(screen.getByRole("heading", { name: /PO 43/ })).toBeTruthy();
+    expect((screen.getByLabelText("accepted on line 1") as HTMLInputElement).value).toBe("750");
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    await waitFor(() => expect(postedActions(fetchMock, "receiveGoods")[0]).toMatchObject({ poNumber: 43, lines: [{ lineNumber: 1, quantity: 750 }] }));
+  });
+
+  it("preserves quantity edits made while the selected order history is loading", async () => {
+    let resolveHistory!: (value: unknown) => void;
+    const pendingHistory = new Promise<unknown>((resolve) => { resolveHistory = resolve; });
+    const fetchMock = receivingFetch(undefined, () => pendingHistory);
+    await openOrder(fetchMock);
+
+    fireEvent.change(screen.getByLabelText("accepted on line 1"), { target: { value: "666" } });
+    await act(async () => {
+      resolveHistory({
+        ok: true,
+        data: {
+          receipts: [],
+          orderLines: rollup.orderLines.map((line) => line.position === 1
+            ? { ...line, remainingThousandths: 500 }
+            : line),
+        },
+      });
+    });
+
+    expect((screen.getByLabelText("accepted on line 1") as HTMLInputElement).value).toBe("666");
+    expect((screen.getByLabelText("accepted on line 2") as HTMLInputElement).value).toBe("1000");
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    await waitFor(() => expect(postedActions(fetchMock, "receiveGoods")[0]).toMatchObject({
+      poNumber: 42,
+      lines: [
+        { lineNumber: 1, quantity: 666 },
+        { lineNumber: 2, quantity: 1000 },
+      ],
+    }));
+  });
+
   it("shows a selected Go receipt history error without retrying the legacy detail action", async () => {
     const fetchMock = receivingFetch(undefined, () => Response.json({ error: "receipt history unavailable" }, { status: 404 }));
     await openOrder(fetchMock);
@@ -1577,6 +1665,45 @@ describe("PurchasingReceivingPage", () => {
     expect(await screen.findByText("receipt history unavailable")).toBeTruthy();
     expect(fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute")).toHaveLength(2);
     expect(fetchMock.mock.calls.some(([input]) => input === "/api/purchasing")).toBe(false);
+  });
+
+  it("keeps touched receipt fields on history retry and refreshes untouched lines", async () => {
+    let historyAttempt = 0;
+    const fetchMock = receivingFetch(undefined, () => {
+      historyAttempt += 1;
+      return historyAttempt === 1
+        ? Response.json({ error: "receipt history unavailable" }, { status: 404 })
+        : {
+          ok: true,
+          data: {
+            receipts: [],
+            orderLines: rollup.orderLines.map((line) => line.position === 1
+              ? { ...line, remainingThousandths: 500 }
+              : { ...line, remainingThousandths: 730 }),
+          },
+        };
+    });
+    await openOrder(fetchMock);
+    expect(await screen.findByText("receipt history unavailable")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("accepted on line 1"), { target: { value: "321" } });
+    fireEvent.change(screen.getByLabelText("rejected on line 1"), { target: { value: "12" } });
+    fireEvent.change(await screen.findByLabelText(/rejection reason for line 1/i), { target: { value: "damaged carton" } });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect((screen.getByLabelText("accepted on line 2") as HTMLInputElement).value).toBe("730"));
+    expect((screen.getByLabelText("accepted on line 1") as HTMLInputElement).value).toBe("321");
+    expect((screen.getByLabelText("rejected on line 1") as HTMLInputElement).value).toBe("12");
+    expect((screen.getByLabelText(/rejection reason for line 1/i) as HTMLInputElement).value).toBe("damaged carton");
+
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    await waitFor(() => expect(postedActions(fetchMock, "receiveGoods")[0]).toMatchObject({
+      poNumber: 42,
+      lines: [
+        { lineNumber: 1, quantity: 321, rejected: 12, rejectionNote: "damaged carton" },
+        { lineNumber: 2, quantity: 730, rejected: 0 },
+      ],
+    }));
   });
 
   it("refuses to send a receipt with nothing entered", async () => {
