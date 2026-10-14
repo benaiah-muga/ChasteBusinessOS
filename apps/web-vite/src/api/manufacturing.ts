@@ -177,6 +177,39 @@ const DeleteBomOutputSchema = z.object({
 }).strict().refine((output) => output.removedCount === output.previousComponents.length && output.components.length === 0, {
   message: "BOM deletion output must carry its prior snapshot and an empty resulting state",
 });
+const RestoreBomOutputSchema = z.object({
+  assemblySku: z.string().trim().min(1),
+  restoredCount: z.number().int().nonnegative(),
+  previousComponents: z.array(z.object({
+    sku: z.string().min(1),
+    quantityThousandths: z.number().int().nonnegative().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()),
+  components: z.array(z.object({
+    sku: z.string().min(1),
+    quantityThousandths: z.number().int().nonnegative().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()),
+}).strict().refine((output) => output.restoredCount === output.components.length, {
+  message: "BOM restore output must match its resulting component snapshot",
+});
+
+function sameBomComponents(
+  left: readonly ManufacturingBomComponent[],
+  right: readonly ManufacturingBomComponent[],
+): boolean {
+  if (left.length !== right.length) return false;
+  const sortBySku = (components: readonly ManufacturingBomComponent[]) => [...components].sort((a, b) => a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0);
+  const sortedLeft = sortBySku(left);
+  const sortedRight = sortBySku(right);
+  return sortedLeft.every((component, index) => {
+    const expected = sortedRight[index];
+    return expected !== undefined
+      && component.sku === expected.sku
+      && component.quantityThousandths === expected.quantityThousandths
+      && component.scrapPctThousandths === expected.scrapPctThousandths;
+  });
+}
 const DeleteBomSchema = z.object({
   action: z.literal("deleteBom"),
   assemblySku: z.string().trim().min(1),
@@ -185,6 +218,20 @@ const DeleteBomSchema = z.object({
     quantityThousandths: z.number().int().positive().safe(),
     scrapPctThousandths: z.number().int().nonnegative().safe(),
   }).strict()).min(1),
+}).strict();
+const RestoreBomSchema = z.object({
+  action: z.literal("restoreBom"),
+  assemblySku: z.string().trim().min(1),
+  expectedComponents: z.array(z.object({
+    sku: z.string().trim().min(1),
+    quantityThousandths: z.number().int().nonnegative().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()),
+  components: z.array(z.object({
+    sku: z.string().trim().min(1),
+    quantityThousandths: z.number().int().positive().safe(),
+    scrapPctThousandths: z.number().int().nonnegative().safe(),
+  }).strict()),
 }).strict();
 const ProduceFromBomSchema = z.object({
   action: z.literal("produceFromBom"),
@@ -222,6 +269,7 @@ const CancelWorkOrderSchema = z.object({
 const WriteActionSchema = z.discriminatedUnion("action", [
   DefineBomSchema,
   DeleteBomSchema,
+  RestoreBomSchema,
   ProduceFromBomSchema,
   ReverseProductionRunSchema,
   CreateWorkOrderSchema,
@@ -278,7 +326,9 @@ export type ManufacturingCostPreview = z.infer<typeof CostPreviewSchema>;
 export type ManufacturingFeasibility = z.infer<typeof FeasibilitySchema>;
 export type ManufacturingBomReport = z.infer<typeof BomReportSchema>;
 export type ManufacturingWriteAction = z.infer<typeof WriteActionSchema>;
-export type ManufacturingActionResult = { kind: "completed" } | { kind: "pending"; reason: string };
+type ManufacturingBomComponent = { sku: string; quantityThousandths: number; scrapPctThousandths: number };
+export type ManufacturingBomUndo = { assemblySku: string; expectedComponents: ManufacturingBomComponent[]; components: ManufacturingBomComponent[] };
+export type ManufacturingActionResult = { kind: "completed"; bomUndo?: ManufacturingBomUndo } | { kind: "pending"; reason: string };
 
 export function manufacturingActionRequest(
   action: ManufacturingWriteAction,
@@ -300,6 +350,16 @@ export function manufacturingActionRequest(
       body: {
         capabilityId: "manufacturing.deleteBom",
         input: { assemblySku: action.assemblySku, expectedComponents: action.expectedComponents },
+        intentId,
+      },
+    };
+  }
+  if (action.action === "restoreBom") {
+    return {
+      url: "/api/capabilities/execute",
+      body: {
+        capabilityId: "manufacturing.restoreBom",
+        input: { assemblySku: action.assemblySku, expectedComponents: action.expectedComponents, components: action.components },
         intentId,
       },
     };
@@ -516,14 +576,42 @@ export async function submitManufacturingAction(
   if (parsed.data.action in ProductionOutputSchemas && !(ProductionOutputSchemas[parsed.data.action as keyof typeof ProductionOutputSchemas]?.safeParse(envelope.data.data).success ?? false)) {
     throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected production response.");
   }
-  if (parsed.data.action === "defineBom" && !DefineBomOutputSchema.safeParse(envelope.data.data).success) {
-    throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected BOM definition response.");
-  }
-  if (parsed.data.action === "deleteBom" && !DeleteBomOutputSchema.safeParse(envelope.data.data).success) {
-    throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected BOM deletion response.");
+  let bomUndo: ManufacturingBomUndo | undefined;
+  if (parsed.data.action === "defineBom") {
+    const output = DefineBomOutputSchema.safeParse(envelope.data.data);
+    if (!output.success) {
+      throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected BOM definition response.");
+    }
+    if (output.data.assemblySku !== parsed.data.assemblySku
+      || !sameBomComponents(output.data.components, parsed.data.components)
+      || !sameBomComponents(output.data.previousComponents, parsed.data.expectedComponents)) {
+      throw new ManufacturingApiError(response.status, "The manufacturing service returned a BOM definition snapshot that does not match the requested change.");
+    }
+    bomUndo = { assemblySku: output.data.assemblySku, expectedComponents: output.data.components, components: output.data.previousComponents };
+  } else if (parsed.data.action === "deleteBom") {
+    const output = DeleteBomOutputSchema.safeParse(envelope.data.data);
+    if (!output.success) {
+      throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected BOM deletion response.");
+    }
+    if (output.data.assemblySku !== parsed.data.assemblySku
+      || !sameBomComponents(output.data.previousComponents, parsed.data.expectedComponents)) {
+      throw new ManufacturingApiError(response.status, "The manufacturing service returned a BOM deletion snapshot that does not match the requested change.");
+    }
+    bomUndo = { assemblySku: output.data.assemblySku, expectedComponents: output.data.components, components: output.data.previousComponents };
+  } else if (parsed.data.action === "restoreBom") {
+    const output = RestoreBomOutputSchema.safeParse(envelope.data.data);
+    if (!output.success) {
+      throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected BOM restore response.");
+    }
+    if (output.data.assemblySku !== parsed.data.assemblySku
+      || !sameBomComponents(output.data.previousComponents, parsed.data.expectedComponents)
+      || !sameBomComponents(output.data.components, parsed.data.components)) {
+      throw new ManufacturingApiError(response.status, "The manufacturing service returned a BOM restore snapshot that does not match the requested change.");
+    }
+    bomUndo = { assemblySku: output.data.assemblySku, expectedComponents: output.data.components, components: output.data.previousComponents };
   }
   if (attempt) clearManufacturingAttempt(attempt);
-  return { kind: "completed" };
+  return { kind: "completed", ...(bomUndo ? { bomUndo } : {}) };
 }
 
 async function postRead<TInput extends object, T>(

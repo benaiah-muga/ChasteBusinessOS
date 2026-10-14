@@ -13,6 +13,7 @@ import {
   submitManufacturingAction,
   type ManufacturingBomEdge,
   type ManufacturingBomReport,
+  type ManufacturingBomUndo,
   type ManufacturingCostPreview,
   type ManufacturingFeasibility,
   type ManufacturingLot,
@@ -260,6 +261,8 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [bomUndo, setBomUndo] = useState<ManufacturingBomUndo | null>(null);
+  const [bomUndoLabel, setBomUndoLabel] = useState("Undo BOM change");
   const [pendingManufacturingAction, setPendingManufacturingAction] = useState<ManufacturingWriteAction | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -321,6 +324,8 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
     setLoadedScopeKey(null);
     setState({ status: "loading" });
     setNotice(null);
+    setBomUndo(null);
+    setBomUndoLabel("Undo BOM change");
     setPendingManufacturingAction(null);
     setRefreshError(null);
     setBusy(false);
@@ -380,6 +385,12 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
       if (result.kind === "pending") {
         setNotice({ tone: "pending", text: `${label} requires approval. ${result.reason}` });
         return false;
+      }
+      if (result.bomUndo) {
+        setBomUndo(result.bomUndo);
+        setBomUndoLabel(action.action === "restoreBom" && bomUndoLabel === "Undo BOM change" ? "Redo BOM change" : "Undo BOM change");
+      } else if (action.action === "defineBom" || action.action === "deleteBom" || action.action === "restoreBom") {
+        setBomUndo(null);
       }
       setPendingManufacturingAction(null);
       setNotice({ tone: "success", text: `${label} done.` });
@@ -628,6 +639,14 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
         </p>
       )}
       {refreshError && <p style={{ ...styles.notice, ...styles.noticeError }} role="alert">{refreshError}</p>}
+      {bomUndo && (
+        <section style={{ ...styles.notice, ...styles.noticePending }} aria-label="BOM change recovery">
+          <span>{bomUndoLabel} for {bomUndo.assemblySku}. The change is applied only if the BOM still matches the captured state.</span>
+          <button type="button" style={styles.button} disabled={busy} onClick={() => void run({ action: "restoreBom", ...bomUndo }, `${bomUndoLabel} for ${bomUndo.assemblySku}`)}>
+            {bomUndoLabel}
+          </button>
+        </section>
+      )}
       {pendingManufacturingAction && (
         <section style={{ ...styles.notice, ...styles.noticePending }} aria-label="Unresolved manufacturing action">
           <span>An earlier manufacturing action has an uncertain result. Retry the exact saved action to reconcile it before making another change.</span>

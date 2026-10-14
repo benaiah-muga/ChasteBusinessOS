@@ -52,8 +52,9 @@ interface StubOptions {
 
 function manufacturingWriteResult(action: PostedBody): PostedBody {
   switch (action.action) {
-    case "defineBom": return { assemblyItemId: "item-1", assemblySku: action.assemblySku, componentCount: 1, previousComponents: [], components: action.components };
+    case "defineBom": return { assemblyItemId: "item-1", assemblySku: action.assemblySku, componentCount: Array.isArray(action.components) ? action.components.length : 0, previousComponents: action.expectedComponents, components: action.components };
     case "deleteBom": return { assemblySku: action.assemblySku, removedCount: 1, previousComponents: action.expectedComponents, components: [] };
+    case "restoreBom": return { assemblySku: action.assemblySku, restoredCount: Array.isArray(action.components) ? action.components.length : 0, previousComponents: action.expectedComponents, components: action.components };
     case "createWorkOrder": return { workOrderId: "55555555-5555-4555-8555-555555555555", number: 10, expectedGoodThousandths: action.plannedQtyThousandths };
     case "releaseWorkOrder": return { released: true };
     case "completeWorkOrder": return { runRef: "66666666-6666-4666-8666-666666666666", completed: true, producedTotalThousandths: action.quantityThousandths, status: "released", producedThousandths: action.quantityThousandths, consumedComponents: [], costRolledUpMinor: 0 };
@@ -208,6 +209,46 @@ describe("Vite manufacturing page", () => {
     fireEvent.click(screen.getByRole("button", { name: "tree" }));
     expect(screen.getByRole("columnheader", { name: "Qty / parent" })).not.toBeNull();
     expect(screen.getByText("4.000")).not.toBeNull();
+  });
+
+  it("toggles undo and redo through Go while preserving the exact BOM snapshots", async () => {
+    const fetchMock = manufacturingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
+
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: /^BOMs/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete BOM" }));
+    await screen.findByRole("button", { name: "Undo BOM change" });
+    fireEvent.click(screen.getByRole("button", { name: "Undo BOM change" }));
+
+    await screen.findByRole("button", { name: "Redo BOM change" });
+    fireEvent.click(screen.getByRole("button", { name: "Redo BOM change" }));
+    await screen.findByRole("button", { name: "Undo BOM change" });
+    fireEvent.click(screen.getByRole("button", { name: "Undo BOM change" }));
+    await screen.findByRole("button", { name: "Redo BOM change" });
+
+    const writes = postedActions(fetchMock).filter((action) => action.action === "deleteBom" || action.action === "restoreBom");
+    expect(writes).toHaveLength(4);
+    expect(writes[1]).toMatchObject({
+      action: "restoreBom",
+      assemblySku: "DESK-1",
+      expectedComponents: [],
+      components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
+    });
+    expect(writes[2]).toMatchObject({
+      action: "restoreBom",
+      assemblySku: "DESK-1",
+      expectedComponents: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
+      components: [],
+    });
+    expect(writes[3]).toMatchObject({
+      action: "restoreBom",
+      assemblySku: "DESK-1",
+      expectedComponents: [],
+      components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
+    });
+    expect(screen.getByText(/only if the BOM still matches the captured state/)).not.toBeNull();
   });
 
   it("sends a governed defineBom write with a stamped intent id and keeps approval pending visible", async () => {

@@ -4606,3 +4606,10 @@ new owners and the manifest shows zero legacy runtime paths.
      Authenticated browser proof created a synthetic response and conversation,
      inserted the text into the composer, left Send untouched, saw successful Go
      capability requests, and recorded no browser errors.
+
+427. (Runtime verified) Vite Manufacturing can undo and redo a BOM deletion
+     through Go's snapshot-guarded `manufacturing.restoreBom` capability. Each
+     successful restore supplies the next expected snapshot, and the action
+     label tracks Undo and Redo across repeated changes. Focused tests pass 96
+     cases with typecheck and lint passing. Authenticated browser proof verified
+     the Go writes and repeated undo/redo behavior with no browser errors.

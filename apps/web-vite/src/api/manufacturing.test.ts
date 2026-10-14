@@ -372,6 +372,86 @@ describe("manufacturing API", () => {
     });
   });
 
+  it("maps BOM restoration to the governed Go inverse capability", () => {
+    const components = [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }];
+    expect(manufacturingActionRequest({ action: "restoreBom", assemblySku: "DESK-1", expectedComponents: [], components }, "intent-12345678901234567890")).toEqual({
+      url: "/api/capabilities/execute",
+      body: { capabilityId: "manufacturing.restoreBom", input: { assemblySku: "DESK-1", expectedComponents: [], components }, intentId: "intent-12345678901234567890" },
+    });
+  });
+
+  it("submits BOM restoration and returns its exact inverse snapshot", async () => {
+    const components = [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }];
+    const fetchMock = stubSequenced([Response.json({ ok: true, data: {
+      assemblySku: "DESK-1", restoredCount: 1, previousComponents: [], components,
+    } })]);
+    await expect(submitManufacturingAction({ action: "restoreBom", assemblySku: "DESK-1", expectedComponents: [], components }, undefined, {
+      retryScope: { actorId: "actor-1", organizationId: "org-1" },
+    })).resolves.toEqual({ kind: "completed", bomUndo: { assemblySku: "DESK-1", expectedComponents: components, components: [] } });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "manufacturing.restoreBom" });
+  });
+
+  it.each([
+    {
+      label: "define rejects a mismatched assembly SKU",
+      action: { action: "defineBom", assemblySku: "DESK-1", expectedComponents: [], components: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] } as ManufacturingWriteAction,
+      output: { assemblyItemId: "item-1", assemblySku: "CHAIR-1", componentCount: 1, previousComponents: [], components: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] },
+    },
+    {
+      label: "define rejects resulting components that differ from the requested target",
+      action: { action: "defineBom", assemblySku: "DESK-1", expectedComponents: [], components: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] } as ManufacturingWriteAction,
+      output: { assemblyItemId: "item-1", assemblySku: "DESK-1", componentCount: 1, previousComponents: [], components: [{ sku: "LEG-2", quantityThousandths: 1000, scrapPctThousandths: 0 }] },
+    },
+    {
+      label: "define rejects a previous snapshot that differs from the expected state",
+      action: { action: "defineBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }], components: [{ sku: "LEG-2", quantityThousandths: 1000, scrapPctThousandths: 0 }] } as ManufacturingWriteAction,
+      output: { assemblyItemId: "item-1", assemblySku: "DESK-1", componentCount: 1, previousComponents: [{ sku: "LEG-3", quantityThousandths: 1000, scrapPctThousandths: 0 }], components: [{ sku: "LEG-2", quantityThousandths: 1000, scrapPctThousandths: 0 }] },
+    },
+    {
+      label: "delete rejects a mismatched assembly SKU",
+      action: { action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] } as ManufacturingWriteAction,
+      output: { assemblySku: "CHAIR-1", removedCount: 1, previousComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }], components: [] },
+    },
+    {
+      label: "delete rejects a previous snapshot that differs from the expected state",
+      action: { action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] } as ManufacturingWriteAction,
+      output: { assemblySku: "DESK-1", removedCount: 1, previousComponents: [{ sku: "LEG-2", quantityThousandths: 1000, scrapPctThousandths: 0 }], components: [] },
+    },
+    {
+      label: "restore rejects a mismatched assembly SKU",
+      action: { action: "restoreBom", assemblySku: "DESK-1", expectedComponents: [], components: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] } as ManufacturingWriteAction,
+      output: { assemblySku: "CHAIR-1", restoredCount: 1, previousComponents: [], components: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] },
+    },
+    {
+      label: "restore rejects resulting components that differ from the requested target",
+      action: { action: "restoreBom", assemblySku: "DESK-1", expectedComponents: [], components: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] } as ManufacturingWriteAction,
+      output: { assemblySku: "DESK-1", restoredCount: 1, previousComponents: [], components: [{ sku: "LEG-2", quantityThousandths: 1000, scrapPctThousandths: 0 }] },
+    },
+    {
+      label: "restore rejects a previous snapshot that differs from the expected state",
+      action: { action: "restoreBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }], components: [{ sku: "LEG-2", quantityThousandths: 1000, scrapPctThousandths: 0 }] } as ManufacturingWriteAction,
+      output: { assemblySku: "DESK-1", restoredCount: 1, previousComponents: [{ sku: "LEG-3", quantityThousandths: 1000, scrapPctThousandths: 0 }], components: [{ sku: "LEG-2", quantityThousandths: 1000, scrapPctThousandths: 0 }] },
+    },
+  ])("$label", async ({ action, output }) => {
+    const fetchMock = stubSequenced([Response.json({ ok: true, data: output })]);
+    await expect(submitManufacturingAction(action, undefined, {
+      retryScope: { actorId: "actor-1", organizationId: "org-1" },
+    })).rejects.toThrow("snapshot that does not match the requested change");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches BOM snapshots independent of component ordering", async () => {
+    const first = { sku: "LEG-A", quantityThousandths: 1000, scrapPctThousandths: 0 };
+    const second = { sku: "LEG-B", quantityThousandths: 2000, scrapPctThousandths: 0 };
+    vi.stubGlobal("fetch", stubSequenced([Response.json({ ok: true, data: {
+      assemblyItemId: "item-1", assemblySku: "DESK-1", componentCount: 2,
+      previousComponents: [], components: [first, second],
+    } })]));
+    await expect(submitManufacturingAction({
+      action: "defineBom", assemblySku: "DESK-1", expectedComponents: [], components: [second, first],
+    }, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } })).resolves.toMatchObject({ kind: "completed" });
+  });
+
   it("submits deleteBom through Go and validates its output", async () => {
     const fetchMock = stubSequenced([Response.json({ ok: true, data: {
       assemblySku: "DESK-1",
@@ -381,7 +461,7 @@ describe("manufacturing API", () => {
     } })]);
     await expect(submitManufacturingAction({ action: "deleteBom", assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] }, undefined, {
       retryScope: { actorId: "actor-1", organizationId: "org-1" },
-    })).resolves.toEqual({ kind: "completed" });
+    })).resolves.toEqual({ kind: "completed", bomUndo: { assemblySku: "DESK-1", expectedComponents: [], components: [{ sku: "LEG-1", quantityThousandths: 1000, scrapPctThousandths: 0 }] } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
@@ -614,7 +694,7 @@ describe("manufacturing API", () => {
       assemblySku: "DESK-1",
       expectedComponents: [],
       components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
-    }, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } })).resolves.toEqual({ kind: "completed" });
+    }, undefined, { retryScope: { actorId: "actor-1", organizationId: "org-1" } })).resolves.toEqual({ kind: "completed", bomUndo: { assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }], components: [] } });
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       capabilityId: "manufacturing.defineBom",
@@ -635,7 +715,7 @@ describe("manufacturing API", () => {
     };
     const options = { retryScope: { actorId: "actor-1", organizationId: "org-1" } };
     await expect(submitManufacturingAction(action, undefined, options)).rejects.toMatchObject({ status: 404 });
-    await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
+    await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed", bomUndo: { assemblySku: "DESK-1", expectedComponents: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }], components: [] } });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
     const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
     const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
