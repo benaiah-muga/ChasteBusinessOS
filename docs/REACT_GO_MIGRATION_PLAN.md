@@ -2633,20 +2633,21 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD=1`, and
      `GO_MESSAGE_ATTACHMENT_DOWNLOAD_ROUTE=1`. The downloaded bytes matched
      the uploaded fixture, and the browser error log was empty. See proof 324.
-229. (Go/Vite tests verified; browser proof pending) Route Vite older
+229. (Complete) Route Vite older
      thread pages through `messaging.readMessages` using a visible message ID
      scoped to the same organization and conversation. Use stable keyset
      pagination and preserve around-message search jumps as a separate read.
      Messaging client and page suites passed, and the Go latest-window test
-     passed with runtime integration required. Authenticated browser proof
-     remains pending.
-230. (Go/Vite tests verified; browser proof pending) Route Vite
+     passed with runtime integration required. Authenticated browser proof is
+     recorded in proof 386.
+230. (Complete) Route Vite
      around-message thread reads through `messaging.readMessages`. Return the
      target with up to 30 older and 30 newer visible messages, use stable
      `(created_at, id)` ordering, and report older-side pagination metadata.
      Keep search result discovery separate from the thread read. Messaging
      client and page suites passed, and the Go around-window test passed with
-     runtime integration required. Authenticated browser proof remains pending.
+     runtime integration required. Authenticated browser proof is recorded in
+     proof 386.
 231. (Complete) Route Vite read
      receipt updates through the session-authenticated
      `messaging.advanceReadCursor` capability when
@@ -4131,3 +4132,13 @@ new owners and the manifest shows zero legacy runtime paths.
      `agent-browser` loaded the Vite not-found page, retained the Vite URL, and
      reported no browser errors. A TCP check confirmed the legacy server port
      3001 stayed closed. This completes item 384.
+
+386. (Runtime verified) On 2026-10-14, authenticated `agent-browser` searched
+     the synthetic `Migration paging proof` conversation for message 61.
+     Go's `messaging.readMessages` around request returned HTTP 200 with the
+     61-message window 31 through 91, and the older-page request using the
+     returned visible-message cursor returned HTTP 200 with messages 01
+     through 30. With the reader away from the bottom, the around result,
+     message 01, and message 61 stayed rendered through a five-second poll
+     interval; no latest-page read was issued. The browser error and console
+     logs were empty. This completes items 229 and 230.

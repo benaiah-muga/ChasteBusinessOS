@@ -1301,6 +1301,75 @@ it("sends page presence heartbeats and typing updates through the Go session rou
     }
   });
 
+  it("keeps an around and older thread window stable during polling away from the bottom", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const threadInputs: Array<Record<string, unknown>> = [];
+      let presenceReads = 0;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+        if (isGoCapability(path, init, "messaging.listConversations")) return capabilityResponse({ conversations: [conversation()], me });
+        if (isGoCapability(path, init, "messaging.listPeople")) return Promise.resolve(peopleCapabilityResponse(people));
+        if (path.includes("/presence")) {
+          presenceReads += 1;
+          return Response.json({ people: [] });
+        }
+        if (isGoCapability(path, init, "messaging.searchMessages")) {
+          return capabilityResponse({ results: [{ id: "hit-1", conversationId: channelId, conversationTitle: "general", body: "the needle", createdAt: "2026-10-01T09:00:00.000Z", senderType: "human", senderUserId: other }] });
+        }
+        if (isGoCapability(path, init, "messaging.readMessages")) {
+          const request = JSON.parse(String(init?.body)) as { input?: Record<string, unknown> };
+          const input = request.input ?? {};
+          threadInputs.push(input);
+          if (input.around === "hit-1") {
+            return capabilityResponse(threadBody({ messages: [message({ id: "hit-1", body: "the needle" })], hasMore: true, nextCursor: "history-before" }));
+          }
+          if (input.before === "history-before") {
+            return capabilityResponse(threadBody({
+              messages: [message({ id: "old-1", body: "last month" }), message({ id: "hit-1", body: "the needle" })],
+              hasMore: false,
+              nextCursor: null,
+            }));
+          }
+          return capabilityResponse(threadBody({ messages: [message({ id: "latest-1", body: "newest message" })] }));
+        }
+        return Response.json({ error: "not found" }, { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      render(<MessagesPage />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      await screen.findByText("newest message");
+
+      fireEvent.click(await screen.findByRole("button", { name: "All messages" }));
+      fireEvent.change(screen.getByLabelText("Search all messages"), { target: { value: "needle" } });
+      fireEvent.click(await screen.findByRole("button", { name: /the needle/ }));
+      await waitFor(() => expect(threadInputs.some((input) => input.around === "hit-1")).toBe(true));
+
+      const scroller = screen.getByLabelText("Messages in general");
+      fireEvent.scroll(scroller, { target: { scrollTop: 0 } });
+      expect(await screen.findByText("last month")).not.toBeNull();
+
+      Object.defineProperty(scroller, "scrollHeight", { get: () => 1200, configurable: true });
+      Object.defineProperty(scroller, "clientHeight", { get: () => 300, configurable: true });
+      Object.defineProperty(scroller, "scrollTop", { get: () => 0, configurable: true });
+      const readsBeforePoll = threadInputs.length;
+      const presenceReadsBeforePoll = presenceReads;
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_100); });
+
+      expect(threadInputs).toHaveLength(readsBeforePoll);
+      expect(presenceReads).toBeGreaterThan(presenceReadsBeforePoll);
+      expect(threadInputs.some((input) => input.around === "hit-1")).toBe(true);
+      expect(threadInputs.some((input) => input.before === "history-before")).toBe(true);
+      expect(document.querySelector("#message-old-1")).not.toBeNull();
+      expect(document.querySelector("#message-hit-1")).not.toBeNull();
+      expect(document.querySelector("#message-latest-1")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows agent, customer, and system bubbles as visually distinct regions", async () => {
     const fetchMock = router([
       moduleRoute,

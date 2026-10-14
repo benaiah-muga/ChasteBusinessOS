@@ -1391,8 +1391,10 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
       if (document.visibilityState !== "visible") return;
       const panel = threadRef.current;
       const atBottom = panel ? isNearBottom(panel) : true;
-      if (atBottom) autoScrollRef.current = true;
-      void refreshThread(activeId, { markRead: atBottom });
+      if (atBottom) {
+        autoScrollRef.current = true;
+        void refreshThread(activeId, { markRead: true });
+      }
       refreshPresence();
     }, THREAD_POLL_MS);
     const heartbeatTimer = window.setInterval(heartbeat, HEARTBEAT_MS);

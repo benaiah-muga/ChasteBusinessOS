@@ -17,6 +17,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Messaging refreshes the latest thread page and advances its read cursor only while the reader is near the bottom. Search-around results and older pages remain in place while reading history.
 - The default `pnpm dev` command now starts only the React/Vite app; use `pnpm dev:legacy` explicitly for temporary Next compatibility work.
 - The Vite development API proxy now sends unclaimed `/api` paths to Go, where unsupported routes fail with 404 instead of reaching the legacy server.
 - Vite keeps unknown page URLs in its own not-found page instead of redirecting them to the legacy app.
