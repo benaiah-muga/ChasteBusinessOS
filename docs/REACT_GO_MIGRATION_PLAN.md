@@ -257,8 +257,9 @@ The browser stores exact actor and organization scoped action intents for reload
 recovery and blocks legacy writes while a Go action has an unresolved result.
 
 Go CRM read parity covers the timeline and task query modes through an
-explicit signed opt-in; CRM writes and unported read modes remain on the
-legacy route. The Go metrics reader matches the newest-200-session aggregate,
+explicit signed opt-in. Vite saved-customer-view writes use Go capabilities;
+other unported CRM writes and read modes retain their existing route owners.
+The Go metrics reader matches the newest-200-session aggregate,
 null-rate, rounding, and organization-scope behavior. Its short-lived signed
 HTTP adapter is opt-in through `GO_METRICS_READ=1`; the public route remains
 legacy-owned by default. The current route manifest has 162 API methods: 66 business methods are
@@ -3034,12 +3035,12 @@ new owners and the manifest shows zero legacy runtime paths.
      decisions. The generated route-ownership manifest and its exact ownership
      test now record the Vite page owner.
 
-268. (Implemented and tested) Accept Better Auth's opaque user IDs when Vite
+268. (Complete) Accept Better Auth's opaque user IDs when Vite
      scopes durable CRM retry intents. Keep organization IDs UUID-validated and
      keep the client actor identifier out of authorization claims; Go continues
      to derive authority from the authenticated session. API and CRM page tests
-     cover opaque IDs and overlong-ID rejection. Browser verification of the
-     newly enabled CRM write controls remains open.
+     cover opaque IDs and overlong-ID rejection. Authenticated browser proof of
+     a CRM Go write using an opaque Better Auth ID is recorded in proof 390.
 
 269. (Runtime verified) Mark `/crm` as Vite-owned after the authenticated
      browser proof loaded the CRM workspace, customer list, and customer
@@ -4167,3 +4168,10 @@ new owners and the manifest shows zero legacy runtime paths.
      capabilities; all returned HTTP 200. After reload, the project, task
      status, and assignment remained. No browser errors occurred. This
      completes item 270 and verifies the Projects browser flow.
+
+390. (Runtime verified) On 2026-10-14, authenticated Vite saved the synthetic
+     customer view `Migration CRM Opaque ID Proof 20261014` through Go's
+     `crm.saveCustomerView` capability with HTTP 200. Go refreshed the view
+     list and the saved view appeared in the Vite customer selector. The
+     authenticated Better Auth user ID was opaque and not a UUID. The browser
+     error log was empty. This completes item 268.
