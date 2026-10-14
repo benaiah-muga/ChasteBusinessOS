@@ -3214,9 +3214,7 @@ new owners and the manifest shows zero legacy runtime paths.
      governance policy through Go. GET and POST returned HTTP 200, the UI
      confirmed the save, and the browser error log was empty.
 
-283. (Implemented; runtime-role capability DB proof and focused Vite API tests
-     passed; authenticated browser proof and live legacy differential remain
-     pending) Route Vite Accounting and Purchasing tax-code catalog reads
+283. (Complete) Route Vite Accounting and Purchasing tax-code catalog reads
      through Go's `accounting.listTaxCodes` capability. Go requires
      `accounting.read`, executes the read in the active organization's
      `dbx.WithOrgTx`, and returns all tax codes in legacy active-first,
@@ -3226,7 +3224,9 @@ new owners and the manifest shows zero legacy runtime paths.
      the legacy Next app. The canonical accounting registry and generated
      capability manifest now expose the shared schema and intent for other
      clients. The capability endpoint is already Go-owned; no global route
-     ownership change is implied. `graft build` completed.
+     ownership change is implied. The authenticated Vite browser proof is in
+     proof 388. No Next differential was run because Vite and Go are the
+     migration target.
 
 284. (Complete; runtime-role DB projection proof, focused Vite API/proxy tests,
      and authenticated Support browser proof passed) Move
@@ -4152,3 +4152,11 @@ new owners and the manifest shows zero legacy runtime paths.
      returned HTTP 200. The database contains one matching ledger event and
      one conversation membership for that user. The browser error log was
      empty. This completes item 240.
+
+388. (Runtime verified) On 2026-10-14, authenticated Vite created a local
+     Uganda tax profile and synthetic active output and input tax codes
+     through Go's `accounting.createTaxProfile` and `accounting.createTaxCode`
+     capabilities. Go's `accounting.listTaxCodes` returned HTTP 200 with both
+     directions. The Accounting Tax tab displayed only `MIGOUT18`; Purchasing's
+     vendor-bill form offered only `MIGIN18` under Input tax. The browser error
+     log was empty. This completes item 283.
