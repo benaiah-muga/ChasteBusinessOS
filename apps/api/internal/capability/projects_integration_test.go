@@ -630,7 +630,8 @@ func TestGoProjectsReadBoardMatchesLegacyColumnsAndAuditBehavior(t *testing.T) {
 	}
 	if output.Columns[0].Tasks[0].ParentTaskID != nil || output.Columns[0].Tasks[0].AssigneeUserID != nil ||
 		output.Columns[0].Tasks[0].DueAt == nil || *output.Columns[0].Tasks[0].DueAt != "2026-08-10T14:30:01.987Z" ||
-		output.Columns[0].Tasks[0].Position != 1 {
+		output.Columns[0].Tasks[0].Position != 1 || output.Columns[0].Tasks[0].ProjectID != projectID ||
+		output.Columns[0].Tasks[0].CreatedAt == "" {
 		t.Fatalf("board task=%+v, want nullable fields and JavaScript millisecond ISO precision", output.Columns[0].Tasks[0])
 	}
 	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2`, fx.orgID, ProjectBoardReadCapabilityID); got != before+1 {

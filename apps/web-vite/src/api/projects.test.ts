@@ -45,8 +45,8 @@ function boardResponse() {
       {
         status: "todo",
         tasks: [
-          { id: taskId, title: "First by position", parentTaskId: null, priority: "high", assigneeUserId: null, dueAt: null, position: 2 },
-          { id: "ebc7ac08-244a-41aa-b463-9bb0d3ce315d", title: "Second by position", parentTaskId: taskId, priority: "medium", assigneeUserId: memberId, dueAt: "2026-10-02T00:00:00.000Z", position: 8 },
+          { id: taskId, projectId, title: "First by position", parentTaskId: null, priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" },
+          { id: "ebc7ac08-244a-41aa-b463-9bb0d3ce315d", projectId, title: "Second by position", parentTaskId: taskId, priority: "medium", assigneeUserId: memberId, dueAt: "2026-10-02T00:00:00.000Z", position: 8, note: "Keep the source", createdAt: "2026-10-01T00:00:01.000Z" },
         ],
       },
       { status: "doing", tasks: [] },
@@ -216,7 +216,7 @@ describe("projects API client", () => {
     await expect(fetchProjects()).rejects.toEqual(new ProjectsApiError(403, "You do not have permission to view or change projects."));
   });
 
-  it("dispatches all five write contracts directly to Go when the paired selector is active", async () => {
+  it("dispatches all seven write contracts directly to Go when the paired selector is active", async () => {
     localStorage.clear();
     vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
     const cases = [
@@ -225,6 +225,8 @@ describe("projects API client", () => {
       [{ action: "createTask", projectId, title: "Write the brief", parentTaskId: taskId, assigneeUserId: memberId, dueAt: "2026-10-10T00:00:00.000Z", priority: "high" }, "projects.createTask", { projectId, title: "Write the brief", parentTaskId: taskId, assigneeUserId: memberId, dueAt: "2026-10-10T00:00:00.000Z", priority: "high" }, { taskId }],
       [{ action: "moveTask", taskId, status: "doing", position: 4 }, "projects.moveTask", { taskId, status: "doing", position: 4 }, { moved: true, status: "doing" }],
       [{ action: "assignTask", taskId, assigneeUserId: memberId }, "projects.assignTask", { taskId, assigneeUserId: memberId }, { assigned: true }],
+      [{ action: "deleteTask", taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }, "projects.deleteTask", { taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }, { taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }],
+      [{ action: "restoreTask", taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }, "projects.restoreTask", { taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }, { taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }],
     ] as const;
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: cases[0][3] }));
     vi.stubGlobal("fetch", fetchMock);
@@ -236,7 +238,7 @@ describe("projects API client", () => {
       expect(url).toBe("/api/capabilities/execute");
       expect(JSON.parse(String(init?.body))).toEqual({ capabilityId, input, intentId: expect.any(String) });
     }
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
   });
 
   it("accepts opaque Better Auth actor IDs for Go actions while requiring a UUID organization", async () => {

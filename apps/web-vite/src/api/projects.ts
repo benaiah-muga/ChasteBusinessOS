@@ -13,15 +13,18 @@ const ProjectListSchema = z.object({ projects: z.array(ProjectSchema) });
 
 const BoardTaskSchema = z.object({
   id: z.string().min(1),
+  projectId: z.string().uuid(),
   title: z.string(),
   parentTaskId: z.string().nullable(),
-  priority: z.string().min(1),
+  priority: z.enum(["low", "medium", "high"]),
   assigneeUserId: z.string().nullable(),
   dueAt: z.string().datetime().nullable(),
   position: z.number().int().nonnegative(),
+  note: z.string().nullable(),
+  createdAt: z.string().datetime(),
 });
 
-const BoardColumnSchema = z.object({ status: z.string().min(1), tasks: z.array(BoardTaskSchema) });
+const BoardColumnSchema = z.object({ status: z.enum(["todo", "doing", "done"]), tasks: z.array(BoardTaskSchema) });
 const ProjectBoardSchema = z.object({ columns: z.array(BoardColumnSchema) });
 
 const ProjectMembersSchema = z.object({
@@ -73,6 +76,21 @@ const ArchiveProjectInputSchema = z.object({
   action: z.literal("archiveProject"),
   projectId: z.string().uuid(),
 });
+const ProjectTaskSnapshotSchema = z.object({
+  taskId: z.string().uuid(),
+  projectId: z.string().uuid(),
+  title: z.string().min(1).max(200),
+  parentTaskId: z.string().uuid().nullable(),
+  status: z.enum(["todo", "doing", "done"]),
+  priority: z.enum(["low", "medium", "high"]),
+  assigneeUserId: z.string().uuid().nullable(),
+  dueAt: z.string().datetime().nullable(),
+  position: z.number().int().nonnegative(),
+  note: z.string().max(10000).nullable(),
+  createdAt: z.string().datetime(),
+}).strict();
+const DeleteTaskInputSchema = ProjectTaskSnapshotSchema.extend({ action: z.literal("deleteTask") });
+const RestoreTaskInputSchema = ProjectTaskSnapshotSchema.extend({ action: z.literal("restoreTask") });
 
 export const ProjectActionSchema = z.discriminatedUnion("action", [
   CreateProjectInputSchema,
@@ -80,6 +98,8 @@ export const ProjectActionSchema = z.discriminatedUnion("action", [
   AssignTaskInputSchema,
   MoveTaskInputSchema,
   ArchiveProjectInputSchema,
+  DeleteTaskInputSchema,
+  RestoreTaskInputSchema,
 ]);
 
 const ProjectActionResponseSchema = z.object({ ok: z.literal(true), data: z.unknown() });
@@ -110,6 +130,8 @@ const ProjectActionOutputSchemas = {
     expectedPosition: z.number().int().nonnegative().optional(),
   }).strict(),
   archiveProject: z.object({ archived: z.literal(true), projectId: z.string().uuid().optional() }).strict(),
+  deleteTask: ProjectTaskSnapshotSchema,
+  restoreTask: ProjectTaskSnapshotSchema,
 } as const;
 
 const PROJECT_ATTEMPT_PREFIX = "chaste:projects:go:attempt:v1:";
@@ -381,6 +403,8 @@ export async function submitProjectAction<Action extends ProjectAction>(
     createTask: "projects.createTask",
     moveTask: "projects.moveTask",
     assignTask: "projects.assignTask",
+    deleteTask: "projects.deleteTask",
+    restoreTask: "projects.restoreTask",
   };
   const url = goSelected ? "/api/capabilities/execute" : "/api/projects";
   const body = goSelected

@@ -4558,3 +4558,11 @@ new owners and the manifest shows zero legacy runtime paths.
      receipt entry was disabled, then recorded 1.25 units and saw 1.25 accepted
      with 1.25 remaining. Go capability calls returned HTTP 200 and the browser
      reported no errors.
+422. (Runtime verified) Vite Projects can delete a task through Go using the
+     complete task snapshot, then restore that same task through an actor- and
+     organization-scoped Undo action. The Go board read now returns the snapshot
+     fields needed for a guarded restore. Focused Vite API/page tests, typecheck,
+     lint, Go parser, and handler tests pass; the Go database-backed board test
+     is included in the full verification run. Authenticated browser proof
+     created a synthetic task, deleted it, and restored it with Undo. Go
+     capability calls returned HTTP 200 and the browser reported no errors.

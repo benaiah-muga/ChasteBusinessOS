@@ -23,13 +23,13 @@ function board(projectStatus: "active" | "archived" = "active") {
       {
         status: "todo",
         tasks: [
-          { id: taskId, title: "Draft the launch brief", parentTaskId: null, priority: "high", assigneeUserId: null, dueAt: null, position: 1 },
+          { id: taskId, projectId, title: "Draft the launch brief", parentTaskId: null, priority: "high", assigneeUserId: null, dueAt: null, position: 1, note: null, createdAt: "2026-09-21T10:00:00.000Z" },
         ],
       },
       {
         status: "doing",
         tasks: [
-          { id: doingTaskId, title: "Review the copy", parentTaskId: taskId, priority: "medium", assigneeUserId: memberId, dueAt: "2026-10-05T00:00:00.000Z", position: 4 },
+          { id: doingTaskId, projectId, title: "Review the copy", parentTaskId: taskId, priority: "medium", assigneeUserId: memberId, dueAt: "2026-10-05T00:00:00.000Z", position: 4, note: "Review before launch", createdAt: "2026-09-21T10:01:00.000Z" },
         ],
       },
       { status: "done", tasks: [] },
@@ -155,7 +155,7 @@ describe("Vite projects page", () => {
       if (path === `/api/projects?projectId=${projectId}`) return Response.json(board());
       if (path === `/api/projects?projectId=${secondProjectId}`) return Response.json({
         columns: [
-          { status: "todo", tasks: [{ id: taskId, title: "Measure loading bay", parentTaskId: null, priority: "medium", assigneeUserId: null, dueAt: null, position: 0 }] },
+          { status: "todo", tasks: [{ id: taskId, projectId, title: "Measure loading bay", parentTaskId: null, priority: "medium", assigneeUserId: null, dueAt: null, position: 0, note: null, createdAt: "2026-09-21T10:00:00.000Z" }] },
           { status: "doing", tasks: [] },
           { status: "done", tasks: [] },
         ],
@@ -273,6 +273,71 @@ describe("Vite projects page", () => {
     expect(payload.intentId).toEqual(expect.any(String));
   });
 
+  it("deletes an unchanged Go task snapshot and restores it through the reciprocal capability", async () => {
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    let taskDeleted = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return projectModules();
+      if (path === "/api/projects" && init?.method !== "POST") return Response.json({ projects: [activeProject] });
+      if (path.startsWith("/api/projects?projectId=")) {
+        const current = board();
+        if (taskDeleted) current.columns[1]?.tasks.splice(0, 1);
+        return Response.json(current);
+      }
+      if (path === "/api/team") return team();
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { capabilityId: string; input: Record<string, unknown> };
+        if (body.capabilityId === "projects.deleteTask") taskDeleted = true;
+        if (body.capabilityId === "projects.restoreTask") taskDeleted = false;
+        return Response.json({ ok: true, data: body.input });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectsPage actorId="c0f4707d-1e6c-4627-9ce5-a80b7b95a16e" organizationId="3196834e-9b90-4a20-9263-a3391fdc4329" />);
+    await screen.findByRole("heading", { name: "Board · Website relaunch" });
+    await screen.findByRole("button", { name: "Delete Review the copy" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Review the copy" }));
+
+    expect(await screen.findByText("Review the copy was deleted.")).not.toBeNull();
+    expect(screen.queryByText("Review the copy")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo delete" }));
+    expect(await screen.findByText("Review the copy")).not.toBeNull();
+    expect(screen.queryByText("Review the copy was deleted.")).toBeNull();
+
+    const writes = fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST");
+    expect(writes.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+      { capabilityId: "projects.deleteTask", input: {
+        taskId: doingTaskId,
+        projectId,
+        title: "Review the copy",
+        parentTaskId: taskId,
+        status: "doing",
+        priority: "medium",
+        assigneeUserId: memberId,
+        dueAt: "2026-10-05T00:00:00.000Z",
+        position: 4,
+        note: "Review before launch",
+        createdAt: "2026-09-21T10:01:00.000Z",
+      }, intentId: expect.any(String) },
+      { capabilityId: "projects.restoreTask", input: {
+        taskId: doingTaskId,
+        projectId,
+        title: "Review the copy",
+        parentTaskId: taskId,
+        status: "doing",
+        priority: "medium",
+        assigneeUserId: memberId,
+        dueAt: "2026-10-05T00:00:00.000Z",
+        position: 4,
+        note: "Review before launch",
+        createdAt: "2026-09-21T10:01:00.000Z",
+      }, intentId: expect.any(String) },
+    ]);
+  });
+
   it("keeps the selected project board when an earlier project's move finishes late", async () => {
     const secondProject = { ...activeProject, id: secondProjectId, name: "Warehouse fit-out" };
     let resolveMove!: (response: Response) => void;
@@ -284,7 +349,7 @@ describe("Vite projects page", () => {
       if (path === `/api/projects?projectId=${projectId}`) return Response.json(board());
       if (path === `/api/projects?projectId=${secondProjectId}`) return Response.json({
         columns: [
-          { status: "todo", tasks: [{ id: taskId, title: "Measure loading bay", parentTaskId: null, priority: "medium", assigneeUserId: null, dueAt: null, position: 0 }] },
+          { status: "todo", tasks: [{ id: taskId, projectId, title: "Measure loading bay", parentTaskId: null, priority: "medium", assigneeUserId: null, dueAt: null, position: 0, note: null, createdAt: "2026-09-21T10:00:00.000Z" }] },
           { status: "doing", tasks: [] },
           { status: "done", tasks: [] },
         ],

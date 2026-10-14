@@ -41,6 +41,8 @@ type MemberState =
   | { status: "ready"; members: ProjectMember[] };
 
 type Notice = { tone: "success" | "pending" | "error"; message: string };
+type ProjectTaskSnapshot = Omit<Extract<ProjectAction, { action: "deleteTask" }>, "action">;
+type DeletedTaskState = { snapshot: ProjectTaskSnapshot; actorId: string | null; organizationId: string | null };
 function errorMessage(error: unknown): string {
   if (error instanceof ProjectsApiError) return error.message;
   if (error instanceof DOMException && error.name === "TimeoutError") return "The projects service took too long. Try again.";
@@ -75,6 +77,7 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
   const [projectForm, setProjectForm] = useState({ name: "", due: "" });
   const [taskForm, setTaskForm] = useState({ title: "", assignee: "", due: "", priority: "medium" as "low" | "medium" | "high" });
   const [archiveTarget, setArchiveTarget] = useState<Project | null>(null);
+  const [deletedTask, setDeletedTask] = useState<DeletedTaskState | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [overStatus, setOverStatus] = useState<string | null>(null);
   const selectedIdRef = useRef(selectedId);
@@ -155,6 +158,8 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
 
   useEffect(() => { void refreshPendingActions(); }, [refreshPendingActions]);
 
+  useEffect(() => { setDeletedTask(null); }, [actorId, organizationId]);
+
   useEffect(() => {
     if (moduleState.status !== "ready" || !moduleState.enabled || !selectedId) {
       setBoardState({ status: "idle" });
@@ -213,7 +218,9 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
     const label = action.action === "createProject" ? `Create ${action.name}`
       : action.action === "createTask" ? `Add “${action.title}”`
         : action.action === "archiveProject" ? "Archive project"
-          : action.action === "moveTask" ? `Move task to ${action.status}` : "Assign task";
+          : action.action === "moveTask" ? `Move task to ${action.status}`
+            : action.action === "deleteTask" ? `Delete ${action.title}`
+              : action.action === "restoreTask" ? `Restore ${action.title}` : "Assign task";
     const result = await postAction(action, label, pending);
     if (result?.kind !== "completed") return;
     if (action.action === "createProject") {
@@ -234,6 +241,13 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
     } else if (action.action === "archiveProject") {
       setArchiveTarget(null);
       await loadProjects();
+    } else if (action.action === "deleteTask") {
+      const { action: _action, ...snapshot } = action;
+      setDeletedTask({ snapshot, actorId, organizationId });
+      await loadBoard(action.projectId);
+    } else if (action.action === "restoreTask") {
+      setDeletedTask(null);
+      await loadBoard(action.projectId);
     } else if (selectedId) {
       await loadBoard(selectedId);
     }
@@ -304,6 +318,42 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
     if (result?.kind === "completed") await loadBoard(selectedId);
   }
 
+  async function deleteTask(task: BoardTask, status: BoardColumn["status"]): Promise<void> {
+    if (selected?.status !== "active" || !selectedId || task.projectId !== selectedId) return;
+    const action: ProjectAction = {
+      action: "deleteTask",
+      taskId: task.id,
+      projectId: task.projectId,
+      title: task.title,
+      parentTaskId: task.parentTaskId,
+      status,
+      priority: task.priority as "low" | "medium" | "high",
+      assigneeUserId: task.assigneeUserId,
+      dueAt: task.dueAt,
+      position: task.position,
+      note: task.note,
+      createdAt: task.createdAt,
+    };
+    const result = await postAction(action, `Delete ${task.title}`);
+    if (result?.kind === "completed") {
+      const { action: _action, ...snapshot } = action;
+      setDeletedTask({ snapshot, actorId, organizationId });
+      await loadBoard(selectedId);
+    }
+  }
+
+  async function restoreDeletedTask(): Promise<void> {
+    const pendingDelete = deletedTask;
+    const snapshot = pendingDelete?.snapshot;
+    if (!snapshot || pendingDelete.actorId !== actorId || pendingDelete.organizationId !== organizationId
+      || selected?.status !== "active" || selectedId !== snapshot.projectId) return;
+    const result = await postAction({ action: "restoreTask", ...snapshot }, `Restore ${snapshot.title}`);
+    if (result?.kind === "completed") {
+      setDeletedTask(null);
+      await loadBoard(snapshot.projectId);
+    }
+  }
+
   async function archiveProject(): Promise<void> {
     if (!archiveTarget) return;
     const target = archiveTarget;
@@ -358,6 +408,13 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
         <div className={`projects-notice projects-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
           <span>{notice.message}</span>
           <button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}>Dismiss</button>
+        </div>
+      )}
+
+      {deletedTask && deletedTask.actorId === actorId && deletedTask.organizationId === organizationId && selectedId === deletedTask.snapshot.projectId && (
+        <div className="projects-notice projects-notice-success" role="status">
+          <span>{deletedTask.snapshot.title} was deleted.</span>
+          <button type="button" disabled={busy || selected?.status !== "active"} onClick={() => void restoreDeletedTask()}>Undo delete</button>
         </div>
       )}
 
@@ -543,6 +600,7 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
                                   <option value="">{memberState.status === "loading" ? "Loading team…" : members.length === 0 ? "No members available" : "Unassigned"}</option>
                                   {members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}
                                 </select>
+                                <button className="projects-quiet-button" type="button" aria-label={`Delete ${task.title}`} disabled={busy || selected.status !== "active"} onClick={() => void deleteTask(task, column.status)}>Delete</button>
                               </div>
                             </li>
                           ))}

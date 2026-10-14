@@ -35,12 +35,15 @@ type ProjectBoardInput struct {
 
 type ProjectBoardTask struct {
 	ID             string  `json:"id"`
+	ProjectID      string  `json:"projectId"`
 	Title          string  `json:"title"`
 	ParentTaskID   *string `json:"parentTaskId"`
 	Priority       string  `json:"priority"`
 	AssigneeUserID *string `json:"assigneeUserId"`
 	DueAt          *string `json:"dueAt"`
 	Position       int64   `json:"position"`
+	Note           *string `json:"note"`
+	CreatedAt      string  `json:"createdAt"`
 }
 
 type ProjectBoardColumn struct {
@@ -604,7 +607,7 @@ func listProjectBoard(ctx context.Context, tx pgx.Tx, orgID string, input Projec
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, title, parent_task_id::text, priority, assignee_user_id::text, due_at, position, status
+		SELECT id::text, project_id::text, title, parent_task_id::text, priority, assignee_user_id::text, due_at, position, note, created_at, status
 		FROM project_tasks
 		WHERE project_id = $1::uuid AND org_id = $2::uuid
 		ORDER BY position ASC`, input.ProjectID, orgID)
@@ -615,11 +618,13 @@ func listProjectBoard(ctx context.Context, tx pgx.Tx, orgID string, input Projec
 	for rows.Next() {
 		var task ProjectBoardTask
 		var dueAt *time.Time
+		var createdAt time.Time
 		var status string
-		if err := rows.Scan(&task.ID, &task.Title, &task.ParentTaskID, &task.Priority, &task.AssigneeUserID, &dueAt, &task.Position, &status); err != nil {
+		if err := rows.Scan(&task.ID, &task.ProjectID, &task.Title, &task.ParentTaskID, &task.Priority, &task.AssigneeUserID, &dueAt, &task.Position, &task.Note, &createdAt, &status); err != nil {
 			return ProjectBoardOutput{}, err
 		}
 		task.DueAt = projectISOTime(dueAt)
+		task.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		switch status {
 		case "todo":
 			output.Columns[0].Tasks = append(output.Columns[0].Tasks, task)
