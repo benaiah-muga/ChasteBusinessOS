@@ -19,6 +19,7 @@ import {
   readPendingAccountingReversePayment,
   readPendingAccountingBankReconciliationWrite,
   readPendingAccountingCloseYear,
+  readPendingAccountingPeriodFxWrite,
   submitAccountingAction,
 } from "./accounting";
 
@@ -903,6 +904,77 @@ describe("accounting API: governed writes", () => {
       status: 422,
       message: "Period is sealed",
     });
+  });
+});
+
+describe("accounting API: Go Accounting period and FX writes", () => {
+  beforeEach(stubPaymentLocks);
+
+  it("routes reopening through the organization-scoped Go capability and clears success", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: { reopened: true } }));
+    await expect(submitAccountingAction("/api/accounting", { action: "reopenPeriod", year: 2026, month: 1 }, undefined, paymentRetryScope))
+      .resolves.toEqual({ kind: "completed" });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      headers: expect.objectContaining({ "X-Organization-ID": paymentRetryScope.organizationId }),
+    }));
+    expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.reopenPeriod",
+      input: { year: 2026, month: 1 },
+      intentId: expect.any(String),
+    });
+    await expect(readPendingAccountingPeriodFxWrite(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("routes FX-rate recording through Go and reuses only the exact scoped retry", async () => {
+    const output = { rateId: "11111111-1111-4111-8111-111111111111", num: 10875, den: 10000 };
+    const mock = stubFetch(() => Response.json({ ok: true, data: output }));
+    const action = { action: "recordFxRate", quoteCurrency: "eur", rate: "1.0875", effectiveAt: "2026-10-14T12:00:00.000Z" };
+    await submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope);
+    const first = JSON.parse(String(mock.mock.calls[0]?.[1]?.body));
+    expect(first).toMatchObject({
+      capabilityId: "accounting.recordFxRate",
+      input: { quoteCurrency: "EUR", rate: "1.0875", effectiveAt: action.effectiveAt },
+    });
+    expect(mock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": paymentRetryScope.organizationId });
+    expect(mock).toHaveBeenCalledTimes(1);
+    await expect(readPendingAccountingPeriodFxWrite(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("keeps exact period or FX details unresolved through pending and transport failures", async () => {
+    const action = { action: "recordFxRate", quoteCurrency: "EUR", rate: "1.0875" };
+    const pending = stubFetch(() => Response.json({ pendingApproval: true, reason: "Controller review." }, { status: 202 }));
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "pending", reason: "Controller review." });
+    const saved = await readPendingAccountingPeriodFxWrite(paymentRetryScope);
+    expect(saved).toMatchObject(action);
+    await expect(submitAccountingAction("/api/accounting", { ...action, rate: "1.09" }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(pending).toHaveBeenCalledTimes(1);
+    const pendingIntentId = JSON.parse(String(pending.mock.calls[0]?.[1]?.body)).intentId;
+    const retry = stubFetch(() => { throw new TypeError("offline"); });
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(JSON.parse(String(retry.mock.calls[0]?.[1]?.body)).intentId).toBe(pendingIntentId);
+    expect(await readPendingAccountingPeriodFxWrite(paymentRetryScope)).toMatchObject(action);
+  });
+
+  it("preserves an unresolved reopen and rejects a different period before another request", async () => {
+    const mock = stubFetch(() => Response.json({ pendingApproval: true }, { status: 202 }));
+    const action = { action: "reopenPeriod", year: 2026, month: 1 };
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope))
+      .resolves.toEqual({ kind: "pending", reason: "This Accounting action is waiting for approval." });
+    await expect(readPendingAccountingPeriodFxWrite(paymentRetryScope)).resolves.toMatchObject(action);
+    await expect(submitAccountingAction("/api/accounting", { ...action, month: 2 }, undefined, paymentRetryScope))
+      .rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when organization scope or action data is invalid", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: { reopened: true } }));
+    await expect(submitAccountingAction("/api/accounting", { action: "reopenPeriod", year: 2026, month: 13 }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 400 });
+    await expect(submitAccountingAction("/api/accounting", { action: "recordFxRate", quoteCurrency: "EURO", rate: "1.2" }, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 400 });
+    await expect(submitAccountingAction("/api/accounting", { action: "reopenPeriod", year: 2026, month: 1 })).rejects.toMatchObject({ status: 0 });
+    expect(mock).not.toHaveBeenCalled();
   });
 });
 

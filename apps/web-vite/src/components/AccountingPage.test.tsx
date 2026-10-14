@@ -126,6 +126,7 @@ interface StubOptions {
   taxCodes?: unknown;
   actionResponse?: Response | (() => Response);
   goPaymentResponse?: () => Response;
+  goPeriodFxWriteResponse?: () => Response;
   goCreateInvoiceResponse?: () => Response;
   goCreditNoteResponse?: () => Response;
   goReverseEntryResponse?: () => Response;
@@ -261,6 +262,14 @@ function stubAccounting(options: StubOptions = {}) {
           refundedMinor: 2_500,
           invoiceNumber: 1042,
           outstandingMinor: 2_500,
+        } });
+      }
+      if (capabilityId === "accounting.reopenPeriod") {
+        return options.goPeriodFxWriteResponse?.() ?? Response.json({ ok: true, data: { reopened: true } });
+      }
+      if (capabilityId === "accounting.recordFxRate") {
+        return options.goPeriodFxWriteResponse?.() ?? Response.json({ ok: true, data: {
+          rateId: "11111111-1111-4111-8111-111111111111", num: 10875, den: 10000,
         } });
       }
       if (capabilityId === "accounting.matchBankTransaction") {
@@ -1231,9 +1240,56 @@ describe("AccountingPage tabs", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reopen period" }));
 
     await waitFor(() => {
-      const write = calls.find((call) => call.body?.includes("reopenPeriod"));
-      expect(JSON.parse(write!.body!)).toMatchObject({ action: "reopenPeriod", year: 2026, month: 1 });
+      const write = calls.find((call) => call.body?.includes('"capabilityId":"accounting.reopenPeriod"'));
+      expect(write?.url).toBe("/api/capabilities/execute");
+      expect(JSON.parse(write!.body!)).toMatchObject({
+        capabilityId: "accounting.reopenPeriod",
+        input: { year: 2026, month: 1 },
+        intentId: expect.any(String),
+      });
     });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST")).toBe(false);
+  });
+
+  it("records an FX rate through the Go capability", async () => {
+    const { calls } = stubAccounting();
+    await renderReady();
+
+    fireEvent.click(screen.getByRole("button", { name: /Reports/ }));
+    fireEvent.change(await screen.findByLabelText("Currency"), { target: { value: "eur" } });
+    fireEvent.change(screen.getByLabelText("Rate, 1 unit in base"), { target: { value: "1.0875" } });
+    fireEvent.change(screen.getByLabelText("Effective (optional)"), { target: { value: "2026-10-14" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record rate" }));
+
+    await waitFor(() => {
+      const write = calls.find((call) => call.body?.includes('"capabilityId":"accounting.recordFxRate"'));
+      expect(write?.url).toBe("/api/capabilities/execute");
+      expect(JSON.parse(write!.body!)).toMatchObject({
+        capabilityId: "accounting.recordFxRate",
+        input: { quoteCurrency: "EUR", rate: "1.0875", effectiveAt: "2026-10-14T12:00:00.000Z" },
+        intentId: expect.any(String),
+      });
+    });
+    expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST")).toBe(false);
+  });
+
+  it("restores an unresolved FX-rate draft and labels its exact retry", async () => {
+    const { calls } = stubAccounting({
+      goPeriodFxWriteResponse: () => Response.json({ pendingApproval: true, reason: "Controller review." }, { status: 202 }),
+    });
+    await renderReady();
+
+    fireEvent.click(screen.getByRole("button", { name: /Reports/ }));
+    fireEvent.change(await screen.findByLabelText("Currency"), { target: { value: "eur" } });
+    fireEvent.change(screen.getByLabelText("Rate, 1 unit in base"), { target: { value: "1.0875" } });
+    fireEvent.change(screen.getByLabelText("Effective (optional)"), { target: { value: "2026-10-14" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record rate" }));
+
+    expect(await screen.findByText(/An FX-rate write is unresolved/)).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText("Currency") as HTMLInputElement).value).toBe("EUR"));
+    expect((screen.getByLabelText("Rate, 1 unit in base") as HTMLInputElement).value).toBe("1.0875");
+    const write = calls.find((call) => call.body?.includes('"capabilityId":"accounting.recordFxRate"'));
+    expect(write?.url).toBe("/api/capabilities/execute");
   });
 
   it("parses a pasted feed before importing it", async () => {

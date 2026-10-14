@@ -40,6 +40,8 @@ The full v1 changelog is preserved at the bottom of this file.
   Go intent and remains actionable after transient failures.
 - The Manufacturing workspace now opens in Vite and reads its overview through
   the Go capability API.
+- Vite Accounting period reopening and foreign exchange rate writes now use
+  scoped Go capabilities with durable exact-intent recovery.
 - Vite purchasing vendor and bill creation, bill payment, and bill credits now
   use Go capabilities. Credits on foreign-currency bills fail closed until an
   exchange rate is available.

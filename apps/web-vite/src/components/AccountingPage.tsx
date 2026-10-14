@@ -22,6 +22,7 @@ import {
   readPendingAccountingReversePayment,
   readPendingAccountingBankReconciliationWrite,
   readPendingAccountingCloseYear,
+  readPendingAccountingPeriodFxWrite,
   submitAccountingAction,
   type AccountingAging,
   type AccountingBill,
@@ -40,6 +41,7 @@ import {
   type AccountingReverseEntryAction,
   type AccountingReversePaymentAction,
   type AccountingBankReconciliationWriteAction,
+  type AccountingPeriodFxWriteAction,
   type AccountingReminder,
   type AccountingReports,
   type AccountingStatement,
@@ -364,6 +366,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
   const [pendingReversePayment, setPendingReversePayment] = useState<AccountingReversePaymentAction | null>(null);
   const [pendingBankReconciliationWrite, setPendingBankReconciliationWrite] = useState<AccountingBankReconciliationWriteAction | null>(null);
   const [pendingCloseYear, setPendingCloseYear] = useState<number | null>(null);
+  const [pendingPeriodFxWrite, setPendingPeriodFxWrite] = useState<AccountingPeriodFxWriteAction | null>(null);
   const [pendingPurchasingBillPayment, setPendingPurchasingBillPayment] = useState<Awaited<ReturnType<typeof readPendingPurchasingBillPayment>>>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentRetryScope: AccountingPaymentRetryScope = { actorId, organizationId };
@@ -421,6 +424,18 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       if (active) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved invoice payment." });
       }
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    setPendingPeriodFxWrite(null);
+    if (!actorId || !organizationId) return;
+    let active = true;
+    void readPendingAccountingPeriodFxWrite(paymentRetryScope).then((action) => {
+      if (active) setPendingPeriodFxWrite(action);
+    }).catch((error) => {
+      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved Accounting action." });
     });
     return () => { active = false; };
   }, [actorId, organizationId]);
@@ -559,6 +574,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const actionScopeKey = `${actorId ?? ""}:${organizationId ?? ""}`;
       const actionScopeIsCurrent = () => paymentRetryScopeKeyRef.current === actionScopeKey;
       const isCloseYear = path === "/api/accounting" && payload.action === "closeYear";
+      const isPeriodFxWrite = path === "/api/accounting" && (payload.action === "reopenPeriod" || payload.action === "recordFxRate");
       const isRecordPayment = path === "/api/accounting" && payload.action === "recordPayment";
       const goRecordPayment = isRecordPayment;
       const isCreateInvoice = path === "/api/accounting" && payload.action === "createInvoice";
@@ -591,6 +607,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
         if (goReversePayment && !actionScopeIsCurrent()) return false;
         if (isCloseYear) {
           setPendingCloseYear(outcome.kind === "pending" ? await readPendingAccountingCloseYear(paymentRetryScope) : null);
+        }
+        if (isPeriodFxWrite) {
+          setPendingPeriodFxWrite(outcome.kind === "pending" ? await readPendingAccountingPeriodFxWrite(paymentRetryScope) : null);
         }
         if (goRecordPayment) {
           setPendingRecordPayment(outcome.kind === "pending"
@@ -637,7 +656,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : { tone: "success", text: `${label} done.` },
         );
         void load();
-        return !((isCloseYear || goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry || goBankReconciliationWrite || goPurchasingBillPayment) && outcome.kind === "pending");
+        return !((isCloseYear || isPeriodFxWrite || goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry || goBankReconciliationWrite || goPurchasingBillPayment) && outcome.kind === "pending");
       } catch (error) {
         if (isCloseYear) {
           try { setPendingCloseYear(await readPendingAccountingCloseYear(paymentRetryScope)); }
@@ -647,6 +666,10 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               ? payload.year as number
               : null);
           }
+        }
+        if (isPeriodFxWrite) {
+          try { setPendingPeriodFxWrite(await readPendingAccountingPeriodFxWrite(paymentRetryScope)); }
+          catch { setPendingPeriodFxWrite(payload as unknown as AccountingPeriodFxWriteAction); }
         }
         if (goRecordPayment) {
           try { setPendingRecordPayment(await readPendingAccountingRecordPayment(paymentRetryScope)); }
@@ -918,6 +941,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               cash={state.cash}
               year={new Date().getUTCFullYear()}
               busy={busy}
+              pendingPeriodFxWrite={pendingPeriodFxWrite}
               onAction={runAction}
             />
           )}
@@ -927,6 +951,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               closedPeriods={state.data.closedPeriods}
               busy={busy}
               pendingCloseYear={pendingCloseYear}
+              pendingPeriodFxWrite={pendingPeriodFxWrite}
               onCloseYear={(year) =>
                 runAction("/api/accounting", { action: "closeYear", year }, `Year-end close ${year}`)
               }
@@ -2381,12 +2406,14 @@ function ReportsSection({
   cash,
   year,
   busy,
+  pendingPeriodFxWrite,
   onAction,
 }: {
   reports: AccountingReports;
   cash: AccountingCashBasis | null;
   year: number;
   busy: boolean;
+  pendingPeriodFxWrite: AccountingPeriodFxWriteAction | null;
   onAction: (
     path: "/api/accounting" | "/api/banking",
     payload: Record<string, unknown>,
@@ -2394,6 +2421,14 @@ function ReportsSection({
   ) => Promise<boolean>;
 }) {
   const [fxForm, setFxForm] = useState({ quoteCurrency: "", rate: "", effectiveAt: "" });
+  useEffect(() => {
+    if (pendingPeriodFxWrite?.action !== "recordFxRate") return;
+    setFxForm({
+      quoteCurrency: pendingPeriodFxWrite.quoteCurrency,
+      rate: pendingPeriodFxWrite.rate,
+      effectiveAt: pendingPeriodFxWrite.effectiveAt?.slice(0, 10) ?? "",
+    });
+  }, [pendingPeriodFxWrite]);
   const cashFlow = reports.cashFlow ?? null;
   const exposures = reports.fxExposure?.exposures ?? [];
 
@@ -2417,6 +2452,11 @@ function ReportsSection({
 
   return (
     <section className="accounting-stack">
+      {pendingPeriodFxWrite?.action === "recordFxRate" && (
+        <p className="accounting-callout" role="status">
+          An FX-rate write is unresolved. The saved rate has been restored; retry those exact details to recover its result.
+        </p>
+      )}
       {reports.unsupportedCurrencies === undefined ? (
         <p className="accounting-callout">
           Currency coverage could not be verified for this report. Review foreign-currency activity
@@ -2670,12 +2710,14 @@ function PeriodsSection({
   closedPeriods,
   busy,
   pendingCloseYear,
+  pendingPeriodFxWrite,
   onCloseYear,
   onReopen,
 }: {
   closedPeriods: Awaited<ReturnType<typeof fetchAccountingOverview>>["closedPeriods"];
   busy: boolean;
   pendingCloseYear: number | null;
+  pendingPeriodFxWrite: AccountingPeriodFxWriteAction | null;
   onCloseYear: (year: number) => Promise<boolean>;
   onReopen: (year: number, month: number) => Promise<boolean>;
 }) {
@@ -2691,8 +2733,19 @@ function PeriodsSection({
     }
   }, [pendingCloseYear]);
 
+  useEffect(() => {
+    if (pendingPeriodFxWrite?.action === "reopenPeriod") {
+      setReopenTarget({ year: pendingPeriodFxWrite.year, month: pendingPeriodFxWrite.month });
+    }
+  }, [pendingPeriodFxWrite]);
+
   return (
     <section className="accounting-stack accounting-narrow">
+      {pendingPeriodFxWrite?.action === "reopenPeriod" && (
+        <p className="accounting-callout" role="status">
+          This period reopen is unresolved. Retry the saved period to recover its result.
+        </p>
+      )}
       <div>
         <h2>Closed period history</h2>
         <p className="accounting-hint">

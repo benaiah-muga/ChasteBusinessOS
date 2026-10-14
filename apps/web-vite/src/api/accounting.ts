@@ -445,6 +445,30 @@ const CloseYearActionSchema = z.object({
   action: z.literal("closeYear"),
   year: z.number().int().safe().min(2000).max(2100),
 }).strict();
+const ReopenPeriodActionSchema = z.object({
+  action: z.literal("reopenPeriod"),
+  year: z.number().int().safe().min(2000).max(2100),
+  month: z.number().int().safe().min(1).max(12),
+}).strict();
+const RecordFxRateActionSchema = z.object({
+  action: z.literal("recordFxRate"),
+  quoteCurrency: z.string().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()),
+  rate: z.string().regex(/^(?:\d+)(?:\.\d+)?$/).refine((value) => Number.isFinite(Number(value)) && Number(value) > 0),
+  effectiveAt: timestamp.optional(),
+}).strict();
+const PeriodFxWriteActionSchema = z.discriminatedUnion("action", [ReopenPeriodActionSchema, RecordFxRateActionSchema]);
+const StoredPeriodFxWriteSchema = z.object({
+  action: PeriodFxWriteActionSchema,
+  intentId: z.string().uuid(),
+  fingerprint: z.string().length(64),
+}).strict();
+const ReopenPeriodOutputSchema = z.object({ reopened: z.literal(true) }).strict();
+const RecordFxRateOutputSchema = z.object({
+  rateId: z.string().uuid(),
+  num: z.number().int().safe().positive(),
+  den: z.number().int().safe().positive(),
+}).strict();
+const PERIOD_FX_WRITE_ATTEMPT_PREFIX = "chaste:accounting:period-fx-write:go:attempt:v1:";
 const StoredCloseYearSchema = z.object({
   action: CloseYearActionSchema,
   intentId: z.string().uuid(),
@@ -569,6 +593,7 @@ export type AccountingCreditNoteAction = z.infer<typeof CreditNoteActionSchema>;
 export type AccountingReverseEntryAction = z.infer<typeof ReverseEntryActionSchema>;
 export type AccountingReversePaymentAction = z.infer<typeof ReversePaymentActionSchema>;
 export type AccountingBankReconciliationWriteAction = z.infer<typeof BankReconciliationWriteActionSchema>;
+export type AccountingPeriodFxWriteAction = z.infer<typeof PeriodFxWriteActionSchema>;
 
 export function goAccountingCreditNoteUseGo(): boolean {
   return typeof __GO_ACCOUNTING_CREDIT_NOTE__ !== "undefined" && __GO_ACCOUNTING_CREDIT_NOTE__;
@@ -596,6 +621,16 @@ export async function readPendingAccountingCloseYear(scope: AccountingPaymentRet
   catch { throw new AccountingApiError(0, "Enable browser storage to recover an unresolved year-end close.", true); }
   if (raw === null) return null;
   return parseStoredCloseYear(raw).action.year;
+}
+
+export async function readPendingAccountingPeriodFxWrite(scope: AccountingPaymentRetryScope): Promise<AccountingPeriodFxWriteAction | null> {
+  const { scopeHash } = await accountingPaymentScope(scope);
+  const storageKey = `${PERIOD_FX_WRITE_ATTEMPT_PREFIX}${scopeHash}`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new AccountingApiError(0, "Enable browser storage to recover an unresolved Accounting period or FX write.", true); }
+  if (raw === null) return null;
+  return parseStoredPeriodFxWrite(raw).action;
 }
 
 export async function readPendingAccountingReverseEntry(scope: AccountingPaymentRetryScope): Promise<AccountingReverseEntryAction | null> {
@@ -941,6 +976,12 @@ export async function submitAccountingAction(
     const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
     return submitGoAccountingCloseYear(action.data, scoped, signal);
   }
+  if (path === "/api/accounting" && (payload.action === "reopenPeriod" || payload.action === "recordFxRate")) {
+    const action = PeriodFxWriteActionSchema.safeParse(payload);
+    if (!action.success) throw new AccountingApiError(400, "Enter a valid Accounting period or FX action before submitting.");
+    const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
+    return submitGoAccountingPeriodFxWrite(action.data, scoped, signal);
+  }
   if (path === "/api/banking") {
     const action = BankReconciliationWriteActionSchema.safeParse(payload);
     if (!action.success) throw new AccountingApiError(400, "Enter a valid bank action before submitting.");
@@ -992,6 +1033,50 @@ export async function submitAccountingAction(
   if (!response.ok) throw new AccountingApiError(response.status, errorMessage(response.status, body, "complete this accounting action"));
   const envelope = EnvelopeSchema.safeParse(body);
   if (!envelope.success) throw new AccountingApiError(response.status, "The Accounting service returned an unexpected action response.");
+  return { kind: "completed" };
+}
+
+async function submitGoAccountingPeriodFxWrite(
+  action: AccountingPeriodFxWriteAction,
+  scope: { actorId: string; organizationId: string; scopeHash: string },
+  signal?: AbortSignal,
+): Promise<AccountingActionOutcome> {
+  const attempt = await accountingPeriodFxWriteAttempt(action, scope.scopeHash);
+  const capabilityId = action.action === "reopenPeriod" ? "accounting.reopenPeriod" : "accounting.recordFxRate";
+  const { action: _action, ...input } = action;
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await getJson("/api/capabilities/execute", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "X-Organization-ID": scope.organizationId },
+      body: JSON.stringify({ capabilityId, input, intentId: attempt.intentId }),
+    }, signal));
+  } catch (error) {
+    if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
+    throw new AccountingApiError(0, "The Go Accounting service could not confirm this period or FX action. Retry its exact details to recover the result.", true);
+  }
+  if (response.status === 202) {
+    const pending = PendingSchema.safeParse(body);
+    if (!pending.success) throw new AccountingApiError(202, "The Go Accounting service returned an invalid period or FX approval response.", true);
+    return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This Accounting action is waiting for approval." };
+  }
+  if (!response.ok) {
+    const uncertain = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
+    if (!uncertain) await clearAccountingPeriodFxWriteAttempt(attempt);
+    throw new AccountingApiError(response.status, errorMessage(response.status, body, "complete this Accounting action"), uncertain);
+  }
+  const envelope = EnvelopeSchema.safeParse(body);
+  const output = envelope.success
+    ? action.action === "reopenPeriod"
+      ? ReopenPeriodOutputSchema.safeParse(envelope.data.data)
+      : RecordFxRateOutputSchema.safeParse(envelope.data.data)
+    : null;
+  if (response.status !== 200 || !output?.success) {
+    throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected period or FX action response.", true);
+  }
+  await clearAccountingPeriodFxWriteAttempt(attempt);
   return { kind: "completed" };
 }
 
@@ -1530,6 +1615,40 @@ async function accountingCloseYearAttempt(action: z.infer<typeof CloseYearAction
   );
 }
 
+async function accountingPeriodFxWriteAttempt(
+  action: AccountingPeriodFxWriteAction,
+  scopeHash: string,
+): Promise<{ storageKey: string; intentId: string; fingerprint: string }> {
+  const storageKey = `${PERIOD_FX_WRITE_ATTEMPT_PREFIX}${scopeHash}`;
+  const fingerprint = await accountingPaymentFingerprint(action);
+  return withAccountingReservationLock(
+    storageKey,
+    "This browser cannot safely reserve an Accounting period or FX action. Open Accounting in a browser with Web Locks enabled before continuing.",
+    "The browser could not reserve this Accounting action safely. Retry after closing other Accounting tabs.",
+    async () => {
+      let raw: string | null;
+      try { raw = window.localStorage.getItem(storageKey); }
+      catch { throw new AccountingApiError(0, "Enable browser storage before changing period or FX data so the action can be retried safely."); }
+      if (raw !== null) {
+        const stored = parseStoredPeriodFxWrite(raw);
+        if (stored.fingerprint !== fingerprint) {
+          throw new AccountingApiError(0, "A previous period or FX action is unresolved. Retry its exact details before changing Accounting data.", true);
+        }
+        return { storageKey, intentId: stored.intentId, fingerprint: stored.fingerprint };
+      }
+      const stored = { action, intentId: crypto.randomUUID(), fingerprint };
+      const serialized = JSON.stringify(stored);
+      try {
+        window.localStorage.setItem(storageKey, serialized);
+        if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("Accounting retry marker did not persist");
+      } catch {
+        throw new AccountingApiError(0, "Enable browser storage before changing period or FX data so the action can be retried safely.");
+      }
+      return { storageKey, intentId: stored.intentId, fingerprint };
+    },
+  );
+}
+
 async function accountingPaymentFingerprint(action: unknown): Promise<string> {
   try {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(action)));
@@ -1602,6 +1721,15 @@ function parseStoredCloseYear(raw: string): z.infer<typeof StoredCloseYearSchema
   return parsed.data;
 }
 
+function parseStoredPeriodFxWrite(raw: string): z.infer<typeof StoredPeriodFxWriteSchema> {
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new AccountingApiError(0, "An unresolved period or FX action marker is malformed. Contact an administrator before retrying.", true); }
+  const parsed = StoredPeriodFxWriteSchema.safeParse(decoded);
+  if (!parsed.success) throw new AccountingApiError(0, "An unresolved period or FX action marker is malformed. Contact an administrator before retrying.", true);
+  return parsed.data;
+}
+
 async function clearAccountingRecordPaymentAttempt(storageKey: string): Promise<void> {
   try { window.localStorage.removeItem(storageKey); }
   catch { throw new AccountingApiError(0, "The payment completed, but its retry marker could not be cleared. Reload before recording another payment.", true); }
@@ -1663,6 +1791,26 @@ async function clearAccountingBankReconciliationWriteAttempt(attempt: { storageK
 async function clearAccountingCloseYearAttempt(storageKey: string): Promise<void> {
   try { window.localStorage.removeItem(storageKey); }
   catch { throw new AccountingApiError(0, "The year-end close completed, but its retry marker could not be cleared. Reload before closing another year.", true); }
+}
+
+async function clearAccountingPeriodFxWriteAttempt(attempt: { storageKey: string; intentId: string; fingerprint: string }): Promise<void> {
+  try {
+    await withAccountingReservationLock(
+      attempt.storageKey,
+      "This browser cannot safely verify an Accounting action retry marker. Open Accounting in a browser with Web Locks enabled before continuing.",
+      "The browser could not safely verify this Accounting retry marker. Reload before changing period or FX data.",
+      async () => {
+        const raw = window.localStorage.getItem(attempt.storageKey);
+        if (raw === null) return;
+        const current = parseStoredPeriodFxWrite(raw);
+        if (current.intentId === attempt.intentId && current.fingerprint === attempt.fingerprint) {
+          window.localStorage.removeItem(attempt.storageKey);
+        }
+      },
+    );
+  } catch {
+    throw new AccountingApiError(0, "The Accounting action completed, but its retry marker could not be verified and cleared. Reload before changing period or FX data.", true);
+  }
 }
 
 export async function emailInvoice(invoiceNumber: number, to: string, signal?: AbortSignal): Promise<{ urlPath: string | null }> {
