@@ -26,6 +26,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Inventory can cancel an untouched pending stock transfer draft through Go after explicit confirmation, with scoped exact retry recovery.
 - Vite Hiring can close an open role through Go and keeps it closed after refresh.
 - Vite Sales can quick-create a catalog item through Go's `inventory.createItem` capability and add it to a sales draft, with actor/org-scoped retry recovery.
+- Vite Support can file an internal request, bug, or capability-gap ticket through Go's `support.createTicket` capability with actor/org-scoped exact retry recovery.
 
 ### Fixed
 
@@ -37,6 +38,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite POS lets staff name a register when opening a shift and sends the normalized name to Go, which validates the same 1-80 character contract.
 - Vite Accounting clears an in-flight revaluation confirmation when the active actor or organization changes, preventing a stale dialog from posting under the new scope.
 - Go CRM rejects stale profile undo or reapply snapshots atomically when another client has changed any included customer.
+- Vite Support clears a ticket retry marker after definitive authorization and request rejections, while preserving exact retries for uncertain outcomes and Go's 422 intent-conflict response.
 
 ### Changed
 

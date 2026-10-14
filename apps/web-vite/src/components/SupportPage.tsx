@@ -10,6 +10,7 @@ import {
   type SupportCannedResponseRetryScope,
   type PendingSupportConversationWrite,
   type SupportConversationWriteRetryScope,
+  type PendingSupportTicket,
   type SupportWriteAction,
   createSupportCustomer,
   fetchSupportChannels,
@@ -23,9 +24,11 @@ import {
   readPendingSupportConversationWrite,
   readPendingSupportCannedResponse,
   readPendingSupportKbArticle,
+  readPendingSupportTicket,
   supportWriteActionFromPending,
   submitSupportCannedResponse,
   submitSupportKbArticle,
+  submitSupportTicket,
   submitSupportAction,
   submitSupportConversationAction,
   updateSupportChannels,
@@ -111,6 +114,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
   const [membersError, setMembersError] = useState<string | null>(null);
   const [ticket, setTicket] = useState<TicketDraft>({ priority: "normal", category: "", assigneeUserId: "", slaDueAt: "" });
   const [ticketSaved, setTicketSaved] = useState(false);
+  const [fileTicket, setFileTicket] = useState<PendingSupportTicket>({ title: "", description: "", origin: "request" });
   const threadRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -195,6 +199,18 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       setNotice({ tone: "error", text: friendlyError(error) });
     }
   }, [retryScope, restoreConversationAction]);
+
+  useEffect(() => {
+    try {
+      const pending = readPendingSupportTicket(retryScope);
+      if (pending) {
+        setFileTicket(pending);
+        setNotice({ tone: "pending", text: "An unresolved Go support ticket was restored. Retry these exact details to recover its result." });
+      }
+    } catch (error) {
+      setNotice({ tone: "error", text: friendlyError(error) });
+    }
+  }, [retryScope]);
 
   useEffect(() => {
     if (state.status !== "ready" || tab !== "inbox" || members.length > 0 || membersError) return;
@@ -449,6 +465,36 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
     }
   }
 
+  async function submitTicket() {
+    const input = { ...fileTicket, title: fileTicket.title.trim(), description: fileTicket.description.trim() };
+    if (!input.title || !input.description) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const outcome = await submitSupportTicket(input, retryScope);
+      if (outcome.kind === "pending") {
+        setNotice({ tone: "pending", text: outcome.reason });
+        return;
+      }
+      setFileTicket({ title: "", description: "", origin: "request" });
+      setNotice({ tone: "success", text: `Support ticket filed (${outcome.data.ticketId}).` });
+    } catch (error) {
+      try {
+        const pending = readPendingSupportTicket(retryScope);
+        if (pending && JSON.stringify(pending) !== JSON.stringify(input)) {
+          setFileTicket(pending);
+          setNotice({ tone: "pending", text: "A previous Go ticket filing is unresolved. Its exact saved details were restored; retry them before making changes." });
+          return;
+        }
+      } catch {
+        // Keep the original request error visible when retry state cannot be read.
+      }
+      setNotice({ tone: "error", text: friendlyError(error) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createConversation() {
     if (!newCustomerId || !newSubject.trim()) return;
     const created = await run({ action: "create", customerId: newCustomerId, subject: newSubject.trim() });
@@ -521,6 +567,28 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
                 </button>
               </div>
               <div className="support-overview-grid">
+                <section className="support-panel">
+                  <header><h2>File an internal support ticket</h2></header>
+                  <p className="support-muted">Record a request, bug, or capability gap for your team to follow up.</p>
+                  <label className="support-label">Title
+                    <input value={fileTicket.title} maxLength={200} onChange={(event) => setFileTicket({ ...fileTicket, title: event.target.value })} />
+                  </label>
+                  <label className="support-label">Details
+                    <textarea rows={4} maxLength={8000} value={fileTicket.description} onChange={(event) => setFileTicket({ ...fileTicket, description: event.target.value })} />
+                  </label>
+                  <label className="support-label">Type
+                    <select value={fileTicket.origin} onChange={(event) => setFileTicket({ ...fileTicket, origin: event.target.value as PendingSupportTicket["origin"] })}>
+                      <option value="request">Request</option>
+                      <option value="bug">Bug</option>
+                      <option value="capability_gap">Capability gap</option>
+                    </select>
+                  </label>
+                  <div className="support-actions">
+                    <button className="shell-button" type="button" disabled={busy || !fileTicket.title.trim() || !fileTicket.description.trim()} onClick={() => void submitTicket()}>
+                      File ticket
+                    </button>
+                  </div>
+                </section>
                 <section className="support-panel">
                   <header><h2>Latest activity</h2></header>
                   {latestActivity.length === 0 ? (

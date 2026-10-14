@@ -145,6 +145,93 @@ const KbArticleRetryRecordSchema = z.object({
   fingerprint: z.string().min(1),
 }).strict();
 const KB_ARTICLE_RETRY_PREFIX = "chaste.support.kb-article-intent.v1:";
+const TICKET_RETRY_PREFIX = "chaste.support.ticket-intent.v1:";
+const SupportTicketInputSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().min(1).max(8000),
+  origin: z.enum(["capability_gap", "bug", "request"]),
+}).strict();
+const SupportTicketRetryRecordSchema = z.object({
+  version: z.literal(1),
+  intentId: uuid,
+  input: SupportTicketInputSchema,
+  fingerprint: z.string().min(1),
+}).strict();
+
+function supportTicketRetryStorageKey(scope: SupportCannedResponseRetryScope): string {
+  const actorId = normalizeRetryActorId(scope.actorId);
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!actorId || !uuid.safeParse(organizationId).success) {
+    throw new SupportApiError(0, "Wait for your account and organization to finish loading before filing a ticket.");
+  }
+  return `${TICKET_RETRY_PREFIX}${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}`;
+}
+
+function supportTicketFingerprint(input: z.infer<typeof SupportTicketInputSchema>): string {
+  return JSON.stringify(input);
+}
+
+function readSupportTicketRetryRecord(storageKey: string): z.infer<typeof SupportTicketRetryRecordSchema> | null {
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "Ticket retry protection is unavailable. Enable browser storage before filing.");
+  }
+  if (raw === null) return null;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw);
+  } catch {
+    throw new SupportApiError(0, "A saved ticket retry record is unreadable. Verify the ticket before trying again.");
+  }
+  const parsed = SupportTicketRetryRecordSchema.safeParse(decoded);
+  if (!parsed.success || parsed.data.fingerprint !== supportTicketFingerprint(parsed.data.input)) {
+    throw new SupportApiError(0, "A saved ticket retry record is invalid. Verify the ticket before trying again.");
+  }
+  return parsed.data;
+}
+
+export type PendingSupportTicket = z.infer<typeof SupportTicketInputSchema>;
+
+export function readPendingSupportTicket(scope: SupportCannedResponseRetryScope): PendingSupportTicket | null {
+  return readSupportTicketRetryRecord(supportTicketRetryStorageKey(scope))?.input ?? null;
+}
+
+async function createSupportTicketAttempt(
+  input: z.infer<typeof SupportTicketInputSchema>,
+  scope: SupportCannedResponseRetryScope,
+): Promise<{ storageKey: string; record: z.infer<typeof SupportTicketRetryRecordSchema> }> {
+  const storageKey = supportTicketRetryStorageKey(scope);
+  const fingerprint = supportTicketFingerprint(input);
+  const existing = readSupportTicketRetryRecord(storageKey);
+  if (existing) {
+    if (existing.fingerprint !== fingerprint) {
+      throw new SupportApiError(0, "A previous ticket filing is unresolved. Retry its exact saved details before changing them.");
+    }
+    return { storageKey, record: existing };
+  }
+  const record = { version: 1 as const, intentId: crypto.randomUUID(), input, fingerprint };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(record));
+  } catch {
+    throw new SupportApiError(0, "Ticket retry protection could not be saved. Enable browser storage before filing.");
+  }
+  const saved = readSupportTicketRetryRecord(storageKey);
+  if (!saved || saved.intentId !== record.intentId || saved.fingerprint !== fingerprint) {
+    throw new SupportApiError(0, "Ticket retry protection could not be verified. Check browser storage and try again.");
+  }
+  return { storageKey, record: saved };
+}
+
+async function clearSupportTicketAttempt(storageKey: string, intentId: string): Promise<void> {
+  if (readSupportTicketRetryRecord(storageKey)?.intentId !== intentId) return;
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "The ticket was filed, but its retry record could not be cleared. Retry the same details to confirm the result.");
+  }
+}
 
 function kbArticleRetryStorageKey(scope: SupportCannedResponseRetryScope): string {
   const actorId = normalizeRetryActorId(scope.actorId);
@@ -494,6 +581,42 @@ export type SupportActionOutput<Action extends SupportWriteAction> = z.infer<typ
 export type SupportActionOutcome<Output> =
   | { kind: "completed"; data: Output }
   | { kind: "pending"; reason: string };
+
+export async function submitSupportTicket(
+  input: PendingSupportTicket,
+  scope: SupportCannedResponseRetryScope,
+  signal?: AbortSignal,
+): Promise<SupportActionOutcome<{ ticketId: string }>> {
+  const parsedInput = SupportTicketInputSchema.safeParse(input);
+  if (!parsedInput.success) throw new SupportApiError(0, "The support ticket contains invalid details.");
+  const attempt = await createSupportTicketAttempt(parsedInput.data, scope);
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      cache: "no-store",
+      headers: supportOrganizationHeader(scope.organizationId),
+      body: JSON.stringify({ capabilityId: "support.createTicket", input: attempt.record.input, intentId: attempt.record.intentId }),
+    }, signal));
+  } catch {
+    throw new SupportApiError(0, "The Go support service could not confirm this ticket. Retry its exact saved details to recover the result.");
+  }
+  if (response.status === 202 || PendingEnvelopeSchema.safeParse(body).success) return pendingOutcome(body, DEFAULT_PENDING_REASON);
+  if (!response.ok) {
+    if (response.status >= 400 && response.status < 500 && response.status !== 404 && response.status !== 408 && response.status !== 422 && response.status !== 429) {
+      await clearSupportTicketAttempt(attempt.storageKey, attempt.record.intentId);
+    }
+    throw new SupportApiError(response.status, messageFor(response.status, body));
+  }
+  const envelope = GoCapabilityEnvelopeSchema.safeParse(body);
+  const output = envelope.success ? z.object({ ticketId: uuid }).strict().safeParse(envelope.data.data) : null;
+  if (response.status !== 200 || !output?.success) {
+    throw new SupportApiError(response.status, "The Go support service returned an unexpected ticket result.");
+  }
+  await clearSupportTicketAttempt(attempt.storageKey, attempt.record.intentId);
+  return { kind: "completed", data: output.data };
+}
 
 // The gated-write envelope can include a reason, error, or hint depending on the server response.
 // One of the three copy fields is required so a bare flag cannot masquerade as a gate.

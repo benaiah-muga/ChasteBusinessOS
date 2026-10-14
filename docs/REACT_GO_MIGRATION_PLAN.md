@@ -4436,3 +4436,13 @@ new owners and the manifest shows zero legacy runtime paths.
      Authenticated browser proof created `MIG-SALES-20261014` through Go,
      added it to a draft, and saved order #2. Capability requests returned
      HTTP 200 and the browser error log was empty.
+
+413. (Implemented and verified: focused tests, independent review, and
+     authenticated browser proof) Vite Support now files internal requests,
+     bugs, and capability-gap tickets through Go's `support.createTicket`
+     capability. The client validates the Go receipt and uses actor/org-scoped
+     exact intent recovery. Definitive rejections such as 403 clear the retry
+     lock, while 422 stays locked because Go also uses it for intent conflicts.
+     The Support API and page suites pass 73 cases. Authenticated browser proof
+     filed a synthetic capability-gap ticket through Go; the capability
+     request returned HTTP 200 and the browser error log was empty.

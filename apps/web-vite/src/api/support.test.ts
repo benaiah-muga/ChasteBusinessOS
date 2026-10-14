@@ -11,11 +11,13 @@ import {
   fetchSupportThread,
   readPendingSupportCannedResponse,
   readPendingSupportKbArticle,
+  readPendingSupportTicket,
   readPendingSupportConversationWrite,
   supportWriteActionFromPending,
   submitSupportConversationAction,
   submitSupportCannedResponse,
   submitSupportKbArticle,
+  submitSupportTicket,
   submitSupportAction,
   SupportApiError,
   SupportWriteActionSchema,
@@ -531,6 +533,85 @@ describe("Go knowledge article write", () => {
     expect(readPendingSupportKbArticle(scope)).toEqual(pending);
   });
 
+});
+
+describe("Go internal ticket write", () => {
+  const scope = {
+    actorId: "55555555-5555-4555-8555-555555555555",
+    organizationId: "66666666-6666-4666-8666-666666666666",
+  };
+  const input = { title: "Refund flow gap", description: "A customer asked for a refund, but this workspace has no refund action.", origin: "capability_gap" as const };
+
+  it("files through the Go capability with an org scoped intent and validates the UUID receipt", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { ticketId: conversationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSupportTicket(input, scope)).resolves.toEqual({ kind: "completed", data: { ticketId: conversationId } });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", cache: "no-store" }));
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(new Headers(init?.headers).get("X-Organization-ID")).toBe(scope.organizationId);
+    const payload = JSON.parse(String(init?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    expect(payload).toMatchObject({ capabilityId: "support.createTicket", input });
+    expect(payload.intentId).toEqual(expect.any(String));
+    expect(readPendingSupportTicket(scope)).toBeNull();
+  });
+
+  it("retries the exact saved ticket after uncertainty and rejects changed details", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ error: "temporarily unavailable" }, 503));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitSupportTicket(input, scope)).rejects.toMatchObject({ status: 503 });
+    expect(readPendingSupportTicket(scope)).toEqual(input);
+    const initial = JSON.parse(window.localStorage.getItem(`chaste.support.ticket-intent.v1:${scope.actorId}:${scope.organizationId}`) ?? "{}") as { intentId?: string };
+    await expect(submitSupportTicket({ ...input, title: "Changed request" }, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("exact saved details") });
+
+    const retry = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { ticketId: conversationId } }));
+    vi.stubGlobal("fetch", retry);
+    await expect(submitSupportTicket(input, scope)).resolves.toMatchObject({ kind: "completed" });
+    const retried = JSON.parse(String(retry.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    expect(retried.intentId).toBe(initial.intentId);
+  });
+
+  it("retains intent after pending approval and fails closed on malformed success", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Needs approval." }, 202))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { ticketId: "invalid" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitSupportTicket(input, scope)).resolves.toEqual({ kind: "pending", reason: "Needs approval." });
+    await expect(submitSupportTicket(input, scope)).rejects.toMatchObject({ status: 200, message: "The Go support service returned an unexpected ticket result." });
+    expect(readPendingSupportTicket(scope)).toEqual(input);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears a definitive 403 so the user can edit a rejected ticket", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "forbidden" }, 403))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { ticketId: conversationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitSupportTicket(input, scope)).rejects.toMatchObject({ status: 403 });
+    expect(readPendingSupportTicket(scope)).toBeNull();
+
+    const corrected = { ...input, title: "Updated request" };
+    await expect(submitSupportTicket(corrected, scope)).resolves.toMatchObject({ kind: "completed" });
+    const payloads = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { input: unknown; intentId: string });
+    expect(payloads[1]?.input).toEqual(corrected);
+    expect(payloads[1]?.intentId).not.toBe(payloads[0]?.intentId);
+  });
+
+  it("retains 422 intent conflicts for exact recovery", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ error: "action intent conflict" }, 422));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitSupportTicket(input, scope)).rejects.toMatchObject({ status: 422 });
+    expect(readPendingSupportTicket(scope)).toEqual(input);
+    const pendingRecord = JSON.parse(window.localStorage.getItem(`chaste.support.ticket-intent.v1:${scope.actorId}:${scope.organizationId}`) ?? "{}") as { intentId?: string };
+    await expect(submitSupportTicket({ ...input, title: "Changed details" }, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("exact saved details") });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const retry = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { ticketId: conversationId } }));
+    vi.stubGlobal("fetch", retry);
+    await expect(submitSupportTicket(input, scope)).resolves.toMatchObject({ kind: "completed" });
+    const retried = JSON.parse(String(retry.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    expect(retried.intentId).toBe(pendingRecord.intentId);
+  });
 });
 
 describe("Go support conversation writes", () => {

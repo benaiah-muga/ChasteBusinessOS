@@ -151,6 +151,29 @@ describe("Vite support page", () => {
     expect(fetchMock.mock.calls.map(([path]) => String(path))).toContain("/api/capabilities/execute");
   }, SLOW);
 
+  it("files an internal request through support.createTicket", async () => {
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const { calls } = supportFetch({
+      execute: (payload) => payload.capabilityId === "support.createTicket"
+        ? Response.json({ ok: true, data: { ticketId: otherConversationId } })
+        : Response.json({ ok: true, data: {} }),
+    });
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
+    await screen.findByText("Latest activity");
+    fireEvent.change(screen.getByLabelText("Title", { selector: "input" }), { target: { value: "Refund workflow gap" } });
+    fireEvent.change(screen.getByLabelText("Details"), { target: { value: "The team needs a governed way to issue a refund." } });
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "capability_gap" } });
+    fireEvent.click(screen.getByRole("button", { name: "File ticket" }));
+
+    expect(await screen.findByText(`Support ticket filed (${otherConversationId}).`)).not.toBeNull();
+    const call = calls.find((entry) => entry.payload?.capabilityId === "support.createTicket");
+    expect(call?.path).toBe("/api/capabilities/execute");
+    expect(call?.payload).toMatchObject({
+      capabilityId: "support.createTicket",
+      input: { title: "Refund workflow gap", description: "The team needs a governed way to issue a refund.", origin: "capability_gap" },
+    });
+  }, SLOW);
+
   it("quick-creates a conversation customer through the Go CRM capability with organization-scoped retry", async () => {
     vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
     const actorId = "55555555-5555-4555-8555-555555555555";
