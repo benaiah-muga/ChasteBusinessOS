@@ -112,7 +112,8 @@ export type HrPayrollAction = Extract<HrAction, { action: "createPayrollRun" | "
 export type HrHiringAction = Extract<HrAction, { action: "createOpening" | "closeOpening" | "addApplicant" | "moveApplicant" }>;
 export type HrEmployeeHireAction = Extract<HrAction, { action: "hireEmployee" }>;
 export type HrEmployeeDeactivateAction = Extract<HrAction, { action: "deactivateEmployee" }>;
-export type HrEmployeeAction = HrEmployeeHireAction | HrEmployeeDeactivateAction;
+export type HrEmployeeStructureAction = { action: "updateStructure"; employeeId: string; department?: string; position?: string };
+export type HrEmployeeAction = HrEmployeeHireAction | HrEmployeeDeactivateAction | HrEmployeeStructureAction;
 export type HrLeaveAction =
   | { action: "requestLeave"; employeeId: string; kind: string; startDate: string; endDate: string }
   | { action: "decideLeave"; requestId: string; approve: boolean }
@@ -186,11 +187,13 @@ const GoHrEmployeeHireActionSchema = z.object({
   annualLeaveDays: z.number().int().safe().min(0).max(365).optional(),
 }).strict();
 const GoHrEmployeeDeactivateActionSchema = z.object({ action: z.literal("deactivateEmployee"), employeeId: z.string().uuid() }).strict();
-const GoHrEmployeeActionSchema = z.discriminatedUnion("action", [GoHrEmployeeHireActionSchema, GoHrEmployeeDeactivateActionSchema]);
+const GoHrEmployeeStructureActionSchema = z.object({ action: z.literal("updateStructure"), employeeId: z.string().uuid(), department: z.string().max(100).optional(), position: z.string().max(100).optional() }).strict();
+const GoHrEmployeeActionSchema = z.discriminatedUnion("action", [GoHrEmployeeHireActionSchema, GoHrEmployeeDeactivateActionSchema, GoHrEmployeeStructureActionSchema]);
 const GoHrEmployeeAttemptSchema = z.object({ intentId: z.string().uuid(), fingerprint: z.string().length(64), action: GoHrEmployeeActionSchema }).strict();
 const GoHrEmployeeOutputSchemas = {
   hireEmployee: z.object({ employeeId: z.string().uuid() }).strict(),
   deactivateEmployee: z.object({ deactivated: z.boolean() }).strict(),
+  updateStructure: z.object({ updated: z.literal(true) }).strict(),
 } as const;
 const GoPendingEntriesSchema = z.object({
   entries: z.array(z.object({
@@ -394,12 +397,14 @@ export async function submitHrEmployeeAction(
   signal?: AbortSignal,
 ): Promise<HrActionResult> {
   const parsedAction = GoHrEmployeeActionSchema.safeParse(action);
-  if (!parsedAction.success) throw new HrApiError(400, "The employee action does not match the Go service contract.");
+  if (!parsedAction.success || (parsedAction.data.action === "updateStructure" && parsedAction.data.department === undefined && parsedAction.data.position === undefined)) throw new HrApiError(400, "The employee action does not match the Go service contract.");
   const scoped = await hrEmployeeScope(scope);
   const attempt = await goHrEmployeeAttempt(parsedAction.data, scoped.scopeHash);
   const capability = parsedAction.data.action === "hireEmployee"
     ? { capabilityId: "hr.hireEmployee", input: hrEmployeeHireCapabilityInput(parsedAction.data) }
-    : { capabilityId: "hr.deactivateEmployee", input: { employeeId: parsedAction.data.employeeId } };
+    : parsedAction.data.action === "deactivateEmployee"
+      ? { capabilityId: "hr.deactivateEmployee", input: { employeeId: parsedAction.data.employeeId } }
+      : { capabilityId: "hr.updateEmployeeStructure", input: { employeeId: parsedAction.data.employeeId, ...(parsedAction.data.department !== undefined ? { department: parsedAction.data.department } : {}), ...(parsedAction.data.position !== undefined ? { position: parsedAction.data.position } : {}) } };
   try {
     const response = await request("/api/capabilities/execute", {
       method: "POST",

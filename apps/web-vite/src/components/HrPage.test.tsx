@@ -187,7 +187,7 @@ describe("Vite People page", () => {
     stubFetchWithGoTimeReads(fetchMock);
     render(<HrPage organizationId="33333333-3333-4333-8333-333333333333" />);
 
-    expect(await screen.findByText("amina@example.com")).not.toBeNull();
+    expect(await screen.findByText(/amina@example.com/)).not.toBeNull();
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities/execute")).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
   });
@@ -283,8 +283,86 @@ describe("Vite People page", () => {
 
     expect(await screen.findByText("Employee deactivated.")).not.toBeNull();
     expect(writes).toEqual([{ capabilityId: "hr.deactivateEmployee", input: { employeeId: employee.id } }]);
-    await waitFor(() => expect(screen.getByText("Inactive")).not.toBeNull());
+    await waitFor(() => expect(screen.getAllByText("Inactive")).toHaveLength(2));
     expect(screen.queryByRole("button", { name: "Deactivate" })).toBeNull();
+  });
+
+  it("edits employee structure through the Go capability and refreshes from the Go report", async () => {
+    window.history.replaceState(null, "", "/hr?tab=people");
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    stubHrWriteLocks();
+    let currentEmployee = employee;
+    const currentReport = { ...report, employees: [currentEmployee] };
+    const writes: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: currentReport });
+        if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [] } });
+        if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [] } });
+        writes.push({ capabilityId: body.capabilityId, input: body.input });
+        currentEmployee = { ...currentEmployee, department: "Field Ops", title: "Lead Technician" };
+        currentReport.employees = [currentEmployee];
+        return Response.json({ ok: true, data: { updated: true } });
+      }
+      throw new Error(`Unexpected employee route: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HrPage baseCurrency="UGX" actorId="22222222-2222-4222-8222-222222222222" organizationId="33333333-3333-4333-8333-333333333333" />);
+
+    await screen.findByRole("heading", { name: "Hire an employee" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Amina Wanjiru" });
+    fireEvent.change(within(dialog).getByLabelText("Department"), { target: { value: "Field Ops" } });
+    fireEvent.change(within(dialog).getByLabelText("Job title"), { target: { value: "Lead Technician" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    expect(await screen.findByText("Employee profile updated.")).not.toBeNull();
+    expect(writes).toEqual([{ capabilityId: "hr.updateEmployeeStructure", input: { employeeId: employee.id, department: "Field Ops", position: "Lead Technician" } }]);
+    await waitFor(() => expect(screen.getByText("Field Ops")).not.toBeNull());
+    expect(screen.getByText(/Lead Technician/)).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
+  });
+
+  it("retries a pending employee profile update with its saved Go intent", async () => {
+    window.history.replaceState(null, "", "/hr?tab=people");
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    stubHrWriteLocks();
+    const writes: Array<{ capabilityId: string; intentId: string; input: Record<string, unknown> }> = [];
+    let requestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: report });
+        if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [] } });
+        if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [] } });
+        writes.push(body);
+        requestCount += 1;
+        return requestCount === 1
+          ? Response.json({ pendingApproval: true, reason: "HR approval required." }, { status: 202 })
+          : Response.json({ ok: true, data: { updated: true } });
+      }
+      throw new Error(`Unexpected employee route: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HrPage baseCurrency="UGX" actorId="22222222-2222-4222-8222-222222222222" organizationId="33333333-3333-4333-8333-333333333333" />);
+
+    await screen.findByRole("heading", { name: "Hire an employee" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Amina Wanjiru" });
+    fireEvent.change(within(dialog).getByLabelText("Department"), { target: { value: "Field Ops" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    expect(await screen.findByText(/Employee profile update is waiting for approval/)).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry exact employee profile update" }));
+    expect(await screen.findByText("Employee profile updated.")).not.toBeNull();
+    expect(writes).toHaveLength(2);
+    expect(writes[1]).toEqual(writes[0]);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
   });
 
   it("drops employee hire recovery state immediately when the active organization changes", async () => {

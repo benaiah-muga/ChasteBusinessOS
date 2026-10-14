@@ -4480,3 +4480,14 @@ new owners and the manifest shows zero legacy runtime paths.
      executed by this flow. Authenticated `agent-browser` proof on 2026-10-14
      asked a revenue question and received a cited result from Go. The request
      returned HTTP 200 and the browser error log was empty.
+
+415. (Implemented and verified: focused tests and authenticated browser proof)
+     Vite People can update an employee's department and job title through Go's
+     `hr.updateEmployeeStructure` capability. The UI validates the Go request
+     and receipt, scopes the exact retry to actor and organization, and refreshes
+     the employee report after success. A pending response offers an explicit
+     exact-retry action with the same intent. HR API and page tests pass 38 and
+     32 cases respectively. Authenticated `agent-browser` proof on 2026-10-14
+     updated the synthetic migration employee through Go, showed the refreshed
+     department and title, observed the capability request return HTTP 200,
+     and recorded no browser errors or legacy `/api/hr` requests.

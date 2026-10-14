@@ -273,17 +273,19 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
       if (!isCurrentScope()) return;
       if (result.kind === "pending") {
         setEmployeeActionRecovery(action);
-        const actionLabel = action.action === "hireEmployee" ? "Employee hire" : "Employee deactivation";
+        const actionLabel = action.action === "hireEmployee" ? "Employee hire" : action.action === "deactivateEmployee" ? "Employee deactivation" : "Employee profile update";
         setNotice({ tone: "pending", text: `${actionLabel} is waiting for approval or result recovery. Retry the exact details when ready.` });
       } else {
         setEmployeeActionRecovery(null);
         if (action.action === "hireEmployee") {
           setHire({ name: "", email: "", title: "", salary: "" });
           setNotice({ tone: "success", text: "Employee hire completed." });
-        } else if (result.data.deactivated === true) {
+        } else if (action.action === "deactivateEmployee" && result.data.deactivated === true) {
           setNotice({ tone: "success", text: "Employee deactivated." });
+        } else if (action.action === "updateStructure" && result.data.updated === true) {
+          setNotice({ tone: "success", text: "Employee profile updated." });
         } else {
-          setNotice({ tone: "error", text: "This employee could not be deactivated. Refresh the directory and check the employee status." });
+          setNotice({ tone: "error", text: "The employee change could not be confirmed. Refresh the directory and check the record." });
         }
         await refreshAll();
       }
@@ -385,7 +387,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
     if (tab !== "people") return null;
     return <>
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-      {employeeActionRecovery && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeAction(employeeActionRecovery, true)}>{employeeActionRecovery.action === "hireEmployee" ? "Retry exact employee hire" : "Retry exact employee deactivation"}</button></div>}
+      {employeeActionRecovery && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeAction(employeeActionRecovery, true)}>{employeeActionRecovery.action === "hireEmployee" ? "Retry exact employee hire" : employeeActionRecovery.action === "deactivateEmployee" ? "Retry exact employee deactivation" : "Retry exact employee profile update"}</button></div>}
     </>;
   }
 
@@ -485,12 +487,18 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
       {tab === "leave" && leaveRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runLeaveAction(leaveRecoveryAction, "Leave action")}>Retry exact leave action</button></div>}
       {tab === "hiring" && hiringRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runHiringAction(hiringRecoveryAction, "Hiring action", true)}>Retry exact Hiring action</button></div>}
-      {tab === "people" && employeeActionRecovery && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeAction(employeeActionRecovery, true)}>{employeeActionRecovery.action === "hireEmployee" ? "Retry exact employee hire" : "Retry exact employee deactivation"}</button></div>}
+      {tab === "people" && employeeActionRecovery && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeAction(employeeActionRecovery, true)}>{employeeActionRecovery.action === "hireEmployee" ? "Retry exact employee hire" : employeeActionRecovery.action === "deactivateEmployee" ? "Retry exact employee deactivation" : "Retry exact employee profile update"}</button></div>}
       {tab === "payroll" && payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll action</button></div>}
       {timeRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void submitTimeAction(timeRecoveryAction, "Time action", undefined, true)}>Retry exact time action</button></div>}
       <section id="hr-tab-panel" className="hr-content" role="tabpanel" aria-labelledby={`hr-tab-${tab}`}>
         {tab === "overview" && <Overview report={data} timeRows={timeRows} currency={currency} onTabChange={changeTab} />}
-        {tab === "people" && <People employees={data.employees} currency={currency} hire={hire} setHire={setHire} busy={busy || Boolean(employeeActionRecovery)} onDeactivate={(employee) => void runEmployeeAction({ action: "deactivateEmployee", employeeId: employee.id })} onHire={() => {
+        {tab === "people" && <People employees={data.employees} currency={currency} hire={hire} setHire={setHire} busy={busy || Boolean(employeeActionRecovery)} onDeactivate={(employee) => void runEmployeeAction({ action: "deactivateEmployee", employeeId: employee.id })} onUpdateStructure={(employee, department, position) => {
+          const action: Extract<HrEmployeeAction, { action: "updateStructure" }> = { action: "updateStructure", employeeId: employee.id };
+          if (department !== employee.department) action.department = department;
+          if (position !== employee.title) action.position = position;
+          if (action.department === undefined && action.position === undefined) return;
+          void runEmployeeAction(action);
+        }} onHire={() => {
           if (!currency) return;
           const salaryMinor = Math.round(Number(hire.salary) * (10 ** (currencyMinorUnits(currency) ?? 2)));
           if (!hire.name.trim() || !Number.isSafeInteger(salaryMinor) || salaryMinor <= 0) return;
@@ -737,8 +745,10 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
   return <article className="hr-metric"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function People({ employees, currency, hire, setHire, busy, onHire, onDeactivate }: { employees: HrEmployee[]; currency: string | null; hire: { name: string; email: string; title: string; salary: string }; setHire: (value: { name: string; email: string; title: string; salary: string }) => void; busy: boolean; onHire: () => void; onDeactivate: (employee: HrEmployee) => void }) {
+function People({ employees, currency, hire, setHire, busy, onHire, onDeactivate, onUpdateStructure }: { employees: HrEmployee[]; currency: string | null; hire: { name: string; email: string; title: string; salary: string }; setHire: (value: { name: string; email: string; title: string; salary: string }) => void; busy: boolean; onHire: () => void; onDeactivate: (employee: HrEmployee) => void; onUpdateStructure: (employee: HrEmployee, department: string, position: string) => void }) {
   const [deactivateTarget, setDeactivateTarget] = useState<HrEmployee | null>(null);
+  const [editTarget, setEditTarget] = useState<HrEmployee | null>(null);
+  const [structure, setStructure] = useState({ department: "", position: "" });
   const currencyReady = Boolean(currency);
   const minorUnits = currencyMinorUnits(currency ?? "USD") ?? 2;
   return <>
@@ -753,8 +763,9 @@ function People({ employees, currency, hire, setHire, busy, onHire, onDeactivate
       </form>
     </section>
     <section className="hr-card hr-table-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Directory</p><h2>People</h2></div><span className="hr-count">{employees.length} records</span></div>
-      {employees.length === 0 ? <p className="hr-muted">No employee records yet.</p> : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Employee</th><th scope="col">Department</th><th scope="col">Monthly salary</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>{employees.map((employee) => <tr key={employee.id}><th scope="row"><span className="hr-table-person">{employee.name}</span><small>{employee.email || employee.title || "No contact details"}</small></th><td>{employee.department || "Not set"}</td><td>{currency ? formatMoney(employee.monthlySalaryMinor, currency) : "Loading currency"}</td><td><span className={`hr-pill ${employee.active ? "is-active" : "is-muted"}`}>{employee.active ? "Active" : "Inactive"}</span></td><td>{employee.active ? <button type="button" disabled={busy} onClick={() => setDeactivateTarget(employee)}>Deactivate</button> : <span className="hr-muted">No actions</span>}</td></tr>)}</tbody></table></div>}
+      {employees.length === 0 ? <p className="hr-muted">No employee records yet.</p> : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Employee</th><th scope="col">Department</th><th scope="col">Monthly salary</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>{employees.map((employee) => <tr key={employee.id}><th scope="row"><span className="hr-table-person">{employee.name}</span><small>{employee.title || "No title"}{employee.email ? ` · ${employee.email}` : ""}</small></th><td>{employee.department || "Not set"}</td><td>{currency ? formatMoney(employee.monthlySalaryMinor, currency) : "Loading currency"}</td><td><span className={`hr-pill ${employee.active ? "is-active" : "is-muted"}`}>{employee.active ? "Active" : "Inactive"}</span></td><td><div className="hr-row-actions"><button type="button" disabled={busy} onClick={() => { setEditTarget(employee); setStructure({ department: employee.department ?? "", position: employee.title ?? "" }); }}>Edit profile</button>{employee.active ? <button type="button" disabled={busy} onClick={() => setDeactivateTarget(employee)}>Deactivate</button> : <span className="hr-muted">Inactive</span>}</div></td></tr>)}</tbody></table></div>}
     </section>
+    {editTarget && <div className="hr-confirm-backdrop"><section className="hr-card hr-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-edit-title"><p className="hr-eyebrow">Team structure</p><h2 id="hr-edit-title">Edit {editTarget.name}</h2><form className="hr-form-grid" onSubmit={(event) => { event.preventDefault(); onUpdateStructure(editTarget, structure.department, structure.position); setEditTarget(null); }}><label>Department<input disabled={busy} maxLength={100} value={structure.department} onChange={(event) => setStructure({ ...structure, department: event.currentTarget.value })} /></label><label>Job title<input disabled={busy} maxLength={100} value={structure.position} onChange={(event) => setStructure({ ...structure, position: event.currentTarget.value })} /></label><div className="hr-actions"><button type="button" disabled={busy} onClick={() => setEditTarget(null)}>Cancel</button><button className="hr-primary-button" type="submit" disabled={busy || (structure.department === (editTarget.department ?? "") && structure.position === (editTarget.title ?? ""))}>Save profile</button></div></form></section></div>}
     {deactivateTarget && <div className="hr-confirm-backdrop"><section className="hr-card hr-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-deactivate-title"><p className="hr-eyebrow">Confirm employee change</p><h2 id="hr-deactivate-title">Deactivate {deactivateTarget.name}?</h2><p>This removes the employee from active team work and excludes them from future payroll runs. Their historical records remain available.</p><div className="hr-actions"><button type="button" onClick={() => setDeactivateTarget(null)}>Cancel</button><button type="button" className="hr-primary-button" disabled={busy} onClick={() => { onDeactivate(deactivateTarget); setDeactivateTarget(null); }}>Confirm deactivation</button></div></section></div>}
   </>;
 }
