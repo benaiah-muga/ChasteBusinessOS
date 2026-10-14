@@ -1241,8 +1241,7 @@ it("reports typing presence after the debounce and clears it on the mount heartb
     expect(JSON.parse(typingBodies[0]!).typing).toBe(false);
   });
 
-it("sends page presence heartbeats and typing updates through the selected Go session route", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PRESENCE__", true);
+it("sends page presence heartbeats and typing updates through the Go session route", async () => {
     const presenceWrites: { path: string; body: Record<string, unknown> }[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);

@@ -133,7 +133,6 @@ describe("marketing governed writes", () => {
       return Response.json({ ok: true, data: { segmentId } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
 
     await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }, undefined, retryScope))
       .resolves.toEqual({ kind: "completed", data: { segmentId } });
@@ -146,7 +145,6 @@ describe("marketing governed writes", () => {
   });
 
   it("preserves Go approval-pending behavior for segment creation", async () => {
-    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(
       {
         ok: false,
@@ -162,7 +160,6 @@ describe("marketing governed writes", () => {
   });
 
   it("fails closed instead of falling back when the Go segment route is absent", async () => {
-    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "not found" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -180,7 +177,6 @@ describe("marketing governed writes", () => {
   });
 
   it("reuses the exact scoped segment intent after a response may have been lost", async () => {
-    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("connection lost"))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { segmentId } }));
@@ -266,7 +262,6 @@ describe("marketing campaign Go routing", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { segmentId } }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
-    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
 
     await expect(submitMarketingAction(createCampaignAction, undefined, opaqueScope)).resolves.toMatchObject({ kind: "completed" });
     await expect(submitMarketingAction({ action: "createSegment", name: "All", minSpendMinor: 0 }, undefined, opaqueScope))
@@ -405,13 +400,11 @@ describe("marketing campaign Go routing", () => {
   it.each([
     {
       label: "segment creation",
-      selector: "__GO_MARKETING_SEGMENT_SLICE__",
       action: { action: "createSegment" as const, name: "Big spenders", minSpendMinor: 25_000 },
     },
     { label: "campaign creation", selector: "__GO_MARKETING_CAMPAIGN_WRITES__", action: createCampaignAction },
     { label: "campaign send", selector: "__GO_MARKETING_CAMPAIGN_WRITES__", action: { action: "sendCampaign" as const, campaignId } },
-  ])("does not fall back to legacy after Go 404 for $label", async ({ selector, action }) => {
-    vi.stubGlobal(selector, true);
+  ])("does not fall back to legacy after Go 404 for $label", async ({ action }) => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -481,7 +474,6 @@ describe("marketing campaign Go routing", () => {
     await expect(submitMarketingAction(createCampaignAction, undefined, { actorId: "u".repeat(256), organizationId: retryScope.organizationId })).rejects.toThrow(/active user and organization/);
     await expect(submitMarketingAction(createCampaignAction, undefined, { actorId: retryScope.actorId, organizationId: "organization_external_123" })).rejects.toThrow(/active user and organization/);
     vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", false);
-    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
     await expect(submitMarketingAction({ action: "createSegment", name: "All", minSpendMinor: 0 }, undefined, { actorId: null, organizationId: retryScope.organizationId })).rejects.toThrow(/active user and organization/);
     await expect(submitMarketingAction({ action: "createSegment", name: "All", minSpendMinor: 0 }, undefined, { actorId: "u".repeat(256), organizationId: retryScope.organizationId })).rejects.toThrow(/active user and organization/);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -496,7 +488,6 @@ describe("marketing campaign Go routing", () => {
 
   it("clears the old scoped intent on terminal 4xx and does not change segment routing", async () => {
     vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
-    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "invalid campaign" }, { status: 422 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { campaignId: "7ed25b56-02d4-4f5b-b858-9681920abdd0" } }))

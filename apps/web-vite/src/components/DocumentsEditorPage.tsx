@@ -3,6 +3,7 @@ import "./DocumentsEditorPage.css";
 import {
   DEFAULT_PAGE_SETTINGS,
   DocumentsEditorApiError,
+  allocateAuthoredDocumentNumber,
   createDocumentTemplate,
   documentHtmlToJson,
   documentJsonToHtml,
@@ -19,11 +20,13 @@ import {
   sanitizeDocumentHtml,
   updateDocumentMetadata,
   type AuthoredDocument,
+  type AuthoredDocumentNumberKind,
   type DocumentsAssistTextRequest,
   type PageSettings,
   type PresenceUser,
   type VersionRow,
 } from "../api/documents-editor";
+import { searchDocumentRecords, type DocumentRecord, type DocumentRecordType } from "../api/documents-library";
 import "./DocumentsEditorPage.css";
 
 /**
@@ -67,6 +70,16 @@ const SAVE_LABELS: Record<SaveState, string> = {
 };
 
 const LANGUAGES = ["English", "Swahili", "French", "Arabic", "Luganda", "Amharic"];
+const DOCUMENT_NUMBER_KINDS: Array<{ value: AuthoredDocumentNumberKind; label: string }> = [
+  { value: "invoice", label: "Invoice" },
+  { value: "quote", label: "Quote" },
+  { value: "receipt", label: "Receipt" },
+  { value: "delivery_note", label: "Delivery note" },
+  { value: "purchase_order", label: "Purchase order" },
+  { value: "voucher", label: "Voucher" },
+  { value: "employment_contract", label: "Employment contract" },
+  { value: "employment_agreement", label: "Employment agreement" },
+];
 
 function readableError(error: unknown): string {
   return error instanceof DocumentsEditorApiError
@@ -544,6 +557,113 @@ function AssistPanel({ handle, documentId }: { handle: SurfaceHandle | null; doc
   );
 }
 
+const recordTypeOptions: Array<{ value: DocumentRecordType; label: string }> = [
+  { value: "customer", label: "Customer" },
+  { value: "supplier", label: "Supplier" },
+  { value: "employee", label: "Employee" },
+  { value: "invoice", label: "Invoice" },
+  { value: "quote", label: "Quote" },
+  { value: "purchase_order", label: "Purchase order" },
+  { value: "sales_order", label: "Sales order" },
+];
+
+function RecordLinkDialog({
+  currentLabel,
+  onClose,
+  onSelect,
+  onClear,
+}: {
+  currentLabel: string | null;
+  onClose: () => void;
+  onSelect: (record: DocumentRecord, type: DocumentRecordType) => Promise<void>;
+  onClear: () => Promise<void>;
+}) {
+  const [type, setType] = useState<DocumentRecordType>("customer");
+  const [query, setQuery] = useState("");
+  const [records, setRecords] = useState<DocumentRecord[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [searched, setSearched] = useState(false);
+
+  async function search() {
+    if (searching) return;
+    setSearching(true);
+    setError(null);
+    setSearched(true);
+    try {
+      setRecords(await searchDocumentRecords(type, query));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not search records.");
+      setRecords([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function select(record: DocumentRecord) {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSelect(record, type);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not link this record.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function clear() {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onClear();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not remove this record link.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="de-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="de-dialog de-record-dialog" role="dialog" aria-modal="true" aria-labelledby="de-record-title">
+        <button type="button" className="de-dialog-close" aria-label="Close record search" onClick={onClose}>×</button>
+        <h2 id="de-record-title">Link a business record</h2>
+        <p>Search the current workspace, then attach a record to this document.</p>
+        {currentLabel && <p className="de-record-current">Current link: {currentLabel}</p>}
+        <div className="de-record-search">
+          <label htmlFor="de-record-type">Record type</label>
+          <select id="de-record-type" className="de-select" value={type} onChange={(event) => { setType(event.currentTarget.value as DocumentRecordType); setSearched(false); setRecords([]); }}>
+            {recordTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <label htmlFor="de-record-query">Name or number</label>
+          <input id="de-record-query" className="de-input" value={query} maxLength={120} onChange={(event) => setQuery(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void search(); } }} placeholder="Search records" />
+          <button type="button" className="de-button de-button-primary" disabled={searching || query.trim().length < 2} onClick={() => void search()}>{searching ? "Searching…" : "Search"}</button>
+        </div>
+        {error && <p className="de-record-error" role="alert">{error}</p>}
+        {searched && !searching && records.length === 0 && !error && <p className="de-record-empty">No matching records found.</p>}
+        {records.length > 0 && (
+          <ul className="de-record-results">
+            {records.map((record) => (
+              <li key={record.id}>
+                <div><strong>{record.label}</strong><span>{record.detail}</span></div>
+                <button type="button" className="de-button" disabled={saving} onClick={() => void select(record)}>{saving ? "Saving…" : "Link"}</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <footer>
+          {currentLabel && <button type="button" className="de-button" disabled={saving} onClick={() => void clear()}>Remove link</button>}
+          <button type="button" className="de-button de-button-ghost" onClick={onClose}>Close</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 export function DocumentsEditorPage({ documentId, actorId = null, organizationId = null }: { documentId?: string; actorId?: string | null; organizationId?: string | null }) {
   const resolvedId = documentId ?? documentsEditorIdFromPath(window.location.pathname);
   const [retry, setRetry] = useState(0);
@@ -562,6 +682,10 @@ export function DocumentsEditorPage({ documentId, actorId = null, organizationId
   const [publishBusy, setPublishBusy] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
+  const [numberKind, setNumberKind] = useState<AuthoredDocumentNumberKind>("invoice");
+  const [reservedNumber, setReservedNumber] = useState<string | null>(null);
+  const [numberBusy, setNumberBusy] = useState(false);
+  const [recordLinkOpen, setRecordLinkOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [compare, setCompare] = useState<CompareState>(null);
@@ -851,6 +975,69 @@ export function DocumentsEditorPage({ documentId, actorId = null, organizationId
     }
   }
 
+  async function reserveNumber() {
+    setNumberBusy(true);
+    try {
+      const outcome = await allocateAuthoredDocumentNumber(numberKind, { actorId, organizationId });
+      if (outcome.kind === "pending") {
+        setNotice({ tone: "pending", text: outcome.hint });
+        return;
+      }
+      setReservedNumber(outcome.data.number);
+      setNotice({ tone: "success", text: `${outcome.data.number} reserved for this organization.` });
+    } catch (error) {
+      setNotice({ tone: "error", text: readableError(error) });
+    } finally {
+      setNumberBusy(false);
+    }
+  }
+
+  function insertReservedNumber() {
+    const surface = surfaceRef.current;
+    if (!surface || !reservedNumber || lockRef.current || typeof document.execCommand !== "function") return;
+    surface.element.focus();
+    document.execCommand("insertText", false, reservedNumber);
+    surface.emit();
+  }
+
+  async function linkRecord(record: DocumentRecord, type: DocumentRecordType) {
+    if (!resolvedId) return;
+    const outcome = await updateDocumentMetadata(resolvedId, {
+      linkedRecordType: type,
+      linkedRecordId: record.id,
+      linkedRecordLabel: record.label,
+    }, { actorId, organizationId });
+    if (outcome.kind === "pending") {
+      setNotice({ tone: "pending", text: `Linking ${record.label} was proposed and waits for approval.` });
+      return;
+    }
+    setBoot((current) => current.status === "ready" ? {
+      ...current,
+      document: { ...current.document, linkedRecordType: type, linkedRecordId: record.id, linkedRecordLabel: record.label },
+    } : current);
+    setNotice({ tone: "success", text: `Linked ${record.label}.` });
+    setRecordLinkOpen(false);
+  }
+
+  async function clearRecordLink() {
+    if (!resolvedId) return;
+    const outcome = await updateDocumentMetadata(resolvedId, {
+      linkedRecordType: null,
+      linkedRecordId: null,
+      linkedRecordLabel: null,
+    }, { actorId, organizationId });
+    if (outcome.kind === "pending") {
+      setNotice({ tone: "pending", text: "Removing the record link was proposed and waits for approval." });
+      return;
+    }
+    setBoot((current) => current.status === "ready" ? {
+      ...current,
+      document: { ...current.document, linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: null },
+    } : current);
+    setNotice({ tone: "success", text: "Removed the linked record." });
+    setRecordLinkOpen(false);
+  }
+
   function printNow() {
     setPrintHtml(refineDocumentHtml(contentHtmlRef.current));
     requestAnimationFrame(() => window.print());
@@ -935,9 +1122,22 @@ export function DocumentsEditorPage({ documentId, actorId = null, organizationId
               </select>
             </div>
             <div className="de-actions">
+              <select className="de-select" aria-label="Number type" value={numberKind} onChange={(event) => setNumberKind(event.target.value as AuthoredDocumentNumberKind)}>
+                {DOCUMENT_NUMBER_KINDS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+              <button type="button" className="de-button" disabled={numberBusy} onClick={() => void reserveNumber()}>
+                {numberBusy ? "Reserving…" : "Reserve number"}
+              </button>
+              {reservedNumber && (
+                <>
+                  <output aria-label="Reserved number">{reservedNumber}</output>
+                  <button type="button" className="de-button" disabled={Boolean(lockHolder)} onMouseDown={(event) => event.preventDefault()} onClick={insertReservedNumber}>Insert number</button>
+                </>
+              )}
               <button type="button" className="de-button de-button-primary" disabled={publishBusy} onClick={() => setPublishOpen(true)}>Publish version</button>
               <button type="button" className="de-button de-button-ghost" onClick={printNow}>Print / PDF</button>
               <button type="button" className="de-button de-button-ghost" onClick={() => setVersionsOpen(true)}>Versions {versions.length > 0 ? `(${versions.length})` : ""}</button>
+              <button type="button" className="de-button de-button-ghost" onClick={() => setRecordLinkOpen(true)}>{linkedRecordLabel ? "Change linked record" : "Link a record"}</button>
               <button type="button" className="de-button de-button-ghost" onClick={() => setTemplateOpen(true)}>Save as template</button>
               <button type="button" className="de-button de-button-ghost" onClick={() => downloadDocx(title.trim() || "Untitled document", contentRef.current)}>.docx</button>
               <button type="button" className="de-button de-button-ghost" aria-pressed={aiOpen} onClick={() => setAiOpen((value) => !value)}>Assist</button>
@@ -1016,6 +1216,15 @@ export function DocumentsEditorPage({ documentId, actorId = null, organizationId
               </footer>
             </section>
           </div>
+        )}
+
+        {recordLinkOpen && (
+          <RecordLinkDialog
+            currentLabel={linkedRecordLabel}
+            onClose={() => setRecordLinkOpen(false)}
+            onSelect={linkRecord}
+            onClear={clearRecordLink}
+          />
         )}
 
         {versionsOpen && (

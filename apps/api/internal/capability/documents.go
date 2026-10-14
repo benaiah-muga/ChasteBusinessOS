@@ -17,6 +17,7 @@ import (
 // dbx.WithOrgTx, so app.org_id is already set for PostgreSQL RLS.
 const (
 	documentsAddVersionCapabilityID        = "documents.addVersion"
+	documentsAllocateNumberCapabilityID    = "documents.allocateNumber"
 	documentsCreateDocCapabilityID         = "documents.createDoc"
 	documentsCreateDocumentCapabilityID    = "documents.createDocument"
 	documentsCreateFolderCapabilityID      = "documents.createFolder"
@@ -45,7 +46,10 @@ const (
 // capability, keyed by id, so the registry has a single wiring point.
 func DocumentsCapabilitySpecs() map[string]capabilitySpec {
 	return map[string]capabilitySpec{
-		documentsAddVersionCapabilityID:        {module: "documents", permission: "documents.write", risk: "write"},
+		documentsAddVersionCapabilityID: {module: "documents", permission: "documents.write", risk: "write"},
+		// Allocations are monotonic and may already have been observed by another
+		// request, so they deliberately have no inverse capability.
+		documentsAllocateNumberCapabilityID:    {module: "documents", permission: "documents.write", risk: "write"},
 		documentsCreateDocCapabilityID:         {module: "documents", permission: "documents.write", risk: "write", inverseCapabilityID: documentsDeleteDocCapabilityID},
 		documentsCreateDocumentCapabilityID:    {module: "documents", permission: "documents.write", risk: "write", inverseCapabilityID: documentsDeleteDocumentCapabilityID},
 		documentsCreateFolderCapabilityID:      {module: "documents", permission: "documents.write", risk: "write", inverseCapabilityID: documentsDeleteFolderCapabilityID},
@@ -77,6 +81,7 @@ func DocumentsCapabilitySpecs() map[string]capabilitySpec {
 func DocumentsCapabilityIDs() []string {
 	return []string{
 		documentsAddVersionCapabilityID,
+		documentsAllocateNumberCapabilityID,
 		documentsCreateDocCapabilityID,
 		documentsCreateDocumentCapabilityID,
 		documentsCreateFolderCapabilityID,
@@ -236,6 +241,8 @@ type DocumentsInput struct {
 	// searchRecords
 	Type *string `json:"type,omitempty"`
 	ID   *string `json:"id,omitempty"`
+	// allocateNumber
+	Kind *string `json:"kind,omitempty"`
 	// suggestCoding
 	Lines []DocumentsCodingLine `json:"lines,omitempty"`
 }
@@ -246,6 +253,8 @@ func ParseDocumentsInput(capabilityID string, raw json.RawMessage) (DocumentsInp
 	switch capabilityID {
 	case documentsAddVersionCapabilityID:
 		return parseAddDocumentVersionInput(raw)
+	case documentsAllocateNumberCapabilityID:
+		return parseDocumentNumberInput(raw)
 	case documentsCreateDocCapabilityID:
 		return parseCreateAuthoredDocumentInput(raw)
 	case documentsCreateDocumentCapabilityID:
@@ -322,6 +331,8 @@ func executeDocumentsCapability(
 	switch capabilityID {
 	case documentsAddVersionCapabilityID:
 		output, err = addDocumentVersion(ctx, tx, claims, input, now)
+	case documentsAllocateNumberCapabilityID:
+		output, err = allocateDocumentNumber(ctx, tx, claims.OrganizationID, input, now)
 	case documentsCreateDocCapabilityID:
 		output, err = createAuthoredDocument(ctx, tx, claims, input)
 	case documentsCreateDocumentCapabilityID:

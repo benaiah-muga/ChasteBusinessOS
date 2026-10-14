@@ -205,28 +205,15 @@ export type CrmActionOutcome<T = Record<string, unknown>> =
 
 const SuccessSchema = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) });
 const PendingSchema = z.object({ ok: z.literal(false).optional(), pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() });
-const ImportPendingSchema = z.object({ pendingApproval: z.literal(true), error: z.string() });
-
-export async function submitCrmAction<T extends Record<string, unknown> = Record<string, unknown>>(
-  path: "/api/deals" | "/api/customers" | "/api/crm" | "/api/crm/views",
-  action: Record<string, unknown>,
-  signal?: AbortSignal,
-): Promise<CrmActionOutcome<T>> {
-  const { response, body } = await request(path, { method: "POST", body: JSON.stringify({ ...action, intentId: crypto.randomUUID() }) }, signal);
-  return parseCrmActionOutcome<T>(response, body);
-}
 
 export async function submitCrmDealStageMove(
   input: { dealId: string; stage: "lead" | "qualified" | "proposal" | "negotiation" | "won" | "lost"; lostReason?: string },
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<CrmActionOutcome<{ moved: boolean; stage: string }>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_DEAL_STAGE_MOVE__ !== "undefined" && __GO_CRM_DEAL_STAGE_MOVE__);
   const parsedInput = CrmDealStageMoveInputSchema.safeParse(input);
   if (!parsedInput.success) throw new CrmApiError(0, "Check the deal and stage details before submitting.");
-  const action = { action: "move", ...parsedInput.data };
-  if (!useGo) return submitCrmAction("/api/deals", action, signal);
   const actorId = normalizeRetryActorId(retryScope?.actorId);
   const organizationIdInput = retryScope?.organizationId?.trim();
   const parsedOrganizationId = uuid.safeParse(organizationIdInput);
@@ -694,20 +681,11 @@ export async function readPendingCrmDealCreate(scope: CrmTaskRetryScope): Promis
 export async function submitCrmDealCreate(
   input: CrmDealCreateInput,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<{ dealId: string }>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_DEAL_CREATE__ !== "undefined" && __GO_CRM_DEAL_CREATE__);
   const action = { action: "createDeal" as const, ...input };
-  const legacyAction = { action: "create", ...input };
   const scope = await crmTaskScope(retryScope);
-  if (!useGo) {
-    const unresolved = await readPendingCrmDealCreate(scope);
-    if (unresolved) {
-      throw new CrmApiError(0, "A Go deal creation is unresolved. Restore the Go deal route and retry its exact details before creating another deal.", true);
-    }
-    return submitCrmAction("/api/deals", legacyAction, signal);
-  }
   if (!CrmDealCreateMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the deal details and correct invalid values before submitting.");
   const attempt = await crmTaskAttempt(action, scope, "create", CRM_DEAL_CREATE_INTENT_PREFIX);
   try {
@@ -750,19 +728,12 @@ export async function readPendingCrmLeadConversion(scope: CrmTaskRetryScope, dea
 export async function submitCrmLeadConversion(
   input: CrmLeadConversionInput,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<{ dealId: string; customerId: string; stage: "qualified"; conversionIntentId: string }>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_LEAD_CONVERSION__ !== "undefined" && __GO_CRM_LEAD_CONVERSION__);
   const parsedInput = CrmLeadConversionInputSchema.safeParse(input);
   if (!parsedInput.success) throw new CrmApiError(0, "Review the lead and customer details before converting.");
   const scope = await crmTaskScope(retryScope);
-  if (!useGo) {
-    const unresolved = await readPendingCrmLeadConversion(scope, parsedInput.data.dealId);
-    if (unresolved) throw new CrmApiError(0, "A Go lead conversion is unresolved. Restore the Go conversion route and retry its exact details before using the legacy route.", true);
-    return submitCrmAction("/api/crm", { action: "convertLead", ...parsedInput.data }, signal);
-  }
-
   const action: CrmLeadConversionMutation = { action: "convertLead", ...parsedInput.data };
   const attempt = await crmTaskAttempt(action, scope, `convert:${parsedInput.data.dealId}`, CRM_LEAD_CONVERSION_INTENT_PREFIX);
   try {
@@ -796,19 +767,11 @@ async function clearCrmDealCreateAttempt(storageKey: string): Promise<void> {
 export async function submitCrmCustomerCreate(
   input: CrmCustomerCreateInput,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<{ customerId: string; duplicateWarning?: string | null }>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_CREATE__ !== "undefined" && __GO_CRM_CUSTOMER_CREATE__);
   const action = { action: "createCustomer" as const, ...input };
   const scope = await crmTaskScope(retryScope);
-  if (!useGo) {
-    const unresolved = await readPendingCrmCustomerCreate(scope);
-    if (unresolved) {
-      throw new CrmApiError(0, "A Go customer creation is unresolved. Restore the Go customer route and retry its exact details before creating another customer.", true);
-    }
-    return submitCrmAction("/api/customers", { action: "create", ...input }, signal);
-  }
   if (!CrmCustomerCreateMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the customer details and correct invalid values before submitting.");
   const attempt = await crmTaskAttempt(action, scope, "create", CRM_CUSTOMER_CREATE_INTENT_PREFIX);
   try {
@@ -834,18 +797,12 @@ export async function submitCrmCustomerCreate(
 export async function submitCrmCustomerDeactivate(
   customerId: string,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<{ deactivated: boolean }>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_DEACTIVATE__ !== "undefined" && __GO_CRM_CUSTOMER_DEACTIVATE__);
   const input = { customerId };
   if (!uuid.safeParse(customerId).success) throw new CrmApiError(0, "Choose a valid customer before deactivating it.");
   const scope = await crmTaskScope(retryScope);
-  if (!useGo) {
-    const unresolved = await readPendingCrmCustomerDeactivate({ actorId: scope.actorId, organizationId: scope.organizationId }, customerId);
-    if (unresolved) throw new CrmApiError(0, "A Go customer deactivation is unresolved. Restore the Go customer route and retry the same customer before using the legacy route.", true);
-    return submitCrmAction("/api/customers", { action: "deactivate", ...input }, signal);
-  }
   const action: CrmCustomerDeactivateMutation = { action: "deactivateCustomer", customerId };
   const attempt = await crmTaskAttempt(action, scope, `deactivate:${customerId}`, CRM_CUSTOMER_DEACTIVATE_INTENT_PREFIX);
   try {
@@ -938,26 +895,12 @@ export async function readCrmCustomerMergeUndo(scope: CrmTaskRetryScope): Promis
 export async function submitCrmCustomerMerge(
   input: Pick<CrmCustomerMergeResult, "survivorCustomerId" | "duplicateCustomerId">,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<CrmCustomerMergeResult>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_MERGE__ !== "undefined" && __GO_CRM_CUSTOMER_MERGE__);
   const parsedInput = CrmCustomerMergeInputSchema.safeParse(input);
   if (!parsedInput.success) throw new CrmApiError(0, "Choose two different valid customers to merge.");
   const scope = await crmTaskScope(retryScope);
-  if (!useGo) {
-    if (await readPendingCrmCustomerMerge({ actorId: scope.actorId, organizationId: scope.organizationId }) ||
-      await readPendingCrmCustomerMergeUndo({ actorId: scope.actorId, organizationId: scope.organizationId })) {
-      throw new CrmApiError(0, "A Go customer merge is unresolved. Restore the Go customer route and retry its exact action before using the legacy route.", true);
-    }
-    const outcome = await submitCrmAction("/api/customers", { action: "merge", ...parsedInput.data }, signal);
-    if (outcome.kind === "pending") return outcome;
-    const parsedOutput = CrmCustomerMergeResultSchema.safeParse(outcome.data);
-    if (!parsedOutput.success || parsedOutput.data.survivorCustomerId !== parsedInput.data.survivorCustomerId || parsedOutput.data.duplicateCustomerId !== parsedInput.data.duplicateCustomerId) {
-      throw new CrmApiError(0, "The CRM service returned an unexpected merge result.", true);
-    }
-    return { kind: "completed", data: parsedOutput.data };
-  }
   if (await readPendingCrmCustomerMergeUndo({ actorId: scope.actorId, organizationId: scope.organizationId })) {
     throw new CrmApiError(0, "A Go customer merge undo is unresolved. Retry that exact undo before starting another merge.", true);
   }
@@ -991,25 +934,12 @@ export async function submitCrmCustomerMerge(
 export async function submitCrmCustomerMergeUndo(
   input: unknown,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<CrmCustomerMergeResult>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_MERGE__ !== "undefined" && __GO_CRM_CUSTOMER_MERGE__);
   const parsedInput = CrmCustomerMergeResultSchema.safeParse(input);
   if (!parsedInput.success) throw new CrmApiError(0, "The customer merge snapshot is invalid and cannot be restored.");
   const scope = await crmTaskScope(retryScope);
-  if (!useGo) {
-    if (await readPendingCrmCustomerMerge({ actorId: scope.actorId, organizationId: scope.organizationId }) ||
-      await readPendingCrmCustomerMergeUndo({ actorId: scope.actorId, organizationId: scope.organizationId })) {
-      throw new CrmApiError(0, "A Go customer merge is unresolved. Restore the Go customer route and retry its exact action before using the legacy route.", true);
-    }
-    const outcome = await submitCrmAction("/api/customers", { action: "undoMerge", ...parsedInput.data }, signal);
-    if (outcome.kind === "pending") return outcome;
-    const parsedOutput = CrmCustomerMergeResultSchema.safeParse(outcome.data);
-    if (!parsedOutput.success) throw new CrmApiError(0, "The CRM service returned an unexpected merge undo result.", true);
-    await clearCrmCustomerMergeUndo(scope);
-    return { kind: "completed", data: parsedOutput.data };
-  }
   if (await readPendingCrmCustomerMerge({ actorId: scope.actorId, organizationId: scope.organizationId })) {
     throw new CrmApiError(0, "A Go customer merge is unresolved. Retry that exact merge before undoing it.", true);
   }
@@ -1079,11 +1009,9 @@ export async function readPendingCrmCustomerProfileUpdate(scope: CrmTaskRetrySco
 export async function submitCrmCustomerProfileUpdate(
   input: CrmCustomerProfileUpdateMutation,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<z.infer<typeof CrmCustomerProfileUpdateOutputSchema>>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_PROFILE_UPDATE__ !== "undefined" && __GO_CRM_CUSTOMER_PROFILE_UPDATE__);
-  if (!useGo) return submitCrmAction("/api/customers", input, signal);
   if (!CrmCustomerProfileUpdateMutationSchema.safeParse(input).success) {
     throw new CrmApiError(0, "Review the customer profile changes and correct invalid values before submitting.");
   }
@@ -1369,7 +1297,7 @@ const ImportResponseSchema = z.object({
   skippedDuplicateRows: z.array(z.number().int().positive()).optional(),
   createdIds: z.array(uuid),
   errors: z.array(z.object({ row: z.number().int(), message: z.string() })).optional(),
-});
+}).strict();
 export type CrmImportResult = z.infer<typeof ImportResponseSchema>;
 
 export async function readPendingCrmCustomerImport(scope: CrmTaskRetryScope): Promise<CrmCustomerImportRow[] | null> {
@@ -1469,28 +1397,12 @@ async function clearCrmCustomerImportUndo(scope: { scopeHash: string }, importIn
 export async function importCrmCustomers(
   rows: CrmCustomerImportRow[],
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<CrmImportResult>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_IMPORT__ !== "undefined" && __GO_CRM_CUSTOMER_IMPORT__);
   const parsedRows = z.array(CrmCustomerImportRowSchema).min(1).max(5000).refine((items) => new Set(items.map((row) => row.rowNumber)).size === items.length).safeParse(rows);
   if (!parsedRows.success) throw new CrmApiError(0, "Review the customer import rows and correct invalid values before submitting.");
   const scope = await crmTaskScope(retryScope);
-  if (!useGo) {
-    if (await readPendingCrmCustomerImport(scope) || await readPendingCrmCustomerImportUndo(scope) || await readCrmCustomerImportUndo(scope)) {
-      throw new CrmApiError(0, "A Go customer import is unresolved. Restore the Go customer route and retry its exact action before using the legacy import route.", true);
-    }
-    const { response, body } = await request("/api/import", { method: "POST", body: JSON.stringify({ entity: "customers", rows: parsedRows.data }) }, signal);
-    if (response.status === 202) {
-      const parsed = ImportPendingSchema.safeParse(body);
-      if (!parsed.success) throw new CrmApiError(202, "The import service returned an unexpected approval response.");
-      return { kind: "pending", reason: parsed.data.error };
-    }
-    if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
-    const parsed = ImportResponseSchema.safeParse(body);
-    if (!parsed.success) throw new CrmApiError(response.status, "The import service returned an unexpected result.");
-    return { kind: "completed", data: parsed.data };
-  }
   if (await readPendingCrmCustomerImportUndo(scope)) {
     throw new CrmApiError(0, "A Go customer import undo is unresolved. Retry that exact undo before starting another import.", true);
   }
@@ -1518,15 +1430,16 @@ export async function importCrmCustomers(
     if (!parsed.success || parsed.data.importIntentId !== attempt.intentId || !skippedRowsAreValid || parsed.data.imported !== parsed.data.createdIds.length || new Set(parsed.data.createdIds).size !== parsed.data.createdIds.length || parsed.data.imported + skippedRowNumbers.length !== parsedRows.data.length) {
       throw new CrmApiError(response.status, "The CRM service returned an unexpected import result.", true);
     }
-    const result: CrmImportResult = {
+    const normalized = ImportResponseSchema.safeParse({
       inserted: parsed.data.imported,
       skippedDuplicates: parsed.data.skippedDuplicateRows.length,
       skippedDuplicateRows: parsed.data.skippedDuplicateRows,
       createdIds: parsed.data.createdIds,
-    };
-    await persistCrmCustomerImportUndo(scope, result, parsed.data.importIntentId);
+    });
+    if (!normalized.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected import result.", true);
+    await persistCrmCustomerImportUndo(scope, normalized.data, parsed.data.importIntentId);
     await clearCrmTaskAttempt(attempt);
-    return { kind: "completed", data: result };
+    return { kind: "completed", data: normalized.data };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
       await clearCrmTaskAttempt(attempt);
@@ -1538,31 +1451,13 @@ export async function importCrmCustomers(
 export async function undoCrmImport(
   importIds: string[],
   signal?: AbortSignal,
-  useGoOverride?: boolean,
+  _useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
   importIntentId?: string,
 ): Promise<CrmActionOutcome<{ undone: number; remaining: number }>> {
-  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_IMPORT__ !== "undefined" && __GO_CRM_CUSTOMER_IMPORT__);
   const parsedIds = z.array(uuid).min(1).max(5000).refine((ids) => new Set(ids).size === ids.length).safeParse(importIds);
   if (!parsedIds.success) throw new CrmApiError(0, "The customer import undo IDs are invalid.");
   const scope = await crmTaskScope(retryScope);
-  if (!useGo) {
-    if (importIntentId || await readCrmCustomerImportUndo(scope)) throw new CrmApiError(0, "This import was performed by Go. Restore the Go CRM import route to undo it safely.", true);
-    if (await readPendingCrmCustomerImport(scope) || await readPendingCrmCustomerImportUndo(scope)) {
-      throw new CrmApiError(0, "A Go customer import is unresolved. Restore the Go customer route and retry its exact action before using the legacy import route.", true);
-    }
-    const { response, body } = await request("/api/import", { method: "POST", body: JSON.stringify({ entity: "customers", action: "undo", importIds: parsedIds.data }) }, signal);
-    if (response.status === 202) {
-      const parsed = ImportPendingSchema.safeParse(body);
-      if (!parsed.success) throw new CrmApiError(202, "The import service returned an unexpected undo approval response.");
-      return { kind: "pending", reason: parsed.data.error };
-    }
-    if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
-    const parsed = z.object({ undone: z.number().int().nonnegative(), remaining: z.number().int().nonnegative() }).safeParse(body);
-    if (!parsed.success) throw new CrmApiError(response.status, "The import service returned an unexpected undo result.");
-    await clearCrmCustomerImportUndo(scope);
-    return { kind: "completed", data: parsed.data };
-  }
   if (await readPendingCrmCustomerImport(scope)) {
     throw new CrmApiError(0, "A Go customer import is unresolved. Retry that exact import before undoing it.", true);
   }

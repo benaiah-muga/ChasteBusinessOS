@@ -38,7 +38,6 @@ describe("POS API client", () => {
   });
 
   it("posts only the shift-summary capability to Go and validates its response envelope", async () => {
-    vi.stubGlobal("__GO_POS_SHIFT_SUMMARY_ROUTE__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: summary }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -58,7 +57,6 @@ describe("POS API client", () => {
   });
 
   it("does not fall back to the legacy POS action when the Go route is missing", async () => {
-    vi.stubGlobal("__GO_POS_SHIFT_SUMMARY_ROUTE__", true);
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -68,7 +66,6 @@ describe("POS API client", () => {
   });
 
   it("does not retry a Go response other than 404", async () => {
-    vi.stubGlobal("__GO_POS_SHIFT_SUMMARY_ROUTE__", true);
     const fetchMock = vi.fn(async () => Response.json({ error: "forbidden" }, { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -76,14 +73,13 @@ describe("POS API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the legacy route when the Go selector is disabled", async () => {
-    vi.stubGlobal("__GO_POS_SHIFT_SUMMARY_ROUTE__", false);
+  it("keeps shift summaries on Go with no selector configuration", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: summary }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchPosShiftSummary(id)).resolves.toEqual(summary);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]![0]).toBe("/api/pos");
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/pos/shift-summary");
   });
 
   it("rejects invalid IDs before issuing a request and rejects malformed response data", async () => {

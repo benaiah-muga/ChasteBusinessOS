@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PAGE_SETTINGS,
   DocumentsEditorApiError,
+  allocateAuthoredDocumentNumber,
   buildDocxBytes,
   createAuthoredDocumentDraft,
   createDocumentTemplate,
@@ -80,12 +81,16 @@ function bodyOf(call: RecordedCall): Record<string, unknown> {
   return JSON.parse(String(call.init.body ?? "{}")) as Record<string, unknown>;
 }
 
+function organizationHeaderOf(call: RecordedCall): string | null {
+  return new Headers(call.init.headers).get("X-Organization-ID");
+}
+
 afterEach(() => {
   window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
-const templateScope = { actorId: "actor-1", organizationId: "org-1" };
+const templateScope = { actorId: "actor-1", organizationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
 
 function stubWebLocks() {
   const queues = new Map<string, Promise<void>>();
@@ -284,6 +289,7 @@ describe("authored document creation", () => {
     });
     expect(calls[0]?.url).toBe("/api/capabilities/execute");
     expect(calls[0]?.init.credentials).toBe("same-origin");
+    expect(organizationHeaderOf(calls[0]!)).toBe(templateScope.organizationId);
     expect(window.localStorage.length).toBe(0);
   });
 
@@ -292,7 +298,7 @@ describe("authored document creation", () => {
     const { calls } = recorder(() => { throw new Error("connection lost"); });
     await expect(createAuthoredDocumentDraft(templateScope)).rejects.toMatchObject({ status: 0 });
     const first = bodyOf(calls[0]!);
-    const otherScope = { actorId: "actor-2", organizationId: "org-1" };
+    const otherScope = { actorId: "actor-2", organizationId: templateScope.organizationId };
     const { calls: otherCalls } = recorder(() => Response.json({ ok: true, data: { documentId: "not-a-uuid" } }));
     await expect(createAuthoredDocumentDraft(otherScope)).rejects.toMatchObject({ status: 200 });
     expect(bodyOf(otherCalls[0]!).intentId).not.toBe(first.intentId);
@@ -303,23 +309,58 @@ describe("authored document creation", () => {
 
   it("fails closed when scope or retry locking is unavailable", async () => {
     await expect(createAuthoredDocumentDraft({ actorId: null, organizationId: "org-1" })).rejects.toMatchObject({ status: 0 });
+    const { calls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft({ actorId: "actor-1", organizationId: "org-1" })).rejects.toMatchObject({ status: 0 });
+    expect(calls).toHaveLength(0);
     vi.stubGlobal("navigator", { ...navigator, locks: undefined });
     await expect(createAuthoredDocumentDraft(templateScope)).rejects.toMatchObject({ status: 0 });
   });
 });
 
+describe("authored document number allocation", () => {
+  it("allocates through the Go capability and validates the returned number", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => Response.json({ ok: true, data: { number: "PO-2026-0001" } }));
+    await expect(allocateAuthoredDocumentNumber("purchase_order", templateScope)).resolves.toEqual({
+      kind: "completed",
+      data: { number: "PO-2026-0001" },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[0]!)).toMatchObject({
+      capabilityId: "documents.allocateNumber",
+      input: { kind: "purchase_order" },
+      intentId: expect.any(String),
+    });
+    expect(organizationHeaderOf(calls[0]!)).toBe(templateScope.organizationId);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("reuses the same intent after an uncertain response and rejects malformed outputs", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(allocateAuthoredDocumentNumber("receipt", templateScope)).rejects.toMatchObject({ status: 0 });
+    const intentId = bodyOf(calls[0]!).intentId;
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { number: "RCT-2026-0001", extra: true } }));
+    await expect(allocateAuthoredDocumentNumber("receipt", templateScope)).rejects.toMatchObject({ status: 200 });
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(intentId);
+  });
+});
+
 describe("draft workspace ticks", () => {
+  const workspaceDocumentId = goAuthoredDocument.id;
+
   it("stamps an intent id and sends the draft with its known revision", async () => {
     const { calls } = recorder(() => Response.json({ lock: { heldBy: "Ada", mine: true }, savedRev: 4, draft: null, others: [] }));
 
-    const tick = await postEditorWorkspace("doc-1", {
+    const tick = await postEditorWorkspace(workspaceDocumentId, {
       content: { type: "doc", content: [] },
       pageSettings: DEFAULT_PAGE_SETTINGS,
       rev: 3,
     });
 
     expect(tick).toEqual({ conflict: false, savedRev: 4, lock: { heldBy: "Ada", mine: true }, others: [], draft: null });
-    expect(calls[0]?.url).toBe("/api/docs/doc-1/workspace");
+    expect(calls[0]?.url).toBe(`/api/docs/${workspaceDocumentId}/workspace`);
     expect(calls[0]?.init.method).toBe("POST");
     const sent = bodyOf(calls[0]!);
     expect(typeof sent.intentId).toBe("string");
@@ -330,11 +371,11 @@ describe("draft workspace ticks", () => {
 
   it("keeps a caller supplied intent id so a retried save reconciles", async () => {
     const { calls } = recorder(() => Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] }));
-    await postEditorWorkspace("doc-1", { content: { type: "doc", content: [] }, intentId: undefined } as never);
+    await postEditorWorkspace(workspaceDocumentId, { content: { type: "doc", content: [] }, intentId: undefined } as never);
     expect(typeof bodyOf(calls[0]!).intentId).toBe("string");
 
     const again = recorder(() => Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] }));
-    await postEditorWorkspace("doc-1", { content: { type: "doc", content: [] }, rev: 2 });
+    await postEditorWorkspace(workspaceDocumentId, { content: { type: "doc", content: [] }, rev: 2 });
     expect(bodyOf(again.calls[0]!).rev).toBe(2);
   });
 
@@ -346,7 +387,7 @@ describe("draft workspace ticks", () => {
       others: [{ userId: "u-2", name: "Grace" }],
     }, { status: 409 }));
 
-    const tick = await postEditorWorkspace("doc-1", { content: { type: "doc", content: [] }, rev: 4 });
+    const tick = await postEditorWorkspace(workspaceDocumentId, { content: { type: "doc", content: [] }, rev: 4 });
     expect(tick.conflict).toBe(true);
     expect(tick.draft?.rev).toBe(9);
     expect(tick.others).toEqual([{ userId: "u-2", name: "Grace" }]);
@@ -354,15 +395,22 @@ describe("draft workspace ticks", () => {
 
   it("surfaces a real failure as an error", async () => {
     recorder(() => Response.json({ error: "invalid body" }, { status: 400 }));
-    await expect(postEditorWorkspace("doc-1", {})).rejects.toThrow("Some details were missing or malformed.");
+    await expect(postEditorWorkspace(workspaceDocumentId, {})).rejects.toThrow("Some details were missing or malformed.");
+  });
+
+  it("rejects invalid workspace IDs before making a request", async () => {
+    const { calls } = recorder(() => Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] }));
+    await expect(postEditorWorkspace("not-a-uuid", {})).rejects.toMatchObject({ status: 400 });
+    releaseEditorWorkspace("not-a-uuid");
+    expect(calls).toHaveLength(0);
   });
 
   it("releases presence and the lock without waiting for an answer", () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    releaseEditorWorkspace("doc-1");
+    releaseEditorWorkspace(workspaceDocumentId);
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/docs/doc-1/workspace", expect.objectContaining({ method: "DELETE", keepalive: true }));
+    expect(fetchMock).toHaveBeenCalledWith(`/api/docs/${workspaceDocumentId}/workspace`, expect.objectContaining({ method: "DELETE", keepalive: true }));
   });
 });
 
@@ -415,6 +463,7 @@ describe("governed writes", () => {
       "documents.saveDocVersion", "documents.restoreDocVersion", "documents.updateDocMetadata",
     ]);
     expect(calls.slice(0, 3).every((call) => call.url === "/api/capabilities/execute")).toBe(true);
+    expect(calls.slice(0, 4).every((call) => organizationHeaderOf(call) === templateScope.organizationId)).toBe(true);
     expect(bodyOf(calls[3]!).capabilityId).toBe("documents.createTemplate");
     const intentId = bodyOf(calls[3]!).intentId;
 
@@ -442,9 +491,12 @@ describe("governed writes", () => {
 
     expect(calls[0]?.url).toBe("/api/capabilities/execute");
     expect(bodyOf(calls[0]!)).toMatchObject({ capabilityId: "documents.restoreDocVersion", input: { documentId: goAuthoredDocument.id, sourceVersion: 2 } });
+    expect(organizationHeaderOf(calls[0]!)).toBe(templateScope.organizationId);
     expect(calls[1]?.url).toBe("/api/capabilities/execute");
     expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.createTemplate", input: { name: "Quote" } });
+    expect(organizationHeaderOf(calls[1]!)).toBe(templateScope.organizationId);
     expect(bodyOf(calls[2]!)).toMatchObject({ capabilityId: "documents.updateDocMetadata", input: { documentId: goAuthoredDocument.id, title: "Renamed" } });
+    expect(organizationHeaderOf(calls[2]!)).toBe(templateScope.organizationId);
     const identities = calls.map((call) => bodyOf(call).intentId);
     expect(new Set(identities).size).toBe(3);
   });

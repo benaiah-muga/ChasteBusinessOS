@@ -468,8 +468,12 @@ export async function advanceReadCursor(conversationId: string, readAt: string, 
 }
 
 export async function fetchConversationPresence(conversationId: string, signal?: AbortSignal): Promise<ConversationPresence[]> {
-  const result = await getJson(`/api/conversations/${encodeURIComponent(conversationId)}/presence`, "who is online", PresenceResponseSchema, signal);
-  return result.people;
+  const validatedConversationId = z.string().uuid().parse(conversationId);
+  const { response, body } = await send(`/api/conversations/${encodeURIComponent(validatedConversationId)}/presence`, { method: "GET" }, "who is online", signal);
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "who is online"));
+  const result = PresenceResponseSchema.safeParse(body);
+  if (!result.success) throw new MessagingApiError(response.status, "The messaging service returned presence in an unexpected format.");
+  return result.data.people;
 }
 
 export async function reportConversationPresence(conversationId: string, typing: boolean, signal?: AbortSignal): Promise<void> {
@@ -621,9 +625,12 @@ async function sendConversationAgentReplyThroughGo(
   intentId: string,
   signal?: AbortSignal,
 ): Promise<{ kind: "completed"; reply: string; messageId: string; replayed: boolean } | { kind: "pending"; reason: string }> {
-  const { response, body } = await send(`/api/conversations/${encodeURIComponent(conversationId)}/agent-reply`, {
+  const validatedConversationId = z.string().uuid().parse(conversationId);
+  const validatedMessageId = z.string().uuid().parse(messageId);
+  const validatedIntentId = z.string().uuid().parse(intentId);
+  const { response, body } = await send(`/api/conversations/${encodeURIComponent(validatedConversationId)}/agent-reply`, {
     method: "POST",
-    body: JSON.stringify({ messageId, intentId }),
+    body: JSON.stringify({ messageId: validatedMessageId, intentId: validatedIntentId }),
   }, "get the AI reply", signal, 480_000);
   if (response.status === 202) {
     const pending = PendingApprovalSchema.safeParse(body);

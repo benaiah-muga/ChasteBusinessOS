@@ -354,7 +354,7 @@ beforeEach(() => {
       orderedMinor: 150000,
       lines: [{ lineNumber: 1, description: "Steel rods", quantity: 10000, unitPriceMinor: 15000 }],
     }] });
-    if (path === "/api/pos" && init?.method === "POST") return Response.json({ ok: true, data: {
+    if (path === "/api/pos/shift-summary" && init?.method === "POST") return Response.json({ ok: true, data: {
       register: "Main register",
       status: "closed",
       salesCount: 4,

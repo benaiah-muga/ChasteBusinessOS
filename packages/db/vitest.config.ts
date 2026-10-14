@@ -11,5 +11,8 @@ export default defineConfig({
     // parallel load, which is how the RLS sweep used to fail.
     testTimeout: 20_000,
     hookTimeout: 120_000,
+    // DB suites share one fixture database. Concurrent GRANT/REVOKE statements
+    // race on PostgreSQL catalog rows despite transaction-scoped advisory locks.
+    fileParallelism: false,
   },
 });

@@ -121,6 +121,7 @@ export type WorkspaceTick = {
 };
 
 const PublishedVersionSchema = z.object({ version: z.number().int().positive() }).strict();
+const DocumentNumberSchema = z.object({ number: z.string().min(1) }).strict();
 const TemplateCreatedSchema = z.object({
   templateId: z.string().uuid(),
   placeholders: z.array(z.string()),
@@ -170,6 +171,7 @@ export type DocumentsAssistResult = AssistText | AssistPrefill;
 export type GovernedOutcome<T> = { kind: "completed"; data: T } | { kind: "pending"; hint: string };
 
 export type DocumentsEditorRetryScope = { actorId: string | null; organizationId: string | null };
+export type AuthoredDocumentNumberKind = "invoice" | "quote" | "receipt" | "delivery_note" | "purchase_order" | "voucher" | "employment_contract" | "employment_agreement";
 
 export class DocumentsEditorApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -321,6 +323,7 @@ export async function postEditorWorkspace(
   payload: { content?: Record<string, unknown>; pageSettings?: PageSettings; rev?: number },
   signal?: AbortSignal,
 ): Promise<WorkspaceTick> {
+  validateDocumentVersionInput(id);
   const { status, body } = await post(`${documentPath(id)}/workspace`, { ...payload }, signal);
   if (status !== 409 && (status < 200 || status >= 300)) throw new DocumentsEditorApiError(status, messageFor(status, body));
   const parsed = WorkspaceResponseSchema.safeParse(body);
@@ -336,6 +339,7 @@ export async function postEditorWorkspace(
 
 /** Release presence and the soft lock on exit. Never fails hard. */
 export function releaseEditorWorkspace(id: string): void {
+  if (!documentUUID.safeParse(id).success) return;
   void fetch(`${documentPath(id)}/workspace`, { method: "DELETE", credentials: "same-origin", keepalive: true }).catch(() => undefined);
 }
 
@@ -361,7 +365,13 @@ export function restoreDocumentVersion(
 
 export function updateDocumentMetadata(
   id: string,
-  body: { title?: string; folder?: string | null },
+  body: {
+    title?: string;
+    folder?: string | null;
+    linkedRecordType?: string | null;
+    linkedRecordId?: string | null;
+    linkedRecordLabel?: string | null;
+  },
   scope: DocumentsEditorRetryScope,
   signal?: AbortSignal,
 ): Promise<GovernedOutcome<z.infer<typeof MetadataUpdatedSchema>>> {
@@ -382,6 +392,13 @@ export function createAuthoredDocumentDraft(
   scope: DocumentsEditorRetryScope,
 ): Promise<GovernedOutcome<z.infer<typeof AuthoredDocumentCreatedSchema>>> {
   return createAuthoredDocumentDraftInGo(scope);
+}
+
+export function allocateAuthoredDocumentNumber(
+  kind: AuthoredDocumentNumberKind,
+  scope: DocumentsEditorRetryScope,
+): Promise<GovernedOutcome<z.infer<typeof DocumentNumberSchema>>> {
+  return governedDocumentWrite("documents.allocateNumber", { kind }, DocumentNumberSchema, scope);
 }
 
 const templateRetryPrefix = "chaste:documents-template:v1:";
@@ -438,6 +455,7 @@ async function governedDocumentWrite<T>(
       const { status, body } = await request("/api/capabilities/execute", {
         method: "POST",
         cache: "no-store",
+        headers: { "X-Organization-ID": organizationId },
         body: JSON.stringify({ capabilityId, input, intentId: marker.intentId }),
       }, signal);
       if (status === 202) {
@@ -474,7 +492,7 @@ function parseDocumentWriteRetryMarker(raw: string | null): z.infer<typeof Docum
 function templateRetryScope(scope: DocumentsEditorRetryScope): { actorId: string; organizationId: string } {
   const actorId = scope.actorId?.trim() ?? "";
   const organizationId = scope.organizationId?.trim() ?? "";
-  if (!actorId || !organizationId || actorId.length > 255 || organizationId.length > 255) {
+  if (!actorId || actorId.length > 255 || !z.string().uuid().safeParse(organizationId).success) {
     throw new DocumentsEditorApiError(0, "Wait for your account and organization to finish loading before creating or saving documents.");
   }
   return { actorId, organizationId };
@@ -525,6 +543,7 @@ async function createDocumentTemplateInGo(
     const { status, body } = await request("/api/capabilities/execute", {
       method: "POST",
       cache: "no-store",
+      headers: { "X-Organization-ID": organizationId },
       body: JSON.stringify({ capabilityId: "documents.createTemplate", input: { name: normalizedName, content }, intentId: marker.intentId }),
     }, signal);
     if (status === 202) {
@@ -582,6 +601,7 @@ async function createAuthoredDocumentDraftInGo(
     const { status, body } = await request("/api/capabilities/execute", {
       method: "POST",
       cache: "no-store",
+      headers: { "X-Organization-ID": organizationId },
       body: JSON.stringify({ capabilityId: "documents.createDoc", input, intentId: marker.intentId }),
     });
     if (status === 202) {

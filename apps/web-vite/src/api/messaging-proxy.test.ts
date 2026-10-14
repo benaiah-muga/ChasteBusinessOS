@@ -169,7 +169,6 @@ describe("Messaging capability proxy", () => {
     expect(goProxy.server.config.define?.__GO_MESSAGING_READ_CURSOR__).toBe("true");
     expect(goProxy.server.config.define?.__GO_MESSAGING_REACTIONS__).toBe("true");
     expect(goProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("true");
-    expect(goProxy.server.config.define?.__GO_MESSAGING_PRESENCE__).toBe("true");
     expect(goProxy.server.config.define?.__GO_MESSAGING_ATTACHMENT_UPLOAD__).toBe("true");
     const goResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await goResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
@@ -188,7 +187,6 @@ describe("Messaging capability proxy", () => {
     vi.stubEnv("CHASTE_GO_MESSAGING_READ_CURSOR", "0");
     vi.stubEnv("CHASTE_GO_MESSAGING_REACTIONS", "0");
     vi.stubEnv("CHASTE_GO_MESSAGING_PINS", "0");
-    vi.stubEnv("CHASTE_GO_MESSAGING_PRESENCE", "0");
     vi.stubEnv("CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD", "0");
     const rollbackProxy = await startViteProxy();
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("false");
@@ -197,10 +195,14 @@ describe("Messaging capability proxy", () => {
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_READ_CURSOR__).toBe("false");
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_REACTIONS__).toBe("false");
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("false");
-    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_PRESENCE__).toBe("false");
     expect(rollbackProxy.server.config.define?.__GO_MESSAGING_ATTACHMENT_UPLOAD__).toBe("false");
     const rollbackResponse = await fetch(`${rollbackProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await rollbackResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
+    const conversationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const presenceResponse = await fetch(`${rollbackProxy.origin}/api/conversations/${conversationId}/presence`);
+    expect(await presenceResponse.json()).toEqual({ target: "go", path: `/api/conversations/${conversationId}/presence` });
+    const agentReplyResponse = await fetch(`${rollbackProxy.origin}/api/conversations/${conversationId}/agent-reply`, { method: "POST" });
+    expect(await agentReplyResponse.json()).toEqual({ target: "go", path: `/api/conversations/${conversationId}/agent-reply` });
     const legacyEditResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1`, { method: "PATCH" });
     expect(await legacyEditResponse.json()).toEqual({ target: "legacy", path: "/api/messages/m1" });
     const legacyDeleteResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1?intentId=11111111-1111-4111-8111-111111111111`, { method: "DELETE" });
@@ -217,7 +219,6 @@ describe("Messaging capability proxy", () => {
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("false");
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_REACTIONS__).toBe("false");
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("false");
-    expect(legacyProxy.server.config.define?.__GO_MESSAGING_PRESENCE__).toBe("false");
     expect(legacyProxy.server.config.define?.__GO_MESSAGING_ATTACHMENT_UPLOAD__).toBe("false");
     const capabilityResponse = await fetch(`${legacyProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await capabilityResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });

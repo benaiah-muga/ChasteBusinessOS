@@ -4029,3 +4029,20 @@ new owners and the manifest shows zero legacy runtime paths.
      supported permissions, along with 46 Vite Settings tests. Independent
      review approved the permission and module-gate behavior. This completes
      item 374.
+
+376. (Complete) Bind asynchronous Vite POS return recovery, quick item
+     creation, and opening-stock completion to the actor and organization
+     scope captured when each request starts. Reset quick-add form state on
+     organization changes and ignore stale responses in the new register.
+     Keep Go routine webhook enqueue limited to enabled webhook routines and
+     restrict the application database role to the enqueue function.
+
+377. (Runtime verified) On 2026-10-14, authenticated agent-browser loaded the
+     Vite POS register with the paid synthetic sale still visible after reload.
+     Go POS reads and capability requests returned HTTP 200 and the browser
+     reported no page errors. Workspace typecheck passed all 27 packages, lint
+     had no errors, all 25 Turbo test tasks passed, and `pnpm go:verify` passed
+     with runtime integration required. POS regressions cover delayed sale,
+     return recovery, item creation, and opening-stock responses after an
+     organization switch. Independent webhook and POS reviews found no
+     remaining actionable issue. This completes item 376.

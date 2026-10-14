@@ -1,12 +1,21 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as posSessionApi from "../api/pos-session";
 import { closePosSession, openPosSession, restorePosRegisterAttempt } from "../api/pos-session";
-import { PosPage } from "./PosPage";
+import { PosPage as PosPageComponent } from "./PosPage";
 
 const sessionId = "10000000-0000-4000-8000-000000000001";
 const closedSessionId = "10000000-0000-4000-8000-000000000002";
 const saleId = "20000000-0000-4000-8000-000000000003";
 const saleLineId = "30000000-0000-4000-8000-000000000004";
+const organizationId = "40000000-0000-4000-8000-000000000004";
+let defaultActorSequence = 0;
+
+function PosPage(props: ComponentProps<typeof PosPageComponent>) {
+  defaultActorSequence += 1;
+  return <PosPageComponent {...props} actorId={props.actorId ?? `pos-test-actor-${defaultActorSequence}`} organizationId={props.organizationId ?? organizationId} />;
+}
 
 /** Session timestamps are relative to now so relative-time copy stays assertable on any day. */
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
@@ -95,18 +104,18 @@ function registerRoute(overrides: (url: string, payload: Payload | null) => Resp
     if (url === "/api/inventory") return Response.json({ items: [catalogItem] });
     if (url === "/api/pos/customers") return Response.json({ customers: [{ id: "20000000-0000-4000-8000-000000000001", name: "Amina", email: "amina@example.test", purchaseCount: 2, lifetimeSpendMinor: 10000 }] });
     if (url === "/api/pos" && !payload) return Response.json({ sessions: [openSession, closedSession], sales: [sale] });
-    if (url === "/api/pos" && payload?.action === "shiftSummary") return Response.json({ ok: true, data: shiftSummary });
-    if (url === "/api/pos" && payload?.action === "sale") {
+    if (url === "/api/pos/shift-summary") return Response.json({ ok: true, data: shiftSummary });
+    if (url === "/api/capabilities/execute" && payload?.capabilityId === "pos.completeSale") {
       return Response.json({
         ok: true,
         data: { invoiceId: saleId, invoiceNumber: 41, totalMinor: 2500, tenderedMinor: 2500, changeGivenMinor: 0, tenders: [{ method: "cash", amountMinor: 2500 }] },
       });
     }
-    if (url === "/api/pos" && payload?.action === "open") return Response.json({ ok: true, data: { sessionId } });
-    if (url === "/api/pos" && payload?.action === "close") {
+    if (url === "/api/capabilities/execute" && payload?.capabilityId === "pos.openSession") return Response.json({ ok: true, data: { sessionId } });
+    if (url === "/api/capabilities/execute" && payload?.capabilityId === "pos.closeSession") {
       return Response.json({ ok: true, data: { expectedCashMinor: 14500, varianceMinor: -500, flagged: true } });
     }
-    if (url === "/api/pos" && payload?.action === "returnSale") {
+    if (url === "/api/capabilities/execute" && payload?.capabilityId === "pos.returnSale") {
       return Response.json({ ok: true, data: { refundEntryId: "e1", refundMinor: 2500, creditedMinor: 0, restockedLines: 1, refundMethod: "cash" } });
     }
     return Response.json({ ok: true, data: {} });
@@ -115,8 +124,18 @@ function registerRoute(overrides: (url: string, payload: Payload | null) => Resp
 
 function postedPayloads(fetchMock: ReturnType<typeof registerRoute>, action: string): Payload[] {
   return fetchMock.mock.calls
-    .map((call) => (call[1]?.body ? (JSON.parse(String(call[1].body)) as Payload) : null))
-    .filter((payload): payload is Payload => payload?.action === action);
+    .flatMap((call): Payload[] => {
+      if (String(call[0]) !== "/api/capabilities/execute" || !call[1]?.body) return [];
+      const payload = JSON.parse(String(call[1].body)) as Payload;
+      const capabilityActions: Record<string, string> = {
+        "pos.openSession": "open",
+        "pos.closeSession": "close",
+        "pos.completeSale": "sale",
+        "pos.returnSale": "returnSale",
+      };
+      if (capabilityActions[String(payload.capabilityId)] !== action) return [];
+      return [{ action, ...(payload.input as Payload), intentId: payload.intentId }];
+    })
 }
 
 /** The mobile checkout bar repeats the checkout action, so scope it to the ring-a-sale panel. */
@@ -141,10 +160,10 @@ afterEach(() => {
 describe("Vite POS register page", () => {
   it("restores a pending register opening and retries the exact Go action after reload", async () => {
     const actorId = "operator-register-recovery";
-    const organizationId = "workspace-register-recovery";
+    const organizationId = "60000000-0000-4000-8000-000000000007";
     const scopeId = `${organizationId}:${actorId}`;
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 })));
-    await openPosSession({ action: "open", openingFloatMinor: 8750 }, undefined, { useGo: true, scopeId });
+    await openPosSession({ action: "open", openingFloatMinor: 8750 }, undefined, { scopeId });
     const saved = await restorePosRegisterAttempt(scopeId);
     expect(saved).not.toBeNull();
 
@@ -176,10 +195,10 @@ describe("Vite POS register page", () => {
 
   it("does not apply a delayed register response after switching organizations", async () => {
     const firstActor = "operator-register-org-a";
-    const firstOrg = "workspace-register-org-a";
+    const firstOrg = "60000000-0000-4000-8000-000000000003";
     const firstScope = `${firstOrg}:${firstActor}`;
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 })));
-    await openPosSession({ action: "open", openingFloatMinor: 6400 }, undefined, { useGo: true, scopeId: firstScope });
+    await openPosSession({ action: "open", openingFloatMinor: 6400 }, undefined, { scopeId: firstScope });
 
     let resolveGo!: (response: Response) => void;
     const fetchMock = registerRoute((url, payload) => {
@@ -193,7 +212,7 @@ describe("Vite POS register page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Retry saved action" }, { timeout: 5_000 }));
     await waitFor(() => expect(resolveGo).toBeTypeOf("function"));
 
-    page.rerender(<PosPage baseCurrency="USD" actorId="operator-register-org-b" organizationId="workspace-register-org-b" />);
+    page.rerender(<PosPage baseCurrency="USD" actorId="operator-register-org-b" organizationId="60000000-0000-4000-8000-000000000004" />);
     resolveGo(Response.json({ ok: true, data: { sessionId } }));
 
     await waitFor(() => expect(screen.queryByText("Register opening needs a retry")).toBeNull());
@@ -202,7 +221,7 @@ describe("Vite POS register page", () => {
 
   it("freezes register inputs while a Go close is unresolved", async () => {
     const actorId = "operator-register-close-freeze";
-    const organizationId = "workspace-register-close-freeze";
+    const organizationId = "60000000-0000-4000-8000-000000000008";
     const scopeId = `${organizationId}:${actorId}`;
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 })));
     await closePosSession({
@@ -210,7 +229,7 @@ describe("Vite POS register page", () => {
       sessionId,
       countedCashMinor: 14000,
       varianceReason: "cash refund entered after count",
-    }, undefined, { useGo: true, scopeId });
+    }, undefined, { scopeId });
     const fetchMock = registerRoute();
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
@@ -234,7 +253,7 @@ describe("Vite POS register page", () => {
     expect(screen.getByText("−$2.00")).not.toBeNull();
     expect(screen.getByRole("link", { name: "POS shift summary" }).getAttribute("href")).toBe("/pos/shift-summary");
     fireEvent.click(screen.getByRole("tab", { name: "Sell · register open" }));
-    expect(screen.getByRole("link", { name: "Full shift summary" }).getAttribute("href")).toBe("/pos/shift-summary");
+    expect(screen.getByRole("link", { name: "POS shift summary" }).getAttribute("href")).toBe("/pos/shift-summary");
   });
 
   it("keeps the module gate visible instead of rendering a register that is switched off", async () => {
@@ -271,7 +290,7 @@ describe("Vite POS register page", () => {
 
   it("opens a register session with the opening float in minor units", async () => {
     const fetchMock = registerRoute((url, payload) => {
-      if (url === "/api/pos" && payload?.action === "open") return Response.json({ ok: true, data: { sessionId } });
+      if (url === "/api/capabilities/execute" && payload?.capabilityId === "pos.openSession") return Response.json({ ok: true, data: { sessionId } });
       if (url === "/api/pos" && !payload) return Response.json({ sessions: [closedSession], sales: [sale] });
       return null;
     });
@@ -398,7 +417,7 @@ describe("Vite POS register page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    const firstRender = render(<PosPage baseCurrency="USD" actorId="operator-retry" useGoCompleteSale />);
+    const firstRender = render(<PosPage baseCurrency="USD" actorId="operator-retry"  />);
 
     fireEvent.change(await screen.findByLabelText("Search products by name, SKU, or barcode"), { target: { value: "bread" } });
     fireEvent.click(await screen.findByRole("button", { name: /^Boda bread/ }));
@@ -410,7 +429,7 @@ describe("Vite POS register page", () => {
     fireEvent.keyDown(window, { key: "Backspace", ctrlKey: true });
     expect(screen.getByText("Cart · 1 line")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Remove Boda bread" }).hasAttribute("disabled")).toBe(true);
-    await waitFor(() => expect(JSON.parse(localStorage.getItem("chaste.pos.cart.v2:unresolved-org:operator-retry") ?? "{}").attemptUncertain).toBe(true));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(`chaste.pos.cart.v2:${organizationId}:operator-retry`) ?? "{}").attemptUncertain).toBe(true));
 
     const saved = Object.entries(localStorage).find(([key]) => key.startsWith("chaste.pos.sale-intent.v1:"));
     expect(saved).toBeDefined();
@@ -420,7 +439,7 @@ describe("Vite POS register page", () => {
 
     firstRender.unmount();
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId="operator-retry" useGoCompleteSale />);
+    render(<PosPage baseCurrency="USD" actorId="operator-retry"  />);
     expect(await screen.findByText(/locked to the same attempt/)).not.toBeNull();
     expect(screen.getByLabelText("Search products by name, SKU, or barcode").hasAttribute("disabled")).toBe(true);
     fireEvent.click(await completeSaleButton());
@@ -447,7 +466,7 @@ describe("Vite POS register page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId="operator-go-404" useGoCompleteSale />);
+    render(<PosPage baseCurrency="USD" actorId="operator-go-404"  />);
 
     fireEvent.change(await screen.findByLabelText("Search products by name, SKU, or barcode"), { target: { value: "bread" } });
     fireEvent.click(await screen.findByRole("button", { name: /^Boda bread/ }));
@@ -465,10 +484,61 @@ describe("Vite POS register page", () => {
     expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/pos" && init?.method === "POST" && JSON.parse(String(init.body)).action === "sale")).toBe(false);
   });
 
-  it.each([true, false])("blocks the POS screen with a recovery message when the saved sale retry marker is damaged and Go is %s", async (useGoCompleteSale) => {
-    const actorId = `operator-damaged-sale-marker-${useGoCompleteSale}`;
-    const organizationId = "unresolved-org";
-    const scopeId = actorId;
+  it("does not let a completed sale from the previous organization clear the new organization's cart", async () => {
+    const previousOrganization = "60000000-0000-4000-8000-000000000021";
+    const nextOrganization = "60000000-0000-4000-8000-000000000022";
+    let finishSale: ((response: Response) => void) | null = null;
+    const fetchMock = registerRoute((url, payload) => {
+      if (url === "/api/capabilities/execute" && payload?.capabilityId === "pos.completeSale") {
+        return new Promise<Response>((resolve) => { finishSale = resolve; });
+      }
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/pos?tab=sell");
+    const { rerender } = render(<PosPage baseCurrency="USD" actorId="operator-scope-switch" organizationId={previousOrganization} />);
+
+    fireEvent.change(await screen.findByLabelText("Search products by name, SKU, or barcode"), { target: { value: "bread" } });
+    fireEvent.click(await screen.findByRole("button", { name: /^Boda bread/ }));
+    fireEvent.click(await completeSaleButton());
+    await waitFor(() => expect(finishSale).toBeTypeOf("function"));
+
+    rerender(<PosPage baseCurrency="USD" actorId="operator-scope-switch" organizationId={nextOrganization} />);
+    const nextCartKey = `chaste.pos.cart.v2:${nextOrganization}:operator-scope-switch`;
+    const nextCart = {
+      sessionId,
+      lines: [{ description: "New organization bread", quantity: 1000, unitPriceMinor: 2500, sku: "BRD-001" }],
+      customerId: "",
+      method: "cash",
+      cashReceived: "",
+      splitMode: false,
+      splitTenders: [],
+      awaitingApproval: false,
+      attemptUncertain: false,
+      attemptIntentId: null,
+    };
+    localStorage.setItem(nextCartKey, JSON.stringify(nextCart));
+
+    await act(async () => {
+      finishSale?.(Response.json({
+        ok: true,
+        data: { invoiceId: saleId, invoiceNumber: 41, totalMinor: 2500, tenderedMinor: 2500, changeGivenMinor: 0, tenders: [{ method: "cash", amountMinor: 2500 }] },
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(localStorage.getItem(nextCartKey)).toBe(JSON.stringify(nextCart));
+    expect(screen.queryByText("Sale #41 recorded for $25.00 (cash $25.00).")).toBeNull();
+    const saleCall = fetchMock.mock.calls.find(([url, init]) => url === "/api/capabilities/execute" && init?.body
+      && JSON.parse(String(init.body)).capabilityId === "pos.completeSale");
+    expect(saleCall?.[1]?.headers).toMatchObject({ "X-Organization-ID": previousOrganization });
+    expect(JSON.parse(String(saleCall?.[1]?.body)).intentId).toEqual(expect.any(String));
+  });
+
+  it("blocks the POS screen with a recovery message when the saved sale retry marker is damaged", async () => {
+    const actorId = "operator-damaged-sale-marker";
+    const organizationId = "60000000-0000-4000-8000-000000000009";
+    const scopeId = `${organizationId}:${actorId}`;
     const action = {
       action: "sale" as const,
       sessionId,
@@ -505,7 +575,7 @@ describe("Vite POS register page", () => {
       : null);
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId={actorId} useGoCompleteSale={useGoCompleteSale} />);
+    render(<PosPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
     expect(await screen.findByText(/locked to the same attempt/)).not.toBeNull();
     fireEvent.click(await completeSaleButton());
 
@@ -519,7 +589,7 @@ describe("Vite POS register page", () => {
   });
 
   it("surfaces a governed 202 as pending rather than as a posted sale", async () => {
-    const fetchMock = registerRoute((url, payload) => url === "/api/pos" && payload?.action === "sale"
+    const fetchMock = registerRoute((url, payload) => url === "/api/capabilities/execute" && payload?.capabilityId === "pos.completeSale"
       ? Response.json({ ok: false, pendingApproval: true, reason: "needs a manager" }, { status: 202 })
       : null);
     vi.stubGlobal("fetch", fetchMock);
@@ -549,7 +619,7 @@ describe("Vite POS register page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId="operator-rotate" useGoCompleteSale />);
+    render(<PosPage baseCurrency="USD" actorId="operator-rotate" organizationId={organizationId} />);
 
     fireEvent.change(await screen.findByLabelText("Search products by name, SKU, or barcode"), { target: { value: "bread" } });
     fireEvent.click(await screen.findByRole("button", { name: /^Boda bread/ }));
@@ -583,17 +653,17 @@ describe("Vite POS register page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId="operator-abandon" useGoCompleteSale />);
+    render(<PosPage baseCurrency="USD" actorId="operator-abandon"  />);
 
     fireEvent.change(await screen.findByLabelText("Search products by name, SKU, or barcode"), { target: { value: "bread" } });
     fireEvent.click(await screen.findByRole("button", { name: /^Boda bread/ }));
     fireEvent.click(await completeSaleButton());
     await screen.findByText("Sale status is not confirmed");
-    const firstIntentId = JSON.parse(localStorage.getItem("chaste.pos.cart.v2:unresolved-org:operator-abandon") ?? "{}").attemptIntentId;
+    const firstIntentId = JSON.parse(localStorage.getItem(`chaste.pos.cart.v2:${organizationId}:operator-abandon`) ?? "{}").attemptIntentId;
     expect(firstIntentId).toEqual(expect.any(String));
 
     fireEvent.click(screen.getByRole("button", { name: "Abandon attempt and start another sale" }));
-    await waitFor(() => expect(localStorage.getItem("chaste.pos.cart.v2:unresolved-org:operator-abandon")).toBeNull());
+    await waitFor(() => expect(localStorage.getItem(`chaste.pos.cart.v2:${organizationId}:operator-abandon`)).toBeNull());
     fireEvent.change(screen.getByLabelText("Search products by name, SKU, or barcode"), { target: { value: "bread" } });
     fireEvent.click(await screen.findByRole("button", { name: /^Boda bread/ }));
     fireEvent.click(await completeSaleButton());
@@ -608,7 +678,7 @@ describe("Vite POS register page", () => {
   });
 
   it("refuses a sale the payload schema rejects before any request is sent", async () => {
-    const fetchMock = registerRoute((url, payload) => url === "/api/pos" && payload?.action === "sale"
+    const fetchMock = registerRoute((url, payload) => url === "/api/capabilities/execute" && payload?.capabilityId === "pos.completeSale"
       ? Response.json({ error: "line quantity must be positive" }, { status: 400 })
       : null);
     vi.stubGlobal("fetch", fetchMock);
@@ -666,7 +736,7 @@ describe("Vite POS register page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    const { unmount } = render(<PosPage baseCurrency="USD" actorId="actor-1" organizationId="org-1" useGoReturnSale />);
+    const { unmount } = render(<PosPage baseCurrency="USD" actorId="actor-1" organizationId="60000000-0000-4000-8000-000000000005" />);
 
     fireEvent.click(await returnButtonForSale(41));
     const dialog = await screen.findByRole("dialog", { name: "Return sale #41" });
@@ -680,7 +750,7 @@ describe("Vite POS register page", () => {
     expect(within(dialog).getByRole("button", { name: "Retry pending return safely" })).not.toBeNull();
     unmount();
     reloadAsCompleted = true;
-    render(<PosPage baseCurrency="USD" actorId="actor-1" organizationId="org-1" useGoReturnSale />);
+    render(<PosPage baseCurrency="USD" actorId="actor-1" organizationId="60000000-0000-4000-8000-000000000005" />);
 
     const restoredDialog = await screen.findByRole("dialog", { name: "Return sale #41" });
     expect(within(restoredDialog).getByLabelText("Reason for return")).toHaveProperty("value", "damaged on arrival");
@@ -696,7 +766,8 @@ describe("Vite POS register page", () => {
     const goPayloads = fetchMock.mock.calls.filter((call) => String(call[0]) === "/api/capabilities/execute").map((call) => JSON.parse(String(call[1]?.body)));
     expect(goPayloads).toHaveLength(2);
     expect(goPayloads[0]).toEqual(goPayloads[1]);
-    expect(postedPayloads(fetchMock, "returnSale")).toHaveLength(0);
+    expect(postedPayloads(fetchMock, "returnSale")).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/pos" && init?.method === "POST")).toBe(false);
   });
 
   it("clears a pending return attempt after terminal 4xx and permits a corrected fresh request", async () => {
@@ -712,7 +783,7 @@ describe("Vite POS register page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId="actor-terminal" organizationId="org-terminal" useGoReturnSale />);
+    render(<PosPage baseCurrency="USD" actorId="actor-terminal" organizationId="60000000-0000-4000-8000-000000000006" />);
 
     fireEvent.click(await returnButtonForSale(41));
     let dialog = await screen.findByRole("dialog", { name: "Return sale #41" });
@@ -749,7 +820,7 @@ describe("Vite POS register page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId="actor-1" organizationId="org-1" useGoReturnSale />);
+    render(<PosPage baseCurrency="USD" actorId="actor-1" organizationId="60000000-0000-4000-8000-000000000005" />);
 
     fireEvent.click(await returnButtonForSale(41));
     let dialog = await screen.findByRole("dialog", { name: "Return sale #41" });
@@ -797,7 +868,7 @@ describe("Vite POS register page", () => {
       status: "queued",
       errorMessage: null,
     };
-    localStorage.setItem("chaste.pos.queued-sales.v2:unresolved-org:queued-owner", JSON.stringify([queued]));
+    localStorage.setItem(`chaste.pos.queued-sales.v2:${organizationId}:queued-owner`, JSON.stringify([queued]));
     const fetchMock = registerRoute();
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
@@ -830,8 +901,8 @@ describe("Vite POS register page", () => {
       status: "queued",
       errorMessage: null,
     };
-    localStorage.setItem("chaste.pos.queued-sales.v2:unresolved-org:queued-receipt-owner", JSON.stringify([queued]));
-    const fetchMock = registerRoute((url, payload) => url === "/api/pos" && payload?.action === "sale"
+    localStorage.setItem(`chaste.pos.queued-sales.v2:${organizationId}:queued-receipt-owner`, JSON.stringify([queued]));
+    const fetchMock = registerRoute((url, payload) => url === "/api/capabilities/execute" && payload?.capabilityId === "pos.completeSale"
       ? Response.json({
         ok: true,
         data: { invoiceId: saleId, invoiceNumber: 41, totalMinor: 2500, tenderedMinor: 3000, changeGivenMinor: 500, tenders: [{ method: "cash", amountMinor: 2500 }] },
@@ -870,7 +941,8 @@ describe("Vite POS register page", () => {
       status: "queued",
       errorMessage: null,
     };
-    localStorage.setItem("chaste.pos.queued-sales.v2:unresolved-org:queued-pending-owner", JSON.stringify([queued]));
+    const queueKey = `chaste.pos.queued-sales.v2:${organizationId}:queued-pending-owner`;
+    localStorage.setItem(queueKey, JSON.stringify([queued]));
     let saleAttempts = 0;
     const fetchMock = registerRoute((url, payload) => {
       if (url !== "/api/capabilities/execute" || payload?.capabilityId !== "pos.completeSale") return null;
@@ -880,11 +952,11 @@ describe("Vite POS register page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId="queued-pending-owner" useGoCompleteSale />);
+    render(<PosPage baseCurrency="USD" actorId="queued-pending-owner" organizationId={organizationId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Send sale" }));
     expect(await screen.findByText(/was submitted and is waiting for approval/)).not.toBeNull();
-    await waitFor(() => expect(JSON.parse(localStorage.getItem("chaste.pos.queued-sales.v2:unresolved-org:queued-pending-owner") ?? "[]")).toHaveLength(0));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(queueKey) ?? "[]")).toHaveLength(0));
     expect(Object.keys(localStorage).some((key) => key.startsWith("chaste.pos.sale-intent.v1:") )).toBe(false);
 
     fireEvent.change(screen.getByLabelText("Search products by name, SKU, or barcode"), { target: { value: "bread" } });
@@ -914,13 +986,14 @@ describe("Vite POS register page", () => {
       status: "queued",
       errorMessage: null,
     };
-    localStorage.setItem("chaste.pos.queued-sales.v2:unresolved-org:queued-uncertain-owner", JSON.stringify([queued]));
+    const queueKey = `chaste.pos.queued-sales.v2:${organizationId}:queued-uncertain-owner`;
+    localStorage.setItem(queueKey, JSON.stringify([queued]));
     const fetchMock = registerRoute((url, payload) => url === "/api/capabilities/execute" && payload?.capabilityId === "pos.completeSale"
       ? (() => { throw new TypeError("connection reset"); })()
       : null);
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId="queued-uncertain-owner" useGoCompleteSale />);
+    render(<PosPage baseCurrency="USD" actorId="queued-uncertain-owner" organizationId={organizationId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Send sale" }));
     expect(await screen.findByText("Result unknown")).not.toBeNull();
@@ -933,6 +1006,7 @@ describe("Vite POS register page", () => {
     expect(localStorage.getItem(retryRecord![0])).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Discard after checking" }));
     await waitFor(() => expect(localStorage.getItem(retryRecord![0])).toBeNull());
+    expect(JSON.parse(localStorage.getItem(queueKey) ?? "[]")).toEqual([]);
     expect(await screen.findByText(/Verify Sales and Approvals before creating a replacement/)).not.toBeNull();
   });
 
@@ -954,14 +1028,14 @@ describe("Vite POS register page", () => {
       status: "queued",
       errorMessage: null,
     };
-    const queueKey = "chaste.pos.queued-sales.v2:unresolved-org:malformed-owner";
+    const queueKey = `chaste.pos.queued-sales.v2:${organizationId}:malformed-owner`;
     localStorage.setItem(queueKey, JSON.stringify([queued]));
     const fetchMock = registerRoute((url, payload) => url === "/api/capabilities/execute" && payload?.capabilityId === "pos.completeSale"
       ? Response.json(body, { status })
       : null);
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState(null, "", "/pos?tab=sell");
-    render(<PosPage baseCurrency="USD" actorId="malformed-owner" useGoCompleteSale />);
+    render(<PosPage baseCurrency="USD" actorId="malformed-owner"  />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Send sale" }));
     expect(await screen.findByText("Queued sale result is not confirmed")).not.toBeNull();
@@ -970,7 +1044,7 @@ describe("Vite POS register page", () => {
     expect(intentRecord).toBeDefined();
     expect(JSON.parse(intentRecord![1]!).intentId).toBe(queued.intentId);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/capabilities/execute")).toHaveLength(1);
-    expect(postedPayloads(fetchMock, "sale")).toHaveLength(0);
+    expect(postedPayloads(fetchMock, "sale")).toHaveLength(1);
   });
 
   it("isolates the same operator's POS data across active organizations", async () => {
@@ -1010,8 +1084,125 @@ describe("Vite POS register page", () => {
     expect(await screen.findByRole("region", { name: "Parked carts" })).not.toBeNull();
   });
 
+  it("ignores a return recovery result after the operator switches organizations", async () => {
+    const actorId = "shared-operator-return-recovery";
+    const orgA = "60000000-0000-4000-8000-000000000031";
+    const orgB = "60000000-0000-4000-8000-000000000032";
+    let resolveReturnRecovery!: (value: Awaited<ReturnType<typeof posSessionApi.restorePosReturnAttempt>>) => void;
+    const pendingReturnRecovery = new Promise<Awaited<ReturnType<typeof posSessionApi.restorePosReturnAttempt>>>((resolve) => {
+      resolveReturnRecovery = resolve;
+    });
+    let holdOrgBRegisterRead = false;
+    let resolveOrgBRegisterState!: (response: Response) => void;
+    const waitingOrgBRegisterState = new Promise<Response>((resolve) => { resolveOrgBRegisterState = resolve; });
+    const fetchMock = registerRoute((url) => {
+      if (url === "/api/pos" && holdOrgBRegisterRead) return waitingOrgBRegisterState;
+      return null;
+    });
+    const restoreSpy = vi.spyOn(posSessionApi, "restorePosReturnAttempt").mockImplementation((scopeId) => {
+      return scopeId === `${orgA}:${actorId}` ? pendingReturnRecovery : Promise.resolve(null);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/pos?tab=sell");
+    const view = render(<PosPage baseCurrency="USD" actorId={actorId} organizationId={orgA} />);
+    await screen.findByRole("heading", { name: "Register workspace" });
+    await waitFor(() => expect(restoreSpy).toHaveBeenCalledWith(`${orgA}:${actorId}`));
+
+    holdOrgBRegisterRead = true;
+    view.rerender(<PosPage baseCurrency="USD" actorId={actorId} organizationId={orgB} />);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === "/api/pos").length).toBeGreaterThan(1));
+    resolveReturnRecovery({
+      action: { action: "returnSale", invoiceId: saleId, reason: "damaged", refundMethod: "cash", lines: [{ invoiceLineId: saleLineId, quantity: 1000 }] },
+      intentId: "40000000-0000-4000-8000-000000000033",
+      status: "uncertain",
+    });
+    await act(async () => { await pendingReturnRecovery; });
+
+    expect(screen.queryByText("Return result is unknown")).toBeNull();
+    expect(screen.queryByText("An unresolved return needs review")).toBeNull();
+    resolveOrgBRegisterState(Response.json({ sessions: [], sales: [] }));
+    view.unmount();
+  });
+
+  it("does not let a quick product response update the next organization's POS state", async () => {
+    const actorId = "shared-operator-quick-product";
+    const orgA = "60000000-0000-4000-8000-000000000041";
+    const orgB = "60000000-0000-4000-8000-000000000042";
+    let resolveItemCreation!: (response: Response) => void;
+    const pendingItemCreation = new Promise<Response>((resolve) => { resolveItemCreation = resolve; });
+    const fetchMock = registerRoute((url, payload) => {
+      if (url === "/api/inventory") return Response.json({ items: [] });
+      if (url === "/api/capabilities/execute" && payload?.capabilityId === "inventory.createItem") return pendingItemCreation;
+      return null;
+    });
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/pos?tab=sell");
+    const view = render(<PosPage baseCurrency="USD" actorId={actorId} organizationId={orgA} />);
+    await screen.findByRole("heading", { name: "Register workspace" });
+    fireEvent.click(await screen.findByRole("button", { name: "Add a product" }));
+    fireEvent.change(screen.getByLabelText("Product name"), { target: { value: "Org A quick item" } });
+    fireEvent.change(screen.getByLabelText("Price"), { target: { value: "25.00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save product" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/capabilities/execute" && init?.body
+      && JSON.parse(String(init.body)).capabilityId === "inventory.createItem")).toBe(true));
+    const createCall = fetchMock.mock.calls.find(([url, init]) => url === "/api/capabilities/execute" && init?.body
+      && JSON.parse(String(init.body)).capabilityId === "inventory.createItem");
+    expect(createCall?.[1]?.headers).toMatchObject({ "X-Organization-ID": orgA });
+
+    view.rerender(<PosPage baseCurrency="USD" actorId={actorId} organizationId={orgB} />);
+    expect(await screen.findByRole("heading", { name: "Register workspace" })).not.toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Quick add product" })).toBeNull();
+    resolveItemCreation(Response.json({ ok: true, data: { itemId: "40000000-0000-4000-8000-000000000043" } }));
+    await act(async () => { await pendingItemCreation; });
+
+    expect(screen.queryByRole("dialog", { name: "Quick add product" })).toBeNull();
+    expect(screen.queryByText("Org A quick item is in the catalog with zero stock.")).toBeNull();
+    expect(screen.queryByText("Org A quick item was added.")).toBeNull();
+    view.unmount();
+  });
+
+  it("ignores an opening stock response after the operator switches organizations", async () => {
+    const actorId = "shared-operator-opening-stock";
+    const orgA = "60000000-0000-4000-8000-000000000051";
+    const orgB = "60000000-0000-4000-8000-000000000052";
+    let resolveStockAdjustment!: (response: Response) => void;
+    const pendingStockAdjustment = new Promise<Response>((resolve) => { resolveStockAdjustment = resolve; });
+    const fetchMock = registerRoute((url, payload) => {
+      if (url === "/api/inventory") return Response.json({ items: [] });
+      if (url === "/api/capabilities/execute" && payload?.capabilityId === "inventory.createItem") {
+        return Response.json({ ok: true, data: { itemId: "40000000-0000-4000-8000-000000000054" } });
+      }
+      if (url === "/api/capabilities/execute" && payload?.capabilityId === "inventory.adjustStock") return pendingStockAdjustment;
+      return null;
+    });
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/pos?tab=sell");
+    const view = render(<PosPage baseCurrency="USD" actorId={actorId} organizationId={orgA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add a product" }));
+    fireEvent.change(screen.getByLabelText("Product name"), { target: { value: "Org A opening stock item" } });
+    fireEvent.change(screen.getByLabelText("Price"), { target: { value: "25.00" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: /Opening stock/ }), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save product" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/capabilities/execute" && init?.body
+      && JSON.parse(String(init.body)).capabilityId === "inventory.adjustStock")).toBe(true));
+    const stockCall = fetchMock.mock.calls.find(([url, init]) => url === "/api/capabilities/execute" && init?.body
+      && JSON.parse(String(init.body)).capabilityId === "inventory.adjustStock");
+    expect(stockCall?.[1]?.headers).toMatchObject({ "X-Organization-ID": orgA });
+
+    view.rerender(<PosPage baseCurrency="USD" actorId={actorId} organizationId={orgB} />);
+    await screen.findByRole("heading", { name: "Register workspace" });
+    resolveStockAdjustment(Response.json({ ok: true, data: { movementId: "40000000-0000-4000-8000-000000000053" } }));
+    await act(async () => { await pendingStockAdjustment; });
+
+    expect(screen.queryByText("Org A opening stock item is in the catalog with 2 unit in opening stock.")).toBeNull();
+    expect(screen.queryByText("Org A opening stock item was added.")).toBeNull();
+    view.unmount();
+  });
+
   it("keeps tab deep links in the URL and restores the cart saved on the device", async () => {
-    localStorage.setItem("chaste.pos.cart.v2:unresolved-org:draft-owner", JSON.stringify({
+    localStorage.setItem(`chaste.pos.cart.v2:${organizationId}:draft-owner`, JSON.stringify({
       sessionId,
       lines: [{ description: "Boda bread", quantity: 1000, unitPriceMinor: 2500, sku: "BRD-001" }],
       customerId: "",
@@ -1040,7 +1231,7 @@ describe("Vite POS register page", () => {
     localStorage.setItem("chaste.pos.cart.v1", legacyCart);
     localStorage.setItem("chaste.pos.parked-carts.v1", legacyParked);
     localStorage.setItem("chaste.pos.queued-sales.v1", legacyQueued);
-    localStorage.setItem("chaste.pos.cart.v2:unresolved-org:operator-a", JSON.stringify({
+    localStorage.setItem(`chaste.pos.cart.v2:${organizationId}:operator-a`, JSON.stringify({
       sessionId,
       lines: [{ description: "Operator A draft bread", quantity: 1000, unitPriceMinor: 2500, sku: "BRD-001" }],
       customerId: "",
@@ -1050,7 +1241,7 @@ describe("Vite POS register page", () => {
       splitTenders: [],
       awaitingApproval: false,
     }));
-    localStorage.setItem("chaste.pos.parked-carts.v2:unresolved-org:operator-a", JSON.stringify([{
+    localStorage.setItem(`chaste.pos.parked-carts.v2:${organizationId}:operator-a`, JSON.stringify([{
       id: "50000000-0000-4000-8000-000000000010",
       parkedAt: "2026-09-28T09:30:00.000Z",
       sessionId,
@@ -1062,7 +1253,7 @@ describe("Vite POS register page", () => {
       splitMode: false,
       splitTenders: [],
     }]));
-    localStorage.setItem("chaste.pos.queued-sales.v2:unresolved-org:operator-a", JSON.stringify([{
+    localStorage.setItem(`chaste.pos.queued-sales.v2:${organizationId}:operator-a`, JSON.stringify([{
       id: "50000000-0000-4000-8000-000000000011",
       intentId: "40000000-0000-4000-8000-000000000012",
       sessionId,

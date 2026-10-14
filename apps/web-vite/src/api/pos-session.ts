@@ -285,49 +285,27 @@ export async function fetchPosModules(signal?: AbortSignal): Promise<{ pos: bool
   return { pos: parsed.data.enabledModules.includes("pos"), inventory: parsed.data.enabledModules.includes("inventory") };
 }
 
-async function postPosAction(
-  action: Record<string, unknown>,
-  intentId: string,
-  signal: AbortSignal | undefined,
-  path = "/api/pos",
-): Promise<{ status: number; body: unknown }> {
-  return postPosRequest(path, { ...action, intentId }, signal);
-}
-
-async function postPosRequest(
-  path: string,
-  body: Record<string, unknown>,
-  signal: AbortSignal | undefined,
-): Promise<{ status: number; body: unknown }> {
-  let response: Response;
-  try {
-    response = await fetch(path, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      cache: "no-store",
-      signal: requestSignal(signal, 20_000),
-      body: JSON.stringify(body),
-    });
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    throw unreachable(error, "The POS service took too long to respond. Check the register before trying again.");
-  }
-  return { status: response.status, body: await response.json().catch(() => null) };
-}
-
 async function postGoPosCapability(
   capabilityId: "pos.openSession" | "pos.closeSession" | "pos.completeSale" | "pos.returnSale",
   input: Record<string, unknown>,
   intentId: string,
   signal?: AbortSignal,
+  organizationId?: string | null,
 ): Promise<{ status: number; body: unknown }> {
+  const organization = organizationId?.trim();
+  if (organization && !uuid.safeParse(organization).success) {
+    throw new PosApiError(0, "POS actions require a valid organization identifier.");
+  }
   let response: Response;
   try {
     response = await fetch("/api/capabilities/execute", {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        ...(organization ? { "X-Organization-ID": organization } : {}),
+      },
       cache: "no-store",
       signal: requestSignal(signal, 20_000),
       body: JSON.stringify({
@@ -628,23 +606,9 @@ function clearReturnIntent(storageKey: string, intentId: string): void {
 export async function openPosSession(
   action: PosOpenAction,
   signal?: AbortSignal,
-  options: { useGo?: boolean; scopeId?: string | null; intentId?: string; isScopeCurrent?: () => boolean } = {},
+  options: { scopeId?: string | null; organizationId?: string | null; intentId?: string; isScopeCurrent?: () => boolean } = {},
 ): Promise<PosActionOutcome<z.infer<typeof OpenOutputSchema>>> {
   const payload = parseOrThrow(PosOpenActionSchema, action, "Check the opening float and try again.");
-  const configuredForGo = typeof __GO_POS_OPEN_SESSION_SLICE__ !== "undefined" && __GO_POS_OPEN_SESSION_SLICE__;
-  const useGo = options.useGo ?? configuredForGo;
-  if (!useGo) {
-    const scopeId = options.scopeId?.trim();
-    if (scopeId) {
-      const storageKey = await registerAttemptStorageKey(scopeId);
-      assertRegisterScopeCurrent(options.isScopeCurrent);
-      const activeResult = readRegisterActiveAttempt(storageKey);
-      if (activeResult.kind === "corrupt") throw new PosApiError(0, "A saved register retry marker is damaged. Verify the register before starting another action.");
-      if (activeResult.kind === "valid") throw new PosApiError(0, "A Go register action is unresolved. Restore Go register routes and retry the saved action before using the legacy route.");
-    }
-    return interpret(await postPosAction(payload, options.intentId ?? crypto.randomUUID(), signal), OpenOutputSchema, "Could not open the register.");
-  }
-
   const scopeId = options.scopeId?.trim();
   if (!scopeId) throw new PosApiError(0, "Register opening requires an authenticated actor and organization scope.");
   const storageKey = await registerAttemptStorageKey(scopeId);
@@ -663,7 +627,7 @@ export async function openPosSession(
   const intentId = options.intentId ?? active?.intentId ?? crypto.randomUUID();
   rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "uncertain" }, true);
 
-  const result = await postGoPosCapability("pos.openSession", { openingFloatMinor: payload.openingFloatMinor }, intentId, signal);
+  const result = await postGoPosCapability("pos.openSession", { openingFloatMinor: payload.openingFloatMinor }, intentId, signal, options.organizationId);
   if (result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408 && result.status !== 429) clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
   const outcome = interpret(result, OpenOutputSchema, "Could not open the register.");
   if (outcome.kind === "completed") clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
@@ -680,43 +644,34 @@ export async function submitPosSale(
   action: PosSaleAction,
   intentId?: string,
   signal?: AbortSignal,
-  options: { useGo?: boolean; scopeId?: string | null; persistRetryIntent?: boolean } = {},
+  options: { scopeId?: string | null; organizationId?: string | null } = {},
 ): Promise<PosActionOutcome<z.infer<typeof SaleOutputSchema>>> {
   const payload = parseOrThrow(PosSaleActionSchema, action, "Check the sale lines and payment amounts before submitting.");
-  const configuredForGo = typeof __GO_POS_COMPLETE_SALE_SLICE__ !== "undefined" && __GO_POS_COMPLETE_SALE_SLICE__;
-  const useGo = options.useGo ?? configuredForGo;
-  const route: SaleRetryRoute = useGo ? "go" : "legacy";
-  let storageKey: string | null = null;
+  const scopeId = options.scopeId?.trim();
+  if (!scopeId) throw new PosApiError(0, "POS sales require an authenticated actor and organization scope.");
+  const route: SaleRetryRoute = "go";
+  const storageKey = await saleIntentStorageKey(payload, scopeId);
   let stableIntentId = intentId ?? crypto.randomUUID();
-  if (useGo || options.persistRetryIntent === true || intentId !== undefined || options.scopeId != null) {
-    storageKey = await saleIntentStorageKey(payload, options.scopeId ?? null);
-    const storedResult = readSaleIntent(storageKey);
-    if (storedResult.kind === "corrupt") {
-      throw new PosApiError(0, "The saved POS sale retry marker is damaged. Do not create a replacement sale; verify Sales and Approvals before repairing or removing this browser record.");
-    }
-    const stored = storedResult.kind === "valid" ? storedResult.attempt : null;
-    if (stored && stored.route !== route) {
-      const storedRouteLabel = stored.route === "go" ? "Go" : "legacy";
-      throw new PosApiError(0, `This sale has an unresolved ${storedRouteLabel} retry. Restore the ${storedRouteLabel} POS sale route and retry the exact sale before switching routes.`);
-    }
-    if (stored && intentId !== undefined && stored.intentId !== intentId) {
-      throw new PosApiError(0, "This sale has a different unresolved retry identity. Retry the exact sale already in progress before starting another.");
-    }
-    stableIntentId = intentId ?? stored?.intentId ?? crypto.randomUUID();
-    if (useGo || options.persistRetryIntent === true || stored) rememberSaleIntent(storageKey, stableIntentId, route);
+  const storedResult = readSaleIntent(storageKey);
+  if (storedResult.kind === "corrupt") {
+    throw new PosApiError(0, "The saved POS sale retry marker is damaged. Do not create a replacement sale; verify Sales and Approvals before repairing or removing this browser record.");
   }
-
-  let result: { status: number; body: unknown };
-  if (useGo) {
-    const { action: _action, ...input } = payload;
-    result = await postGoPosCapability("pos.completeSale", input, stableIntentId, signal);
-  } else {
-    result = await postPosAction(payload, stableIntentId, signal);
+  const stored = storedResult.kind === "valid" ? storedResult.attempt : null;
+  if (stored && stored.route !== route) {
+    throw new PosApiError(0, "This sale has an unresolved legacy retry. Verify Sales and Approvals before starting a new Go sale.");
   }
+  if (stored && intentId !== undefined && stored.intentId !== intentId) {
+    throw new PosApiError(0, "This sale has a different unresolved retry identity. Retry the exact sale already in progress before starting another.");
+  }
+  stableIntentId = intentId ?? stored?.intentId ?? crypto.randomUUID();
+  rememberSaleIntent(storageKey, stableIntentId, route);
 
-  if (storageKey && result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408) clearSaleIntent(storageKey, stableIntentId);
+  const { action: _action, ...input } = payload;
+  const result = await postGoPosCapability("pos.completeSale", input, stableIntentId, signal, options.organizationId);
+
+  if (result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408) clearSaleIntent(storageKey, stableIntentId);
   const outcome = interpret(result, SaleOutputSchema, "The sale could not be posted.");
-  if (storageKey && outcome.kind === "completed") clearSaleIntent(storageKey, stableIntentId);
+  if (outcome.kind === "completed") clearSaleIntent(storageKey, stableIntentId);
   return outcome;
 }
 
@@ -732,23 +687,9 @@ export async function clearPosSaleRetryIntent(action: PosSaleAction, scopeId: st
 export async function closePosSession(
   action: PosCloseAction,
   signal?: AbortSignal,
-  options: { useGo?: boolean; scopeId?: string | null; intentId?: string; isScopeCurrent?: () => boolean } = {},
+  options: { scopeId?: string | null; organizationId?: string | null; intentId?: string; isScopeCurrent?: () => boolean } = {},
 ): Promise<PosActionOutcome<z.infer<typeof CloseOutputSchema>>> {
   const payload = parseOrThrow(PosCloseActionSchema, action, "Check the counted cash and the variance note before closing.");
-  const configuredForGo = typeof __GO_POS_CLOSE_SESSION_SLICE__ !== "undefined" && __GO_POS_CLOSE_SESSION_SLICE__;
-  const useGo = options.useGo ?? configuredForGo;
-  if (!useGo) {
-    const scopeId = options.scopeId?.trim();
-    if (scopeId) {
-      const storageKey = await registerAttemptStorageKey(scopeId);
-      assertRegisterScopeCurrent(options.isScopeCurrent);
-      const activeResult = readRegisterActiveAttempt(storageKey);
-      if (activeResult.kind === "corrupt") throw new PosApiError(0, "A saved register retry marker is damaged. Verify the register before starting another action.");
-      if (activeResult.kind === "valid") throw new PosApiError(0, "A Go register action is unresolved. Restore Go register routes and retry the saved action before using the legacy route.");
-    }
-    return interpret(await postPosAction(payload, options.intentId ?? crypto.randomUUID(), signal), CloseOutputSchema, "The register session could not be closed.");
-  }
-
   const scopeId = options.scopeId?.trim();
   if (!scopeId) throw new PosApiError(0, "Register closing requires an authenticated actor and organization scope.");
   const storageKey = await registerAttemptStorageKey(scopeId);
@@ -772,7 +713,7 @@ export async function closePosSession(
     countedCashMinor: payload.countedCashMinor,
     ...(payload.varianceReason === undefined ? {} : { varianceReason: payload.varianceReason }),
   };
-  const result = await postGoPosCapability("pos.closeSession", input, intentId, signal);
+  const result = await postGoPosCapability("pos.closeSession", input, intentId, signal, options.organizationId);
   if (result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408 && result.status !== 429) clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
   const outcome = interpret(result, CloseOutputSchema, "The register session could not be closed.");
   if (outcome.kind === "completed") clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
@@ -783,40 +724,34 @@ export async function closePosSession(
 export async function requestPosReturn(
   action: PosReturnAction,
   signal?: AbortSignal,
-  options: { useGo?: boolean; scopeId?: string | null; intentId?: string } = {},
+  options: { scopeId?: string | null; organizationId?: string | null; intentId?: string } = {},
 ): Promise<PosActionOutcome<z.infer<typeof ReturnOutputSchema>>> {
   const payload = parseOrThrow(PosReturnActionSchema, action, "Check the return quantities and reason before submitting.");
-  const configuredForGo = typeof __GO_POS_RETURN_SALE_SLICE__ !== "undefined" && __GO_POS_RETURN_SALE_SLICE__;
-  const useGo = options.useGo ?? configuredForGo;
-  const persistAttempt = options.scopeId !== undefined && options.scopeId !== null;
-  const storageKey = persistAttempt ? await returnIntentStorageKey(payload, options.scopeId ?? null) : null;
-  const activeAttemptKey = persistAttempt ? await returnActiveAttemptStorageKey(options.scopeId ?? null) : null;
-  const fingerprint = storageKey?.slice(RETURN_INTENT_STORAGE_PREFIX.length) ?? null;
-  const activeAttempt = activeAttemptKey ? readReturnActiveAttempt(activeAttemptKey) : null;
+  const scopeId = options.scopeId?.trim();
+  if (!scopeId) throw new PosApiError(0, "POS returns require an authenticated actor and organization scope.");
+  const storageKey = await returnIntentStorageKey(payload, scopeId);
+  const activeAttemptKey = await returnActiveAttemptStorageKey(scopeId);
+  const fingerprint = storageKey.slice(RETURN_INTENT_STORAGE_PREFIX.length);
+  const activeAttempt = readReturnActiveAttempt(activeAttemptKey);
   if (activeAttempt && activeAttempt.fingerprint !== fingerprint) {
     throw new PosApiError(0, "A previous return result is still unknown. Retry the exact return or verify the sale before starting another return.");
   }
   if (activeAttempt && options.intentId && options.intentId !== activeAttempt.intentId) {
     throw new PosApiError(0, "This return must keep its saved attempt identity until its result is resolved.");
   }
-  const intentId = options.intentId ?? (storageKey ? readReturnIntent(storageKey) : null) ?? activeAttempt?.intentId ?? crypto.randomUUID();
-  if (storageKey) rememberReturnIntent(storageKey, intentId);
-  if (activeAttemptKey && fingerprint) rememberReturnActiveAttempt(activeAttemptKey, fingerprint, intentId, payload, activeAttempt?.status ?? "uncertain");
+  const intentId = options.intentId ?? readReturnIntent(storageKey) ?? activeAttempt?.intentId ?? crypto.randomUUID();
+  rememberReturnIntent(storageKey, intentId);
+  rememberReturnActiveAttempt(activeAttemptKey, fingerprint, intentId, payload, activeAttempt?.status ?? "uncertain");
 
-  let result: { status: number; body: unknown };
-  if (useGo) {
-    const { action: _action, ...input } = payload;
-    result = await postGoPosCapability("pos.returnSale", input, intentId, signal);
-  } else {
-    result = await postPosAction(payload, intentId, signal);
-  }
+  const { action: _action, ...input } = payload;
+  const result = await postGoPosCapability("pos.returnSale", input, intentId, signal, options.organizationId);
 
-  if (storageKey && result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408) clearReturnIntent(storageKey, intentId);
-  if (activeAttemptKey && fingerprint && result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408) clearReturnActiveAttempt(activeAttemptKey, fingerprint, intentId);
+  if (result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408) clearReturnIntent(storageKey, intentId);
+  if (result.status >= 400 && result.status < 500 && result.status !== 404 && result.status !== 408) clearReturnActiveAttempt(activeAttemptKey, fingerprint, intentId);
   const outcome = interpret(result, ReturnOutputSchema, "The return could not be submitted.");
-  if (outcome.kind === "pending" && activeAttemptKey && fingerprint) rememberReturnActiveAttempt(activeAttemptKey, fingerprint, intentId, payload, "pending");
-  if (storageKey && outcome.kind === "completed") clearReturnIntent(storageKey, intentId);
-  if (activeAttemptKey && fingerprint && outcome.kind === "completed") clearReturnActiveAttempt(activeAttemptKey, fingerprint, intentId);
+  if (outcome.kind === "pending") rememberReturnActiveAttempt(activeAttemptKey, fingerprint, intentId, payload, "pending");
+  if (outcome.kind === "completed") clearReturnIntent(storageKey, intentId);
+  if (outcome.kind === "completed") clearReturnActiveAttempt(activeAttemptKey, fingerprint, intentId);
   return outcome;
 }
 

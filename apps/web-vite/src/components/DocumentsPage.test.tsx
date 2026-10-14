@@ -8,6 +8,12 @@ const rows = [
 ];
 const goDocumentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
+function emptyLibraryCapability(capabilityId: string): Response | undefined {
+  if (capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+  if (capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+  return undefined;
+}
+
 function detail(id: string, title: string, status: string, parsedMarkdown: string | null) {
   return {
     document: {
@@ -26,6 +32,7 @@ function detail(id: string, title: string, status: string, parsedMarkdown: strin
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
   window.history.replaceState(null, "", "/");
 });
 
@@ -42,7 +49,9 @@ describe("Vite documents page", () => {
   it("shows the existing library, selected document details, extracted text, and file link", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      const request = JSON.parse(String(init?.body ?? "{}")) as { input?: { id?: string } };
+      const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string } };
+      if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+      if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
       return request.input?.id === undefined
         ? Response.json({ ok: true, data: { documents: rows, vendors: [] } })
         : Response.json({ ok: true, data: { document: detail(request.input.id, request.input.id === rows[1]!.id ? "Warehouse notes" : "Supplier invoice", request.input.id === rows[1]!.id ? "queued" : "parsed", request.input.id === rows[1]!.id ? null : "Invoice number: 42").document } });
@@ -54,7 +63,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
     expect(screen.getByText("Invoice number: 42")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe(`/api/go/documents/${rows[0]!.id}/content`);
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(4);
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search documents" }), { target: { value: "warehouse" } });
     expect(screen.getByRole("button", { name: /Warehouse notes/ })).not.toBeNull();
@@ -63,12 +72,86 @@ describe("Vite documents page", () => {
     expect(await screen.findByText("Text extraction is in progress.")).not.toBeNull();
   });
 
+  it("loads authored documents from Go and filters by title, folder, and linked record", async () => {
+    const authoredDocuments = [
+      { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", title: "Supplier agreement", status: "draft", versions: 2, templateId: null, folder: "Legal", documentType: "agreement", linkedRecordType: "supplier", linkedRecordId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", linkedRecordLabel: "Northwind", updatedAt: "2026-10-01T00:00:00.000Z" },
+      { id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", title: "Hiring plan", status: "draft", versions: 1, templateId: null, folder: "People", documentType: "plan", linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: null, updatedAt: "2026-10-02T00:00:00.000Z" },
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
+      if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: authoredDocuments } });
+      if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
+      throw new Error(`Unexpected capability ${request.capabilityId}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    expect(await screen.findByText("Supplier agreement")).not.toBeNull();
+    expect(screen.getByText("Hiring plan")).not.toBeNull();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search written documents" }), { target: { value: "northwind" } });
+    expect(screen.getByText("Supplier agreement")).not.toBeNull();
+    expect(screen.queryByText("Hiring plan")).toBeNull();
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body ?? "{}"))).some((request) => request.capabilityId === "documents.listDocs")).toBe(true);
+  });
+
+  it("creates, renames, and deletes folders through Go capabilities", async () => {
+    vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+    const actorId = "11111111-aaaa-4aaa-8aaa-111111111111";
+    const organizationId = "22222222-bbbb-4bbb-8bbb-222222222222";
+    let folder: { id: string; path: string } | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: actorId, name: "Ada", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: actorId, expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
+      if (url === "/api/org") return Response.json({ activeOrgId: organizationId, orgs: [{ id: organizationId, name: "Workspace" }] });
+      const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, string>; intentId?: string };
+      if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
+      if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+      if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: folder ? [folder] : [] } });
+      expect(request.intentId).toMatch(/^[0-9a-f-]{36}$/u);
+      if (request.capabilityId === "documents.createFolder") {
+        folder = { id: "33333333-cccc-4ccc-8ccc-333333333333", path: request.input.path! };
+        return Response.json({ ok: true, data: { folderId: folder.id, path: folder.path } });
+      }
+      if (request.capabilityId === "documents.renameFolder") {
+        const previous = request.input.path!;
+        folder = { id: folder!.id, path: request.input.newPath! };
+        return Response.json({ ok: true, data: { path: previous, movedTo: folder.path } });
+      }
+      if (request.capabilityId === "documents.deleteFolder") {
+        const previous = folder!.path;
+        folder = null;
+        return Response.json({ ok: true, data: { deleted: true, path: previous } });
+      }
+      throw new Error(`Unexpected capability ${request.capabilityId}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    await screen.findByRole("heading", { name: "No documents yet" });
+    fireEvent.change(screen.getByLabelText("Create folder"), { target: { value: "Finance" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(await screen.findByText("Created Finance.")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.change(screen.getByLabelText("New path for Finance"), { target: { value: "Finance / Payables" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Moved Finance to Finance / Payables.")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(await screen.findByText("Deleted Finance / Payables.")).not.toBeNull();
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body ?? "{}"))).map((request) => request.capabilityId)).toEqual(expect.arrayContaining(["documents.createFolder", "documents.renameFolder", "documents.deleteFolder"]));
+  });
+
   it("selects the document identified by the Vite documentId query", async () => {
     window.history.replaceState(null, "", `/documents?documentId=${rows[1]!.id}`);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      const request = JSON.parse(String(init?.body)) as { input: { id?: string } };
+      const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
+      if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+      if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
       return request.input.id === undefined
         ? Response.json({ ok: true, data: { documents: rows, vendors: [] } })
         : Response.json({ ok: true, data: { document: detail(rows[1]!.id, "Warehouse notes", "queued", null).document } });
@@ -80,7 +163,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Warehouse notes" })).not.toBeNull();
     expect(screen.getByRole("button", { name: /Warehouse notes/ }).getAttribute("aria-current")).toBe("true");
     expect(screen.getByRole("button", { name: /Supplier invoice/ }).getAttribute("aria-current")).toBeNull();
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(4);
   });
 
   it("validates documentId and shows a not-found state without selecting the first row", async () => {
@@ -89,7 +172,10 @@ describe("Vite documents page", () => {
       const url = String(input);
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
       if (url === "/api/capabilities/execute") {
-        expect(JSON.parse(String(init?.body))).toMatchObject({ capabilityId: "documents.listIngestedDocuments", input: {} });
+        const request = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+        if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+        expect(request.capabilityId).toBe("documents.listIngestedDocuments");
         return Response.json({ ok: true, data: { documents: rows, vendors: [] } });
       }
       return Response.json({ error: "unexpected detail request" }, { status: 404 });
@@ -101,7 +187,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Invalid document link" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Back to document library" }).getAttribute("href")).toBe("/documents");
     expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
-    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute")).toHaveLength(3);
 
     cleanup();
     window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
@@ -110,6 +196,8 @@ describe("Vite documents page", () => {
       if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
+        if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+        if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
         expect(request.capabilityId).toBe("documents.listIngestedDocuments");
         return request.input.id === undefined
           ? Response.json({ ok: true, data: { documents: [{ ...rows[0]!, id: goDocumentId }], vendors: [] } })
@@ -123,8 +211,9 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Document not found" })).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
     const detailRequests = notFoundFetch.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute");
-    expect(detailRequests).toHaveLength(2);
-    expect(JSON.parse(String(detailRequests[1]?.[1]?.body))).toMatchObject({
+    expect(detailRequests).toHaveLength(4);
+    const previewRequest = detailRequests.map((call) => JSON.parse(String(call[1]?.body)) as { input: { id?: string; preview?: boolean } }).find((request) => request.input.id !== undefined);
+    expect(previewRequest).toMatchObject({
       capabilityId: "documents.listIngestedDocuments",
       input: { id: goDocumentId, preview: true },
     });
@@ -143,6 +232,8 @@ describe("Vite documents page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
       const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+      const libraryResponse = emptyLibraryCapability(request.capabilityId);
+      if (libraryResponse) return libraryResponse;
       expect(request.capabilityId).toBe("documents.listIngestedDocuments");
       return request.input.id === undefined
         ? Response.json({ ok: true, data: { documents: [goRow], vendors: [] } })
@@ -155,15 +246,17 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
     expect(screen.getByText("Invoice number: 42")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe(`/api/go/documents/${goDocumentId}/content`);
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(4);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/documents")).toBe(false);
   });
 
   it("shows selected Go list errors without retrying the legacy document route", async () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/modules"
-      ? Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] })
-      : Response.json({ error: "Go route unavailable" }, { status: 404 }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      const request = JSON.parse(String(init?.body)) as { capabilityId: string };
+      return emptyLibraryCapability(request.capabilityId) ?? Response.json({ error: "Go route unavailable" }, { status: 404 });
+    });
     vi.stubGlobal("fetch", fetchMock);
     render(<DocumentsPage />);
 
@@ -177,7 +270,9 @@ describe("Vite documents page", () => {
     const goRow = { ...rows[0]!, id: goDocumentId };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
-      const request = JSON.parse(String(init?.body)) as { input: Record<string, unknown> };
+      const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+      const libraryResponse = emptyLibraryCapability(request.capabilityId);
+      if (libraryResponse) return libraryResponse;
       if (request.input.id === undefined) return Response.json({ ok: true, data: { documents: [goRow], vendors: [] } });
       return Response.json({ error: "The document was not found." }, { status: 404 });
     });
@@ -192,19 +287,27 @@ describe("Vite documents page", () => {
       "/api/modules",
       "/api/capabilities/execute",
       "/api/capabilities/execute",
+      "/api/capabilities/execute",
+      "/api/capabilities/execute",
     ]);
   });
 
   it("announces loading and empty library states", async () => {
-    let resolveResponse: ((response: Response) => void) | undefined;
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/modules"
+    const pending: Array<{ capabilityId: string; resolve: (response: Response) => void }> = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input) === "/api/modules"
       ? Promise.resolve(Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] }))
-      : new Promise<Response>((resolve) => { resolveResponse = resolve; })));
+      : new Promise<Response>((resolve) => {
+        const request = JSON.parse(String(init?.body)) as { capabilityId: string };
+        pending.push({ capabilityId: request.capabilityId, resolve });
+      })));
     render(<DocumentsPage />);
 
     expect(screen.getByRole("status").textContent).toContain("Loading documents");
-    await waitFor(() => expect(resolveResponse).toBeDefined());
-    resolveResponse?.(Response.json({ ok: true, data: { documents: [], vendors: [] } }));
+    await waitFor(() => expect(pending.some(({ capabilityId }) => capabilityId === "documents.listIngestedDocuments")).toBe(true));
+    pending.find(({ capabilityId }) => capabilityId === "documents.listIngestedDocuments")?.resolve(Response.json({ ok: true, data: { documents: [], vendors: [] } }));
+    await waitFor(() => expect(pending).toHaveLength(3));
+    pending.find(({ capabilityId }) => capabilityId === "documents.listDocs")?.resolve(Response.json({ ok: true, data: { documents: [] } }));
+    pending.find(({ capabilityId }) => capabilityId === "documents.listFolders")?.resolve(Response.json({ ok: true, data: { folders: [] } }));
     expect(await screen.findByRole("heading", { name: "No documents yet" })).not.toBeNull();
   });
 
@@ -217,6 +320,8 @@ describe("Vite documents page", () => {
       if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        const libraryResponse = emptyLibraryCapability(request.capabilityId);
+        if (libraryResponse) return libraryResponse;
         if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
         expect(request.capabilityId).toBe("documents.createDoc");
         expect(request.input.title).toBe("Untitled document");
@@ -243,6 +348,8 @@ describe("Vite documents page", () => {
       if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        const libraryResponse = emptyLibraryCapability(request.capabilityId);
+        if (libraryResponse) return libraryResponse;
         if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
         expect(request.capabilityId).toBe("documents.createDocument");
         expect(request.input).toEqual({ title: "Supplier invoice #42", folder: "Finance", text: "Invoice due Friday" });
@@ -260,8 +367,7 @@ describe("Vite documents page", () => {
     fireEvent.change(screen.getByLabelText("Text"), { target: { value: "Invoice due Friday" } });
     fireEvent.click(screen.getByRole("button", { name: "Add text" }));
 
-    expect(await screen.findByRole("status")).not.toBeNull();
-    expect(screen.getByText("Document added to the records library.")).not.toBeNull();
+    expect(await screen.findByText("Document added to the records library.")).not.toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes(":3001"))).toBe(false);
   });
 
@@ -274,6 +380,8 @@ describe("Vite documents page", () => {
       if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+        const libraryResponse = emptyLibraryCapability(request.capabilityId);
+        if (libraryResponse) return libraryResponse;
         if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
         expect(request.capabilityId).toBe("documents.createDocument");
         expect(request.input).toMatchObject({ title: "April bill", mimeType: "application/pdf", fileBase64: btoa("%PDF-1.7 test") });
@@ -297,8 +405,11 @@ describe("Vite documents page", () => {
 
   it("surfaces permission errors and allows retry", async () => {
     let listAttempt = 0;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      const request = JSON.parse(String(init?.body)) as { capabilityId: string };
+      if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+      if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
       listAttempt += 1;
       return listAttempt === 1
         ? Response.json({ error: "forbidden" }, { status: 403 })

@@ -37,6 +37,10 @@ func goAuthRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goMessageAttachmentDownloadRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goMyWorkRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -146,7 +150,7 @@ func goApprovalsDecisionRouteEnabledFromEnv(value string) bool {
 }
 
 func goOnboardingRouteEnabledFromEnv(value string) bool {
-	return value == "1"
+	return value != "0"
 }
 
 func goOrgRouteEnabledFromEnv(value string) bool {
@@ -301,7 +305,7 @@ func run(logger *slog.Logger) error {
 	salesCustomersRoute := httpapi.NewSalesCustomersSessionHandler(pool, resolver, logger)
 	logger.Info("Go sales customer lookup route mounted", "path", "GET /api/sales/customers")
 	var messageAttachmentDownloadRoute http.Handler
-	if os.Getenv("GO_MESSAGE_ATTACHMENT_DOWNLOAD_ROUTE") == "1" {
+	if goMessageAttachmentDownloadRouteEnabledFromEnv(os.Getenv("GO_MESSAGE_ATTACHMENT_DOWNLOAD_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -371,7 +375,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go module switchboard route mounted", "path", "/api/modules")
 	}
 	var modulesWriteRoute http.Handler
-	if os.Getenv("GO_MODULES_WRITE_ROUTE") == "1" {
+	if os.Getenv("GO_MODULES_WRITE_ROUTE") != "0" {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -389,13 +393,15 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go projects route mounted", "path", "/api/projects")
 	}
 	var routinesRoute http.Handler
+	var routinesWebhookRoute http.Handler
 	if goRoutinesRouteEnabledFromEnv(os.Getenv("GO_ROUTINES_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
 		}
 		routinesRoute = httpapi.NewRoutinesSessionHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
-		logger.Info("Go routines route mounted", "paths", []string{"GET /api/routines", "POST /api/routines"})
+		routinesWebhookRoute = httpapi.NewRoutinesWebhookHandler(pool, trustedProxyCIDRs, logger)
+		logger.Info("Go routines route mounted", "paths", []string{"GET /api/routines", "POST /api/routines", "POST /api/routines/webhook/{token}"})
 	}
 	var memoryRoute http.Handler
 	if goMemoryRouteEnabledFromEnv(os.Getenv("GO_MEMORY_ROUTE")) {
@@ -443,7 +449,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go team write route mounted", "path", "/api/team")
 	}
 	var brandingRoute http.Handler
-	if os.Getenv("GO_BRANDING_ROUTE") == "1" {
+	if os.Getenv("GO_BRANDING_ROUTE") != "0" {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -589,7 +595,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go my work route mounted", "path", "/api/my-work")
 	}
 	var myWorkSummaryRoute http.Handler
-	if os.Getenv("GO_MY_WORK_SUMMARY_ROUTE") == "1" {
+	if os.Getenv("GO_MY_WORK_SUMMARY_ROUTE") != "0" {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -617,7 +623,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go durable runs routes mounted", "paths", []string{"GET /api/durable-runs", "GET /api/durable-runs/{id}"})
 	}
 	var notificationsRoute http.Handler
-	if os.Getenv("GO_NOTIFICATIONS_ROUTE") == "1" {
+	if os.Getenv("GO_NOTIFICATIONS_ROUTE") != "0" {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -626,7 +632,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go notifications route mounted", "path", "GET /api/notifications")
 	}
 	var notificationReadRoute http.Handler
-	if os.Getenv("GO_NOTIFICATIONS_WRITE_ROUTE") == "1" {
+	if os.Getenv("GO_NOTIFICATIONS_WRITE_ROUTE") != "0" {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -635,7 +641,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go notification read receipt route mounted", "path", "POST /api/notifications")
 	}
 	var ledgerRoute http.Handler
-	if os.Getenv("GO_LEDGER_ROUTE") == "1" {
+	if os.Getenv("GO_LEDGER_ROUTE") != "0" {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -653,7 +659,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go metrics route mounted", "path", "/api/metrics")
 	}
 	var signalsRoute http.Handler
-	if os.Getenv("GO_SIGNALS_ROUTE") == "1" {
+	if os.Getenv("GO_SIGNALS_ROUTE") != "0" {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -739,7 +745,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go authentication routes mounted", "path", "/api/auth")
 	}
 	var supportPublicRoute http.Handler
-	if os.Getenv("GO_SUPPORT_PUBLIC_ROUTE") == "1" {
+	if os.Getenv("GO_SUPPORT_PUBLIC_ROUTE") != "0" {
 		trustedProxyCIDRs, err := httpapi.ParseTrustedProxyCIDRs(os.Getenv("GO_SUPPORT_TRUSTED_PROXY_CIDRS"))
 		if err != nil {
 			return err
@@ -793,14 +799,14 @@ func run(logger *slog.Logger) error {
 	}
 	var scimReadRoute, scimWriteRoute http.Handler
 	scimRateLimiter := httpapi.NewSCIMRateLimiter()
-	if os.Getenv("GO_SCIM_READ_ROUTE") == "1" {
+	if os.Getenv("GO_SCIM_READ_ROUTE") != "0" {
 		scimReadRoute, err = httpapi.NewSCIMReadHandlerWithLimiter(pool, trustedProxyCIDRs, logger, scimRateLimiter)
 		if err != nil {
 			return err
 		}
 		logger.Info("Go SCIM read route mounted", "path", "/api/scim/v2/Users")
 	}
-	if os.Getenv("GO_SCIM_WRITE_ROUTE") == "1" {
+	if os.Getenv("GO_SCIM_WRITE_ROUTE") != "0" {
 		scimWriteRoute, err = httpapi.NewSCIMWriteHandlerWithLimiter(pool, capabilityExecutor, trustedProxyCIDRs, logger, scimRateLimiter)
 		if err != nil {
 			return err
@@ -808,7 +814,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go SCIM provisioning routes mounted", "paths", []string{"POST /api/scim/v2/Users", "DELETE /api/scim/v2/Users/{id}"})
 	}
 	var scimTokenManagementRoute http.Handler
-	if os.Getenv("GO_SCIM_TOKENS_ROUTE") == "1" {
+	if os.Getenv("GO_SCIM_TOKENS_ROUTE") != "0" {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -844,7 +850,7 @@ func run(logger *slog.Logger) error {
 		orgRoute,
 		authRoute,
 		approvalDecider,
-	), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute)
+	), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute, routinesWebhookRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute)
 	apiHandler = httpapi.MountGoApprovalsReadRoute(apiHandler, approvalsReadRoute)
 	apiHandler = httpapi.MountGoSalesCustomersRoute(apiHandler, salesCustomersRoute)
 	apiHandler = httpapi.MountGoApprovalsDecisionRoute(apiHandler, approvalsDecisionRoute)

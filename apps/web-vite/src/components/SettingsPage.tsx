@@ -14,6 +14,7 @@ import {
   fetchModuleSettings,
   fetchModuleSwitchboard,
   fetchPolicy,
+  fetchPendingGovernedAttempt,
   fetchRoutines,
   isAiProviderId,
   isProtectedModule,
@@ -21,6 +22,7 @@ import {
   saveAiConfig,
   sendEmailTest,
   submitGoverned,
+  retryPendingGoverned,
   SettingsApiError,
   type AiConfig,
   type AiModels,
@@ -32,6 +34,7 @@ import {
   type ModuleSwitchboard,
   type Policy,
   type Routine,
+  type GovernedRetryScope,
 } from "../api/settings";
 import { fetchOrganizations } from "../api/organizations";
 import { parseScheduleText } from "@chaste/erp-core";
@@ -184,9 +187,14 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-export function SettingsPage({ baseCurrency }: { baseCurrency?: string | null }) {
+export function SettingsPage({
+  baseCurrency,
+  actorId,
+  organizationId,
+}: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const [tab, setTab] = useState<TabId>("workspace");
   const [accountingOn, setAccountingOn] = useState<boolean | null>(null);
+  const retryScope = actorId && organizationId ? { actorId, organizationId } : null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -207,6 +215,8 @@ export function SettingsPage({ baseCurrency }: { baseCurrency?: string | null })
           workmate proposes waits in the Approvals inbox.
         </p>
       </header>
+
+      {retryScope && <GovernedRetryNotice scope={retryScope} />}
 
       <div role="tablist" aria-label="Settings sections" style={ui.tablist}>
         {TABS.map((entry) => (
@@ -231,10 +241,54 @@ export function SettingsPage({ baseCurrency }: { baseCurrency?: string | null })
         {tab === "governance" && <GovernanceTab baseCurrency={baseCurrency} />}
         {tab === "ai" && <AiTab />}
         {tab === "branding" && <BrandingTab />}
-        {tab === "routines" && <RoutinesTab />}
+        {tab === "routines" && <RoutinesTab retryScope={retryScope ?? undefined} />}
         {tab === "runtime" && <RuntimeTab />}
       </div>
     </main>
+  );
+}
+
+function GovernedRetryNotice({ scope }: { scope: GovernedRetryScope }) {
+  const [attempt, setAttempt] = useState<Awaited<ReturnType<typeof fetchPendingGovernedAttempt>>>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetchPendingGovernedAttempt(scope)
+      .then((saved) => { if (active) setAttempt(saved); })
+      .catch((error: unknown) => { if (active) setMessage(errorMessage(error)); });
+    return () => { active = false; };
+  }, [scope.actorId, scope.organizationId]);
+
+  async function retry() {
+    if (busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const outcome = await retryPendingGoverned(scope);
+      if (outcome?.kind === "completed") {
+        window.location.reload();
+        return;
+      }
+      if (outcome?.kind === "pending") setMessage(outcome.reason);
+      setAttempt(await fetchPendingGovernedAttempt(scope));
+    } catch (error) {
+      setMessage(errorMessage(error));
+      setAttempt(await fetchPendingGovernedAttempt(scope).catch(() => attempt));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!attempt && !message) return null;
+  return (
+    <section role="status" style={{ ...ui.card, borderColor: "#d7a34a", marginBottom: 18 }}>
+      <strong>{attempt ? "A routine change may not have reached the server." : "Safe routine retries are unavailable."}</strong>
+      {attempt && <p style={ui.muted}>Retrying sends the exact saved action with its original idempotency key.</p>}
+      {message && <p>{message}</p>}
+      {attempt && <button type="button" disabled={busy} onClick={() => void retry()}>{busy ? "Retrying…" : "Retry exact change"}</button>}
+    </section>
   );
 }
 
@@ -1398,7 +1452,7 @@ function BrandingTab() {
 const HEARTBEAT_PROMPT =
   "Proactive heartbeat: scan the business for anything that needs attention (overdue invoices, low stock against reorder points, aging bills, stuck deals). If something needs attention, summarize it with concrete numbers and post it to #general. If nothing needs attention, reply NO_ACTION.";
 
-function RoutinesTab() {
+function RoutinesTab({ retryScope }: { retryScope?: GovernedRetryScope }) {
   const [rows, setRows] = useState<Routine[] | null>(null);
   const [name, setName] = useState("");
   const [scheduleText, setScheduleText] = useState("");
@@ -1429,10 +1483,14 @@ function RoutinesTab() {
 
   async function act(action: Record<string, unknown>, successText: string) {
     if (busy) return;
+    if (!retryScope) {
+      setNotice({ tone: "error", text: "Wait until the active workspace is ready before changing routines." });
+      return;
+    }
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitGoverned("/api/routines", action);
+      const result = await submitGoverned("/api/routines", action, undefined, retryScope);
       if (result.kind === "pending") {
         setNotice({ tone: "pending", text: result.reason });
         return;
@@ -1447,11 +1505,15 @@ function RoutinesTab() {
   }
 
   async function create(overrides?: { name: string; prompt: string; scheduleText: string }) {
+    if (!retryScope) {
+      setNotice({ tone: "error", text: "Wait until the active workspace is ready before changing routines." });
+      return;
+    }
     setCreating(true);
     setNotice(null);
     const payload = overrides ?? { name, prompt, scheduleText, withWebhook };
     try {
-      const result = await submitGoverned("/api/routines", { action: "create", ...payload });
+      const result = await submitGoverned("/api/routines", { action: "create", ...payload }, undefined, retryScope);
       if (result.kind === "pending") {
         setNotice({ tone: "pending", text: result.reason });
         return;

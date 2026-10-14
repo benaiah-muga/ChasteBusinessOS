@@ -2,6 +2,21 @@ package main
 
 import "testing"
 
+func TestGoMessageAttachmentDownloadRouteEnabledFromEnvDefaultsOnAndAllowsDisable(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: true},
+		{value: "1", want: true},
+		{value: "0", want: false},
+	} {
+		if got := goMessageAttachmentDownloadRouteEnabledFromEnv(test.value); got != test.want {
+			t.Errorf("goMessageAttachmentDownloadRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)
+		}
+	}
+}
+
 func TestGoCRMFollowUpDraftRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) {
 	if !goCRMFollowUpDraftRouteEnabledFromEnv("") || !goCRMFollowUpDraftRouteEnabledFromEnv("1") || goCRMFollowUpDraftRouteEnabledFromEnv("0") {
 		t.Fatal("CRM follow-up draft route should default on and allow explicit disable")
@@ -46,15 +61,15 @@ func TestGoAuthRouteEnabledFromEnvMatchesViteProxyDefault(t *testing.T) {
 	}
 }
 
-func TestGoOnboardingRouteEnabledFromEnvDefaultsOff(t *testing.T) {
+func TestGoOnboardingRouteEnabledFromEnvDefaultsOn(t *testing.T) {
 	for _, test := range []struct {
 		value string
 		want  bool
 	}{
-		{value: "", want: false},
+		{value: "", want: true},
 		{value: "0", want: false},
 		{value: "1", want: true},
-		{value: "true", want: false},
+		{value: "true", want: true},
 	} {
 		if got := goOnboardingRouteEnabledFromEnv(test.value); got != test.want {
 			t.Errorf("goOnboardingRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)

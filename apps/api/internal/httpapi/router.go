@@ -153,13 +153,16 @@ func MountGoSCIMTokenManagementRoute(base, route http.Handler) http.Handler {
 
 // MountGoRoutinesRoute mounts only the routine collection paths supported by
 // the Go handler; other methods and subpaths fall through to the base handler.
-func MountGoRoutinesRoute(base, route http.Handler) http.Handler {
+func MountGoRoutinesRoute(base, route http.Handler, webhookRoute ...http.Handler) http.Handler {
 	if route == nil {
 		return base
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/routines", route)
 	mux.Handle("POST /api/routines", route)
+	if len(webhookRoute) > 0 && webhookRoute[0] != nil {
+		mux.Handle("POST /api/routines/webhook/{token}", webhookRoute[0])
+	}
 	if base != nil {
 		mux.Handle("HEAD /api/routines", base)
 		mux.Handle("/", base)

@@ -672,7 +672,7 @@ describe("accounting API: capability reads", () => {
     { label: "pending", response: () => Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 }), status: 202 },
     { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }), status: 404 },
     { label: "malformed", response: () => Response.json({ ok: true, data: { finalMinor: "12000" } }), status: 200 },
-    { label: "capability error", response: () => Response.json({ ok: false, error: "Forecast failed" }, { status: 422 }), status: 500 },
+    { label: "capability error", response: () => Response.json({ ok: false, error: "Forecast failed" }, { status: 422 }), status: 422 },
   ])("fails closed on Go cash forecast $label responses", async ({ response, status }) => {
     const mock = stubFetch(response);
     await expect(fetchCashForecast("")).rejects.toMatchObject({ name: "AccountingApiError", status });
@@ -714,7 +714,7 @@ describe("accounting API: capability reads", () => {
     { label: "pending", response: () => Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 }), status: 202 },
     { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }), status: 404 },
     { label: "malformed", response: () => Response.json({ ok: true, data: { reminders: [{ customerId: "customer-1", extra: true }] } }), status: 200 },
-    { label: "capability error", response: () => Response.json({ ok: false, error: "Reminder report failed" }, { status: 422 }), status: 500 },
+    { label: "capability error", response: () => Response.json({ ok: false, error: "Reminder report failed" }, { status: 422 }), status: 422 },
   ])("fails closed on Go reminder $label responses", async ({ response, status }) => {
     const mock = stubFetch(response);
     await expect(fetchPaymentReminders()).rejects.toMatchObject({ name: "AccountingApiError", status });
@@ -760,7 +760,7 @@ describe("accounting API: capability reads", () => {
     { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }), status: 404 },
     { label: "malformed", response: () => Response.json({ ok: true, data: { currencies: [{ currency: "USD", rows: [] }] } }), status: 200 },
     { label: "invalid row timestamp", response: () => Response.json({ ok: true, data: { currencies: [{ currency: "USD", openingBalanceMinor: 0, closingBalanceMinor: 0, rows: [{ date: "not-a-date", kind: "invoice", ref: "1042", amountMinor: 0, balanceMinor: 0 }] }] } }), status: 200 },
-    { label: "capability error", response: () => Response.json({ ok: false, error: "Customer statement failed" }, { status: 422 }), status: 500 },
+    { label: "capability error", response: () => Response.json({ ok: false, error: "Customer statement failed" }, { status: 422 }), status: 422 },
   ])("fails closed on Go statement $label responses", async ({ response, status }) => {
     const mock = stubFetch(response);
     await expect(fetchCustomerStatement("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).rejects.toMatchObject({
@@ -780,6 +780,13 @@ describe("accounting API: capability reads", () => {
 });
 
 describe("accounting API: governed writes", () => {
+  it("does not fall back to Next-owned accounting endpoints for unsupported actions", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
+    await expect(submitAccountingAction("/api/accounting", { action: "legacy-only-action" }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
   it("fails closed on invoice writes without an organization", async () => {
     const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
     await expect(submitAccountingAction("/api/accounting", {

@@ -879,7 +879,7 @@ async function readGoAccountingCapability<T>(
   if (response.status === 422) {
     const error = CapabilityErrorSchema.safeParse(body);
     if (!error.success) throw new AccountingApiError(503, "The Go Accounting service returned an unexpected response.");
-    throw new AccountingApiError(500, error.data.error.slice(0, 240));
+    throw new AccountingApiError(response.status, error.data.error.slice(0, 240));
   }
   if (response.status !== 200) {
     throw new AccountingApiError(response.status, errorMessage(response.status, body, context));
@@ -935,7 +935,7 @@ async function readGoCustomerStatement(customerId: string, signal?: AbortSignal)
   if (response.status === 422) {
     const error = CapabilityErrorSchema.safeParse(body);
     if (!error.success) throw new AccountingApiError(503, "The customer statement service returned an unexpected response.");
-    throw new AccountingApiError(500, error.data.error.slice(0, 240));
+    throw new AccountingApiError(response.status, error.data.error.slice(0, 240));
   }
   if (response.status !== 200) {
     throw new AccountingApiError(response.status, errorMessage(response.status, body, "load this customer statement"));
@@ -1010,16 +1010,7 @@ export async function submitAccountingAction(
     const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
     return submitGoAccountingReversePayment(action.data, scoped, signal);
   }
-  const { response, body } = await getJson(path, { method: "POST", body: JSON.stringify(payload) }, signal);
-  if (response.status === 202) {
-    const parsed = PendingSchema.safeParse(body);
-    if (!parsed.success) throw new AccountingApiError(202, "This action is waiting for approval but the Accounting service returned an invalid approval response.");
-    return { kind: "pending", reason: parsed.data.reason ?? parsed.data.error ?? "This action is waiting for approval." };
-  }
-  if (!response.ok) throw new AccountingApiError(response.status, errorMessage(response.status, body, "complete this accounting action"));
-  const envelope = EnvelopeSchema.safeParse(body);
-  if (!envelope.success) throw new AccountingApiError(response.status, "The Accounting service returned an unexpected action response.");
-  return { kind: "completed" };
+  throw new AccountingApiError(400, "This Accounting action is not supported by the Go Accounting service.");
 }
 
 async function submitGoAccountingPeriodFxWrite(

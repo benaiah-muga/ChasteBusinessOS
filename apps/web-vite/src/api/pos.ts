@@ -81,7 +81,6 @@ export async function fetchPosShiftSummary(sessionId: string, signal?: AbortSign
   }
 
   const intentId = crypto.randomUUID();
-  const useGoRoute = typeof __GO_POS_SHIFT_SUMMARY_ROUTE__ !== "undefined" && __GO_POS_SHIFT_SUMMARY_ROUTE__;
   let response: Response;
   try {
     const request = (url: string, body: unknown) => fetch(url, {
@@ -92,13 +91,11 @@ export async function fetchPosShiftSummary(sessionId: string, signal?: AbortSign
       signal: requestSignal(signal),
       body: JSON.stringify(body),
     });
-    response = useGoRoute
-      ? await request("/api/pos/shift-summary", {
-        capabilityId: "pos.shiftSummary",
-        input: { sessionId },
-        intentId,
-      })
-      : await request("/api/pos", { action: "shiftSummary", sessionId, intentId });
+    response = await request("/api/pos/shift-summary", {
+      capabilityId: "pos.shiftSummary",
+      input: { sessionId },
+      intentId,
+    });
   } catch (error) {
     if (signal?.aborted) throw error;
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";

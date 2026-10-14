@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumentsEditorPage } from "./DocumentsEditorPage";
 
 const DOCUMENT_ID = "6f1b2c3d-0000-4000-8000-000000000001";
+const ACTOR_ID = "8f0c1d22-0000-4000-8000-000000000002";
+const ORGANIZATION_ID = "8f0c1d22-0000-4000-8000-000000000003";
 
 const authoredDocument = {
   id: DOCUMENT_ID,
@@ -51,6 +53,12 @@ function editorFetch(override?: (call: RecordedCall) => Response | null) {
     }
     if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.listDocVersions") {
       return Response.json({ ok: true, data: { versions: versionRows } });
+    }
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.searchRecords") {
+      return Response.json({ ok: true, data: { records: [{ id: "7f1b2c3d-0000-4000-8000-000000000001", label: "Ada Lovelace", detail: "Customer · ada@example.test", values: { email: "ada@example.test" } }] } });
+    }
+    if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.allocateNumber") {
+      return Response.json({ ok: true, data: { number: "INV-2026-0001" } });
     }
     if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.getDocVersion") {
       const input = call.body.input as { version: number };
@@ -142,7 +150,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId={ACTOR_ID} organizationId={ORGANIZATION_ID} />);
 
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
     const preview = screen.getByLabelText("Live document preview");
@@ -152,6 +160,38 @@ describe("authored document editor", () => {
     expect((window as unknown as { __pwned?: boolean }).__pwned).toBeUndefined();
   }, TIMEOUT);
 
+  it("searches Go records and saves the selected link through document metadata", async () => {
+    const { calls } = editorFetch();
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId={ACTOR_ID} organizationId={ORGANIZATION_ID} />);
+    await screen.findByDisplayValue("Service quote", undefined, BOOT);
+    fireEvent.click(screen.getByRole("button", { name: "Change linked record" }));
+    const dialog = await screen.findByRole("dialog", { name: "Link a business record" });
+    fireEvent.change(within(dialog).getByLabelText("Name or number"), { target: { value: "Ada" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Search" }));
+    expect(await within(dialog).findByText("Ada Lovelace")).not.toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Link" }));
+    expect(await screen.findByText("Source: Ada Lovelace")).not.toBeNull();
+    const search = calls.find((call) => call.body?.capabilityId === "documents.searchRecords");
+    expect(search?.body).toMatchObject({ capabilityId: "documents.searchRecords", input: { type: "customer", query: "Ada" } });
+    const update = calls.find((call) => call.body?.capabilityId === "documents.updateDocMetadata");
+    expect(update?.body).toMatchObject({ input: { linkedRecordType: "customer", linkedRecordId: "7f1b2c3d-0000-4000-8000-000000000001", linkedRecordLabel: "Ada Lovelace" } });
+  }, TIMEOUT);
+
+  it("reserves an authored number through the Go capability and exposes it for insertion", async () => {
+    const { calls } = editorFetch();
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId={ACTOR_ID} organizationId={ORGANIZATION_ID} />);
+    await screen.findByDisplayValue("Service quote", undefined, BOOT);
+    fireEvent.change(screen.getByLabelText("Number type"), { target: { value: "delivery_note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reserve number" }));
+    expect((await screen.findByLabelText("Reserved number")).textContent).toBe("INV-2026-0001");
+    expect(calls.find((call) => call.body?.capabilityId === "documents.allocateNumber")?.body).toMatchObject({
+      capabilityId: "documents.allocateNumber",
+      input: { kind: "delivery_note" },
+      intentId: expect.any(String),
+    });
+    expect((screen.getByRole("button", { name: "Insert number" }) as HTMLButtonElement).disabled).toBe(false);
+  }, TIMEOUT);
+
   it("autosaves a keystroke burst once, then reports the saved revision", async () => {
     const { calls } = editorFetch((call) => {
       if (call.url === `/api/docs/${DOCUMENT_ID}/workspace` && call.body?.content !== undefined) {
@@ -159,7 +199,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId={ACTOR_ID} organizationId={ORGANIZATION_ID} />);
 
     // Opening the document parks the loaded content as a draft, as it always did.
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
@@ -209,7 +249,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId={ACTOR_ID} organizationId={ORGANIZATION_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     typeIntoSurface("<p>Conflicting edit</p>");
@@ -237,7 +277,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId={ACTOR_ID} organizationId={ORGANIZATION_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
@@ -270,7 +310,7 @@ describe("authored document editor", () => {
 
   it("renames through the governed metadata route and shows the new title", async () => {
     const { calls } = editorFetch();
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId={ACTOR_ID} organizationId={ORGANIZATION_ID} />);
     const input = await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.change(input, { target: { value: "Service quote 2026" } });
@@ -298,7 +338,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId={ACTOR_ID} organizationId={ORGANIZATION_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.click(screen.getByRole("button", { name: /Versions/ }));

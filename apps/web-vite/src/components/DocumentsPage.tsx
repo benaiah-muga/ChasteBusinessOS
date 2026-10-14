@@ -1,9 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { DocumentsApiError, fetchDocumentDetail, fetchDocuments, fetchDocumentsEnabled, type DocumentDetail, type DocumentRow } from "../api/documents";
 import { authClient } from "../api/auth";
 import { fetchOrganizations } from "../api/organizations";
 import { createAuthoredDocumentDraft, DocumentsEditorApiError } from "../api/documents-editor";
 import { createIngestedDocument, DocumentsIngestApiError } from "../api/documents-ingest";
+import {
+  createDocumentFolder,
+  deleteDocumentFolder,
+  fetchAuthoredDocuments,
+  fetchDocumentFolders,
+  renameDocumentFolder,
+  type AuthoredDocumentRow,
+  type DocumentFolder,
+  type DocumentsLibraryScope,
+} from "../api/documents-library";
 import { navigate } from "../navigation";
 import "./documents-page.css";
 
@@ -18,6 +28,11 @@ type DetailState =
   | { status: "loading" }
   | { status: "failed"; error: DocumentsApiError }
   | { status: "ready"; document: DocumentDetail };
+
+type AuthoredListState =
+  | { status: "loading" }
+  | { status: "failed"; error: string }
+  | { status: "ready"; documents: AuthoredDocumentRow[] };
 
 type RequestedDocumentSelection =
   | { kind: "none" }
@@ -119,6 +134,16 @@ export function DocumentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [requestedSelectionError, setRequestedSelectionError] = useState<"invalid" | "not-found" | null>(null);
   const [query, setQuery] = useState("");
+  const [authoredQuery, setAuthoredQuery] = useState("");
+  const [authoredState, setAuthoredState] = useState<AuthoredListState>({ status: "loading" });
+  const [folders, setFolders] = useState<DocumentFolder[]>([]);
+  const [folderLoadError, setFolderLoadError] = useState<string | null>(null);
+  const [folderNotice, setFolderNotice] = useState<string | null>(null);
+  const [folderPathInput, setFolderPathInput] = useState("");
+  const [folderEditPath, setFolderEditPath] = useState<string | null>(null);
+  const [folderNewPath, setFolderNewPath] = useState("");
+  const [folderDeleteConfirm, setFolderDeleteConfirm] = useState<string | null>(null);
+  const [folderBusy, setFolderBusy] = useState(false);
   const [retry, setRetry] = useState(0);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -174,6 +199,31 @@ export function DocumentsPage() {
   }, [load, retry]);
 
   useEffect(() => {
+    if (state.status !== "ready") return;
+    const controller = new AbortController();
+    void fetchAuthoredDocuments(controller.signal).then((documents) => {
+      if (!controller.signal.aborted) setAuthoredState({ status: "ready", documents });
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setAuthoredState({ status: "failed", error: error instanceof Error ? error.message : "Could not load written documents." });
+    });
+    return () => controller.abort();
+  }, [state.status, retry]);
+
+  useEffect(() => {
+    if (state.status !== "ready") return;
+    const controller = new AbortController();
+    void fetchDocumentFolders(controller.signal).then((result) => {
+      if (!controller.signal.aborted) {
+        setFolders(result);
+        setFolderLoadError(null);
+      }
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setFolderLoadError(error instanceof Error ? error.message : "Could not load folders.");
+    });
+    return () => controller.abort();
+  }, [state.status, retry]);
+
+  useEffect(() => {
     if (!selectedId) {
       setDetailState({ status: "idle" });
       return;
@@ -197,6 +247,92 @@ export function DocumentsPage() {
       .some((value) => value.toLocaleLowerCase().includes(needle)));
   }, [documents, query]);
   const selected = documents.find((document) => document.id === selectedId) ?? null;
+  const authoredDocuments = authoredState.status === "ready" ? authoredState.documents : [];
+  const filteredAuthored = useMemo(() => {
+    const needle = authoredQuery.trim().toLocaleLowerCase();
+    if (!needle) return authoredDocuments;
+    return authoredDocuments.filter((document) => [document.title, document.status, document.folder ?? "", document.documentType ?? "", document.linkedRecordLabel ?? ""]
+      .some((value) => value.toLocaleLowerCase().includes(needle)));
+  }, [authoredDocuments, authoredQuery]);
+
+  async function libraryScope(): Promise<DocumentsLibraryScope> {
+    const session = await authClient.getSession();
+    const actorId = session.data?.user.id;
+    if (session.error || !actorId) throw new Error("Sign in again before changing folders.");
+    const organizations = await fetchOrganizations();
+    if (!organizations.activeOrgId || !organizations.orgs.some((organization) => organization.id === organizations.activeOrgId)) {
+      throw new Error("Choose an active workspace before changing folders.");
+    }
+    return { actorId, organizationId: organizations.activeOrgId };
+  }
+
+  async function reloadFolders() {
+    const result = await fetchDocumentFolders();
+    setFolders(result);
+    setFolderLoadError(null);
+  }
+
+  async function submitFolderCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (folderBusy) return;
+    setFolderBusy(true);
+    setFolderNotice(null);
+    try {
+      const outcome = await createDocumentFolder(folderPathInput, await libraryScope());
+      if (outcome.kind === "pending") {
+        setFolderNotice(outcome.hint);
+      } else {
+        setFolderPathInput("");
+        setFolderNotice(`Created ${outcome.data.path}.`);
+        await reloadFolders();
+      }
+    } catch (error) {
+      setFolderNotice(error instanceof Error ? error.message : "Could not create the folder.");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function submitFolderRename(path: string) {
+    if (folderBusy) return;
+    setFolderBusy(true);
+    setFolderNotice(null);
+    try {
+      const outcome = await renameDocumentFolder(path, folderNewPath, await libraryScope());
+      if (outcome.kind === "pending") {
+        setFolderNotice(outcome.hint);
+      } else {
+        setFolderEditPath(null);
+        setFolderNewPath("");
+        setFolderNotice(`Moved ${outcome.data.path} to ${outcome.data.movedTo}.`);
+        await Promise.all([reloadFolders(), load()]);
+      }
+    } catch (error) {
+      setFolderNotice(error instanceof Error ? error.message : "Could not rename the folder.");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function submitFolderDelete(path: string) {
+    if (folderBusy) return;
+    setFolderBusy(true);
+    setFolderNotice(null);
+    try {
+      const outcome = await deleteDocumentFolder(path, await libraryScope());
+      if (outcome.kind === "pending") {
+        setFolderNotice(outcome.hint);
+      } else {
+        setFolderDeleteConfirm(null);
+        setFolderNotice(outcome.data.deleted ? `Deleted ${outcome.data.path}.` : `${outcome.data.path} was already removed.`);
+        await reloadFolders();
+      }
+    } catch (error) {
+      setFolderNotice(error instanceof Error ? error.message : "Could not delete the folder.");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
 
   const createDraft = async () => {
     if (creating) return;
@@ -312,6 +448,53 @@ export function DocumentsPage() {
         </section>
       )}
 
+      {state.status === "ready" && (
+        <section className="documents-folder-manager" aria-labelledby="documents-folders-title">
+          <div className="documents-library-heading">
+            <div><h2 id="documents-folders-title">Folders</h2><span>{folders.length} {folders.length === 1 ? "folder" : "folders"}</span></div>
+          </div>
+          <form className="documents-folder-create" onSubmit={(event) => void submitFolderCreate(event)}>
+            <label htmlFor="documents-folder-path">Create folder</label>
+            <input id="documents-folder-path" value={folderPathInput} maxLength={300} onChange={(event) => setFolderPathInput(event.currentTarget.value)} placeholder="Finance / Payables" />
+            <button className="documents-primary-link" type="submit" disabled={folderBusy || !folderPathInput.trim()}>{folderBusy ? "Saving…" : "Create"}</button>
+          </form>
+          {folderNotice && <p className="documents-folder-notice" role="status">{folderNotice}</p>}
+          {folderLoadError && <p className="documents-ingest-error" role="alert">{folderLoadError}</p>}
+          {folders.length > 0 ? (
+            <ul className="documents-folder-list">
+              {folders.map((folder) => (
+                <li key={folder.id}>
+                  {folderEditPath === folder.path ? (
+                    <form className="documents-folder-rename" onSubmit={(event) => { event.preventDefault(); void submitFolderRename(folder.path); }}>
+                      <label className="sr-only" htmlFor={`folder-rename-${folder.id}`}>New path for {folder.path}</label>
+                      <input id={`folder-rename-${folder.id}`} value={folderNewPath} maxLength={300} onChange={(event) => setFolderNewPath(event.currentTarget.value)} />
+                      <button type="submit" disabled={folderBusy || !folderNewPath.trim()}>Save</button>
+                      <button type="button" onClick={() => { setFolderEditPath(null); setFolderNewPath(""); }}>Cancel</button>
+                    </form>
+                  ) : (
+                    <>
+                      <span>{folder.path}</span>
+                      {folderDeleteConfirm === folder.path ? (
+                        <span className="documents-folder-actions">
+                          <span>Delete this empty folder?</span>
+                          <button type="button" disabled={folderBusy} onClick={() => void submitFolderDelete(folder.path)}>Confirm</button>
+                          <button type="button" onClick={() => setFolderDeleteConfirm(null)}>Cancel</button>
+                        </span>
+                      ) : (
+                        <span className="documents-folder-actions">
+                          <button type="button" disabled={folderBusy} onClick={() => { setFolderEditPath(folder.path); setFolderNewPath(folder.path); }}>Rename</button>
+                          <button type="button" disabled={folderBusy} onClick={() => setFolderDeleteConfirm(folder.path)}>Delete</button>
+                        </span>
+                      )}
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="documents-muted">Create folders to organize written documents.</p>}
+        </section>
+      )}
+
       {state.status === "loading" && <p className="documents-loading" role="status">Loading documents…</p>}
       {state.status === "disabled" && (
         <section className="documents-empty" role="status">
@@ -389,6 +572,47 @@ export function DocumentsPage() {
           <section className="documents-detail-panel" aria-label="Selected document">
             {selected ? <DocumentDetails state={detailState} selected={selected} /> : requestedSelectionError ? null : <p className="documents-detail-message">Select a document to review its details.</p>}
           </section>
+        </section>
+      )}
+
+      {state.status === "ready" && (
+        <section className="documents-authored" aria-labelledby="documents-authored-title">
+          <div className="documents-authored-heading">
+            <div>
+              <p className="documents-eyebrow">Written documents</p>
+              <h2 id="documents-authored-title">Drafts and published documents</h2>
+            </div>
+            <span>{authoredState.status === "ready" ? authoredDocuments.length : ""}</span>
+          </div>
+          <label className="documents-search">
+            <span className="sr-only">Search written documents</span>
+            <input type="search" value={authoredQuery} onChange={(event) => setAuthoredQuery(event.currentTarget.value)} placeholder="Search title, folder, or linked record" />
+          </label>
+          {authoredState.status === "loading" ? <p className="documents-loading" role="status">Loading written documents…</p> : null}
+          {authoredState.status === "failed" ? (
+            <div className="documents-error" role="alert"><p>{authoredState.error}</p><button type="button" onClick={() => setRetry((current) => current + 1)}>Try again</button></div>
+          ) : null}
+          {authoredState.status === "ready" && authoredDocuments.length === 0 ? (
+            <div className="documents-filter-empty"><h3>No written documents yet</h3><p>Create a draft to start a document in the editor.</p></div>
+          ) : null}
+          {authoredState.status === "ready" && authoredDocuments.length > 0 && filteredAuthored.length === 0 ? (
+            <div className="documents-filter-empty"><h3>No matching written documents</h3><p>Try another title, status, folder, or linked record.</p></div>
+          ) : null}
+          {authoredState.status === "ready" && filteredAuthored.length > 0 ? (
+            <ul className="documents-authored-list">
+              {filteredAuthored.map((document) => (
+                <li key={document.id}>
+                  <div>
+                    <strong>{document.title}</strong>
+                    <span>{document.folder || "Unfiled"} · {document.documentType || "Document"}{document.linkedRecordLabel ? ` · ${document.linkedRecordLabel}` : ""}</span>
+                    <span>{document.versions} {document.versions === 1 ? "version" : "versions"} · Updated {formatDate(document.updatedAt)}</span>
+                  </div>
+                  <span className={`documents-status ${statusClass(document.status)}`}>{document.status}</span>
+                  <button className="documents-secondary-action" type="button" onClick={() => navigate(`/documents/editor/${encodeURIComponent(document.id)}`)}>Open editor</button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
       )}
     </main>

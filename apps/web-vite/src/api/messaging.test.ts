@@ -683,6 +683,38 @@ describe("messaging API client", () => {
       .resolves.toEqual({ kind: "completed", data: { ok: true, agentReply: "On it", messageId } });
   });
 
+  it("reuses the same validated message and intent when an agent reply is retried", async () => {
+    const intentId = "72b99920-8c21-463a-9c5b-479216017501";
+    const agentRequests: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/capabilities/execute") return Response.json({ ok: true, data: { messageId } });
+      agentRequests.push(JSON.parse(String(init?.body)) as unknown);
+      return Response.json({ ok: true, messageId, reply: "On it", replayed: agentRequests.length > 1 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const input = { body: "Ship it", mentions: [], attachmentIds: [] };
+    await sendConversationMessage(conversationId, input, undefined, { intentId, requestAgentReply: true });
+    await sendConversationMessage(conversationId, input, undefined, { intentId, requestAgentReply: true });
+
+    expect(agentRequests).toEqual([
+      { messageId, intentId },
+      { messageId, intentId },
+    ]);
+  });
+
+  it("rejects malformed agent reply success envelopes", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/capabilities/execute"
+      ? Response.json({ ok: true, data: { messageId } })
+      : Response.json({ ok: true, reply: "On it" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, {
+      intentId: "72b99920-8c21-463a-9c5b-479216017501",
+      requestAgentReply: true,
+    })).rejects.toMatchObject({ name: "MessagingApiError" });
+  });
+
   it("carries an intent id on every governed write", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/capabilities/execute") {
@@ -785,7 +817,6 @@ describe("messaging API client", () => {
   });
 
   it("updates conversation presence through the Go session route", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PRESENCE__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
       ok: true,
       data: { previousLastSeenAt: null, previousTypingUntil: null },
@@ -800,7 +831,6 @@ describe("messaging API client", () => {
   });
 
   it("fails closed on invalid input, selected Go errors, and malformed capability output", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PRESENCE__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "presence denied" }, { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(reportConversationPresence("not-a-uuid", false)).rejects.toThrow();
@@ -813,8 +843,8 @@ describe("messaging API client", () => {
     await expect(reportConversationPresence(conversationId, false)).rejects.toThrow("unexpected format");
   });
 
-  it("keeps conversation presence writes on the Go session route when its old selector is false", async () => {
-    vi.stubGlobal("__GO_MESSAGING_PRESENCE__", false);
+  it("keeps conversation presence writes on Go regardless of old selector values", async () => {
+    vi.stubEnv("CHASTE_GO_MESSAGING_PRESENCE", "0");
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { previousLastSeenAt: null, previousTypingUntil: null } }));
     vi.stubGlobal("fetch", fetchMock);
 

@@ -639,7 +639,7 @@ export async function ensureJobsWorkerRole(
         `GRANT SELECT (id) ON TABLE public.organizations TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
       );
       await tx.unsafe(
-        `GRANT SELECT (id, org_id, enabled, trigger_type, next_run_at) ON TABLE public.routines TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
+        `GRANT SELECT (id, org_id, enabled, trigger_type, next_run_at, webhook_token) ON TABLE public.routines TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
       );
       await tx.unsafe(
         `GRANT SELECT (org_id, article_id, queued_at, available_at) ON TABLE public.support_kb_article_embedding_jobs TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
@@ -653,7 +653,6 @@ export async function ensureJobsWorkerRole(
       await tx.unsafe(
         `GRANT USAGE, CREATE ON SCHEMA jobs_worker TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
       );
-
       for (const roleName of [
         JOBS_WORKER_ROLE_NAME,
         JOBS_CLAIM_OWNER_ROLE_NAME,
@@ -673,6 +672,10 @@ export async function ensureJobsWorkerRole(
           );
         }
       }
+
+      await tx.unsafe(
+        `GRANT INSERT (org_id, type, payload) ON TABLE public.jobs TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
+      );
 
       const grantColumns = async (
         roleName: string,
@@ -710,6 +713,9 @@ export async function ensureJobsWorkerRole(
         `ALTER FUNCTION jobs_worker.list_public_support_embedding_orgs(integer, uuid) OWNER TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
       );
       await tx.unsafe(
+        `ALTER FUNCTION jobs_worker.enqueue_routine_webhook(text) OWNER TO ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
+      );
+      await tx.unsafe(
         `REVOKE ALL ON FUNCTION jobs_worker.claim_capability_job(text, integer) FROM PUBLIC`,
       );
       await tx.unsafe(
@@ -737,7 +743,16 @@ export async function ensureJobsWorkerRole(
         `GRANT USAGE ON SCHEMA jobs_worker TO ${JOBS_WORKER_ROLE_NAME}`,
       );
       await tx.unsafe(
+        `GRANT USAGE ON SCHEMA jobs_worker TO ${APP_ROLE_NAME}`,
+      );
+      await tx.unsafe(
         `REVOKE CREATE ON SCHEMA jobs_worker FROM ${JOBS_CLAIM_OWNER_ROLE_NAME}`,
+      );
+      await tx.unsafe(
+        `REVOKE ALL ON FUNCTION jobs_worker.enqueue_routine_webhook(text) FROM PUBLIC`,
+      );
+      await tx.unsafe(
+        `GRANT EXECUTE ON FUNCTION jobs_worker.enqueue_routine_webhook(text) TO ${APP_ROLE_NAME}`,
       );
       await tx.unsafe(
         `GRANT EXECUTE ON FUNCTION jobs_worker.claim_capability_job(text, integer) TO ${JOBS_WORKER_ROLE_NAME}`,

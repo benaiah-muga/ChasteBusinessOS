@@ -161,30 +161,44 @@ describe("POS register session API client", () => {
     await expect(fetchPosModules()).rejects.toBeInstanceOf(PosApiError);
   });
 
-  it("posts a governed open and keeps a 202 approval envelope pending", async () => {
+  it("posts a Go open and keeps a 202 approval envelope pending", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: { sessionId: openId } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(openPosSession({ action: "open", openingFloatMinor: 10000 })).resolves.toEqual({
+    await expect(openPosSession({ action: "open", openingFloatMinor: 10000 }, undefined, {
+      scopeId: "open-pending-test",
+      organizationId: "40000000-0000-4000-8000-000000000004",
+    })).resolves.toEqual({
       kind: "completed",
       data: { sessionId: openId },
     });
-    expect(fetchMock.mock.calls[0]![0]).toBe("/api/pos");
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
+    expect(new Headers(fetchMock.mock.calls[0]![1]?.headers).get("X-Organization-ID")).toBe("40000000-0000-4000-8000-000000000004");
     expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toEqual(expect.objectContaining({
-      action: "open",
-      openingFloatMinor: 10000,
+      capabilityId: "pos.openSession",
+      input: { openingFloatMinor: 10000 },
       intentId: expect.any(String),
     }));
 
     vi.stubGlobal("fetch", vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: false, pendingApproval: true, reason: "needs a manager" }, { status: 202 })));
-    await expect(openPosSession({ action: "open", openingFloatMinor: 0 })).resolves.toEqual({ kind: "pending", reason: "needs a manager" });
+    await expect(openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { scopeId: "open-pending-test" })).resolves.toEqual({ kind: "pending", reason: "needs a manager" });
+  });
+
+  it("rejects an invalid selected organization before sending a POS write", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { sessionId: openId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(openPosSession({ action: "open", openingFloatMinor: 10000 }, undefined, {
+      scopeId: "invalid-org-test",
+      organizationId: "not-a-uuid",
+    })).rejects.toMatchObject({ message: "POS actions require a valid organization identifier." });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("routes register opening through Go and fails closed when its route is missing", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: { sessionId: openId } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(openPosSession({ action: "open", openingFloatMinor: 2500 }, undefined, { useGo: true, scopeId: "open-fallback" })).resolves.toEqual({
+    await expect(openPosSession({ action: "open", openingFloatMinor: 2500 }, undefined, { scopeId: "open-fallback" })).resolves.toEqual({
       kind: "completed",
       data: { sessionId: openId },
     });
@@ -198,7 +212,7 @@ describe("POS register session API client", () => {
     });
 
     fetchMock.mockImplementationOnce(async () => Response.json({ error: "route not mounted" }, { status: 404 }));
-    await expect(openPosSession({ action: "open", openingFloatMinor: 2500 }, undefined, { useGo: true, scopeId: "open-fallback" })).rejects.toMatchObject({ status: 404 });
+    await expect(openPosSession({ action: "open", openingFloatMinor: 2500 }, undefined, { scopeId: "open-fallback" })).rejects.toMatchObject({ status: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]![0]).toBe("/api/capabilities/execute");
     const goIntent = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body)).intentId;
@@ -208,9 +222,10 @@ describe("POS register session API client", () => {
       intentId: goIntent,
       status: "uncertain",
     });
-    await expect(openPosSession({ action: "open", openingFloatMinor: 2500 }, undefined, { useGo: false, scopeId: "open-fallback" }))
-      .rejects.toThrow("A Go register action is unresolved");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(openPosSession({ action: "open", openingFloatMinor: 2500 }, undefined, { scopeId: "open-fallback" }))
+      .resolves.toEqual({ kind: "completed", data: { sessionId: openId } });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2]![0]).toBe("/api/capabilities/execute");
   });
 
   it.each(["open", "close"] as const)("rejects a caller-provided %s intent that differs from the unresolved attempt", async (kind) => {
@@ -221,8 +236,8 @@ describe("POS register session API client", () => {
       ? { action: "open" as const, openingFloatMinor: 3000 }
       : { action: "close" as const, sessionId: openId, countedCashMinor: 14000 };
     const submit = (intentId?: string) => kind === "open"
-      ? openPosSession(action as { action: "open"; openingFloatMinor: number }, undefined, { useGo: true, scopeId, intentId })
-      : closePosSession(action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { useGo: true, scopeId, intentId });
+      ? openPosSession(action as { action: "open"; openingFloatMinor: number }, undefined, { scopeId, intentId })
+      : closePosSession(action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { scopeId, intentId });
 
     await expect(submit()).resolves.toMatchObject({ kind: "pending" });
     const saved = await restorePosRegisterAttempt(scopeId);
@@ -235,7 +250,7 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async () => Response.json({ error: "not authorized" }, { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { useGo: true, scopeId: "open-forbidden" })).rejects.toMatchObject({ status: 403 });
+    await expect(openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { scopeId: "open-forbidden" })).rejects.toMatchObject({ status: 403 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -246,14 +261,13 @@ describe("POS register session API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { sessionId: openId } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(openPosSession({ action: "open", openingFloatMinor: 8750 }, undefined, { useGo: true, scopeId }))
+    await expect(openPosSession({ action: "open", openingFloatMinor: 8750 }, undefined, { scopeId }))
       .resolves.toEqual({ kind: "pending", reason: "manager review" });
     const saved = await restorePosRegisterAttempt(scopeId);
     expect(saved).toMatchObject({ action: { action: "open", openingFloatMinor: 8750 }, status: "pending" });
     expect(saved?.intentId).toMatch(/^[0-9a-f-]{36}$/i);
 
     await expect(openPosSession(saved!.action as { action: "open"; openingFloatMinor: number }, undefined, {
-      useGo: true,
       scopeId,
       intentId: saved!.intentId,
     })).resolves.toEqual({ kind: "completed", data: { sessionId: openId } });
@@ -267,11 +281,11 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async () => Response.json({ error: "connection interrupted" }, { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 14000 }, undefined, { useGo: true, scopeId }))
+    await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 14000 }, undefined, { scopeId }))
       .rejects.toMatchObject({ status: 503 });
     const saved = await restorePosRegisterAttempt(scopeId);
     expect(saved).toMatchObject({ action: { action: "close", sessionId: openId, countedCashMinor: 14000 }, status: "uncertain" });
-    await expect(openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { useGo: true, scopeId }))
+    await expect(openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { scopeId }))
       .rejects.toMatchObject({ message: expect.stringContaining("register action is unresolved") });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -280,8 +294,8 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: kind === "open" ? { sessionId: openId } : { expectedCashMinor: 0, varianceMinor: 0, flagged: false } }));
     vi.stubGlobal("fetch", fetchMock);
     const attempt = kind === "open"
-      ? openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { useGo: true })
-      : closePosSession({ action: "close", sessionId: openId, countedCashMinor: 0 }, undefined, { useGo: true });
+      ? openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { })
+      : closePosSession({ action: "close", sessionId: openId, countedCashMinor: 0 }, undefined, { });
     await expect(attempt).rejects.toMatchObject({ message: expect.stringContaining("requires an authenticated actor and organization scope") });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -291,8 +305,8 @@ describe("POS register session API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("storage disabled"); });
     const attempt = kind === "open"
-      ? openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { useGo: true, scopeId: `storage-${kind}` })
-      : closePosSession({ action: "close", sessionId: openId, countedCashMinor: 0 }, undefined, { useGo: true, scopeId: `storage-${kind}` });
+      ? openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { scopeId: `storage-${kind}` })
+      : closePosSession({ action: "close", sessionId: openId, countedCashMinor: 0 }, undefined, { scopeId: `storage-${kind}` });
     await expect(attempt).rejects.toMatchObject({ message: expect.stringContaining("retry recovery is unavailable") });
     expect(fetchMock).not.toHaveBeenCalled();
     setItem.mockRestore();
@@ -306,7 +320,6 @@ describe("POS register session API client", () => {
       .mockImplementationOnce(() => { throw new Error("quota exceeded"); });
 
     await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 0 }, undefined, {
-      useGo: true,
       scopeId: "close-storage-save-failure",
     })).rejects.toMatchObject({ message: expect.stringContaining("retry recovery could not be saved") });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -326,8 +339,8 @@ describe("POS register session API client", () => {
         ? { action: "open" as const, openingFloatMinor: 3000 }
         : { action: "close" as const, sessionId: openId, countedCashMinor: 14000 };
       const submit = () => kind === "open"
-        ? openPosSession(action as { action: "open"; openingFloatMinor: number }, undefined, { useGo: true, scopeId })
-        : closePosSession(action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { useGo: true, scopeId });
+        ? openPosSession(action as { action: "open"; openingFloatMinor: number }, undefined, { scopeId })
+        : closePosSession(action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { scopeId });
 
       await expect(submit()).rejects.toMatchObject({ status });
       await expect(restorePosRegisterAttempt(scopeId)).resolves.toMatchObject({ action, status: "uncertain" });
@@ -342,7 +355,7 @@ describe("POS register session API client", () => {
   it("clears a register attempt after a terminal client error", async () => {
     const scopeId = "terminal-open-403";
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "not permitted" }, { status: 403 })));
-    await expect(openPosSession({ action: "open", openingFloatMinor: 3000 }, undefined, { useGo: true, scopeId }))
+    await expect(openPosSession({ action: "open", openingFloatMinor: 3000 }, undefined, { scopeId }))
       .rejects.toMatchObject({ status: 403 });
     await expect(restorePosRegisterAttempt(scopeId)).resolves.toBeNull();
   });
@@ -360,8 +373,8 @@ describe("POS register session API client", () => {
       ? { action: "open" as const, openingFloatMinor: 3000 }
       : { action: "close" as const, sessionId: openId, countedCashMinor: 14000 };
     const submit = () => kind === "open"
-      ? openPosSession(action as { action: "open"; openingFloatMinor: number }, undefined, { useGo: true, scopeId })
-      : closePosSession(action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { useGo: true, scopeId });
+      ? openPosSession(action as { action: "open"; openingFloatMinor: number }, undefined, { scopeId })
+      : closePosSession(action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { scopeId });
     await submit();
     localStorage.setItem(markerKey, corruptMarker);
 
@@ -388,38 +401,33 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: saleOutput }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitPosSale(saleAction(), "40000000-0000-4000-8000-000000000004")).resolves.toEqual({
+    await expect(submitPosSale(saleAction(), "40000000-0000-4000-8000-000000000004", undefined, { scopeId: "sale-idempotent-test" })).resolves.toEqual({
       kind: "completed",
       data: saleOutput,
     });
-    await submitPosSale(saleAction(), "40000000-0000-4000-8000-000000000004");
+    await submitPosSale(saleAction(), "40000000-0000-4000-8000-000000000004", undefined, { scopeId: "sale-idempotent-test" });
     const [, first] = fetchMock.mock.calls[0]!;
     const [, second] = fetchMock.mock.calls[1]!;
-    expect(fetchMock.mock.calls[0]![0]).toBe("/api/pos");
-    expect(JSON.parse(String(first?.body))).toEqual(expect.objectContaining({ action: "sale", intentId: "40000000-0000-4000-8000-000000000004" }));
-    expect(JSON.parse(String(second?.body))).toEqual(expect.objectContaining({ action: "sale", intentId: "40000000-0000-4000-8000-000000000004" }));
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(first?.body))).toEqual(expect.objectContaining({ capabilityId: "pos.completeSale", intentId: "40000000-0000-4000-8000-000000000004" }));
+    expect(JSON.parse(String(second?.body))).toEqual(expect.objectContaining({ capabilityId: "pos.completeSale", intentId: "40000000-0000-4000-8000-000000000004" }));
   });
 
-  it("keeps the legacy default independent of retry persistence", async () => {
+  it("requires a retry scope before starting a sale", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: saleOutput }));
     vi.stubGlobal("fetch", fetchMock);
-    const digest = vi.spyOn(crypto.subtle, "digest");
-
-    await expect(submitPosSale(saleAction())).resolves.toEqual({ kind: "completed", data: saleOutput });
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]![0]).toBe("/api/pos");
-    expect(digest).not.toHaveBeenCalled();
+    await expect(submitPosSale(saleAction())).rejects.toThrow("require an authenticated actor and organization scope");
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(Object.keys(localStorage).some((key) => key.startsWith("chaste.pos.sale-intent.v1:"))).toBe(false);
   });
 
-  it("keeps selector-off sale requests on legacy", async () => {
+  it("keeps POS sales on Go when an obsolete selector is disabled", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: saleOutput }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitPosSale(saleAction(), undefined, undefined, { useGo: false, scopeId: "user-legacy" })).resolves.toEqual({ kind: "completed", data: saleOutput });
+    await expect(submitPosSale(saleAction(), undefined, undefined, { scopeId: "user-legacy" })).resolves.toEqual({ kind: "completed", data: saleOutput });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]![0]).toBe("/api/pos");
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
     expect(Object.keys(localStorage).some((key) => key.startsWith("chaste.pos.sale-intent.v1:"))).toBe(false);
   });
 
@@ -436,7 +444,7 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: saleOutput }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-sale-contract" })).resolves.toEqual({
+    await expect(submitPosSale(action, undefined, undefined, { scopeId: "user-sale-contract" })).resolves.toEqual({
       kind: "completed",
       data: saleOutput,
     });
@@ -469,7 +477,7 @@ describe("POS register session API client", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const submitWithGo = (sale: typeof action) => submitPosSale(sale, undefined, undefined, { useGo: true, scopeId: "user-retry" });
+    const submitWithGo = (sale: typeof action) => submitPosSale(sale, undefined, undefined, { scopeId: "user-retry" });
     if (firstOutcome === "transport uncertainty") {
       await expect(submitWithGo(action)).rejects.toMatchObject({ status: 0 });
     } else {
@@ -484,7 +492,7 @@ describe("POS register session API client", () => {
 
     vi.resetModules();
     const reloaded = await import("./pos-session");
-    await expect(reloaded.submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-retry" })).resolves.toEqual({
+    await expect(reloaded.submitPosSale(action, undefined, undefined, { scopeId: "user-retry" })).resolves.toEqual({
       kind: "completed",
       data: saleOutput,
     });
@@ -499,11 +507,11 @@ describe("POS register session API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockImplementationOnce(async () => Response.json({ error: "route not mounted" }, { status: 404 }));
 
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-go-404" })).rejects.toMatchObject({ status: 404 });
+    await expect(submitPosSale(action, undefined, undefined, { scopeId: "user-go-404" })).rejects.toMatchObject({ status: 404 });
     expect(Object.keys(localStorage).some((key) => key.startsWith("chaste.pos.sale-intent.v1:"))).toBe(true);
     const goRequest = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
 
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-go-404" })).resolves.toEqual({
+    await expect(submitPosSale(action, undefined, undefined, { scopeId: "user-go-404" })).resolves.toEqual({
       kind: "completed",
       data: saleOutput,
     });
@@ -522,15 +530,8 @@ describe("POS register session API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: saleOutput }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-route-pin" })).rejects.toMatchObject({ status: 404 });
-    await expect(submitPosSale(action, undefined, undefined, { useGo: false, scopeId: "user-route-pin" })).rejects.toMatchObject({
-      status: 0,
-      message: expect.stringContaining("Restore the Go POS sale route"),
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
-
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-route-pin" })).resolves.toEqual({ kind: "completed", data: saleOutput });
+    await expect(submitPosSale(action, undefined, undefined, { scopeId: "user-route-pin" })).rejects.toMatchObject({ status: 404 });
+    await expect(submitPosSale(action, undefined, undefined, { scopeId: "user-route-pin" })).resolves.toEqual({ kind: "completed", data: saleOutput });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]![0]).toBe("/api/capabilities/execute");
     expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)));
@@ -538,20 +539,19 @@ describe("POS register session API client", () => {
 
   it("treats route-less pre-upgrade sale markers as Go-pinned", async () => {
     const action = { ...saleAction(), cashReceivedMinor: 3220 };
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ error: "route not mounted" }, { status: 404 }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "route not mounted" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: saleOutput }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-old-marker" })).rejects.toMatchObject({ status: 404 });
+    await expect(submitPosSale(action, undefined, undefined, { scopeId: "user-old-marker" })).rejects.toMatchObject({ status: 404 });
     const [storageKey] = Object.keys(localStorage);
     const request = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
     localStorage.setItem(storageKey!, JSON.stringify({ intentId: request.intentId }));
 
     vi.resetModules();
     const reloaded = await import("./pos-session");
-    await expect(reloaded.submitPosSale(action, undefined, undefined, { useGo: false, scopeId: "user-old-marker" })).rejects.toMatchObject({
-      status: 0,
-      message: expect.stringContaining("Restore the Go POS sale route"),
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(reloaded.submitPosSale(action, undefined, undefined, { scopeId: "user-old-marker" })).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -564,7 +564,7 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async (_url: string) => Response.json({ error: "route not mounted" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
     const previousStorageKeys = new Set(Object.keys(localStorage));
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId })).rejects.toMatchObject({ status: 404 });
+    await expect(submitPosSale(action, undefined, undefined, { scopeId })).rejects.toMatchObject({ status: 404 });
     const [storageKey] = Object.keys(localStorage).filter((key) => key.startsWith("chaste.pos.sale-intent.v1:") && !previousStorageKeys.has(key));
     expect(storageKey).toBeDefined();
     localStorage.setItem(storageKey!, invalidMarker);
@@ -572,12 +572,10 @@ describe("POS register session API client", () => {
     vi.resetModules();
     const reloaded = await import("./pos-session");
     const callerSuppliedIntent = "40000000-0000-4000-8000-000000000025";
-    for (const useGo of [true, false]) {
-      await expect(reloaded.submitPosSale(action, callerSuppliedIntent, undefined, { useGo, scopeId })).rejects.toMatchObject({
-        status: 0,
-        message: expect.stringContaining("saved POS sale retry marker is damaged"),
-      });
-    }
+    await expect(reloaded.submitPosSale(action, callerSuppliedIntent, undefined, { scopeId })).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("saved POS sale retry marker is damaged"),
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(storageKey!)).toBe(invalidMarker);
   });
@@ -591,17 +589,15 @@ describe("POS register session API client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const previousStorageKeys = new Set(Object.keys(localStorage));
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId })).rejects.toMatchObject({ status: 404 });
+    await expect(submitPosSale(action, undefined, undefined, { scopeId })).rejects.toMatchObject({ status: 404 });
     const [storageKey] = Object.keys(localStorage).filter((key) => key.startsWith("chaste.pos.sale-intent.v1:") && !previousStorageKeys.has(key));
     expect(storageKey).toBeDefined();
     localStorage.setItem(storageKey!, "{");
 
-    for (const useGo of [true, false]) {
-      await expect(submitPosSale(action, undefined, undefined, { useGo, scopeId })).rejects.toMatchObject({
-        status: 0,
-        message: expect.stringContaining("saved POS sale retry marker is damaged"),
-      });
-    }
+    await expect(submitPosSale(action, undefined, undefined, { scopeId })).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("saved POS sale retry marker is damaged"),
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(storageKey!)).toBe("{");
   });
@@ -611,7 +607,7 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ error: "Go declined the sale" }, { status }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-refusal" })).rejects.toMatchObject({ status });
+    await expect(submitPosSale(action, undefined, undefined, { scopeId: "user-refusal" })).rejects.toMatchObject({ status });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -620,8 +616,8 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: saleOutput }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-one" });
-    await submitPosSale(action, undefined, undefined, { useGo: true, scopeId: "user-two" });
+    await submitPosSale(action, undefined, undefined, { scopeId: "user-one" });
+    await submitPosSale(action, undefined, undefined, { scopeId: "user-two" });
     const first = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)).intentId;
     const second = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body)).intentId;
     expect(first).not.toBe(second);
@@ -649,13 +645,11 @@ describe("POS register session API client", () => {
       sessionId: openId,
       countedCashMinor: 14000,
       varianceReason: "one refund entered after the count",
-    })).resolves.toEqual({ kind: "completed", data: { expectedCashMinor: 14500, varianceMinor: -500, flagged: true } });
-    expect(fetchMock.mock.calls[0]![0]).toBe("/api/pos");
+    }, undefined, { scopeId: "close-variance-test" })).resolves.toEqual({ kind: "completed", data: { expectedCashMinor: 14500, varianceMinor: -500, flagged: true } });
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
     expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toEqual(expect.objectContaining({
-      action: "close",
-      sessionId: openId,
-      countedCashMinor: 14000,
-      varianceReason: "one refund entered after the count",
+      capabilityId: "pos.closeSession",
+      input: { sessionId: openId, countedCashMinor: 14000, varianceReason: "one refund entered after the count" },
     }));
   });
 
@@ -669,7 +663,7 @@ describe("POS register session API client", () => {
       sessionId: openId,
       countedCashMinor: 14000,
       varianceReason: "one refund entered after the count",
-    }, undefined, { useGo: true, scopeId: "close-success" })).resolves.toEqual({ kind: "completed", data: output });
+    }, undefined, { scopeId: "close-success" })).resolves.toEqual({ kind: "completed", data: output });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
     const goBody = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
@@ -688,32 +682,34 @@ describe("POS register session API client", () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 14500 }, undefined, { useGo: true, scopeId: "close-pending" }))
+    await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 14500 }, undefined, { scopeId: "close-pending" }))
       .resolves.toEqual({ kind: "pending", reason: "manager review" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
   });
 
   it("fails closed when the Go close route is missing", async () => {
-    const fetchMock = vi.fn(async (_url: string) => Response.json({ error: "route not mounted" }, { status: 404 }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "route not mounted" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { expectedCashMinor: 14500, varianceMinor: 0, flagged: false } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 14500 }, undefined, { useGo: true, scopeId: "close-fallback" }))
+    await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 14500 }, undefined, { scopeId: "close-fallback" }))
       .rejects.toMatchObject({ status: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/capabilities/execute");
     const saved = await restorePosRegisterAttempt("close-fallback");
     expect(saved).toMatchObject({ action: { action: "close", sessionId: openId, countedCashMinor: 14500 }, status: "uncertain" });
-    await expect(closePosSession(saved!.action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { useGo: false, scopeId: "close-fallback" }))
-      .rejects.toThrow("A Go register action is unresolved");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(closePosSession(saved!.action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { scopeId: "close-fallback" }))
+      .resolves.toEqual({ kind: "completed", data: { expectedCashMinor: 14500, varianceMinor: 0, flagged: false } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it.each([403, 422, 503])("does not fall back to legacy after Go returns HTTP %s", async (status) => {
     const fetchMock = vi.fn(async () => Response.json({ error: "Go declined the close" }, { status }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 14500 }, undefined, { useGo: true, scopeId: `close-error-${status}` }))
+    await expect(closePosSession({ action: "close", sessionId: openId, countedCashMinor: 14500 }, undefined, { scopeId: `close-error-${status}` }))
       .rejects.toMatchObject({ status });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -731,11 +727,10 @@ describe("POS register session API client", () => {
       reason: "damaged on arrival",
       refundMethod: "cash",
       lines: [{ invoiceLineId: lineId, quantity: 500 }],
-    })).resolves.toMatchObject({ kind: "completed", data: { restockedLines: 1 } });
+    }, undefined, { scopeId: "return-itemized-test" })).resolves.toMatchObject({ kind: "completed", data: { restockedLines: 1 } });
     expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toEqual(expect.objectContaining({
-      action: "returnSale",
-      invoiceId: saleId,
-      lines: [{ invoiceLineId: lineId, quantity: 500 }],
+      capabilityId: "pos.returnSale",
+      input: { invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash", lines: [{ invoiceLineId: lineId, quantity: 500 }] },
     }));
   });
 
@@ -747,7 +742,7 @@ describe("POS register session API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "returnSale" as const, invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" as const, lines: [{ invoiceLineId: lineId, quantity: 500 }] };
 
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId: "org-1:actor-1" })).resolves.toMatchObject({
+    await expect(requestPosReturn(action, undefined, { scopeId: "org-1:actor-1" })).resolves.toMatchObject({
       kind: "completed", data: { refundMinor: 1250, restockedLines: 1 },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -770,20 +765,20 @@ describe("POS register session API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "returnSale" as const, invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" as const, lines: [{ invoiceLineId: lineId, quantity: 500 }] };
 
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId: "org-1:actor-1" })).resolves.toMatchObject({ kind: "pending" });
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId: "org-1:actor-1" })).resolves.toMatchObject({ kind: "pending" });
+    await expect(requestPosReturn(action, undefined, { scopeId: "org-1:actor-1" })).resolves.toMatchObject({ kind: "pending" });
+    await expect(requestPosReturn(action, undefined, { scopeId: "org-1:actor-1" })).resolves.toMatchObject({ kind: "pending" });
     vi.resetModules();
     const { requestPosReturn: retryReturn, restorePosReturnAttempt: restoreReturn } = await import("./pos-session");
     await expect(restoreReturn("org-1:actor-1")).resolves.toEqual({
       action, intentId: expect.any(String), status: "pending",
     });
-    await expect(retryReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { useGo: true, scopeId: "org-1:actor-1" }))
+    await expect(retryReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { scopeId: "org-1:actor-1" }))
       .rejects.toThrow(/previous return result is still unknown/i);
-    await expect(retryReturn(action, undefined, { useGo: true, scopeId: "org-1:actor-1" })).resolves.toMatchObject({ kind: "completed" });
+    await expect(retryReturn(action, undefined, { scopeId: "org-1:actor-1" })).resolves.toMatchObject({ kind: "completed" });
     const intents = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).intentId);
     expect(intents[0]).toBe(intents[1]);
     expect(intents[1]).toBe(intents[2]);
-    await expect(retryReturn(action, undefined, { useGo: true, scopeId: "org-1:actor-1" })).resolves.toMatchObject({ kind: "completed" });
+    await expect(retryReturn(action, undefined, { scopeId: "org-1:actor-1" })).resolves.toMatchObject({ kind: "completed" });
     const laterIntent = JSON.parse(String(fetchMock.mock.calls[3]![1]?.body)).intentId;
     expect(laterIntent).not.toBe(intents[2]);
   });
@@ -793,10 +788,10 @@ describe("POS register session API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "returnSale" as const, invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" as const, lines: [{ invoiceLineId: lineId, quantity: 500 }] };
     const scopeId = "return-404:actor-1";
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId })).rejects.toMatchObject({ status: 404 });
+    await expect(requestPosReturn(action, undefined, { scopeId })).rejects.toMatchObject({ status: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await expect(restorePosReturnAttempt(scopeId)).resolves.toMatchObject({ action, intentId: expect.any(String) });
-    await expect(requestPosReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { useGo: false, scopeId }))
+    await expect(requestPosReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { scopeId }))
       .rejects.toThrow("previous return result is still unknown");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -804,7 +799,7 @@ describe("POS register session API client", () => {
   it.each([401, 403, 422, 500])("does not fall back from Go return status %s", async (status) => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ error: "rejected" }, { status }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(requestPosReturn({ action: "returnSale", invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" }, undefined, { useGo: true, scopeId: `org-error-${status}:actor-1` })).rejects.toBeInstanceOf(PosApiError);
+    await expect(requestPosReturn({ action: "returnSale", invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" }, undefined, { scopeId: `org-error-${status}:actor-1` })).rejects.toBeInstanceOf(PosApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -818,14 +813,14 @@ describe("POS register session API client", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "returnSale" as const, invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" as const, lines: [{ invoiceLineId: lineId, quantity: 500 }] };
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId: "org-retry:actor-1" })).rejects.toBeInstanceOf(PosApiError);
-    await expect(requestPosReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { useGo: true, scopeId: "org-retry:actor-1" }))
+    await expect(requestPosReturn(action, undefined, { scopeId: "org-retry:actor-1" })).rejects.toBeInstanceOf(PosApiError);
+    await expect(requestPosReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { scopeId: "org-retry:actor-1" }))
       .rejects.toThrow(/previous return result is still unknown/i);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.resetModules();
     const { requestPosReturn: retryReturn } = await import("./pos-session");
-    await retryReturn(action, undefined, { useGo: true, scopeId: "org-retry:actor-1" });
-    await retryReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { useGo: true, scopeId: "org-retry:actor-1" });
+    await retryReturn(action, undefined, { scopeId: "org-retry:actor-1" });
+    await retryReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { scopeId: "org-retry:actor-1" });
     const intents = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).intentId);
     expect(intents[0]).toBe(intents[1]);
     expect(intents[2]).not.toBe(intents[1]);
@@ -842,8 +837,8 @@ describe("POS register session API client", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "returnSale" as const, invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" as const, lines: [{ invoiceLineId: lineId, quantity: 500 }] };
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId: "org-2:actor-1" })).rejects.toBeInstanceOf(PosApiError);
-    await expect(requestPosReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { useGo: true, scopeId: "org-2:actor-1" })).resolves.toMatchObject({ kind: "completed" });
+    await expect(requestPosReturn(action, undefined, { scopeId: "org-2:actor-1" })).rejects.toBeInstanceOf(PosApiError);
+    await expect(requestPosReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { scopeId: "org-2:actor-1" })).resolves.toMatchObject({ kind: "completed" });
     const intents = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).intentId);
     expect(intents[0]).not.toBe(intents[1]);
   });
@@ -859,9 +854,9 @@ describe("POS register session API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "returnSale" as const, invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" as const, lines: [{ invoiceLineId: lineId, quantity: 500 }] };
     const scopeId = "org-terminal:actor-1";
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId })).resolves.toMatchObject({ kind: "pending" });
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId })).rejects.toBeInstanceOf(PosApiError);
-    await expect(requestPosReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { useGo: true, scopeId })).resolves.toMatchObject({ kind: "completed" });
+    await expect(requestPosReturn(action, undefined, { scopeId })).resolves.toMatchObject({ kind: "pending" });
+    await expect(requestPosReturn(action, undefined, { scopeId })).rejects.toBeInstanceOf(PosApiError);
+    await expect(requestPosReturn({ ...action, lines: [{ invoiceLineId: lineId, quantity: 250 }] }, undefined, { scopeId })).resolves.toMatchObject({ kind: "completed" });
     const intents = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).intentId);
     expect(intents[0]).toBe(intents[1]);
     expect(intents[2]).not.toBe(intents[1]);
@@ -882,13 +877,13 @@ describe("POS register session API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "returnSale" as const, invoiceId: saleId, reason: "damaged on arrival", refundMethod: "card" as const, lines: [{ invoiceLineId: lineId, quantity: 250 }] };
     const scopeId = `org-retry-${label}:actor-1`;
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId })).resolves.toMatchObject({ kind: "pending" });
-    await expect(requestPosReturn(action, undefined, { useGo: true, scopeId })).rejects.toBeInstanceOf(PosApiError);
+    await expect(requestPosReturn(action, undefined, { scopeId })).resolves.toMatchObject({ kind: "pending" });
+    await expect(requestPosReturn(action, undefined, { scopeId })).rejects.toBeInstanceOf(PosApiError);
     vi.resetModules();
     const reloadedPosSession = await import("./pos-session");
     const restoredAttempt = await reloadedPosSession.restorePosReturnAttempt(scopeId);
     expect(restoredAttempt).toEqual({ action, intentId: expect.any(String), status: "pending" });
-    await expect(reloadedPosSession.requestPosReturn(action, undefined, { useGo: true, scopeId })).resolves.toMatchObject({ kind: "completed" });
+    await expect(reloadedPosSession.requestPosReturn(action, undefined, { scopeId })).resolves.toMatchObject({ kind: "completed" });
     const requests = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)) as { capabilityId: string; input: unknown; intentId: string });
     const expectedInput = { invoiceId: saleId, reason: "damaged on arrival", refundMethod: "card", lines: [{ invoiceLineId: lineId, quantity: 250 }] };
     expect(requests).toHaveLength(3);
@@ -904,8 +899,8 @@ describe("POS register session API client", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "returnSale" as const, invoiceId: saleId, reason: "damaged on arrival", refundMethod: "cash" as const };
-    await requestPosReturn(action, undefined, { useGo: true, scopeId: "org-private-a:actor-private-a" });
-    await requestPosReturn(action, undefined, { useGo: true, scopeId: "org-private-b:actor-private-a" });
+    await requestPosReturn(action, undefined, { scopeId: "org-private-a:actor-private-a" });
+    await requestPosReturn(action, undefined, { scopeId: "org-private-b:actor-private-a" });
     const intents = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).intentId);
     expect(intents[0]).not.toBe(intents[1]);
     expect(Object.keys(localStorage).join(" ")).not.toMatch(/org-private|actor-private/);
@@ -1036,7 +1031,7 @@ describe("POS register session API client", () => {
     });
 
     vi.stubGlobal("fetch", vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, data: { sessionId: "" } })));
-    await expect(openPosSession({ action: "open", openingFloatMinor: 0 })).rejects.toMatchObject({
+    await expect(openPosSession({ action: "open", openingFloatMinor: 0 }, undefined, { scopeId: "malformed-output-test" })).rejects.toMatchObject({
       message: "The POS service returned an unexpected action response.",
     });
   });

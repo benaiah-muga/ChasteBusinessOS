@@ -168,8 +168,8 @@ func TestPgRoutinesWebhookTokenReaderScopesTokensByOrganization(t *testing.T) {
 		}
 	})
 
-	localToken := "go-routines-local-" + orgID[:8]
-	foreignToken := "go-routines-foreign-" + otherOrgID[:8]
+	localToken := orgID
+	foreignToken := otherOrgID
 	for _, fixture := range []struct {
 		orgID string
 		token string
@@ -185,6 +185,12 @@ func TestPgRoutinesWebhookTokenReaderScopesTokensByOrganization(t *testing.T) {
 			t.Fatalf("insert %s: %v", fixture.name, err)
 		}
 	}
+	const disabledToken = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO routines (org_id, name, prompt, schedule, enabled, trigger_type, webhook_token)
+		VALUES ($1::uuid, 'Disabled webhook routine', 'Routine fixture prompt', '{"kind":"interval","everyMinutes":60}'::jsonb, false, 'webhook', $2)`, orgID, disabledToken); err != nil {
+		t.Fatalf("insert disabled routine: %v", err)
+	}
 
 	tokens, err := (pgRoutinesWebhookTokenReader{pool: runtime}).ForOrganization(ctx, orgID)
 	if err != nil {
@@ -198,6 +204,37 @@ func TestPgRoutinesWebhookTokenReaderScopesTokensByOrganization(t *testing.T) {
 	}
 	if tokensValue := tokensValueForToken(tokens, foreignToken); tokensValue != "" {
 		t.Fatalf("foreign token leaked into organization result: %#v", tokens)
+	}
+	var localRoutineID string
+	for id, token := range tokens {
+		if token == localToken {
+			localRoutineID = id
+		}
+	}
+	if localRoutineID == "" {
+		t.Fatalf("local routine id is missing from token result: %#v", tokens)
+	}
+	queued, err := (pgRoutinesWebhookEnqueuer{pool: runtime}).Enqueue(ctx, localToken)
+	if err != nil || !queued {
+		t.Fatalf("enqueue local webhook: queued=%t err=%v", queued, err)
+	}
+	queued, err = (pgRoutinesWebhookEnqueuer{pool: runtime}).Enqueue(ctx, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	if err != nil || queued {
+		t.Fatalf("unknown webhook token was accepted: queued=%t err=%v", queued, err)
+	}
+	queued, err = (pgRoutinesWebhookEnqueuer{pool: runtime}).Enqueue(ctx, disabledToken)
+	if err != nil || queued {
+		t.Fatalf("disabled webhook token was accepted: queued=%t err=%v", queued, err)
+	}
+	var enqueuedJobs int
+	if err := owner.QueryRow(ctx, `
+		SELECT count(*) FROM jobs
+		WHERE org_id=$1::uuid AND type='routines.executeRoutine'
+		  AND payload->>'routineId'=$2 AND payload->>'trigger'='webhook'`, orgID, localRoutineID).Scan(&enqueuedJobs); err != nil {
+		t.Fatal(err)
+	}
+	if enqueuedJobs != 1 {
+		t.Fatalf("queued webhook jobs=%d, want 1", enqueuedJobs)
 	}
 }
 

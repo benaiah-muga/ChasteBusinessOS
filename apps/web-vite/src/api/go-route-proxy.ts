@@ -42,19 +42,9 @@ export type GoRouteProxyFlags = {
   posRead: boolean;
   posShiftSummary: boolean;
   onboarding: boolean;
-  messageAttachmentDownloads: boolean;
-  messagingPresence: boolean;
   approvalsRead: boolean;
   approvalsDecision: boolean;
 };
-
-export function goPosOpenSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_POS_OPEN_SESSION_SLICE !== "0";
-}
-
-export function goPosCloseSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_POS_CLOSE_SESSION_SLICE !== "0";
-}
 
 export function goProjectsWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PROJECTS_WRITES === "1";
@@ -148,20 +138,6 @@ export function goPurchasingAPAgingReadsFromEnv(env: Record<string, string | und
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_AP_AGING_READS === "1";
 }
 
-export function goDocumentsIngestedReadsFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_DOCUMENT_INGESTED_READS === "1";
-}
-
-export function goDocumentsVersionReadsFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_DOCUMENTS_VERSION_READS === "1";
-}
-
-export function goDocumentsEditorReadsFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" &&
-    env.CHASTE_GO_DOCUMENTS_EDITOR_READS === "1" &&
-    env.CHASTE_GO_DOCUMENTS_VERSION_READS === "1";
-}
-
 export function goMessagingConversationListFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_CONVERSATION_LIST !== "0";
 }
@@ -206,16 +182,8 @@ export function goMessagingPinsFromEnv(env: Record<string, string | undefined>):
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_PINS !== "0";
 }
 
-export function goMessagingPresenceFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_PRESENCE !== "0";
-}
-
 export function goMessagingAttachmentUploadFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD !== "0";
-}
-
-export function goMessagingAttachmentDownloadsFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD !== "0";
 }
 
 export function goSupportInboxReadsFromEnv(env: Record<string, string | undefined>): boolean {
@@ -299,47 +267,45 @@ export function goBankReconciliationWritesFromEnv(env: Record<string, string | u
 
 export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>): GoRouteProxyFlags {
   return {
-    supportPublic: env.CHASTE_GO_SUPPORT_PUBLIC_ROUTE === "1",
+    supportPublic: true,
     // Go owns the auth namespace by default and returns 404 or 405 for unsupported routes.
     auth: env.CHASTE_GO_AUTH_ROUTE !== "0" && env.GO_AUTH_ROUTE !== "0",
     authOidc: env.CHASTE_GO_AUTH_OIDC_ROUTE === "1",
     authSaml: env.CHASTE_GO_AUTH_SAML_ROUTE === "1",
-    scimRead: env.CHASTE_GO_SCIM_READ_ROUTE === "1",
-    scimWrite: env.CHASTE_GO_SCIM_WRITE_ROUTE === "1",
+    scimRead: true,
+    scimWrite: true,
     salesOrders: env.CHASTE_GO_SALES_ORDERS_ROUTE !== "0",
     modulesRead: env.CHASTE_GO_MODULES_ROUTE !== "0",
-    modulesWrite: env.CHASTE_GO_MODULES_WRITE_ROUTE === "1",
+    modulesWrite: true,
     projects: env.CHASTE_GO_PROJECTS_ROUTE !== "0",
-    routines: env.CHASTE_GO_ROUTINES_ROUTE !== "0",
+    routines: true,
     memory: env.CHASTE_GO_MEMORY_ROUTE !== "0",
     moduleSettings: env.CHASTE_GO_MODULE_SETTINGS_ROUTE !== "0",
     aiConfig: env.CHASTE_GO_AI_CONFIG_ROUTE !== "0",
     policy: env.CHASTE_GO_POLICY_ROUTE !== "0",
     teamRead: env.CHASTE_GO_TEAM_READ_ROUTE !== "0",
     teamWrite: env.CHASTE_GO_TEAM_WRITE_ROUTE !== "0",
-    branding: env.CHASTE_GO_BRANDING_ROUTE === "1",
+    branding: true,
     analytics: env.CHASTE_GO_ANALYTICS_ROUTE !== "0",
     analyticsReport: env.CHASTE_GO_ANALYTICS_REPORT_ROUTE !== "0",
     myWork: env.CHASTE_GO_MY_WORK_ROUTE !== "0",
     dashboard: env.CHASTE_GO_DASHBOARD_ROUTE !== "0",
     setup: env.CHASTE_GO_SETUP_ROUTE !== "0",
-    ledger: env.CHASTE_GO_LEDGER_ROUTE === "1",
+    ledger: true,
     metrics: env.CHASTE_GO_METRICS_ROUTE !== "0",
-    myWorkSummary: env.CHASTE_GO_MY_WORK_SUMMARY_ROUTE === "1",
-    signals: env.CHASTE_GO_SIGNALS_ROUTE === "1",
-    scimTokens: env.CHASTE_GO_SCIM_TOKENS_ROUTE === "1",
+    myWorkSummary: true,
+    signals: true,
+    scimTokens: true,
     sessions: env.CHASTE_GO_SESSIONS_ROUTE !== "0",
     durableRuns: env.CHASTE_GO_DURABLE_RUNS_ROUTE !== "0",
-    notifications: env.CHASTE_GO_NOTIFICATIONS_ROUTE === "1",
-    notificationsWrite: env.CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE === "1",
+    notifications: true,
+    notificationsWrite: true,
     crmReads: env.CHASTE_GO_CRM_READS !== "0",
     crmFollowUpDraft: env.CHASTE_GO_CRM_FOLLOW_UP_DRAFT_ROUTE !== "0",
     supportReplyDraft: env.CHASTE_GO_SUPPORT_REPLY_DRAFT_ROUTE !== "0",
-    posRead: env.CHASTE_GO_POS_READ_ROUTE !== "0",
-    posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
-    onboarding: env.CHASTE_GO_ONBOARDING_ROUTE === "1",
-    messageAttachmentDownloads: goMessagingAttachmentDownloadsFromEnv(env),
-    messagingPresence: goMessagingPresenceFromEnv(env),
+    posRead: true,
+    posShiftSummary: true,
+    onboarding: true,
     approvalsRead: env.CHASTE_GO_APPROVALS_READ_ROUTE !== "0",
     approvalsDecision: env.CHASTE_GO_APPROVALS_DECISION_ROUTE !== "0",
   };
@@ -352,13 +318,20 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (["GET", "POST", "PUT", "PATCH"].includes(method ?? "") && /^\/api\/org(?:\?.*)?$/.test(path)) return true;
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
+  // These namespaces have Go handlers for their active Vite flows. Keep malformed
+  // paths and unsupported methods on Go so they cannot silently invoke Next.
+  if (/^\/api\/(?:branding|ledger|signals|notifications|onboarding|support\/public|my-work|modules|scim\/tokens|scim\/v2\/Users|sessions|durable-runs)(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
+  if (/^\/api\/routines(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
   const attachmentID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
   if (method === "GET" && new RegExp(`^/api/go/documents/${attachmentID}/content(?:\\?.*)?$`, "i").test(path)) return true;
-  if (/^\/api\/docs\/assist(?:[^?]*)(?:\?.*)?$/.test(path)) return true;
-  if (["POST", "DELETE"].includes(method ?? "") && /^\/api\/docs\/[^?]*\/workspace(?:[^?]*)(?:\?.*)?$/.test(path)) return true;
-  if (flags.messagingPresence && ["GET", "POST"].includes(method ?? "") && new RegExp(`^/api/conversations/${attachmentID}/presence(?:\\?.*)?$`, "i").test(path)) return true;
-  if (flags.messagingPresence && method === "POST" && new RegExp(`^/api/conversations/${attachmentID}/agent-reply$`, "i").test(path)) return true;
-  if (flags.messageAttachmentDownloads && method === "GET" && new RegExp(`^/api/message-attachments/${attachmentID}(?:\\?.*)?$`, "i").test(path)) return true;
+  // Go owns the Documents namespace in Vite. Unknown paths and methods must
+  // reach Go's 404/405 handling rather than fall through to the legacy app.
+  if (/^\/api\/docs(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
+  // These endpoint namespaces are owned by Go. Route invalid IDs and methods
+  // there too, so Go can return its 404/405 instead of invoking Next handlers.
+  const pathname = path.split("?", 1)[0] ?? "";
+  if (pathname.startsWith("/api/conversations/") && /\/(?:presence|agent-reply)(?:\/|$)/.test(pathname)) return true;
+  if (pathname === "/api/message-attachments" || pathname.startsWith("/api/message-attachments/")) return true;
   if (flags.auth && isGoAuthRequest(path)) return true;
   const scimUserPath = /^\/api\/scim\/v2\/Users(?:\?.*)?$/;
   const scimUserItemPath = /^\/api\/scim\/v2\/Users\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\?.*)?$/i;
@@ -399,9 +372,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.crmReads && method === "GET" && isGoCrmReadRequest(path)) return true;
   if (flags.crmFollowUpDraft && method === "POST" && /^\/api\/crm\/follow-up-draft(?:\?.*)?$/.test(path)) return true;
   if (flags.supportReplyDraft && method === "POST" && /^\/api\/support\/draft(?:\?.*)?$/.test(path)) return true;
-  if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;
-  if (method === "GET" && /^\/api\/pos\/customers(?:\?.*)?$/.test(path)) return true;
-  if (flags.posShiftSummary && method === "POST" && /^\/api\/pos\/shift-summary(?:\?.*)?$/.test(path)) return true;
+  if (/^\/api\/pos(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
   if (flags.dashboard && method === "GET" && /^\/api\/dashboard(?:\?.*)?$/.test(path)) return true;
   if (flags.setup && isGoSetupRequest(method, path)) return true;
   if (flags.ledger && method === "GET" && /^\/api\/ledger(?:\?.*)?$/.test(path)) return true;

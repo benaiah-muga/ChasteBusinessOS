@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { submitGoverned } from "../api/settings";
 import { SettingsPage } from "./SettingsPage";
 
 const switchboard = {
@@ -63,7 +64,16 @@ const orgRoute = () => jsonResponse({
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(navigator, "locks");
+  localStorage.clear();
 });
+
+function enableRetryLock() {
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: { request: (_name: string, _options: { mode: "exclusive" }, callback: () => unknown) => callback() },
+  });
+}
 
 describe("Vite settings page", () => {
   it("names the active organization and links out to the surfaces that own the facts", async () => {
@@ -285,12 +295,13 @@ describe("Vite settings page", () => {
   }, 20_000);
 
   it("creates a routine and reports the webhook trigger the server minted", async () => {
+    enableRetryLock();
     const fetchMock = routedFetch({
       "/api/routines": (init) => (init?.method === "POST"
         ? jsonResponse({ id: "r1", webhookUrl: "https://app.example/api/routines/webhook/tok_123" })
         : jsonResponse({ routines: [] })),
     });
-    render(<SettingsPage />);
+    render(<SettingsPage actorId="actor-settings" organizationId="org-settings" />);
     fireEvent.click(screen.getByRole("tab", { name: "Routines" }));
 
     expect(await screen.findByText("No routines yet. Create one above, or start with the daily heartbeat.")).not.toBeNull();
@@ -308,6 +319,43 @@ describe("Vite settings page", () => {
     });
     await waitFor(() => expect((screen.getByLabelText("Routine name") as HTMLInputElement).value).toBe(""));
   }, 20_000);
+
+  it("shows a saved routine action after reload and retries with its original intent", async () => {
+    enableRetryLock();
+    const scope = { actorId: "retry-actor", organizationId: "retry-org" };
+    const uncertainFetch = vi.fn().mockRejectedValue(new TypeError("connection dropped"));
+    vi.stubGlobal("fetch", uncertainFetch);
+    const action = { action: "run_now", routineId: "routine-retry" };
+    await expect(submitGoverned("/api/routines", action, undefined, scope)).rejects.toMatchObject({ status: 0 });
+
+    const fetchMock = routedFetch({
+      "/api/modules": () => jsonResponse(switchboard),
+      "/api/routines": (init) => init?.method === "POST"
+        ? jsonResponse({ pendingApproval: true, reason: "Approval required" }, 202)
+        : jsonResponse({ routines: [] }),
+    });
+    render(<SettingsPage actorId={scope.actorId} organizationId={scope.organizationId} />);
+
+    expect(await screen.findByText("A routine change may not have reached the server.")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry exact change" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+    expect(postsTo(fetchMock, "/api/routines")[0]).toEqual(JSON.parse(String(uncertainFetch.mock.calls[0]?.[1]?.body)));
+    expect(await screen.findByText("Approval required")).not.toBeNull();
+  });
+
+  it("surfaces an unreadable routine retry marker without clearing it", async () => {
+    enableRetryLock();
+    const scope = { actorId: "ui-corrupt-actor", organizationId: "ui-corrupt-org" };
+    const storageKey = `chaste:governed-retry:v1:${scope.actorId}:${scope.organizationId}`;
+    localStorage.setItem(storageKey, "not-json");
+    routedFetch({ "/api/modules": () => jsonResponse(switchboard) });
+
+    render(<SettingsPage actorId={scope.actorId} organizationId={scope.organizationId} />);
+
+    expect(await screen.findByText("Safe routine retries are unavailable.")).not.toBeNull();
+    expect(screen.getByText(/blocked until this workspace is reconciled/)).not.toBeNull();
+    expect(localStorage.getItem(storageKey)).toBe("not-json");
+  });
 
   it("prevents unsupported schedule phrases from reaching the Go routines API", async () => {
     const fetchMock = routedFetch({ "/api/routines": () => jsonResponse({ routines: [] }) });

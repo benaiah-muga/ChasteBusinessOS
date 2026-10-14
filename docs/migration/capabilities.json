@@ -9938,6 +9938,54 @@
       }
     },
     {
+      "id": "documents.allocateNumber",
+      "title": "Allocate authored document number",
+      "intent": "Reserve the next organization-scoped number for an authored business document.",
+      "module": "documents",
+      "risk": "write",
+      "permission": "documents.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "invoice",
+              "quote",
+              "receipt",
+              "delivery_note",
+              "purchase_order",
+              "voucher",
+              "employment_contract",
+              "employment_agreement"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "documents.createDoc",
       "title": "Create authored document",
       "intent": "Start a new rich text business document, optionally from a filled-in template, so staff can draft letters, quotes and notes in one place",

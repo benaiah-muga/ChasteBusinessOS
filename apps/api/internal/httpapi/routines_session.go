@@ -34,7 +34,13 @@ func (r pgRoutinesWebhookTokenReader) ForOrganization(ctx context.Context, orgID
 		return nil, errors.New("routines database unavailable")
 	}
 	return dbx.WithOrgTx(ctx, r.pool, orgID, func(tx pgx.Tx) (map[string]string, error) {
-		rows, err := tx.Query(ctx, `SELECT id::text, webhook_token FROM routines WHERE org_id=$1::uuid AND webhook_token IS NOT NULL`, orgID)
+		rows, err := tx.Query(ctx, `
+			SELECT id::text, webhook_token
+			FROM routines
+			WHERE org_id=$1::uuid
+			  AND webhook_token IS NOT NULL
+			  AND enabled = true
+			  AND trigger_type = 'webhook'`, orgID)
 		if err != nil {
 			return nil, err
 		}

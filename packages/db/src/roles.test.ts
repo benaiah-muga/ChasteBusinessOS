@@ -434,6 +434,34 @@ describe("capability jobs worker role provisioning", () => {
     });
   });
 
+  it("lets the app enqueue a routine webhook without granting schema creation", async () => {
+    const result = await admin.unsafe<{
+      schema_usage: boolean;
+      schema_create: boolean;
+      enqueue_execute: boolean;
+      enqueue_public_execute: boolean;
+    }[]>(
+      `SELECT has_schema_privilege('chaste_app', 'jobs_worker', 'USAGE') AS schema_usage,
+              has_schema_privilege('chaste_app', 'jobs_worker', 'CREATE') AS schema_create,
+              has_function_privilege('chaste_app', 'jobs_worker.enqueue_routine_webhook(text)', 'EXECUTE') AS enqueue_execute,
+              EXISTS (
+                SELECT 1
+                FROM aclexplode(COALESCE(procedure.proacl, acldefault('f', procedure.proowner))) acl
+                WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+              ) AS enqueue_public_execute
+       FROM pg_proc procedure
+       JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
+       WHERE namespace.nspname = 'jobs_worker' AND procedure.proname = 'enqueue_routine_webhook'`,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      schema_usage: true,
+      schema_create: false,
+      enqueue_execute: true,
+      enqueue_public_execute: false,
+    });
+  });
+
   it("allows the dedicated worker to call bounded support embedding discovery", async () => {
     const result = await jobsWorker<{ count: number }[]>`
       SELECT count(*)::int AS count

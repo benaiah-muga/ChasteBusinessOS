@@ -7,6 +7,7 @@ import {
   fetchModuleSettings,
   fetchModuleSwitchboard,
   fetchPolicy,
+  fetchPendingGovernedAttempt,
   isProtectedModule,
   PROTECTED_MODULE_IDS,
   saveAiConfig,
@@ -14,6 +15,7 @@ import {
   sendEmailTest,
   SettingsApiError,
   submitGoverned,
+  retryPendingGoverned,
 } from "./settings";
 
 const switchboard = {
@@ -49,9 +51,83 @@ function postBodies(fetchMock: { mock: { calls: Call[] } }): Record<string, unkn
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  localStorage.clear();
+  Reflect.deleteProperty(navigator, "locks");
 });
 
+function enableRetryLock() {
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: { request: (_name: string, _options: { mode: "exclusive" }, callback: () => unknown) => callback() },
+  });
+}
+
 describe("Vite settings API", () => {
+  it("reuses the exact routine intent after uncertain transport and clears it only on completion", async () => {
+    enableRetryLock();
+    const scope = { actorId: "actor-1", organizationId: "org-1" };
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection dropped"))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "create", name: "Daily summary", prompt: "Summarize activity", scheduleText: "0 9 * * *" };
+
+    await expect(submitGoverned("/api/routines", action, undefined, scope)).rejects.toMatchObject({ status: 0 });
+    const saved = await fetchPendingGovernedAttempt(scope);
+    expect(saved).toMatchObject({ path: "/api/routines", action });
+    await expect(submitGoverned("/api/routines", action, undefined, scope)).resolves.toEqual({ kind: "completed", data: { ok: true } });
+
+    const [firstBody, secondBody] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+    expect(secondBody).toEqual(firstBody);
+    expect(await fetchPendingGovernedAttempt(scope)).toBeNull();
+  });
+
+  it("blocks a different routine action until the unresolved exact intent is retried", async () => {
+    enableRetryLock();
+    const scope = { actorId: "actor-2", organizationId: "org-2" };
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("connection dropped")));
+    await expect(submitGoverned("/api/routines", { action: "run_now", routineId: "routine-1" }, undefined, scope))
+      .rejects.toMatchObject({ status: 0 });
+    await expect(submitGoverned("/api/routines", { action: "create", name: "Other" }, undefined, scope))
+      .rejects.toMatchObject({ message: expect.stringContaining("Retry that exact change") });
+  });
+
+  it("keeps an unreadable retry marker and blocks fresh routine intents for reconciliation", async () => {
+    enableRetryLock();
+    const scope = { actorId: "actor-corrupt", organizationId: "org-corrupt" };
+    const storageKey = "chaste:governed-retry:v1:actor-corrupt:org-corrupt";
+    localStorage.setItem(storageKey, "not-json");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPendingGovernedAttempt(scope)).rejects.toMatchObject({
+      message: expect.stringContaining("blocked until this workspace is reconciled"),
+    });
+    await expect(submitGoverned("/api/routines", { action: "create", name: "New routine" }, undefined, scope))
+      .rejects.toMatchObject({ message: expect.stringContaining("blocked until this workspace is reconciled") });
+    expect(localStorage.getItem(storageKey)).toBe("not-json");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps approval-pending routine intents and retries the identical request", async () => {
+    enableRetryLock();
+    const scope = { actorId: "actor-3", organizationId: "org-3" };
+    const pending = { pendingApproval: true, reason: "Approval required" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json(pending, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "create", name: "Weekly summary", prompt: "Summarize", scheduleText: "0 9 * * 1" };
+
+    await expect(submitGoverned("/api/routines", action, undefined, scope)).resolves.toMatchObject({ kind: "pending" });
+    const original = await fetchPendingGovernedAttempt(scope);
+    await expect(retryPendingGoverned(scope)).resolves.toEqual({ kind: "completed", data: { ok: true } });
+    const [firstBody, secondBody] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+    expect(secondBody).toEqual(firstBody);
+    expect(original?.intentId).toBe(firstBody?.intentId);
+    expect(await fetchPendingGovernedAttempt(scope)).toBeNull();
+  });
+
   it("reads and saves the persona through the exact organization contract", async () => {
     const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
       .mockResolvedValueOnce(Response.json({ agentSoul: "Be concise." }))

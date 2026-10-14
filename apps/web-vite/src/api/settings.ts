@@ -296,12 +296,134 @@ export type GovernedPath =
   | "/api/routines"
   | "/api/memory";
 
+export interface GovernedRetryScope {
+  actorId: string;
+  organizationId: string;
+}
+
+export interface GovernedAttempt {
+  version: 1;
+  path: GovernedPath;
+  action: Record<string, unknown>;
+  fingerprint: string;
+  intentId: string;
+}
+
+function retryStorageKey(scope: GovernedRetryScope): string {
+  return `chaste:governed-retry:v1:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}`;
+}
+
+function retryLockKey(scope: GovernedRetryScope): string {
+  return `${retryStorageKey(scope)}:lock`;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((entry) => entry === undefined ? "null" : canonicalJson(entry)).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function actionFingerprint(path: GovernedPath, action: Record<string, unknown>): string {
+  return canonicalJson({ path, action });
+}
+
+function parseAttempt(raw: string | null): GovernedAttempt | null {
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") return null;
+    const value = parsed as Partial<GovernedAttempt>;
+    if (
+      value.version !== 1 ||
+      typeof value.path !== "string" ||
+      !["/api/modules", "/api/module-settings", "/api/policy", "/api/branding", "/api/routines", "/api/memory"].includes(value.path) ||
+      value.action === null || typeof value.action !== "object" || Array.isArray(value.action) ||
+      typeof value.fingerprint !== "string" || !z.string().uuid().safeParse(value.intentId).success
+    ) return null;
+    const attempt = value as GovernedAttempt;
+    return actionFingerprint(attempt.path, attempt.action) === attempt.fingerprint ? attempt : null;
+  } catch {
+    return null;
+  }
+}
+
+async function withRetryLock<T>(scope: GovernedRetryScope, callback: () => T | Promise<T>): Promise<T> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!locks || typeof localStorage === "undefined") {
+    throw new SettingsApiError(0, "This browser cannot safely preserve a pending routine change. Use a supported browser and try again.");
+  }
+  try {
+    return await locks.request(retryLockKey(scope), { mode: "exclusive" }, callback);
+  } catch (error) {
+    if (error instanceof SettingsApiError) throw error;
+    throw new SettingsApiError(0, "Could not safely access the saved routine change. Try again.");
+  }
+}
+
+function readAttempt(scope: GovernedRetryScope): GovernedAttempt | null {
+  const storageKey = retryStorageKey(scope);
+  const raw = localStorage.getItem(storageKey);
+  const attempt = parseAttempt(raw);
+  if (raw !== null && !attempt) {
+    throw new SettingsApiError(0, "A saved routine retry record is unreadable. New routine changes are blocked until this workspace is reconciled.");
+  }
+  return attempt;
+}
+
+export async function fetchPendingGovernedAttempt(scope: GovernedRetryScope): Promise<GovernedAttempt | null> {
+  return withRetryLock(scope, () => readAttempt(scope));
+}
+
+async function clearAttempt(scope: GovernedRetryScope, intentId: string): Promise<void> {
+  await withRetryLock(scope, () => {
+    const current = readAttempt(scope);
+    if (current?.intentId === intentId) localStorage.removeItem(retryStorageKey(scope));
+  });
+}
+
+async function reserveAttempt(
+  scope: GovernedRetryScope,
+  path: GovernedPath,
+  action: Record<string, unknown>,
+): Promise<GovernedAttempt> {
+  return withRetryLock(scope, () => {
+    const fingerprint = actionFingerprint(path, action);
+    const existing = readAttempt(scope);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        throw new SettingsApiError(0, "A previous routine change has an uncertain result. Retry that exact change before submitting another.");
+      }
+      return existing;
+    }
+    const attempt: GovernedAttempt = {
+      version: 1,
+      path,
+      action,
+      fingerprint,
+      intentId: crypto.randomUUID(),
+    };
+    const storageKey = retryStorageKey(scope);
+    const serialized = JSON.stringify(attempt);
+    localStorage.setItem(storageKey, serialized);
+    if (localStorage.getItem(storageKey) !== serialized) {
+      localStorage.removeItem(storageKey);
+      throw new SettingsApiError(0, "Could not save the routine change for safe retry. Try again.");
+    }
+    return attempt;
+  });
+}
+
 function pendingReason(body: z.infer<typeof PendingApprovalSchema>): string {
   return body.hint ?? body.reason ?? body.error ?? "This change is waiting for approval.";
 }
 
 /**
- * Every governed write in one place: a fresh `intentId` for idempotency,
+ * Every governed write in one place: a stable `intentId` for idempotency,
  * HTTP 202 preserved as a pending outcome, and the raw success body handed
  * back because these routes answer with different envelopes.
  */
@@ -309,10 +431,37 @@ export async function submitGoverned(
   path: GovernedPath,
   action: Record<string, unknown>,
   signal?: AbortSignal,
+  retryScope?: GovernedRetryScope,
+): Promise<GovernedOutcome> {
+  if (path === "/api/routines" && retryScope) {
+    const attempt = await reserveAttempt(retryScope, path, action);
+    return sendGovernedAttempt(attempt, retryScope, signal);
+  }
+  return sendGovernedAttempt({
+    version: 1,
+    path,
+    action,
+    fingerprint: actionFingerprint(path, action),
+    intentId: crypto.randomUUID(),
+  }, undefined, signal);
+}
+
+export async function retryPendingGoverned(
+  scope: GovernedRetryScope,
+  signal?: AbortSignal,
+): Promise<GovernedOutcome | null> {
+  const attempt = await fetchPendingGovernedAttempt(scope);
+  return attempt ? sendGovernedAttempt(attempt, scope, signal) : null;
+}
+
+async function sendGovernedAttempt(
+  attempt: GovernedAttempt,
+  retryScope: GovernedRetryScope | undefined,
+  signal?: AbortSignal,
 ): Promise<GovernedOutcome> {
   const { response, body } = await request(
-    path,
-    { method: "POST", body: JSON.stringify({ ...action, intentId: crypto.randomUUID() }) },
+    attempt.path,
+    { method: "POST", body: JSON.stringify({ ...attempt.action, intentId: attempt.intentId }) },
     signal,
   );
   if (response.status === 202) {
@@ -320,9 +469,15 @@ export async function submitGoverned(
     if (!pending.success) throw new SettingsApiError(202, "The settings service returned an unexpected approval response.");
     return { kind: "pending", reason: pendingReason(pending.data) };
   }
-  if (!response.ok) throw new SettingsApiError(response.status, errorMessage(response.status, body));
+  if (!response.ok) {
+    if (retryScope && response.status < 500 && response.status !== 408 && response.status !== 429) {
+      await clearAttempt(retryScope, attempt.intentId);
+    }
+    throw new SettingsApiError(response.status, errorMessage(response.status, body));
+  }
   const completed = CompletedRecordSchema.safeParse(body);
   if (!completed.success) throw new SettingsApiError(response.status, "The settings service returned an unexpected action response.");
+  if (retryScope) await clearAttempt(retryScope, attempt.intentId);
   return { kind: "completed", data: completed.data };
 }
 

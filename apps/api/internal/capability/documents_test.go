@@ -15,10 +15,29 @@ import (
 
 const documentsTestUUID = "11111111-1111-4111-8111-111111111111"
 
+func TestDocumentNumberInputContract(t *testing.T) {
+	capabilityID := documentsAllocateNumberCapabilityID
+	spec, exists := capabilitySpecs[capabilityID]
+	if !exists || !supportedCapability(capabilityID) || spec.module != "documents" || spec.permission != "documents.write" || spec.risk != "write" || spec.inverseCapabilityID != "" {
+		t.Fatalf("number allocator spec=%+v supported=%t", spec, supportedCapability(capabilityID))
+	}
+	for kind := range authoredDocumentNumberKinds {
+		if _, err := ParseDocumentsInput(capabilityID, json.RawMessage(`{"kind":"`+kind+`"}`)); err != nil {
+			t.Errorf("accepted kind %q should parse: %v", kind, err)
+		}
+	}
+	for _, raw := range []string{`{}`, `[]`, `null`, `{"kind":"goods_receipt"}`, `{"kind":7}`} {
+		if _, err := ParseDocumentsInput(capabilityID, json.RawMessage(raw)); err == nil {
+			t.Errorf("accepted invalid allocation input %s", raw)
+		}
+	}
+}
+
 // documentsSampleInputs is a minimal payload each capability accepts, so the
 // generic parity checks can walk the manifest's required list per capability.
 var documentsSampleInputs = map[string]string{
 	documentsAddVersionCapabilityID:        `{"documentId":"` + documentsTestUUID + `"}`,
+	documentsAllocateNumberCapabilityID:    `{"kind":"purchase_order"}`,
 	documentsCreateDocCapabilityID:         `{"title":"Letter","content":{"type":"doc"},"html":"<p>x</p>"}`,
 	documentsCreateDocumentCapabilityID:    `{"title":"Bill","text":"pasted"}`,
 	documentsCreateFolderCapabilityID:      `{"path":"Finance/2026"}`,
@@ -55,6 +74,7 @@ var documentsZodDefaultedKeys = map[string][]string{
 // the Go structs marshal to exactly the manifest's output shape.
 var documentsOutputSamples = map[string]any{
 	documentsAddVersionCapabilityID:        DocumentVersionOutput{Version: 2},
+	documentsAllocateNumberCapabilityID:    DocumentNumberOutput{Number: "PO-2026-0001"},
 	documentsCreateDocCapabilityID:         CreateAuthoredDocumentOutput{DocumentID: documentsTestUUID},
 	documentsCreateDocumentCapabilityID:    IngestDocumentOutput{DocumentID: documentsTestUUID},
 	documentsCreateFolderCapabilityID:      CreateDocumentFolderOutput{FolderID: documentsTestUUID, Path: "Finance/2026"},

@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmLeadConversionFromEnv, goDocumentsEditorReadsFromEnv, goDocumentsIngestedReadsFromEnv, goDocumentsVersionReadsFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrPayrollFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosOpenSessionSliceFromEnv, goProjectsWritesFromEnv, goPurchasingAPAgingReadsFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingWorkflowReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goMessagingConversationListFromEnv, goMessagingConversationCreateFromEnv, goMessagingConversationUpdateFromEnv, goMessagingConversationArchiveFromEnv, goMessagingConversationLeaveFromEnv, goMessagingConversationAddMemberFromEnv, goMessagingConversationDeleteFromEnv, goMessagingThreadReadsFromEnv, goMessagingReadCursorFromEnv, goMessagingReactionsFromEnv, goMessagingPinsFromEnv, goMessagingPresenceFromEnv, goMessagingAttachmentUploadFromEnv, goMessagingAttachmentDeleteFromEnv, goMarketingCampaignWritesFromEnv, goMarketingOverviewReadsFromEnv, goSupportInboxReadsFromEnv, goSupportLibraryReadsFromEnv, goSupportCannedResponseWriteFromEnv, goSupportKbArticleWriteFromEnv, goSupportConversationWritesFromEnv, goSupportTicketWritesFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmLeadConversionFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrPayrollFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goProjectsWritesFromEnv, goPurchasingAPAgingReadsFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingWorkflowReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goMessagingConversationListFromEnv, goMessagingConversationCreateFromEnv, goMessagingConversationUpdateFromEnv, goMessagingConversationArchiveFromEnv, goMessagingConversationLeaveFromEnv, goMessagingConversationAddMemberFromEnv, goMessagingConversationDeleteFromEnv, goMessagingThreadReadsFromEnv, goMessagingReadCursorFromEnv, goMessagingReactionsFromEnv, goMessagingPinsFromEnv, goMessagingAttachmentUploadFromEnv, goMessagingAttachmentDeleteFromEnv, goMarketingCampaignWritesFromEnv, goMarketingOverviewReadsFromEnv, goSupportInboxReadsFromEnv, goSupportLibraryReadsFromEnv, goSupportCannedResponseWriteFromEnv, goSupportKbArticleWriteFromEnv, goSupportConversationWritesFromEnv, goSupportTicketWritesFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL("../..", import.meta.url)), ["CHASTE_", "GO_"]);
@@ -31,12 +31,8 @@ export default defineConfig(({ mode }) => {
   const goPurchasingWorkflowReads = goPurchasingWorkflowReadsFromEnv(env);
   const goPurchasingIntelReads = goPurchasingIntelReadsFromEnv(env);
   const goPurchasingAPAgingReads = goPurchasingAPAgingReadsFromEnv(env);
-  const goDocumentsIngestedReads = goDocumentsIngestedReadsFromEnv(env);
-  const goDocumentsVersionReads = goDocumentsVersionReadsFromEnv(env);
-  const goDocumentsEditorReads = goDocumentsEditorReadsFromEnv(env);
   const goPurchasingSourcingWrites = goPurchasingSourcingWritesFromEnv(env);
   const goPurchasingVendorSlice = env.CHASTE_GO_PURCHASING_VENDOR_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
-  const goMarketingSegmentSlice = env.CHASTE_GO_MARKETING_SEGMENT_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goMarketingCampaignWrites = goMarketingCampaignWritesFromEnv(env);
   const goMarketingOverviewReads = goMarketingOverviewReadsFromEnv(env);
   const goHrExpenses = goHrExpensesFromEnv(env);
@@ -69,14 +65,8 @@ export default defineConfig(({ mode }) => {
   const goMessagingReadCursor = goMessagingReadCursorFromEnv(env);
   const goMessagingReactions = goMessagingReactionsFromEnv(env);
   const goMessagingPins = goMessagingPinsFromEnv(env);
-  const goMessagingPresence = goMessagingPresenceFromEnv(env);
   const goMessagingAttachmentUpload = goMessagingAttachmentUploadFromEnv(env);
   const goMessagingAttachmentDelete = goMessagingAttachmentDeleteFromEnv(env);
-  const goPosOpenSessionSlice = goPosOpenSessionSliceFromEnv(env);
-  const goPosCloseSessionSlice = goPosCloseSessionSliceFromEnv(env);
-  const goPosCompleteSaleSlice = env.CHASTE_GO_POS_COMPLETE_SALE_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
-  const goPosReturnSaleSlice = env.CHASTE_GO_POS_RETURN_SALE_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
-  const goPosShiftSummaryRoute = env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0";
 
   return {
     plugins: [react(), goRouteProxy],
@@ -106,12 +96,8 @@ export default defineConfig(({ mode }) => {
       __GO_PURCHASING_WORKFLOW_READS__: JSON.stringify(goPurchasingWorkflowReads),
       __GO_PURCHASING_INTEL_READS__: JSON.stringify(goPurchasingIntelReads),
       __GO_PURCHASING_AP_AGING_READS__: JSON.stringify(goPurchasingAPAgingReads),
-      __GO_DOCUMENT_INGESTED_READS__: JSON.stringify(goDocumentsIngestedReads),
-      __GO_DOCUMENTS_VERSION_READS__: JSON.stringify(goDocumentsVersionReads),
-      __GO_DOCUMENTS_EDITOR_READS__: JSON.stringify(goDocumentsEditorReads),
       __GO_PURCHASING_SOURCING_WRITES__: JSON.stringify(goPurchasingSourcingWrites),
       __GO_PURCHASING_VENDOR_SLICE__: JSON.stringify(goPurchasingVendorSlice),
-      __GO_MARKETING_SEGMENT_SLICE__: JSON.stringify(goMarketingSegmentSlice),
       __GO_MARKETING_CAMPAIGN_WRITES__: JSON.stringify(goMarketingCampaignWrites),
       __GO_MARKETING_OVERVIEW_READS__: JSON.stringify(goMarketingOverviewReads),
       __GO_HR_EXPENSES__: JSON.stringify(goHrExpenses),
@@ -144,14 +130,8 @@ export default defineConfig(({ mode }) => {
       __GO_MESSAGING_READ_CURSOR__: JSON.stringify(goMessagingReadCursor),
       __GO_MESSAGING_REACTIONS__: JSON.stringify(goMessagingReactions),
       __GO_MESSAGING_PINS__: JSON.stringify(goMessagingPins),
-      __GO_MESSAGING_PRESENCE__: JSON.stringify(goMessagingPresence),
       __GO_MESSAGING_ATTACHMENT_UPLOAD__: JSON.stringify(goMessagingAttachmentUpload),
       __GO_MESSAGING_ATTACHMENT_DELETE__: JSON.stringify(goMessagingAttachmentDelete),
-      __GO_POS_OPEN_SESSION_SLICE__: JSON.stringify(goPosOpenSessionSlice),
-      __GO_POS_CLOSE_SESSION_SLICE__: JSON.stringify(goPosCloseSessionSlice),
-      __GO_POS_COMPLETE_SALE_SLICE__: JSON.stringify(goPosCompleteSaleSlice),
-      __GO_POS_RETURN_SALE_SLICE__: JSON.stringify(goPosReturnSaleSlice),
-      __GO_POS_SHIFT_SUMMARY_ROUTE__: JSON.stringify(goPosShiftSummaryRoute),
     },
     server: {
       host: "localhost",

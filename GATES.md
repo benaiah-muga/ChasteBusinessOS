@@ -601,3 +601,18 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   CHECK: pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/go-route-proxy.test.ts
   EXPECT: /Tests\s+\d+ passed/
   EVIDENCE: Direct run exited 0; all 169 Go route proxy tests passed, including GET and POST `/api/email` with `GO_EMAIL_ROUTE=0` still reaching the Go upstream.
+
+- [x] G117: Vite password recovery is handled end to end by Go authentication.
+  EVIDENCE: agent-browser created and verified a synthetic account through local Mailpit, requested a reset link from the Vite sign-in page, updated the password, signed in successfully with the new password, and confirmed the old password is rejected. The Go auth handler was mounted and serves `/api/auth` by default.
+
+- [x] G118: Vite POS register actions and retry recovery are Go-owned and organization-scoped.
+  CHECK: pnpm --filter @chaste/web-vite exec vitest run src/api/pos-session.test.ts src/api/pos.test.ts src/api/go-route-proxy.test.ts src/api/marketing.test.ts src/components/PosPage.test.tsx --reporter=dot --silent && pnpm --filter @chaste/web-vite typecheck && pnpm --filter @chaste/web-vite lint && git diff --check
+  EXPECT: /Tests  .* passed|eslint \.|tsc --noEmit/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Five focused suites passed 313 tests. The tests assert that sale retry markers clear under the organization-and-actor scope, POS Go writes carry `X-Organization-ID`, and POS action routes do not fall back to legacy writes. Vite typecheck, full Vite lint, and diff check passed.
+
+- [x] G119: Delayed POS recovery and quick-add responses cannot change another organization's register, and Go routine webhooks fail closed.
+  CHECK: pnpm typecheck && pnpm lint && pnpm test && GO_RUNTIME_INTEGRATION_REQUIRED=1 pnpm go:verify && git diff --check
+  EXPECT: /25 successful, 25 total|GO_VERIFY_EXIT=0/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Workspace typecheck passed all 27 packages, lint reported 206 existing warnings and no errors, and all 25 Turbo test tasks passed (including 2,045 Vite tests). Go verification passed with runtime integration required. POS tests cover delayed sale, return recovery, item creation, and opening-stock responses after an organization switch; webhook tests cover disabled-token refusal, persistent rate limiting, trusted proxy IP handling, and fail-closed behavior. Independent read-only reviews found no remaining webhook or POS scope issue. Authenticated agent-browser opened the active Vite POS register, showed the paid synthetic sale after reload, observed Go POS reads and capability writes return HTTP 200, and reported no page errors.

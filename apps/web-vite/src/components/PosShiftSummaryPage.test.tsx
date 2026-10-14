@@ -28,8 +28,7 @@ describe("Vite POS shift summary page", () => {
   it("loads the newest session summary and allows switching shifts", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (!init?.method) return Response.json({ sessions });
-      const payload = JSON.parse(String(init.body)) as { sessionId: string };
-      return Response.json({ ok: true, data: summary(payload.sessionId.endsWith("2") ? "Front register" : "Front register") });
+      return Response.json({ ok: true, data: summary("Front register") });
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<PosShiftSummaryPage baseCurrency="USD" />);
@@ -43,7 +42,14 @@ describe("Vite POS shift summary page", () => {
 
     fireEvent.change(screen.getByRole("combobox", { name: "Register session" }), { target: { value: sessions[1]!.id } });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(JSON.parse(String(fetchMock.mock.calls[2]![1]?.body))).toEqual(expect.objectContaining({ action: "shiftSummary", sessionId: sessions[1]!.id }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/pos/shift-summary", expect.objectContaining({
+      method: "POST",
+      body: expect.stringContaining('"capabilityId":"pos.shiftSummary"'),
+    }));
+    expect(JSON.parse(String(fetchMock.mock.calls[2]![1]?.body))).toEqual(expect.objectContaining({
+      capabilityId: "pos.shiftSummary",
+      input: { sessionId: sessions[1]!.id },
+    }));
   });
 
   it("keeps the selected shift when its initial summary request resolves late", async () => {

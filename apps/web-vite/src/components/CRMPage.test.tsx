@@ -15,7 +15,7 @@ type CrmFetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Re
 function routeGoCrmReadsToFixtures(fetchMock: CrmFetchMock): CrmFetchMock {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input) !== "/api/capabilities/execute") return fetchMock(input, init);
-    let body: { capabilityId?: string; input?: { openOnly?: boolean; customerId?: string } };
+    let body: { capabilityId?: string; input?: { openOnly?: boolean; customerId?: string; [key: string]: unknown } };
     try { body = JSON.parse(String(init?.body)) as typeof body; }
     catch { return fetchMock(input, init); }
     const readPath = body.capabilityId === "crm.listDeals" ? "/api/crm?deals=1"
@@ -34,6 +34,18 @@ function routeGoCrmReadsToFixtures(fetchMock: CrmFetchMock): CrmFetchMock {
 
 function customer(name = "Northwind") {
   return { id: customerId, name, email: "contact@northwind.test", phone: null, preferredContactMethod: "email", doNotContact: false, ownerUserId: null, ownerName: null, tags: ["renewal"], notes: "Priority account", nextStep: null, lastActivityAt: "2026-09-28T12:00:00.000Z", deactivatedAt: null };
+}
+function profileSnapshot(item: ReturnType<typeof customer>) {
+  return {
+    customerId: item.id,
+    name: item.name,
+    ownerUserId: item.ownerUserId,
+    tags: item.tags,
+    notes: item.notes,
+    phone: item.phone,
+    preferredContactMethod: item.preferredContactMethod,
+    doNotContact: item.doNotContact,
+  };
 }
 function deal(stage: string) {
   return { id: dealId, title: "Annual renewal", stage, valueMinor: 480000, note: null, customerId, customerName: "Northwind", updatedAt: "2026-09-29T12:00:00.000Z" };
@@ -113,7 +125,7 @@ describe("Vite CRM page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (isDealsRead(path)) return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method === "POST") return Response.json({ ok: true, data: { customerId: createdId, duplicateWarning } });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { customerId: createdId, duplicateWarning } });
       if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/team") return Response.json({ members: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
@@ -131,7 +143,7 @@ describe("Vite CRM page", () => {
 
     expect(await screen.findByText(`Customer added. ${duplicateWarning}`)).not.toBeNull();
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
-    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")?.[1]?.body))).toMatchObject({ action: "create", name: "Northwind Ltd", email: "office@northwind.test" });
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")?.[1]?.body))).toMatchObject({ capabilityId: "crm.createCustomer", input: { name: "Northwind Ltd", email: "office@northwind.test" }, intentId: expect.any(String) });
   });
 
   it("blocks legacy customer creation until the actor and organization scope resolve", async () => {
@@ -179,7 +191,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Add customer" }) as HTMLButtonElement).disabled).toBe(false));
@@ -191,20 +203,7 @@ describe("Vite CRM page", () => {
     expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
     expect(legacyWrites).toBe(0);
 
-    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", false);
-    view.rerender(<CRMPage actorId={customerId} organizationId={dealId} />);
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Retry customer" })).toHaveProperty("disabled", false);
-      expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Retry customer" }));
-    expect(await screen.findByText(/A Go customer creation is unresolved/)).not.toBeNull();
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Northwind Ltd");
-    expect(legacyWrites).toBe(0);
-    expect(goBodies).toHaveLength(1);
-
-    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
-    view.rerender(<CRMPage actorId={customerId} organizationId={dealId} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry customer" })).toHaveProperty("disabled", false));
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry customer" })).toHaveProperty("disabled", false));
     fireEvent.click(screen.getByRole("button", { name: "Retry customer" }));
     expect(await screen.findByText("Customer added.")).not.toBeNull();
@@ -258,7 +257,7 @@ describe("Vite CRM page", () => {
     const otherOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals" && init?.method === "POST") return dealResponse;
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return dealResponse;
       if (isDealsRead(path)) return Response.json({ deals: [] });
       if (isCustomersRead(path)) return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
@@ -272,7 +271,7 @@ describe("Vite CRM page", () => {
     fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: "Long-running deal" } });
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: "125" } });
     fireEvent.click(screen.getByRole("button", { name: "Add deal" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/deals", expect.objectContaining({ method: "POST" })));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/capabilities/execute" && init?.method === "POST")).toBe(true));
 
     view.rerender(<CRMPage actorId={customerId} organizationId={otherOrganizationId} />);
     expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(true);
@@ -308,7 +307,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(false));
@@ -322,17 +321,6 @@ describe("Vite CRM page", () => {
     expect((screen.getByLabelText("Deal name") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Retry deal" }) as HTMLButtonElement).disabled).toBe(false);
 
-    vi.stubGlobal("__GO_CRM_DEAL_CREATE__", false);
-    view.rerender(<CRMPage actorId={customerId} organizationId={dealId} />);
-    await waitFor(() => expect((screen.getByRole("button", { name: "Retry deal" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Retry deal" }));
-    expect(await screen.findByText(/A Go deal creation is unresolved/)).not.toBeNull();
-    expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe("Renewal");
-    expect((screen.getByLabelText("Deal name") as HTMLInputElement).disabled).toBe(true);
-    expect(legacyCreateCalls).toBe(0);
-
-    vi.stubGlobal("__GO_CRM_DEAL_CREATE__", true);
-    view.rerender(<CRMPage actorId={customerId} organizationId={dealId} />);
     await waitFor(() => expect((screen.getByRole("button", { name: "Retry deal" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Retry deal" }));
 
@@ -562,7 +550,7 @@ describe("Vite CRM page", () => {
       if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
-      if (path === "/api/deals" && init?.method === "POST") return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
+    if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
@@ -579,7 +567,7 @@ describe("Vite CRM page", () => {
     expect(await screen.findByText("Manager approval required")).not.toBeNull();
     await waitFor(() => expect((screen.getByRole("combobox", { name: "Move Annual renewal" }) as HTMLSelectElement).value).toBe("proposal"));
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
-    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ action: "move", dealId, stage: "lost", lostReason: "Customer chose another vendor" });
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ capabilityId: "crm.moveDealStage", input: { dealId, stage: "lost", lostReason: "Customer chose another vendor" }, intentId: expect.any(String) });
   });
 
   it("uses Go for lost-stage moves and keeps the reason draft after a pending approval", async () => {
@@ -785,19 +773,21 @@ describe("Vite CRM page", () => {
           { kind: "document", date: "2026-09-21T12:00:00.000Z", refId: "doc-1", summary: "Signed agreement" },
         ] });
       }
-      if (path === "/api/customers" && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as { action: string; name?: string };
-        expect(body.action).toBe("updateProfile");
-        currentCustomer = { ...currentCustomer, name: body.name ?? currentCustomer.name };
-        return Response.json({ ok: true, data: { updatedCount: 1, previous: [] } });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { input: { name?: string } };
+        const previous = [profileSnapshot(currentCustomer)];
+        currentCustomer = { ...currentCustomer, name: body.input.name ?? currentCustomer.name };
+        return Response.json({ ok: true, data: { updatedCount: 1, previous } });
       }
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    const profileButton = await screen.findByRole("button", { name: "Profile" });
+    await waitFor(() => expect(profileButton).toHaveProperty("disabled", false));
+    fireEvent.click(profileButton);
     const dialog = await screen.findByRole("dialog", { name: "Northwind" });
     fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Northwind Ltd" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save profile" }));
@@ -1016,26 +1006,26 @@ describe("Vite CRM page", () => {
       if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
-      if (path === "/api/customers" && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as {
-          action: string;
-          doNotContact?: boolean;
-          preferredContactMethod?: "email" | "phone" | "whatsapp" | "other";
-        };
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { input: { doNotContact?: boolean; preferredContactMethod?: "email" | "phone" | "whatsapp" | "other" } };
+        const previous = [profileSnapshot(currentCustomer)];
         currentCustomer = {
           ...currentCustomer,
-          doNotContact: body.doNotContact ?? currentCustomer.doNotContact,
-          preferredContactMethod: body.preferredContactMethod ?? currentCustomer.preferredContactMethod,
+          doNotContact: body.input.doNotContact ?? currentCustomer.doNotContact,
+          preferredContactMethod: body.input.preferredContactMethod ?? currentCustomer.preferredContactMethod,
         };
-        return Response.json({ ok: true, data: { updatedCount: 1, previous: [] } });
+        return Response.json({ ok: true, data: { updatedCount: 1, previous } });
       }
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    const profileButton = await screen.findByRole("button", { name: "Profile" });
+    await waitFor(() => expect(profileButton).toHaveProperty("disabled", false));
+    fireEvent.click(profileButton);
     const dialog = await screen.findByRole("dialog", { name: "Northwind" });
     fireEvent.change(within(dialog).getByLabelText("Preferred contact"), { target: { value: "whatsapp" } });
     fireEvent.click(within(dialog).getByLabelText("Do not contact"));
@@ -1043,12 +1033,11 @@ describe("Vite CRM page", () => {
 
     await waitFor(() => expect(currentCustomer.doNotContact).toBe(true));
     expect(currentCustomer.preferredContactMethod).toBe("whatsapp");
-    const updatePost = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/customers" && init?.method === "POST");
+    const updatePost = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST");
     expect(JSON.parse(String(updatePost?.[1]?.body))).toMatchObject({
-      action: "updateProfile",
-      customerIds: [customerId],
-      doNotContact: true,
-      preferredContactMethod: "whatsapp",
+      capabilityId: "crm.updateCustomerProfiles",
+      input: { customerIds: [customerId], doNotContact: true, preferredContactMethod: "whatsapp" },
+      intentId: expect.any(String),
     });
   });
 
@@ -1059,7 +1048,7 @@ describe("Vite CRM page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (isDealsRead(path)) return Response.json({ deals: [] });
-      if (path === "/api/customers" && init?.method === "POST") return Response.json({ ok: true, data: { updatedCount: 2, previous: [] } });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { updatedCount: 2, previous: [profileSnapshot(customers[0]!), profileSnapshot(customers[1]!)] } });
       if (isCustomersRead(path)) return Response.json({ customers });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
@@ -1067,7 +1056,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select Northwind" }));
@@ -1079,14 +1068,11 @@ describe("Vite CRM page", () => {
     fireEvent.change(bulkTag, { target: { value: "renewal" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply to selected" }));
 
-    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")).toBe(true));
-    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/customers" && init?.method === "POST");
-    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
-      action: "updateProfile",
-      customerIds: [customerId, secondCustomerId],
-      ownerUserId: ownerId,
-      addTags: ["renewal"],
-    });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")).toBe(true));
+    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ capabilityId: "crm.updateCustomerProfiles", input: {
+      customerIds: [customerId, secondCustomerId], ownerUserId: ownerId, addTags: ["renewal"],
+    }, intentId: expect.any(String) });
     await waitFor(() => expect(screen.getByText("0 selected")).not.toBeNull());
   });
 
@@ -1112,7 +1098,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
     expect(screen.getByText("Today's call")).not.toBeNull();
@@ -1416,10 +1402,12 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
-    fireEvent.click(within(screen.getByRole("row", { name: /Northwind/ })).getByRole("button", { name: "Profile" }));
+    const northwindProfile = within(screen.getByRole("row", { name: /Northwind/ })).getByRole("button", { name: "Profile" });
+    await waitFor(() => expect(northwindProfile).toHaveProperty("disabled", false));
+    fireEvent.click(northwindProfile);
     fireEvent.click(within(await screen.findByRole("dialog", { name: "Northwind" })).getByRole("button", { name: "Activity" }));
     fireEvent.click(within(screen.getByRole("row", { name: /Contoso/ })).getByRole("button", { name: "Profile" }));
     const contosoDialog = await screen.findByRole("dialog", { name: "Contoso" });
@@ -1452,10 +1440,12 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    const profileButton = await screen.findByRole("button", { name: "Profile" });
+    await waitFor(() => expect(profileButton).toHaveProperty("disabled", false));
+    fireEvent.click(profileButton);
     const dialog = await screen.findByRole("dialog", { name: "Northwind" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Close customer profile" }));
     expect(screen.queryByRole("dialog", { name: "Northwind" })).toBeNull();
@@ -1602,11 +1592,11 @@ describe("Vite CRM page", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/capabilities/execute")).toBe(false);
   });
 
-  it("uses the legacy CRM route for lead conversion when explicitly rolled back", async () => {
+  it("keeps lead conversion on Go when a stale rollback flag is set", async () => {
     vi.stubGlobal("__GO_CRM_LEAD_CONVERSION__", false);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified" } });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { dealId, customerId, stage: "qualified", conversionIntentId } });
       if (isDealsRead(path)) return Response.json({ deals: [deal("lead")] });
       if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
@@ -1621,16 +1611,16 @@ describe("Vite CRM page", () => {
     fireEvent.change(within(dialog).getByLabelText("Customer name"), { target: { value: "New Northwind" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Convert lead" }));
 
-    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")).toBe(true));
-    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST");
-    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ action: "convertLead", dealId, createCustomer: true, customerName: "New Northwind", intentId: expect.any(String) });
-    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/capabilities/execute")).toBe(false);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")).toBe(true));
+    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ capabilityId: "crm.convertLead", input: { dealId, createCustomer: true, customerName: "New Northwind" }, intentId: expect.any(String) });
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")).toBe(false);
   });
 
   it("supports deal search, table mode, and drag-and-drop stage confirmation", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/deals" && init?.method === "POST") return Response.json({ ok: true, data: { moved: true, stage: "qualified" } });
+    if (path === "/api/capabilities/execute" && init?.method === "POST") return Response.json({ ok: true, data: { moved: true, stage: "qualified" } });
       if (isDealsRead(path)) return Response.json({ deals: [deal("proposal")] });
       if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
@@ -1638,7 +1628,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     fireEvent.change(screen.getByLabelText("Search deals"), { target: { value: "missing" } });
     expect(screen.queryByText("Annual renewal")).toBeNull();
@@ -1654,8 +1644,8 @@ describe("Vite CRM page", () => {
     fireEvent.drop(target, { dataTransfer: transfer });
     expect(await screen.findByRole("dialog", { name: /Move “Annual renewal” to Qualified/ })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Move to Qualified" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/deals" && init?.method === "POST")).toBe(true));
-    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/deals" && init?.method === "POST")?.[1]?.body))).toMatchObject({ action: "move", dealId, stage: "qualified" });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")).toBe(true));
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")?.[1]?.body))).toMatchObject({ capabilityId: "crm.moveDealStage", input: { dealId, stage: "qualified" }, intentId: expect.any(String) });
   });
 
   it("generates an editable AI follow-up draft and displays its source records", async () => {
@@ -1728,7 +1718,10 @@ describe("Vite CRM page", () => {
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       if (path === "/api/team") return Response.json({ members: [] });
-      if (path === "/api/import" && init?.method === "POST") return Response.json({ inserted: 45, skippedDuplicates: 0, createdIds: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { intentId: string; input: { rows: Array<{ rowNumber: number }> } };
+        return Response.json({ ok: true, data: { imported: 45, skippedDuplicateRows: [], createdIds: body.input.rows.map((_, index) => `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`), importIntentId: body.intentId } });
+      }
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
@@ -1750,8 +1743,11 @@ describe("Vite CRM page", () => {
     expect(screen.getByText("Rows 41-45 of 45")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Import 45 customers/ }));
     await screen.findByText("45 customers imported, 0 duplicates skipped.");
-    const importPost = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/import" && init?.method === "POST");
-    expect(JSON.parse(String(importPost?.[1]?.body)).rows).toHaveLength(45);
+    const importPost = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST" && JSON.parse(String(init.body)).capabilityId === "crm.importCustomers");
+    const importBody = JSON.parse(String(importPost?.[1]?.body)) as { capabilityId: string; input: { rows: unknown[] }; intentId: string };
+    expect(importBody.capabilityId).toBe("crm.importCustomers");
+    expect(importBody.input.rows).toHaveLength(45);
+    expect(importBody.intentId).toMatch(/^[0-9a-f-]{36}$/i);
   });
 
   it("merges into the selected survivor and sends the undo snapshot when Undo merge is used", async () => {
@@ -1801,14 +1797,18 @@ describe("Vite CRM page", () => {
         },
       ],
     };
+    const mergePosts: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (isDealsRead(path)) return Response.json({ deals: [] });
       if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
-      if (path === "/api/customers" && init?.method === "POST") {
-        return Response.json({ ok: true, data: undoSnapshot });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as typeof mergePosts[number];
+        mergePosts.push(body);
+        return Response.json({ ok: true, data: { ...undoSnapshot, mergeIntentId: body.capabilityId === "crm.mergeCustomers" ? body.intentId : String(body.input.mergeIntentId) } });
       }
       return new Response(null, { status: 404 });
     });
@@ -1817,28 +1817,21 @@ describe("Vite CRM page", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     const duplicateRow = screen.getByRole("row", { name: /Duplicate Company/ });
-    fireEvent.click(within(duplicateRow).getByRole("button", { name: "Merge" }));
+    const mergeButton = within(duplicateRow).getByRole("button", { name: "Merge" });
+    await waitFor(() => expect(mergeButton).toHaveProperty("disabled", false));
+    fireEvent.click(mergeButton);
     const mergeDialog = await screen.findByRole("dialog", { name: "Merge customer records" });
     const duplicateSelect = within(mergeDialog).getByLabelText("Duplicate record") as HTMLSelectElement;
     expect(duplicateSelect.value).toBe(duplicateCustomerId);
     fireEvent.change(within(mergeDialog).getByLabelText("Keep this customer"), { target: { value: survivorCustomerId } });
     fireEvent.click(within(mergeDialog).getByRole("button", { name: "Merge records" }));
 
-    const mergePost = await waitFor(() => {
-      const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/customers" && init?.method === "POST");
-      expect(post).toBeDefined();
-      return post;
-    });
-    expect(JSON.parse(String(mergePost?.[1]?.body))).toMatchObject({
-      action: "merge",
-      survivorCustomerId,
-      duplicateCustomerId,
-    });
+    await waitFor(() => expect(mergePosts).toHaveLength(1));
+    expect(mergePosts[0]).toMatchObject({ capabilityId: "crm.mergeCustomers", input: { survivorCustomerId, duplicateCustomerId }, intentId: expect.any(String) });
 
     fireEvent.click(await screen.findByRole("button", { name: "Undo merge" }));
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")).toHaveLength(2));
-    const undoPost = fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")[1];
-    expect(JSON.parse(String(undoPost?.[1]?.body))).toMatchObject({ action: "undoMerge", ...undoSnapshot });
+    await waitFor(() => expect(mergePosts).toHaveLength(2));
+    expect(mergePosts[1]).toMatchObject({ capabilityId: "crm.restoreCustomerMerge", input: { survivorCustomerId, duplicateCustomerId, mergeIntentId: mergePosts[0]!.intentId }, intentId: expect.any(String) });
   });
 
   it("routes merge and undo merge through their Go capabilities", async () => {
@@ -1915,14 +1908,12 @@ describe("Vite CRM page", () => {
       if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
-      if (path === "/api/import" && init?.method === "POST") {
-        const body = String(init.body);
-        const requestBody = JSON.parse(body) as { action?: string };
-        const response = requestBody.action === "undo"
-          ? Response.json({ undone: 2, remaining: 0 })
-          : Response.json({ inserted: 2, skippedDuplicates: 0, createdIds });
-        importPosts.push({ body, response });
-        return response;
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { capabilityId: string; input: { customerIds?: string[]; importIntentId?: string }; intentId: string };
+        importPosts.push({ body: JSON.stringify(body), response: new Response() });
+        return body.capabilityId === "crm.importCustomers"
+          ? Response.json({ ok: true, data: { imported: 2, skippedDuplicateRows: [], createdIds, importIntentId: body.intentId } })
+          : Response.json({ ok: true, data: { customerIds: body.input.customerIds, deactivated: 2, importIntentId: body.input.importIntentId, undoIntentId: body.intentId } });
       }
       return new Response(null, { status: 404 });
     });
@@ -1947,7 +1938,9 @@ describe("Vite CRM page", () => {
     expect(await screen.findByText("Import undone.")).not.toBeNull();
     expect(await screen.findByText("Undid this import. 2 imported customers were deactivated.")).not.toBeNull();
     expect(importPosts).toHaveLength(2);
-    expect(JSON.parse(importPosts[1]!.body)).toEqual({ entity: "customers", action: "undo", importIds: createdIds });
+    const importBody = JSON.parse(importPosts[0]!.body) as { intentId: string };
+    expect(JSON.parse(importPosts[0]!.body)).toMatchObject({ capabilityId: "crm.importCustomers", input: { rows: expect.any(Array) }, intentId: expect.any(String) });
+    expect(JSON.parse(importPosts[1]!.body)).toMatchObject({ capabilityId: "crm.undoCustomerImport", input: { customerIds: createdIds, importIntentId: importBody.intentId }, intentId: expect.any(String) });
   });
 
   it("freezes and restores a pending Go import, then keeps its created IDs available for undo after reload", async () => {
@@ -2063,7 +2056,7 @@ describe("Vite CRM page", () => {
 
   it("requires confirmation to deactivate a customer and keeps the record in inactive history", async () => {
     let currentCustomer: Omit<ReturnType<typeof customer>, "deactivatedAt"> & { deactivatedAt: string | null } = customer();
-    const deactivationPosts: unknown[] = [];
+    const deactivationPosts: Array<{ capabilityId: string; input: { customerId: string }; intentId: string }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (isDealsRead(path)) return Response.json({ deals: [] });
@@ -2073,10 +2066,10 @@ describe("Vite CRM page", () => {
       if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [
         { kind: "invoice", date: "2026-09-20T12:00:00.000Z", refId: "invoice-history-1", summary: "Invoice #42 (sent, UGX 120,000)" },
       ] });
-      if (path === "/api/customers" && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as { action: string; customerId: string };
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as typeof deactivationPosts[number];
         deactivationPosts.push(body);
-        expect(body).toMatchObject({ action: "deactivate", customerId });
+        expect(body).toMatchObject({ capabilityId: "crm.deactivateCustomer", input: { customerId }, intentId: expect.any(String) });
         currentCustomer = { ...currentCustomer, deactivatedAt: "2026-10-01T09:30:00.000Z" };
         return Response.json({ ok: true, data: { deactivated: true } });
       }
@@ -2102,7 +2095,9 @@ describe("Vite CRM page", () => {
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "inactive" } });
     const inactiveRow = await screen.findByRole("row", { name: /Northwind/ });
     expect(within(inactiveRow).getByText("Inactive")).not.toBeNull();
-    fireEvent.click(within(inactiveRow).getByRole("button", { name: "Profile" }));
+    const profileButton = within(inactiveRow).getByRole("button", { name: "Profile" });
+    await waitFor(() => expect(profileButton).toHaveProperty("disabled", false));
+    fireEvent.click(profileButton);
     const profile = await screen.findByRole("dialog", { name: "Northwind" });
     fireEvent.click(within(profile).getByRole("button", { name: "Activity" }));
     expect(await within(profile).findByText("Invoice #42 (sent, UGX 120,000)")).not.toBeNull();

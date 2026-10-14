@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchPosSessions, fetchPosShiftSummary, PosApiError, type PosSession, type PosShiftSummary } from "../api/pos";
-import { legacyUrl } from "../legacy";
 import "./pos-shift-summary-page.css";
 
 type PageState =
@@ -135,7 +134,7 @@ export function PosShiftSummaryPage({ baseCurrency = null }: { baseCurrency?: st
           <h1>POS shift summary</h1>
           <p>Review register takings, tender totals, refunds, and cash variance.</p>
         </div>
-        <a className="pos-summary-full-workspace" href={legacyUrl("/pos")}>Open full POS workspace</a>
+        <a className="pos-summary-full-workspace" href="/pos">Open full POS workspace</a>
       </header>
 
       {state.status === "loading" && <p className="pos-summary-message" role="status">Loading register sessions…</p>}
@@ -151,7 +150,7 @@ export function PosShiftSummaryPage({ baseCurrency = null }: { baseCurrency?: st
         <section className="pos-summary-message pos-summary-empty" aria-live="polite">
           <h2>No register sessions yet</h2>
           <p>Open the POS workspace to start a register session. Shift summaries will appear here.</p>
-          <a href={legacyUrl("/pos")}>Open POS workspace</a>
+          <a href="/pos">Open POS workspace</a>
         </section>
       )}
       {state.status === "ready" && (

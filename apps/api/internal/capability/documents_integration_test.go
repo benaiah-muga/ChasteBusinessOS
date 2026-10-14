@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -995,6 +996,51 @@ func TestGoDocumentsFolders(t *testing.T) {
 	}
 	if missingOut.Deleted {
 		t.Fatal("deleteFolder reported deleted=true for a folder that never existed")
+	}
+}
+
+func TestGoDocumentsNumberAllocations(t *testing.T) {
+	fx := newExecutorFixture(t)
+	kinds := map[string]string{
+		"invoice": "INV", "quote": "QTN", "receipt": "RCT", "delivery_note": "DN",
+		"purchase_order": "PO", "voucher": "VCH", "employment_contract": "EMP", "employment_agreement": "AGR",
+	}
+	year := time.Now().UTC().Year()
+	for kind, prefix := range kinds {
+		var previous int
+		for allocation := 0; allocation < 2; allocation++ {
+			result := documentsExecuteFor(t, fx, documentsAllocateNumberCapabilityID, `{"kind":"`+kind+`"}`)
+			if !result.OK {
+				t.Fatalf("allocate %s number: %s (%v)", kind, result.Error, result.Err)
+			}
+			var output DocumentNumberOutput
+			if err := json.Unmarshal(result.Data, &output); err != nil {
+				t.Fatalf("decode %s number output: %v", kind, err)
+			}
+			parts := strings.Split(output.Number, "-")
+			if len(parts) != 3 {
+				t.Fatalf("parse %s number %q: expected three hyphen-separated parts", kind, output.Number)
+			}
+			gotYear, yearErr := strconv.Atoi(parts[1])
+			gotSequence, sequenceErr := strconv.Atoi(parts[2])
+			if yearErr != nil || sequenceErr != nil {
+				t.Fatalf("parse %s number %q: invalid year or sequence", kind, output.Number)
+			}
+			if parts[0] != prefix || gotYear != year || gotSequence <= 0 {
+				t.Fatalf("%s number = %q, want prefix %q, year %d, positive sequence", kind, output.Number, prefix, year)
+			}
+			if allocation == 1 && gotSequence != previous+1 {
+				t.Fatalf("second %s allocation = %d, want %d", kind, gotSequence, previous+1)
+			}
+			previous = gotSequence
+		}
+	}
+	var authoredPurchaseOrderCount int64
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT "next" FROM doc_counters WHERE org_id=$1::uuid AND kind='authored_purchase_order'`, fx.orgID).Scan(&authoredPurchaseOrderCount); err != nil {
+		t.Fatalf("read authored purchase order counter: %v", err)
+	}
+	if authoredPurchaseOrderCount < 2 {
+		t.Fatalf("authored purchase order counter = %d, want allocations kept in authored_purchase_order", authoredPurchaseOrderCount)
 	}
 }
 

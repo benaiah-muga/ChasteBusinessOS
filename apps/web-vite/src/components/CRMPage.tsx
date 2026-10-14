@@ -21,6 +21,7 @@ import {
   fetchCrmViews,
   importCrmCustomers,
   CrmApiError,
+  type CrmActionOutcome,
   readPendingCrmDealCreate,
   readPendingCrmLeadConversion,
   readPendingCrmCustomerCreate,
@@ -34,7 +35,6 @@ import {
   readPendingCrmSavedViewWrite,
   readPendingCrmTaskCreate,
   readPendingCrmTaskDetailsForScope,
-  submitCrmAction,
   submitCrmLeadConversion,
   submitCrmDealStageMove,
   submitCrmDealCreate,
@@ -253,11 +253,6 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const profileUpdateScopeGeneration = useRef(0);
   const savedViewScopeRef = useRef<string | null>(null);
   const savedViewScopeGeneration = useRef(0);
-  const goCrmCustomerCreate = typeof __GO_CRM_CUSTOMER_CREATE__ !== "undefined" && __GO_CRM_CUSTOMER_CREATE__;
-  const goCrmCustomerImport = typeof __GO_CRM_CUSTOMER_IMPORT__ !== "undefined" && __GO_CRM_CUSTOMER_IMPORT__;
-  const goCrmCustomerProfileUpdate = typeof __GO_CRM_CUSTOMER_PROFILE_UPDATE__ !== "undefined" && __GO_CRM_CUSTOMER_PROFILE_UPDATE__;
-  const goCrmDealCreate = typeof __GO_CRM_DEAL_CREATE__ !== "undefined" && __GO_CRM_DEAL_CREATE__;
-  const goCrmLeadConversion = typeof __GO_CRM_LEAD_CONVERSION__ !== "undefined" && __GO_CRM_LEAD_CONVERSION__;
   const customerCreateScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
   if (customerCreateScopeRef.current !== customerCreateScopeIdentity) {
     customerCreateScopeRef.current = customerCreateScopeIdentity;
@@ -291,7 +286,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }
   const taskDraftReady = Boolean(taskDraftScopeIdentity && taskDraftResolvedScope === taskDraftScopeIdentity);
   const taskDetailsReady = Boolean(taskDraftScopeIdentity && taskDetailsRecoveryScope === taskDraftScopeIdentity);
-  const profileUpdateReady = !goCrmCustomerProfileUpdate || Boolean(profileUpdateScopeIdentity && profileUpdateResolvedScope === profileUpdateScopeIdentity);
+  const profileUpdateReady = Boolean(profileUpdateScopeIdentity && profileUpdateResolvedScope === profileUpdateScopeIdentity);
   const savedViewReady = Boolean(savedViewScopeIdentity && savedViewResolvedScope === savedViewScopeIdentity);
   const lockedProfileCustomerId = profileUpdateLocked && profileUpdateAction?.name !== undefined ? profileUpdateAction.customerIds[0] : null;
 
@@ -421,12 +416,6 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }, [actorId, importRecoveryResolvedScope, importRecoveryScopeIdentity, loading, organizationId]);
 
   useEffect(() => {
-    if (!goCrmCustomerProfileUpdate) {
-      setProfileUpdateResolvedScope(null);
-      setProfileUpdateLocked(false);
-      setProfileUpdateAction(null);
-      return;
-    }
     if (profileUpdateScopeIdentity && profileUpdateResolvedScope === profileUpdateScopeIdentity) return;
     let active = true;
     setProfileUpdateResolvedScope(null);
@@ -470,7 +459,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       setNotice({ tone: "error", text: friendlyError(reason) });
     });
     return () => { active = false; };
-  }, [actorId, customers, goCrmCustomerProfileUpdate, loading, organizationId, profileUpdateResolvedScope, profileUpdateScopeIdentity]);
+  }, [actorId, customers, loading, organizationId, profileUpdateResolvedScope, profileUpdateScopeIdentity]);
 
   useEffect(() => {
     let active = true;
@@ -539,7 +528,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       setNotice({ tone: "error", text: friendlyError(reason) });
     });
     return () => { active = false; };
-  }, [actorId, customerCreateScopeIdentity, goCrmCustomerCreate, organizationId]);
+  }, [actorId, customerCreateScopeIdentity, organizationId]);
 
   useEffect(() => {
     let active = true;
@@ -564,7 +553,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       setNotice({ tone: "error", text: friendlyError(reason) });
     });
     return () => { active = false; };
-  }, [actorId, dealCreateScopeIdentity, goCrmDealCreate, organizationId]);
+  }, [actorId, dealCreateScopeIdentity, organizationId]);
 
   useEffect(() => {
     if ((tab !== "customers" && tab !== "tasks") || membersLoaded) return;
@@ -635,12 +624,12 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     }
   }, [profileUpdateAction]);
 
-  async function mutate(path: "/api/deals" | "/api/customers" | "/api/crm" | "/api/crm/views", action: Record<string, unknown>, onDone?: (data: Record<string, unknown>) => void, submitAction?: () => ReturnType<typeof submitCrmAction>, isCurrent: () => boolean = () => true, busyOwner: "shared" | "customer-create" | "deal-create" | "saved-view" = "shared"): Promise<boolean> {
+  async function mutate(onDone: ((data: Record<string, unknown>) => void) | undefined, submitAction: () => Promise<CrmActionOutcome>, isCurrent: () => boolean = () => true, busyOwner: "shared" | "customer-create" | "deal-create" | "saved-view" = "shared"): Promise<boolean> {
     const setOperationBusy = busyOwner === "customer-create" ? setCustomerCreateBusy : busyOwner === "deal-create" ? setDealCreateBusy : setSharedBusy;
     if (busyOwner === "saved-view") setSavedViewBusyCount((count) => count + 1);
     else setOperationBusy(true);
     try {
-      const outcome = await (submitAction ? submitAction() : submitCrmAction(path, action));
+      const outcome = await submitAction();
       if (!isCurrent()) return false;
       if (outcome.kind === "pending") {
         setNotice({ tone: "pending", text: outcome.reason });
@@ -674,7 +663,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     movingDealIds.current.add(deal.id);
     try {
       const action = { dealId: deal.id, stage: next, ...(trimmedReason ? { lostReason: trimmedReason } : {}) };
-      const accepted = await mutate("/api/deals", { action: "move", ...action }, undefined, () => submitCrmDealStageMove(action, undefined, undefined, { actorId, organizationId }));
+      const accepted = await mutate(undefined, () => submitCrmDealStageMove(action, undefined, undefined, { actorId, organizationId }));
       if (!accepted) {
         setDeals((current) => current.map((item) => item.id === deal.id ? { ...item, stage: beforeStage } : item));
         return;
@@ -706,12 +695,12 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     const operationScope = dealCreateScopeIdentity;
     const operationScopeGeneration = dealCreateScopeGeneration.current;
     const isCurrentScope = () => Boolean(operationScope && dealCreateScopeRef.current === operationScope && dealCreateScopeGeneration.current === operationScopeGeneration);
-    const accepted = await mutate("/api/deals", { action: "create", ...input }, undefined, async () => {
+    const accepted = await mutate(undefined, async () => {
       try {
-        const outcome = await submitCrmDealCreate(input, undefined, goCrmDealCreate, { actorId, organizationId });
+        const outcome = await submitCrmDealCreate(input, undefined, true, { actorId, organizationId });
         if (!isCurrentScope()) return outcome;
         if (outcome.kind === "pending") {
-          if (goCrmDealCreate) setDealCreateLocked(true);
+          setDealCreateLocked(true);
         } else {
           setDealCreateLocked(false);
         }
@@ -721,8 +710,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
         if (reason instanceof Error && "status" in reason) {
           const status = Number((reason as { status: unknown }).status);
           const mayHaveReached = Boolean((reason as { requestMayHaveReachedServer?: unknown }).requestMayHaveReachedServer);
-          if (goCrmDealCreate && (mayHaveReached || status === 408 || status === 429 || status >= 500)) setDealCreateLocked(true);
-          else if (goCrmDealCreate && status >= 400 && status < 500 && status !== 408 && status !== 429) setDealCreateLocked(false);
+          if (mayHaveReached || status === 408 || status === 429 || status >= 500) setDealCreateLocked(true);
+          else if (status >= 400 && status < 500 && status !== 408 && status !== 429) setDealCreateLocked(false);
         }
         throw reason;
       }
@@ -741,12 +730,12 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     const operationScopeGeneration = customerCreateScopeGeneration.current;
     const isCurrentScope = () => Boolean(operationScope && customerCreateScopeRef.current === operationScope && customerCreateScopeGeneration.current === operationScopeGeneration);
     let duplicateWarning: string | null = null;
-    const accepted = await mutate("/api/customers", { action: "create", ...input }, undefined, async () => {
+    const accepted = await mutate(undefined, async () => {
       try {
-        const outcome = await submitCrmCustomerCreate(input, undefined, goCrmCustomerCreate, { actorId, organizationId });
+        const outcome = await submitCrmCustomerCreate(input, undefined, true, { actorId, organizationId });
         if (!isCurrentScope()) return outcome;
         if (outcome.kind === "pending") {
-          if (goCrmCustomerCreate) setCustomerCreateLocked(true);
+          setCustomerCreateLocked(true);
         } else {
           setCustomerCreateLocked(false);
           duplicateWarning = outcome.data.duplicateWarning ?? null;
@@ -757,8 +746,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
         if (reason instanceof Error && "status" in reason) {
           const status = Number((reason as { status: unknown }).status);
           const mayHaveReached = Boolean((reason as { requestMayHaveReachedServer?: unknown }).requestMayHaveReachedServer);
-          if (goCrmCustomerCreate && (mayHaveReached || status === 408 || status === 429 || status >= 500)) setCustomerCreateLocked(true);
-          else if (goCrmCustomerCreate && status >= 400 && status < 500 && status !== 408 && status !== 429) setCustomerCreateLocked(false);
+          if (mayHaveReached || status === 408 || status === 429 || status >= 500) setCustomerCreateLocked(true);
+          else if (status >= 400 && status < 500 && status !== 408 && status !== 429) setCustomerCreateLocked(false);
         }
         throw reason;
       }
@@ -863,12 +852,12 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }
 
   async function performCustomerProfileUpdate(action: CrmCustomerProfileUpdateMutation): Promise<boolean> {
-    if (!profileUpdateReady || (goCrmCustomerProfileUpdate && !profileUpdateScopeIdentity)) return false;
+    if (!profileUpdateReady || !profileUpdateScopeIdentity) return false;
     const scopeGeneration = profileUpdateScopeGeneration.current;
     const isCurrent = () => profileUpdateScopeGeneration.current === scopeGeneration && profileUpdateScopeRef.current === profileUpdateScopeIdentity;
     setProfileUpdateBusyCount((count) => count + 1);
     try {
-      const outcome = await submitCrmCustomerProfileUpdate(action, undefined, goCrmCustomerProfileUpdate, { actorId, organizationId });
+      const outcome = await submitCrmCustomerProfileUpdate(action, undefined, true, { actorId, organizationId });
       if (!isCurrent()) return false;
       if (outcome.kind === "pending") {
         setProfileUpdateAction(action);
@@ -920,7 +909,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     const operationScopeGeneration = taskDraftScopeGeneration.current;
     const isCurrentScope = () => Boolean(operationScope && taskDraftScopeRef.current === operationScope && taskDraftScopeGeneration.current === operationScopeGeneration);
     const action = { action: "createTask" as const, title: taskDraft.title.trim(), ...(taskDraft.dueAt ? { dueAt: new Date(`${taskDraft.dueAt}T12:00:00`).toISOString() } : {}), ...(taskDraft.assigneeUserId ? { assigneeUserId: taskDraft.assigneeUserId } : {}), ...(taskDraft.note.trim() ? { note: taskDraft.note.trim() } : {}), ...(taskDraft.customerId ? { refType: "customer", refId: taskDraft.customerId } : {}) };
-    const accepted = await mutate("/api/crm", action, undefined, async () => {
+    const accepted = await mutate(undefined, async () => {
       try {
         const outcome = await submitCrmTaskMutation(action, undefined, { actorId, organizationId });
         if (!isCurrentScope()) return outcome;
@@ -947,7 +936,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     const operationScope = taskDraftScopeIdentity;
     const operationScopeGeneration = taskDraftScopeGeneration.current;
     const isCurrentScope = () => Boolean(operationScope && taskDraftScopeRef.current === operationScope && taskDraftScopeGeneration.current === operationScopeGeneration);
-    await mutate("/api/crm", { action: "completeTask", taskId }, undefined,
+    await mutate(undefined,
       () => submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, { actorId, organizationId }),
       isCurrentScope);
   }
@@ -976,7 +965,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       dueAt: taskDetailsDraft.dueAt ? new Date(`${taskDetailsDraft.dueAt}T12:00:00`).toISOString() : null,
       assigneeUserId: taskDetailsDraft.assigneeUserId || null,
     };
-    await mutate("/api/crm", { ...action }, () => {
+    await mutate(() => {
       setTaskDetailsDraft(null);
       setTaskDetailsRetryActions((current) => { const next = { ...current }; delete next[action.taskId]; return next; });
     }, async () => {
@@ -1013,7 +1002,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     const generation = savedViewScopeGeneration.current;
     const isCurrent = () => savedViewScopeGeneration.current === generation;
     setSavedViewRecovery(action);
-    const result = await mutate("/api/crm/views", action, () => {
+    const result = await mutate(() => {
       setSavedViewRecovery(null);
       setSaveViewName((current) => current === action.name ? "" : current);
     }, async () => {
@@ -1079,10 +1068,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     if (!convertTarget || (convertMode === "existing" && !convertCustomerId) || (convertMode === "new" && !convertCustomerName.trim())) return;
     const input = { dealId: convertTarget.id, ...(convertMode === "existing" ? { customerId: convertCustomerId } : { createCustomer: true as const, customerName: convertCustomerName.trim() }) };
     const accepted = await mutate(
-      "/api/crm",
-      { action: "convertLead", ...input },
       undefined,
-      () => submitCrmLeadConversion(input, undefined, goCrmLeadConversion, { actorId, organizationId }),
+      () => submitCrmLeadConversion(input, undefined, true, { actorId, organizationId }),
     );
     if (accepted) { setConvertTarget(null); setConvertCustomerId(""); setConvertCustomerName(""); }
   }
@@ -1140,15 +1127,15 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }
 
   async function submitImport() {
-    if (goCrmCustomerImport && !importRecoveryReady) return;
+    if (!importRecoveryReady) return;
     const rows = importRows.filter((row) => row.include && !row.error).map(({ rowNumber, name, email, phone, allowDuplicate }) => ({ rowNumber, name, ...(email ? { email } : {}), ...(phone ? { phone } : {}), allowDuplicate }));
     if (!rows.length) return;
     setSharedBusy(true);
-    if (goCrmCustomerImport) setImportRetryLocked(true);
+    setImportRetryLocked(true);
     try {
-      const result = await importCrmCustomers(rows, undefined, goCrmCustomerImport, { actorId, organizationId });
+      const result = await importCrmCustomers(rows, undefined, true, { actorId, organizationId });
       if (result.kind === "pending") { setNotice({ tone: "pending", text: result.reason }); return; }
-      const savedImportUndo = goCrmCustomerImport ? await readCrmCustomerImportUndo({ actorId, organizationId }) : null;
+      const savedImportUndo = await readCrmCustomerImportUndo({ actorId, organizationId });
       setImportSummary({ imported: result.data.inserted, skipped: result.data.skippedDuplicates, ids: result.data.createdIds, importIntentId: savedImportUndo?.importIntentId ?? null, undone: false });
       setImportRetryLocked(false);
       setNotice({ tone: "success", text: `Imported ${result.data.inserted} customers. ${result.data.skippedDuplicates} likely duplicates were skipped.` });
@@ -1163,10 +1150,10 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }
 
   async function undoImport() {
-    if (!importSummary?.ids.length || goCrmCustomerImport && !importRecoveryReady) return;
+    if (!importSummary?.ids.length || !importRecoveryReady) return;
     setSharedBusy(true);
     try {
-      const result = await undoCrmImport(importSummary.ids, undefined, goCrmCustomerImport, { actorId, organizationId }, importSummary.importIntentId ?? undefined);
+      const result = await undoCrmImport(importSummary.ids, undefined, true, { actorId, organizationId }, importSummary.importIntentId ?? undefined);
       if (result.kind === "pending") {
         setImportSummary({ ...importSummary, undoPending: true });
         setNotice({ tone: "pending", text: result.reason });
@@ -1208,7 +1195,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     {tab === "pipeline" && <section className="crm-panel" aria-label="Deals pipeline"><header className="crm-panel-heading"><div><h2>Deals pipeline</h2><p>Move deals through six stages. Stage changes that affect the forecast require confirmation, and lost deals require a reason.</p></div><label>Show <select aria-label="Filter deals" value={dealFilter} onChange={(event) => setDealFilter(event.target.value as typeof dealFilter)}><option value="all">All deals</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></label></header>
       <form className="crm-inline-form" onSubmit={(event) => void createNewDeal(event)}><label>Deal name<input required maxLength={120} disabled={busy || !dealCreateReady || dealCreateLocked} value={createDeal.title} onChange={(event) => setCreateDeal({ ...createDeal, title: event.target.value })} /></label><label>Value<input type="number" min="0" step="0.01" disabled={busy || !dealCreateReady || dealCreateLocked} value={createDeal.value} onChange={(event) => setCreateDeal({ ...createDeal, value: event.target.value })} /></label><label>Customer<select disabled={busy || !dealCreateReady || dealCreateLocked} value={createDeal.customerId} onChange={(event) => setCreateDeal({ ...createDeal, customerId: event.target.value })}><option value="">No linked customer</option>{activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><button disabled={busy || !dealCreateReady}>{dealCreateLocked ? "Retry deal" : "Add deal"}</button></form>
       {!dealCreateReady && <p role="status">CRM is waiting for account and organization details or restoring a saved deal draft.</p>}
-      {goCrmDealCreate && dealCreateLocked && <p role="status">This deal creation is pending or uncertain. Retry the same details to resolve it.</p>}
+      {dealCreateLocked && <p role="status">This deal creation is pending or uncertain. Retry the same details to resolve it.</p>}
       <div className="crm-deal-controls"><label>Search deals<input type="search" value={dealSearch} onChange={(event) => setDealSearch(event.target.value)} placeholder="Deal, customer, or note" /></label><div role="group" aria-label="Deal layout"><button type="button" aria-pressed={dealView === "board"} onClick={() => setDealView("board")}>Board</button><button type="button" aria-pressed={dealView === "table"} onClick={() => setDealView("table")}>Table</button></div></div>
       {dealView === "board" ? <div className="crm-deal-board">{stages.filter((stageName) => dealFilter === "all" || (dealFilter === "open" ? stageName !== "won" && stageName !== "lost" : stageName === dealFilter)).map((stageName) => <section className={`crm-deal-column${overStage === stageName ? " crm-deal-column-over" : ""}`} key={stageName} aria-label={`${stageLabels[stageName]} deals`} onDragOver={(event) => { event.preventDefault(); setOverStage(stageName); }} onDragLeave={() => setOverStage((current) => current === stageName ? null : current)} onDrop={(event) => { event.preventDefault(); const deal = deals.find((entry) => entry.id === draggingDealId); if (deal) requestMove(deal, stageName); setDraggingDealId(null); setOverStage(null); }}><h3>{stageLabels[stageName]} <span>{visibleDeals.filter((deal) => deal.stage === stageName).length}</span></h3>{visibleDeals.filter((deal) => deal.stage === stageName).map((deal) => <article className={`crm-deal-card${draggingDealId === deal.id ? " crm-deal-card-dragging" : ""}`} key={deal.id} draggable onDragStart={(event) => { setDraggingDealId(deal.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", deal.id); }} onDragEnd={() => { setDraggingDealId(null); setOverStage(null); }}><strong>{deal.title}</strong><span>{money(deal.valueMinor)}</span>{deal.customerName && <small>{deal.customerName}</small>}{deal.note && <small>{deal.note}</small>}<label>Move to<select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}><option value={deal.stage}>{stageLabels[deal.stage]}</option>{stages.filter((candidate) => candidate !== deal.stage).map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></label>{deal.stage === "lead" && <button type="button" onClick={() => { void openLeadConversion(deal); }}>Convert lead</button>}</article>)}</section>)}</div> : <div className="crm-table-wrap"><table className="crm-table crm-deal-table"><thead><tr><th>Deal</th><th>Customer</th><th>Stage</th><th>Value</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{visibleDeals.map((deal) => <tr key={deal.id}><td><strong>{deal.title}</strong>{deal.note && <small>{deal.note}</small>}</td><td>{deal.customerName ?? "Unlinked"}</td><td><select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}>{stages.map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></td><td>{money(deal.valueMinor)}</td><td>{new Date(deal.updatedAt).toLocaleDateString()}</td><td>{deal.stage === "lead" && <button type="button" onClick={() => { void openLeadConversion(deal); }}>Convert lead</button>}</td></tr>)}</tbody></table>{visibleDeals.length === 0 && <p className="crm-empty">No deals match this filter.</p>}</div>}
     </section>}
@@ -1216,7 +1203,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     {tab === "customers" && <section className="crm-panel" aria-label="Customer directory"><header className="crm-panel-heading"><div><h2>Customers</h2><p>Profiles retain linked records when a customer is deactivated or merged.</p></div><div>{importSummary?.ids.length ? <button type="button" onClick={() => setImportOpen(true)}>Undo last import</button> : null}<button type="button" onClick={() => { setImportOpen(true); if (!importSummary?.ids.length || importSummary.undone) { setImportSummary(null); setImportRows([]); } }}>Import CSV</button></div></header>
       <form className="crm-inline-form" onSubmit={(event) => void createNewCustomer(event)}><label>Name<input required maxLength={120} disabled={busy || !customerCreateReady || customerCreateLocked} value={createCustomer.name} onChange={(event) => setCreateCustomer({ ...createCustomer, name: event.target.value })} /></label><label>Email<input type="email" disabled={busy || !customerCreateReady || customerCreateLocked} value={createCustomer.email} onChange={(event) => setCreateCustomer({ ...createCustomer, email: event.target.value })} /></label><label>Phone<input maxLength={40} disabled={busy || !customerCreateReady || customerCreateLocked} value={createCustomer.phone} onChange={(event) => setCreateCustomer({ ...createCustomer, phone: event.target.value })} /></label><label>Preferred contact<select disabled={busy || !customerCreateReady || customerCreateLocked} value={newContactMethod} onChange={(event) => setNewContactMethod(event.target.value as typeof newContactMethod)}><option value="email">Email</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option></select></label><label className="crm-check"><input type="checkbox" disabled={busy || !customerCreateReady || customerCreateLocked} checked={newDoNotContact} onChange={(event) => setNewDoNotContact(event.target.checked)} /> Do not contact</label><button disabled={busy || !customerCreateReady}>{customerCreateLocked ? "Retry customer" : "Add customer"}</button></form>
       {!customerCreateReady && <p role="status">CRM is waiting for account and organization details or restoring a saved customer draft.</p>}
-      {goCrmCustomerCreate && customerCreateLocked && <p role="status">This customer creation is pending or uncertain. Retry the same details to resolve it.</p>}
+      {customerCreateLocked && <p role="status">This customer creation is pending or uncertain. Retry the same details to resolve it.</p>}
       <div className="crm-filter-row"><label>Search<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, email, phone, or tag" /></label><label>Status<select value={customerFilter.status} onChange={(event) => setCustomerFilter({ ...customerFilter, status: event.target.value as CustomerFilter["status"] })}><option value="active">Active</option><option value="inactive">Inactive</option><option value="all">All</option></select></label><label>Owner<select value={customerFilter.owner} onChange={(event) => setCustomerFilter({ ...customerFilter, owner: event.target.value })}><option value="all">All owners</option><option value="unassigned">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label><label>Tag<input value={customerFilter.tag} onChange={(event) => setCustomerFilter({ ...customerFilter, tag: event.target.value })} /></label><label className="crm-check"><input type="checkbox" checked={customerFilter.staleOnly} onChange={(event) => setCustomerFilter({ ...customerFilter, staleOnly: event.target.checked })} /> No activity in 30 days</label><label className="crm-check"><input type="checkbox" checked={customerFilter.duplicateOnly} onChange={(event) => setCustomerFilter({ ...customerFilter, duplicateOnly: event.target.checked })} /> Possible duplicates</label></div>
       <div className="crm-saved-views"><label>Saved views<select aria-label="Saved customer views" value="" onChange={(event) => { const view = views.find((entry) => entry.id === event.target.value); if (view) setCustomerFilter(view.filters); }}><option value="">Choose a view</option>{views.filter((view) => view.isPinned).map((view) => <option key={view.id} value={view.id}>★ {view.name}</option>)}{views.filter((view) => !view.isPinned).map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><input aria-label="Saved view name" placeholder="Name this view" maxLength={60} value={saveViewName} onChange={(event) => setSaveViewName(event.target.value)} /><button type="button" disabled={!saveViewName.trim() || busy || !savedViewReady || Boolean(savedViewRecovery)} onClick={() => void saveView()}>Save current view</button>{views.map((view) => <span className="crm-view-chip" key={view.id}>{view.name}<button type="button" aria-label={`Pin ${view.name}`} disabled={busy || !savedViewReady || Boolean(savedViewRecovery)} onClick={() => void saveView(view.name, { ...view, isPinned: !view.isPinned })}>{view.isPinned ? "★" : "☆"}</button><button type="button" aria-label={`Share ${view.name}`} disabled={busy || !savedViewReady || Boolean(savedViewRecovery)} onClick={() => void saveView(view.name, { ...view, isShared: !view.isShared })}>{view.isShared ? "Shared" : "Private"}</button></span>)}</div>
       {!savedViewReady && <p role="status">CRM is checking for a saved-view change associated with this account and organization.</p>}
@@ -1271,16 +1258,16 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     </section>}
 
     {selected && <div className="crm-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeProfile(); }}><section className="crm-modal" role="dialog" aria-modal="true" aria-labelledby="crm-profile-title"><header><div><p className="crm-eyebrow">Customer profile</p><h2 id="crm-profile-title">{selected.name}</h2></div><button type="button" aria-label="Close customer profile" onClick={closeProfile}>×</button></header><nav className="crm-profile-tabs" aria-label="Customer profile tabs">{(["overview", "activity", "invoices", "documents"] as const).map((value) => <button type="button" key={value} aria-pressed={profileTab === value} onClick={() => setProfileTab(value)}>{value[0]!.toUpperCase()}{value.slice(1)}</button>)}</nav>
-      {profileTab === "overview" ? <><fieldset className="crm-profile-fields" disabled={busy || !profileUpdateReady || profileUpdateLocked}><label>Name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })} /></label><label>Email<input value={selected.email ?? ""} readOnly /></label><label>Phone<input value={profileDraft.phone} onChange={(event) => setProfileDraft({ ...profileDraft, phone: event.target.value })} /></label><label>Owner<select value={profileDraft.ownerUserId} onChange={(event) => setProfileDraft({ ...profileDraft, ownerUserId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label><label>Preferred contact<select value={profileDraft.preferredContactMethod} onChange={(event) => setProfileDraft({ ...profileDraft, preferredContactMethod: event.target.value as typeof profileDraft.preferredContactMethod })}><option value="email">Email</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option></select></label><label>Tags, comma separated<input value={profileDraft.tags} onChange={(event) => setProfileDraft({ ...profileDraft, tags: event.target.value })} /></label><label className="crm-check"><input type="checkbox" checked={profileDraft.doNotContact} onChange={(event) => setProfileDraft({ ...profileDraft, doNotContact: event.target.checked })} /> Do not contact</label><label className="crm-span">Notes<textarea value={profileDraft.notes} onChange={(event) => setProfileDraft({ ...profileDraft, notes: event.target.value })} /></label></fieldset>{goCrmCustomerProfileUpdate && !profileUpdateReady && <p role="status">CRM is restoring a saved customer profile update for this account and organization.</p>}{goCrmCustomerProfileUpdate && profileUpdateLocked && <p role="status">This profile update is pending or uncertain. Retry the same action to resolve it.</p>}<div className="crm-modal-actions"><button type="button" disabled={busy || !profileUpdateReady || (profileUpdateLocked && profileUpdateAction?.name === undefined)} onClick={() => void saveCustomerProfile()}>{profileUpdateLocked ? "Retry profile update" : "Save profile"}</button><button type="button" onClick={() => { setTaskDraft({ ...taskDraft, customerId: selected.id, title: `Follow up with ${selected.name}` }); navigateToTab("tasks"); }}>Create follow-up</button><button type="button" onClick={() => setProfileTab("activity")}>View history</button></div>{selected.nextStep && <p className="crm-next-step">Next step: {selected.nextStep.summary}</p>}<section className="crm-follow-up-draft" aria-label="AI follow-up draft"><header><div><h3>Follow-up draft</h3><p>Use recent CRM records as context, then review and edit before outreach.</p></div><button type="button" disabled={selected.doNotContact || draftState.status === "loading"} onClick={() => void generateFollowUpDraft()}>{draftState.status === "loading" ? "Drafting…" : draftState.status === "ready" ? "Regenerate draft" : "Draft with AI"}</button></header>{selected.doNotContact ? <p className="crm-draft-warning">This customer is marked do not contact. Drafting and outreach shortcuts are disabled.</p> : draftState.status === "loading" ? <p role="status">Reviewing recent invoices, quotes, and follow-ups…</p> : draftState.status === "failed" ? <p role="alert" className="crm-draft-warning">{draftState.message}</p> : draftState.status === "ready" ? <><label>Subject<input value={draftState.subject} maxLength={180} onChange={(event) => setDraftState({ ...draftState, subject: event.target.value })} /></label><label>Message<textarea value={draftState.body} maxLength={4000} onChange={(event) => setDraftState({ ...draftState, body: event.target.value })} /></label><p className="crm-source-heading">Records used</p><ul className="crm-draft-sources">{draftState.draft.sources.map((source) => <li key={`${source.kind}-${source.refId}`}><button type="button" onClick={() => openDraftSource(source)}><strong>{source.kind}</strong><span>{source.summary}</span><small>{new Date(source.date).toLocaleDateString()}, open related record</small></button></li>)}</ul><button type="button" onClick={() => void copyFollowUpDraft()}>{draftCopied ? "Copied" : "Copy draft"}</button></> : <p>Generate a draft from recent invoices, quotes, and follow-up tasks.</p>}</section></> : <div className="crm-timeline" aria-live="polite">{timeline.filter((entry) => profileTab === "activity" || (profileTab === "invoices" ? ["invoice", "payment", "quote"].includes(entry.kind) : entry.kind === "document")).map((entry) => <article key={`${entry.kind}-${entry.refId}`}><span>{new Date(entry.date).toLocaleString()}</span><strong>{entry.kind}</strong><p>{entry.summary}</p></article>)}{timeline.length === 0 && <p>No {profileTab === "invoices" ? "invoice or payment" : profileTab === "documents" ? "document" : "activity"} history is available.</p>}</div>}
+      {profileTab === "overview" ? <><fieldset className="crm-profile-fields" disabled={busy || !profileUpdateReady || profileUpdateLocked}><label>Name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })} /></label><label>Email<input value={selected.email ?? ""} readOnly /></label><label>Phone<input value={profileDraft.phone} onChange={(event) => setProfileDraft({ ...profileDraft, phone: event.target.value })} /></label><label>Owner<select value={profileDraft.ownerUserId} onChange={(event) => setProfileDraft({ ...profileDraft, ownerUserId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label><label>Preferred contact<select value={profileDraft.preferredContactMethod} onChange={(event) => setProfileDraft({ ...profileDraft, preferredContactMethod: event.target.value as typeof profileDraft.preferredContactMethod })}><option value="email">Email</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option></select></label><label>Tags, comma separated<input value={profileDraft.tags} onChange={(event) => setProfileDraft({ ...profileDraft, tags: event.target.value })} /></label><label className="crm-check"><input type="checkbox" checked={profileDraft.doNotContact} onChange={(event) => setProfileDraft({ ...profileDraft, doNotContact: event.target.checked })} /> Do not contact</label><label className="crm-span">Notes<textarea value={profileDraft.notes} onChange={(event) => setProfileDraft({ ...profileDraft, notes: event.target.value })} /></label></fieldset>{!profileUpdateReady && <p role="status">CRM is restoring a saved customer profile update for this account and organization.</p>}{profileUpdateLocked && <p role="status">This profile update is pending or uncertain. Retry the same action to resolve it.</p>}<div className="crm-modal-actions"><button type="button" disabled={busy || !profileUpdateReady || (profileUpdateLocked && profileUpdateAction?.name === undefined)} onClick={() => void saveCustomerProfile()}>{profileUpdateLocked ? "Retry profile update" : "Save profile"}</button><button type="button" onClick={() => { setTaskDraft({ ...taskDraft, customerId: selected.id, title: `Follow up with ${selected.name}` }); navigateToTab("tasks"); }}>Create follow-up</button><button type="button" onClick={() => setProfileTab("activity")}>View history</button></div>{selected.nextStep && <p className="crm-next-step">Next step: {selected.nextStep.summary}</p>}<section className="crm-follow-up-draft" aria-label="AI follow-up draft"><header><div><h3>Follow-up draft</h3><p>Use recent CRM records as context, then review and edit before outreach.</p></div><button type="button" disabled={selected.doNotContact || draftState.status === "loading"} onClick={() => void generateFollowUpDraft()}>{draftState.status === "loading" ? "Drafting…" : draftState.status === "ready" ? "Regenerate draft" : "Draft with AI"}</button></header>{selected.doNotContact ? <p className="crm-draft-warning">This customer is marked do not contact. Drafting and outreach shortcuts are disabled.</p> : draftState.status === "loading" ? <p role="status">Reviewing recent invoices, quotes, and follow-ups…</p> : draftState.status === "failed" ? <p role="alert" className="crm-draft-warning">{draftState.message}</p> : draftState.status === "ready" ? <><label>Subject<input value={draftState.subject} maxLength={180} onChange={(event) => setDraftState({ ...draftState, subject: event.target.value })} /></label><label>Message<textarea value={draftState.body} maxLength={4000} onChange={(event) => setDraftState({ ...draftState, body: event.target.value })} /></label><p className="crm-source-heading">Records used</p><ul className="crm-draft-sources">{draftState.draft.sources.map((source) => <li key={`${source.kind}-${source.refId}`}><button type="button" onClick={() => openDraftSource(source)}><strong>{source.kind}</strong><span>{source.summary}</span><small>{new Date(source.date).toLocaleDateString()}, open related record</small></button></li>)}</ul><button type="button" onClick={() => void copyFollowUpDraft()}>{draftCopied ? "Copied" : "Copy draft"}</button></> : <p>Generate a draft from recent invoices, quotes, and follow-up tasks.</p>}</section></> : <div className="crm-timeline" aria-live="polite">{timeline.filter((entry) => profileTab === "activity" || (profileTab === "invoices" ? ["invoice", "payment", "quote"].includes(entry.kind) : entry.kind === "document")).map((entry) => <article key={`${entry.kind}-${entry.refId}`}><span>{new Date(entry.date).toLocaleString()}</span><strong>{entry.kind}</strong><p>{entry.summary}</p></article>)}{timeline.length === 0 && <p>No {profileTab === "invoices" ? "invoice or payment" : profileTab === "documents" ? "document" : "activity"} history is available.</p>}</div>}
     </section></div>}
 
     {moveTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-lost-title"><h2 id="crm-lost-title">{moveTarget.stage === "lost" ? `Mark “${moveTarget.deal.title}” as lost?` : `Move “${moveTarget.deal.title}” to ${stageLabels[moveTarget.stage]}?`}</h2><p>{moveTarget.stage === "lost" ? "Record why the deal was lost. This will be included in its audit history." : "This stage change updates the weighted pipeline forecast."}</p>{moveTarget.stage === "lost" && <label>Lost reason<textarea required maxLength={500} autoFocus value={lostReason} onChange={(event) => setLostReason(event.target.value)} /></label>}<footer><button type="button" disabled={busy} onClick={() => { setMoveTarget(null); setLostReason(""); }}>Cancel</button><button type="button" disabled={busy || (moveTarget.stage === "lost" && (lostReason.trim().length < 3 || lostReason.trim().length > 500))} onClick={() => void moveDeal(moveTarget.deal, moveTarget.stage, lostReason)}>{moveTarget.stage === "lost" ? "Confirm lost" : `Move to ${stageLabels[moveTarget.stage]}`}</button></footer></section></div>}
 
     {convertTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-convert-title"><h2 id="crm-convert-title">Convert lead</h2><p>Qualify “{convertTarget.title}” and link it to a new or existing customer.</p><div className="crm-convert-modes"><button type="button" aria-pressed={convertMode === "new"} onClick={() => setConvertMode("new")}>Create customer</button><button type="button" aria-pressed={convertMode === "existing"} onClick={() => setConvertMode("existing")}>Use existing customer</button></div>{convertMode === "new" ? <label>Customer name<input autoFocus required value={convertCustomerName} onChange={(event) => setConvertCustomerName(event.target.value)} /></label> : <label>Customer<select value={convertCustomerId} onChange={(event) => setConvertCustomerId(event.target.value)}><option value="">Choose a customer</option>{activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>}<footer><button type="button" onClick={() => setConvertTarget(null)}>Cancel</button><button type="button" disabled={busy || (convertMode === "new" ? !convertCustomerName.trim() : !convertCustomerId)} onClick={() => void convertLead()}>Convert lead</button></footer></section></div>}
 
-    {mergeTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-merge-title"><h2 id="crm-merge-title">Merge customer records</h2><p>Linked history is retained on the surviving customer. The merge can be undone from its confirmation.</p><label>Duplicate record<select value={mergeTarget.id} onChange={(event) => { const found = customers.find((customer) => customer.id === event.target.value); if (found) setMergeTarget(found); }}><option value={mergeTarget.id}>{mergeTarget.name}</option>{customers.filter((customer) => customer.id !== mergeTarget.id && !customer.deactivatedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label>Keep this customer<select value={mergeSurvivorId} onChange={(event) => setMergeSurvivorId(event.target.value)}>{customers.filter((customer) => customer.id !== mergeTarget.id && !customer.deactivatedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><footer><button type="button" onClick={() => setMergeTarget(null)}>Cancel</button><button type="button" disabled={busy || !mergeSurvivorId || mergeSurvivorId === mergeTarget.id} onClick={() => void mutate("/api/customers", { action: "merge", survivorCustomerId: mergeSurvivorId, duplicateCustomerId: mergeTarget.id }, (data) => { setMergeUndo(data); setMergeTarget(null); }, () => submitCrmCustomerMerge({ survivorCustomerId: mergeSurvivorId, duplicateCustomerId: mergeTarget.id }, undefined, undefined, { actorId, organizationId }))}>Merge records</button></footer></section></div>}
-    {mergeUndo && <div className="crm-notice crm-notice-success" role="status">Customer records merged. <button type="button" disabled={busy} onClick={() => void mutate("/api/customers", { action: "undoMerge", ...mergeUndo }, () => setMergeUndo(null), () => submitCrmCustomerMergeUndo(mergeUndo, undefined, undefined, { actorId, organizationId }))}>Undo merge</button></div>}
-    {deactivateTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-deactivate-title"><h2 id="crm-deactivate-title">Deactivate {deactivateTarget.name}?</h2><p>This removes the customer from active pickers and agent lookups. Existing invoices and history stay available.</p><footer><button type="button" onClick={() => setDeactivateTarget(null)}>Cancel</button><button type="button" disabled={busy} onClick={() => void mutate("/api/customers", { action: "deactivate", customerId: deactivateTarget.id }, () => setDeactivateTarget(null), () => submitCrmCustomerDeactivate(deactivateTarget.id, undefined, undefined, { actorId, organizationId }))}>Deactivate customer</button></footer></section></div>}
+    {mergeTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-merge-title"><h2 id="crm-merge-title">Merge customer records</h2><p>Linked history is retained on the surviving customer. The merge can be undone from its confirmation.</p><label>Duplicate record<select value={mergeTarget.id} onChange={(event) => { const found = customers.find((customer) => customer.id === event.target.value); if (found) setMergeTarget(found); }}><option value={mergeTarget.id}>{mergeTarget.name}</option>{customers.filter((customer) => customer.id !== mergeTarget.id && !customer.deactivatedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label>Keep this customer<select value={mergeSurvivorId} onChange={(event) => setMergeSurvivorId(event.target.value)}>{customers.filter((customer) => customer.id !== mergeTarget.id && !customer.deactivatedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><footer><button type="button" onClick={() => setMergeTarget(null)}>Cancel</button><button type="button" disabled={busy || !mergeSurvivorId || mergeSurvivorId === mergeTarget.id} onClick={() => void mutate((data) => { setMergeUndo(data); setMergeTarget(null); }, () => submitCrmCustomerMerge({ survivorCustomerId: mergeSurvivorId, duplicateCustomerId: mergeTarget.id }, undefined, undefined, { actorId, organizationId }))}>Merge records</button></footer></section></div>}
+    {mergeUndo && <div className="crm-notice crm-notice-success" role="status">Customer records merged. <button type="button" disabled={busy} onClick={() => void mutate(() => setMergeUndo(null), () => submitCrmCustomerMergeUndo(mergeUndo, undefined, undefined, { actorId, organizationId }))}>Undo merge</button></div>}
+    {deactivateTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-deactivate-title"><h2 id="crm-deactivate-title">Deactivate {deactivateTarget.name}?</h2><p>This removes the customer from active pickers and agent lookups. Existing invoices and history stay available.</p><footer><button type="button" onClick={() => setDeactivateTarget(null)}>Cancel</button><button type="button" disabled={busy} onClick={() => void mutate(() => setDeactivateTarget(null), () => submitCrmCustomerDeactivate(deactivateTarget.id, undefined, undefined, { actorId, organizationId }))}>Deactivate customer</button></footer></section></div>}
 
     {importOpen && (
       <div className="crm-modal-backdrop">
@@ -1291,8 +1278,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
           </header>
           {importSummary ? (
             <div>
-              <p role="status">{importSummary.undone ? "Import undone." : importSummary.importIntentId && !goCrmCustomerImport ? "This import receipt belongs to Go CRM. Restore the Go customer import route to undo it safely." : importSummary.undoPending ? "This import undo is pending or uncertain. Retry the exact undo to resolve it." : `${importSummary.imported} customers imported, ${importSummary.skipped} duplicates skipped.`}</p>
-              {!importSummary.undone && importSummary.ids.length > 0 && <button type="button" disabled={busy || Boolean(importSummary.importIntentId && !goCrmCustomerImport) || goCrmCustomerImport && !importRecoveryReady} onClick={() => void undoImport()}>{importSummary.undoPending ? "Retry undo" : "Undo this import"}</button>}
+              <p role="status">{importSummary.undone ? "Import undone." : importSummary.undoPending ? "This import undo is pending or uncertain. Retry the exact undo to resolve it." : `${importSummary.imported} customers imported, ${importSummary.skipped} duplicates skipped.`}</p>
+              {!importSummary.undone && importSummary.ids.length > 0 && <button type="button" disabled={busy || !importRecoveryReady} onClick={() => void undoImport()}>{importSummary.undoPending ? "Retry undo" : "Undo this import"}</button>}
               <button type="button" onClick={() => setImportOpen(false)}>Done</button>
             </div>
           ) : (
@@ -1300,24 +1287,24 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
               <div className="crm-import-start">
                 <p>Map your columns, review likely matches, then fix invalid rows before adding customers.</p>
                 <button type="button" onClick={downloadCustomerTemplate}>Download template</button>
-                <label className="crm-file">{importRows.length ? "Choose another CSV" : "Choose CSV"}<input type="file" accept=".csv,text/csv" disabled={importRetryLocked || goCrmCustomerImport && !importRecoveryReady} onChange={(event) => void readImport(event.target.files?.[0])} /></label>
+                <label className="crm-file">{importRows.length ? "Choose another CSV" : "Choose CSV"}<input type="file" accept=".csv,text/csv" disabled={importRetryLocked || !importRecoveryReady} onChange={(event) => void readImport(event.target.files?.[0])} /></label>
               </div>
-              {goCrmCustomerImport && !importRecoveryReady && <p role="status">CRM is restoring the import receipt for the active organization.</p>}
+              {!importRecoveryReady && <p role="status">CRM is restoring the import receipt for the active organization.</p>}
               {importHeaders.length > 0 && (
                 <>
                   <div className="crm-import-mapping" aria-label="Column mapping">
-                    {(["name", "email", "phone"] as const).map((field) => <label key={field}>Map {field}<select aria-label={`Map ${field}`} disabled={importRetryLocked || goCrmCustomerImport && !importRecoveryReady} value={importMapping[field]} onChange={(event) => updateImportMapping(field, event.target.value)}><option value={-1}>Do not import</option>{importHeaders.map((header, index) => <option key={`${field}-${index}`} value={index}>{header || "Unnamed column"}</option>)}</select></label>)}
+                    {(["name", "email", "phone"] as const).map((field) => <label key={field}>Map {field}<select aria-label={`Map ${field}`} disabled={importRetryLocked || !importRecoveryReady} value={importMapping[field]} onChange={(event) => updateImportMapping(field, event.target.value)}><option value={-1}>Do not import</option>{importHeaders.map((header, index) => <option key={`${field}-${index}`} value={index}>{header || "Unnamed column"}</option>)}</select></label>)}
                   </div>
                   <div className="crm-import-summary"><span>{importRows.length} rows, {importRows.filter((row) => !row.error).length} valid, {importRows.filter((row) => row.duplicate).length} possible duplicates.</span><span>{selectedImportCount} selected to import</span><span>Rows {importPage * importPageSize + 1}-{Math.min((importPage + 1) * importPageSize, importRows.length)} of {importRows.length}</span></div>
                   <div className="crm-import-pagination"><button type="button" disabled={importPage === 0} onClick={() => setImportPage((page) => Math.max(0, page - 1))}>Previous</button><button type="button" disabled={(importPage + 1) * importPageSize >= importRows.length} onClick={() => setImportPage((page) => page + 1)}>Next</button></div>
                   <div className="crm-import-rows">
                     {visibleImportRows.map((row, localIndex) => {
                       const index = importPage * importPageSize + localIndex;
-                      const importFieldsDisabled = importRetryLocked || goCrmCustomerImport && !importRecoveryReady;
+                      const importFieldsDisabled = importRetryLocked || !importRecoveryReady;
                       return <article key={row.rowNumber}><label><input type="checkbox" disabled={importFieldsDisabled || Boolean(row.error)} checked={row.include} onChange={(event) => setImportRows((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, include: event.target.checked, includeExplicit: true } : item))} /> Row {row.rowNumber}</label><input aria-label={`Row ${row.rowNumber} name`} disabled={importFieldsDisabled} value={row.name} onChange={(event) => editImportRow(index, "name", event.target.value)} /><input aria-label={`Row ${row.rowNumber} email`} disabled={importFieldsDisabled} value={row.email} onChange={(event) => editImportRow(index, "email", event.target.value)} /><input aria-label={`Row ${row.rowNumber} phone`} disabled={importFieldsDisabled} value={row.phone} onChange={(event) => editImportRow(index, "phone", event.target.value)} />{row.error && <span role="alert">{row.error}</span>}{row.duplicate && <label><input type="checkbox" disabled={importFieldsDisabled} checked={row.allowDuplicate} onChange={(event) => setImportRows((current) => validateImportRows(current.map((item, rowIndex) => rowIndex === index ? { ...item, allowDuplicate: event.target.checked, include: event.target.checked, includeExplicit: true } : item), customers))} />{row.duplicate}, import anyway</label>}</article>;
                     })}
                   </div>
-                  <button type="button" disabled={busy || selectedImportCount === 0 || goCrmCustomerImport && !importRecoveryReady} onClick={() => void submitImport()}>{importRetryLocked ? "Retry import" : "Import"} {selectedImportCount} customers</button>
+                  <button type="button" disabled={busy || selectedImportCount === 0 || !importRecoveryReady} onClick={() => void submitImport()}>{importRetryLocked ? "Retry import" : "Import"} {selectedImportCount} customers</button>
                 </>
               )}
             </>

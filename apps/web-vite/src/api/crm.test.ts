@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmLeadConversion, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmLeadConversion, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmLeadConversion, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmLeadConversion, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -113,13 +113,14 @@ describe("CRM API client", () => {
   it("surfaces pending approvals without treating them as completed writes", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(submitCrmAction("/api/deals", { action: "move", dealId, stage: "won" })).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
+    await expect(submitCrmDealStageMove({ dealId, stage: "won" }, undefined, true, crmRetryScope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
     const init = fetchMock.mock.calls[0]?.[1];
     expect(init?.method).toBe("POST");
-    expect(JSON.parse(String(init?.body))).toMatchObject({ action: "move", dealId, stage: "won", intentId: expect.any(String) });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(init?.body))).toMatchObject({ capabilityId: "crm.moveDealStage", input: { dealId, stage: "won" }, intentId: expect.any(String) });
   });
 
-  it("routes only a Go-enabled stage move through crm.moveDealStage", async () => {
+  it("always routes stage moves through crm.moveDealStage", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { moved: true, stage: "lost" } }));
     vi.stubGlobal("fetch", fetchMock);
     const input = { dealId, stage: "lost" as const, lostReason: "Customer chose another vendor" };
@@ -134,10 +135,10 @@ describe("CRM API client", () => {
       intentId: expect.any(String),
     });
 
-    const legacyFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { moved: true, stage: "qualified" } }));
-    vi.stubGlobal("fetch", legacyFetch);
-    await submitCrmDealStageMove({ dealId, stage: "qualified" }, undefined, false);
-    expect(legacyFetch.mock.calls[0]?.[0]).toBe("/api/deals");
+    const selectorDisabledFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { moved: true, stage: "qualified" } }));
+    vi.stubGlobal("fetch", selectorDisabledFetch);
+    await submitCrmDealStageMove({ dealId, stage: "qualified" }, undefined, false, { actorId: customerId, organizationId: dealId });
+    expect(selectorDisabledFetch.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
   it.each([
@@ -200,27 +201,26 @@ describe("CRM API client", () => {
   });
 
   it("keeps uncertain Go conversions Go-only when the Go route is unavailable or rolled back", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ error: "Go capability unavailable" }, { status: 404 }));
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "Go capability unavailable" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
     const input = { dealId, customerId };
 
     await expect(submitCrmLeadConversion(input, undefined, true, crmRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     await expect(readPendingCrmLeadConversion(crmRetryScope, dealId)).resolves.toEqual(input);
-    await expect(submitCrmLeadConversion(input, undefined, false, crmRetryScope)).rejects.toMatchObject({
-      message: expect.stringContaining("A Go lead conversion is unresolved"),
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(submitCrmLeadConversion(input, undefined, false, crmRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId);
   });
 
-  it("uses the legacy CRM conversion endpoint only when explicitly rolled back without an unresolved Go intent", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId, customerId, stage: "qualified" } }));
+  it("fails closed when Go lead conversion is unavailable instead of using the legacy endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "Go unavailable" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
     const input = { dealId, createCustomer: true as const, customerName: "New Northwind" };
 
-    await expect(submitCrmLeadConversion(input, undefined, false, crmRetryScope)).resolves.toMatchObject({ kind: "completed" });
+    await expect(submitCrmLeadConversion(input, undefined, false, crmRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/crm");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ action: "convertLead", ...input });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.convertLead", input, intentId: expect.any(String) });
   });
 
   it("fails closed with a recoverable error until Go writes have actor and organization scope", async () => {
@@ -387,9 +387,10 @@ describe("CRM API client", () => {
     expect(go404Fetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
     expect(JSON.parse(String(go404Fetch.mock.calls[0]?.[1]?.body)).intentId).toBe(intentId);
     await expect(readPendingCrmDealCreate(scope)).resolves.toEqual(input);
-    await expect(submitCrmDealCreate(input, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    await expect(submitCrmDealCreate({ ...input, title: "Changed" }, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(go404Fetch).toHaveBeenCalledTimes(1);
+    await expect(submitCrmDealCreate(input, undefined, false, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(submitCrmDealCreate({ ...input, title: "Changed" }, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    expect(go404Fetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(go404Fetch.mock.calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(go404Fetch.mock.calls[1]?.[1]?.body)).intentId);
     await expect(readPendingCrmDealCreate(scope)).resolves.toEqual(input);
 
     const retryFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }));
@@ -414,13 +415,13 @@ describe("CRM API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps legacy deal creation on /api/deals when Go is disabled", async () => {
+  it("keeps deal creation on Go when the retired selector is disabled", async () => {
     const input = { title: "Renewal", valueMinor: 25_500, customerId };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }));
     vi.stubGlobal("fetch", fetchMock);
     await submitCrmDealCreate(input, undefined, false, { actorId: customerId, organizationId: dealId });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/deals");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ action: "create", ...input, intentId: expect.any(String) });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createDeal", input, intentId: expect.any(String) });
   });
 
   it("routes task creation and completion through strict Go capability outputs", async () => {
@@ -606,13 +607,13 @@ describe("CRM API client", () => {
 
     const goFetch = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { customerId, duplicateWarning: null } }));
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }));
     vi.stubGlobal("fetch", goFetch);
     await expect(submitCrmCustomerCreate(input, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     await expect(readPendingCrmCustomerCreate(scope)).resolves.toEqual(input);
-    await expect(submitCrmCustomerCreate(input, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    await expect(submitCrmCustomerCreate({ ...input, name: "Changed customer" }, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(goFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
+    await expect(submitCrmCustomerCreate(input, undefined, false, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(submitCrmCustomerCreate({ ...input, name: "Changed customer" }, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    expect(goFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
     await expect(readPendingCrmCustomerCreate(scope)).resolves.toEqual(input);
 
     const retryFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { customerId, duplicateWarning: null } }));
@@ -624,20 +625,16 @@ describe("CRM API client", () => {
     await expect(readPendingCrmCustomerCreate(scope)).resolves.toBeNull();
   });
 
-  it("keeps customer creation on the legacy customer route when the Go selector is disabled", async () => {
+  it("keeps customer creation on Go when the retired selector is disabled", async () => {
     const input = { name: "Northwind", preferredContactMethod: "email" as const, doNotContact: false };
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { customerId } }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { customerId, duplicateWarning: null } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitCrmCustomerCreate(input, undefined, false, { actorId: dealId, organizationId: customerId })).resolves.toEqual({ kind: "completed", data: { customerId } });
+    await expect(submitCrmCustomerCreate(input, undefined, false, { actorId: dealId, organizationId: customerId })).resolves.toEqual({ kind: "completed", data: { customerId, duplicateWarning: null } });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/customers");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      action: "create",
-      ...input,
-      intentId: expect.any(String),
-    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createCustomer", input, intentId: expect.any(String) });
   });
 
   it("reserves and reuses one durable intent across concurrent stage submissions", async () => {
@@ -743,9 +740,7 @@ describe("CRM API client", () => {
     await expect(submitCrmCustomerDeactivate(customerId, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
     const firstIntent = JSON.parse(String(pending.mock.calls[0]?.[1]?.body)).intentId;
 
-    const unavailable = vi.fn()
-      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { deactivated: true } }));
+    const unavailable = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "not found" }, { status: 404 }));
     vi.stubGlobal("fetch", unavailable);
     await expect(submitCrmCustomerDeactivate(customerId, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     expect(unavailable.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
@@ -755,18 +750,12 @@ describe("CRM API client", () => {
     await expect(submitCrmCustomerDeactivate(customerId, undefined, false, { actorId: "x".repeat(256), organizationId: customerId })).rejects.toMatchObject({ status: 0 });
     expect(noScopeLegacy).not.toHaveBeenCalled();
     vi.stubGlobal("fetch", unavailable);
-    await expect(submitCrmCustomerDeactivate(customerId, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(unavailable.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
-    await expect(submitCrmCustomerDeactivate(customerId, undefined, true, scope)).resolves.toEqual({ kind: "completed", data: { deactivated: true } });
+    await expect(submitCrmCustomerDeactivate(customerId, undefined, false, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     expect(unavailable.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
     for (const [, init] of unavailable.mock.calls) {
       expect(JSON.parse(String(init?.body))).toMatchObject({ capabilityId: "crm.deactivateCustomer", input: { customerId }, intentId: firstIntent });
     }
 
-    const legacy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { deactivated: true } }));
-    vi.stubGlobal("fetch", legacy);
-    await submitCrmCustomerDeactivate(customerId, undefined, false, scope);
-    expect(legacy.mock.calls[0]?.[0]).toBe("/api/customers");
   });
 
   it("requires resolved actor and organization scope before Go customer deactivation", async () => {
@@ -818,10 +807,8 @@ describe("CRM API client", () => {
     await expect(submitCrmCustomerMerge(mergeInput, undefined, false)).rejects.toMatchObject({ status: 0 });
     expect(noScopeFallback).not.toHaveBeenCalled();
     vi.stubGlobal("fetch", mergeRetry);
-    await expect(submitCrmCustomerMerge(mergeInput, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(mergeRetry.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
-    const completedMerge = await submitCrmCustomerMerge(mergeInput, undefined, true, scope);
-    expect(completedMerge).toMatchObject({ kind: "completed", data: { ...mergeResult, mergeIntentId } });
+    await expect(submitCrmCustomerMerge(mergeInput, undefined, false, scope)).resolves.toMatchObject({ kind: "completed", data: { ...mergeResult, mergeIntentId } });
+    expect(mergeRetry.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
     const mergeBodies = mergeRetry.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
     expect(mergeBodies).toHaveLength(2);
     expect(mergeBodies.map((body) => body.intentId)).toEqual([mergeIntentId, mergeIntentId]);
@@ -844,8 +831,7 @@ describe("CRM API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: mergeResult }));
     vi.stubGlobal("fetch", undoRetry);
     await expect(submitCrmCustomerMergeUndo(undoInput, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
-    await expect(submitCrmCustomerMergeUndo(undoInput, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    await expect(submitCrmCustomerMergeUndo(undoInput, undefined, true, scope)).resolves.toMatchObject({ kind: "completed" });
+    await expect(submitCrmCustomerMergeUndo(undoInput, undefined, false, scope)).resolves.toMatchObject({ kind: "completed" });
     const undoBodies = undoRetry.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
     expect(undoBodies).toHaveLength(2);
     expect(undoBodies.map((body) => body.intentId)).toEqual([undoIntentId, undoIntentId]);
@@ -865,13 +851,14 @@ describe("CRM API client", () => {
   it("accepts only the established envelope for saved-view writes", async () => {
     const viewId = "8ea6ef66-d321-4be4-a4ee-32fa0b13e5f9";
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { viewId, previous: null } })));
-    await expect(submitCrmAction("/api/crm/views", { name: "Active accounts" })).resolves.toEqual({
+    const input = { name: "Active accounts", filters: savedViewFilters, isShared: false, isPinned: false };
+    await expect(submitCrmSavedViewWrite(input, undefined, crmRetryScope)).resolves.toEqual({
       kind: "completed",
       data: { viewId, previous: null },
     });
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ viewId, previous: null })));
-    await expect(submitCrmAction("/api/crm/views", { name: "Active accounts" })).rejects.toMatchObject({
+    await expect(submitCrmSavedViewWrite(input, undefined, crmRetryScope)).rejects.toMatchObject({
       name: "CrmApiError",
       message: "The CRM service returned an unexpected action response.",
     });
@@ -884,9 +871,20 @@ describe("CRM API client", () => {
       .mockResolvedValueOnce(Response.json({ inserted: 1, skippedDuplicates: 2, createdIds: [customerId], errors: [] }))
       .mockResolvedValueOnce(Response.json({ undone: 1, remaining: 0 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(importCrmCustomers(rows, undefined, false, scope)).resolves.toEqual({ kind: "completed", data: { inserted: 1, skippedDuplicates: 2, createdIds: [customerId], errors: [] } });
-    await expect(undoCrmImport([customerId], undefined, false, scope)).resolves.toEqual({ kind: "completed", data: { undone: 1, remaining: 0 } });
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/import", "/api/import"]);
+    let generatedImportIntentId = "";
+    const resultFetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string };
+      if (body.capabilityId === "crm.importCustomers") {
+        generatedImportIntentId = body.intentId;
+        return Response.json({ ok: true, data: { createdIds: [customerId], imported: 1, skippedDuplicateRows: [3, 4], importIntentId: body.intentId } });
+      }
+      return Response.json({ ok: true, data: { customerIds: [customerId], deactivated: 1, importIntentId: generatedImportIntentId, undoIntentId: body.intentId } });
+    });
+    vi.stubGlobal("fetch", resultFetch);
+    await expect(importCrmCustomers(rows, undefined, false, scope)).resolves.toEqual({ kind: "completed", data: { inserted: 1, skippedDuplicates: 2, skippedDuplicateRows: [3, 4], createdIds: [customerId] } });
+    const importReceipt = await readCrmCustomerImportUndo(scope);
+    await expect(undoCrmImport([customerId], undefined, false, scope, importReceipt?.importIntentId)).resolves.toEqual({ kind: "completed", data: { undone: 1, remaining: 0 } });
+    expect(resultFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
   });
 
   it("retains independent Go customer import receipts and clears only the undone batch", async () => {
@@ -920,11 +918,18 @@ describe("CRM API client", () => {
 
   it("validates approval responses for customer import and undo", async () => {
     const scope = { actorId: dealId, organizationId: customerId };
-    vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Import needs approval" }, { status: 202 }))
-      .mockResolvedValueOnce(Response.json({ pendingApproval: true }, { status: 202 }))
-      .mockResolvedValueOnce(Response.json({ error: "Undo needs approval" }, { status: 202 }))
-      .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Undo needs approval" }, { status: 202 })));
+    let importAttemptCount = 0;
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string };
+      if (body.capabilityId === "crm.importCustomers") {
+        importAttemptCount += 1;
+        if (importAttemptCount === 1) return Response.json({ pendingApproval: true, error: "Import needs approval" }, { status: 202 });
+        if (importAttemptCount === 2) return Response.json({ pendingApproval: "invalid" }, { status: 202 });
+        return Response.json({ ok: true, data: { createdIds: [customerId], imported: 1, skippedDuplicateRows: [], importIntentId: body.intentId } });
+      }
+      return Response.json({ pendingApproval: true, error: "Undo needs approval" }, { status: 202 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(importCrmCustomers([{ rowNumber: 2, name: "Northwind", allowDuplicate: false }], undefined, false, scope)).resolves.toEqual({
       kind: "pending",
@@ -932,16 +937,17 @@ describe("CRM API client", () => {
     });
     await expect(importCrmCustomers([{ rowNumber: 2, name: "Northwind", allowDuplicate: false }], undefined, false, scope)).rejects.toMatchObject({
       name: "CrmApiError",
-      message: "The import service returned an unexpected approval response.",
+      message: "The CRM service returned an unexpected approval response.",
+      requestMayHaveReachedServer: true,
     });
     await expect(undoCrmImport([customerId], undefined, false, scope)).rejects.toMatchObject({
       name: "CrmApiError",
-      message: "The import service returned an unexpected undo approval response.",
+      message: expect.stringContaining("Go customer import is unresolved"),
     });
-    await expect(undoCrmImport([customerId], undefined, false, scope)).resolves.toEqual({
-      kind: "pending",
-      reason: "Undo needs approval",
-    });
+    const result = await importCrmCustomers([{ rowNumber: 2, name: "Northwind", allowDuplicate: false }], undefined, false, scope);
+    expect(result.kind).toBe("completed");
+    const receipt = await readCrmCustomerImportUndo(scope);
+    await expect(undoCrmImport([customerId], undefined, false, scope, receipt?.importIntentId)).resolves.toEqual({ kind: "pending", reason: "Undo needs approval" });
   });
 
   it("rejects import results with duplicate or unsubmitted skipped row numbers", async () => {
@@ -1021,7 +1027,7 @@ describe("CRM API client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("blocks legacy import after the selector is rolled back with a saved Go receipt", async () => {
+  it("keeps new imports on Go when the retired selector is false, after a prior Go receipt", async () => {
     const scope = { actorId: dealId, organizationId: customerId };
     const rows = [{ rowNumber: 2, name: "Northwind", allowDuplicate: false }];
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -1033,13 +1039,10 @@ describe("CRM API client", () => {
     const savedUndo = await readCrmCustomerImportUndo(scope);
     expect(savedUndo).not.toBeNull();
 
-    await expect(importCrmCustomers([{ rowNumber: 2, name: "Contoso", allowDuplicate: false }], undefined, false, scope)).rejects.toMatchObject({
-      name: "CrmApiError",
-      status: 0,
-      requestMayHaveReachedServer: true,
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    await expect(readCrmCustomerImportUndo(scope)).resolves.toEqual(savedUndo);
+    await expect(importCrmCustomers([{ rowNumber: 2, name: "Contoso", allowDuplicate: false }], undefined, false, scope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(await readCrmCustomerImportUndo(scope)).not.toEqual(savedUndo);
   });
 
   it("retries Go customer imports and undo with scoped intents, blocks rollback, and persists the created IDs", async () => {
@@ -1057,10 +1060,10 @@ describe("CRM API client", () => {
     await expect(readPendingCrmCustomerImport(scope)).resolves.toEqual(rows);
     await expect(importCrmCustomers(rows, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
 
-    const noImportFallback = vi.fn();
+    const noImportFallback = vi.fn(async () => Response.json({ error: "Go unavailable" }, { status: 404 }));
     vi.stubGlobal("fetch", noImportFallback);
-    await expect(importCrmCustomers(rows, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(noImportFallback).not.toHaveBeenCalled();
+    await expect(importCrmCustomers(rows, undefined, false, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(noImportFallback).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
 
     const importRetry = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
@@ -1081,11 +1084,10 @@ describe("CRM API client", () => {
     await expect(readPendingCrmCustomerImport(scope)).resolves.toBeNull();
     await expect(readCrmCustomerImportUndo(scope)).resolves.toEqual({ imported: 1, skippedDuplicates: 1, createdIds: [dealId], importIntentId });
 
-    const noCompletedImportUndoFallback = vi.fn();
+    const noCompletedImportUndoFallback = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "Go unavailable" }, { status: 404 }));
     vi.stubGlobal("fetch", noCompletedImportUndoFallback);
-    await expect(undoCrmImport([dealId], undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    await expect(undoCrmImport([dealId], undefined, false, scope, importIntentId)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(noCompletedImportUndoFallback).not.toHaveBeenCalled();
+    await expect(undoCrmImport([dealId], undefined, false, scope, importIntentId)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(noCompletedImportUndoFallback.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
 
     const undo = vi.fn()
       .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Undo needs approval" }, { status: 202 }))
@@ -1096,10 +1098,10 @@ describe("CRM API client", () => {
     await expect(readPendingCrmCustomerImportUndo(scope)).resolves.toEqual({ action: "undoCustomerImport", customerIds: [dealId], importIntentId });
     await expect(undoCrmImport([dealId], undefined, true, scope, importIntentId)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
 
-    const noUndoFallback = vi.fn();
+    const noUndoFallback = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "Go unavailable" }, { status: 404 }));
     vi.stubGlobal("fetch", noUndoFallback);
-    await expect(undoCrmImport([dealId], undefined, false, scope, importIntentId)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(noUndoFallback).not.toHaveBeenCalled();
+    await expect(undoCrmImport([dealId], undefined, false, scope, importIntentId)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(noUndoFallback.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
 
     const undoRetry = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
@@ -1149,21 +1151,16 @@ describe("CRM API client", () => {
     await expect(submitCrmCustomerProfileUpdate(input, undefined, true, { actorId: customerId, organizationId: dealId })).rejects.toMatchObject({ requestMayHaveReachedServer: true });
   });
 
-  it("keeps profile writes on the legacy customer route when the Go selector is disabled", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { updatedCount: 1 } }));
+  it("keeps profile writes on Go when the retired selector is disabled", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: [], notes: null, phone: null, preferredContactMethod: "email", doNotContact: false }] } }));
     vi.stubGlobal("fetch", fetchMock);
     const input = { action: "updateProfile" as const, customerIds: [customerId], notes: "Legacy route" };
 
-    await expect(submitCrmCustomerProfileUpdate(input, undefined, false)).resolves.toEqual({ kind: "completed", data: { updatedCount: 1 } });
+    await expect(submitCrmCustomerProfileUpdate(input, undefined, false, crmRetryScope)).resolves.toMatchObject({ kind: "completed", data: { updatedCount: 1, previous: [{ customerId }] } });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/customers");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      action: "updateProfile",
-      customerIds: [customerId],
-      notes: "Legacy route",
-      intentId: expect.any(String),
-    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.updateCustomerProfiles", input: { customerIds: [customerId] }, intentId: expect.any(String) });
   });
 
   it("keeps the exact profile action and scoped intent after a Go 404 without falling back to the legacy writer", async () => {

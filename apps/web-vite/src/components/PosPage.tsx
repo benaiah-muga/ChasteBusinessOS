@@ -27,7 +27,6 @@ import {
   type PosSale,
   type PosSaleLine,
 } from "../api/pos-session";
-import { legacyUrl } from "../legacy";
 import "./PosPage.css";
 
 type Tab = "overview" | "sell" | "sessions";
@@ -213,7 +212,7 @@ function saleLineTotalMinor(line: PosSaleLine): number {
   return Math.round((line.quantity * line.unitPriceMinor) / 1000) + line.taxMinor;
 }
 
-export function PosPage({ baseCurrency = null, actorId = null, organizationId = null, useGoCompleteSale, useGoReturnSale }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null; useGoCompleteSale?: boolean; useGoReturnSale?: boolean }) {
+export function PosPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const registerScopeId = actorId && organizationId ? `${organizationId}:${actorId}` : null;
   const registerScopeRef = useRef(registerScopeId);
   const registerScopeGeneration = useRef(0);
@@ -224,6 +223,14 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
     registerScopeRef.current = registerScopeId;
     registerScopeGeneration.current += 1;
   }
+  const captureRegisterScope = () => {
+    const scopeId = registerScopeId;
+    const generation = registerScopeGeneration.current;
+    return {
+      scopeId,
+      isCurrent: () => registerScopeGeneration.current === generation && registerScopeRef.current === scopeId,
+    };
+  };
   const currency = useMemo(() => currencyFor(baseCurrency), [baseCurrency]);
   const digits = currency.minorUnits;
   const scale = 10 ** digits;
@@ -411,12 +418,14 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
 
   useEffect(() => {
     if (!registerStateLoaded || !actorId || !organizationId) return;
-    const scopeId = `${organizationId}:${actorId}`;
+    const registerScope = captureRegisterScope();
+    const scopeId = registerScope.scopeId;
+    if (!scopeId) return;
     if (registerStateScope !== scopeId) return;
     if (returnRecoveryScope.current === scopeId) return;
     returnRecoveryScope.current = scopeId;
     void restorePosReturnAttempt(scopeId).then((attempt) => {
-      if (returnRecoveryScope.current !== scopeId) return;
+      if (!registerScope.isCurrent() || returnRecoveryScope.current !== scopeId) return;
       if (!attempt) {
         setReturnRecoveryBlocked(false);
         return;
@@ -442,7 +451,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         ? { tone: "pending", title: `Return of sale #${target.number} is waiting for approval.`, hint: "The exact request and its identity have been restored. Retry it safely to check for completion." }
         : { tone: "error", title: "Return result is unknown", hint: "The exact request and its identity have been restored. Retry it or verify the sale before starting another return." });
     }).catch(() => {
-      if (returnRecoveryScope.current === scopeId) {
+      if (registerScope.isCurrent() && returnRecoveryScope.current === scopeId) {
         setReturnRecoveryBlocked(true);
         setNotice({ tone: "error", title: "Could not restore the return attempt", hint: "Refresh the page or verify the sale before requesting another refund." });
       }
@@ -454,6 +463,11 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
     setRegisterAttemptScopeId(null);
     setRegisterRecoveryBlocked(false);
     setBusy(false);
+    setQueuedSaleBusyId(null);
+    setQuickProduct({ name: "", sku: "", barcode: "", price: "", openingStock: "", unitLabel: "unit" });
+    setQuickProductOpen(false);
+    setQuickProductAdvancedOpen(false);
+    setQuickProductRetryBlocked(false);
     registerRecoveryScope.current = null;
   }, [registerScopeId]);
 
@@ -743,6 +757,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         : { action: "open" as const, openingFloatMinor: Math.max(0, toMinor(float, digits)) };
       const outcome = await openPosSession(action, controller.signal, {
         scopeId,
+        organizationId,
         isScopeCurrent,
         ...(activeRegisterAttempt?.action.action === "open" ? { intentId: activeRegisterAttempt.intentId } : {}),
       });
@@ -799,6 +814,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
           };
       const outcome = await closePosSession(action, controller.signal, {
         scopeId,
+        organizationId,
         isScopeCurrent,
         ...(activeRegisterAttempt?.action.action === "close" ? { intentId: activeRegisterAttempt.intentId } : {}),
       });
@@ -858,8 +874,8 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
     setBusy(true);
     try {
       const outcome = attempt.action.action === "open"
-        ? await openPosSession(attempt.action, controller.signal, { useGo: true, scopeId, intentId: attempt.intentId, isScopeCurrent })
-        : await closePosSession(attempt.action, controller.signal, { useGo: true, scopeId, intentId: attempt.intentId, isScopeCurrent });
+        ? await openPosSession(attempt.action, controller.signal, { scopeId, organizationId, intentId: attempt.intentId, isScopeCurrent })
+        : await closePosSession(attempt.action, controller.signal, { scopeId, organizationId, intentId: attempt.intentId, isScopeCurrent });
       if (!isScopeCurrent()) return;
       const restored = await restorePosRegisterAttempt(scopeId);
       if (!isScopeCurrent()) return;
@@ -1009,6 +1025,8 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
 
   async function completeCurrentSale() {
     if (!openSessionId || lines.length === 0 || salePendingApproval || !online || !checkoutReady) return;
+    const { scopeId, isCurrent } = captureRegisterScope();
+    if (!scopeId) return;
     setBusy(true);
     try {
       const action = currentSaleAction();
@@ -1035,7 +1053,8 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         setNotice({ tone: "error", title: "Sale could not be started safely", hint: "Free browser storage before sending so this exact sale can be retried if the connection drops." });
         return;
       }
-      const outcome = await submitPosSale(action, attemptIntentId, undefined, { scopeId: actorId, useGo: useGoCompleteSale });
+      const outcome = await submitPosSale(action, attemptIntentId, undefined, { scopeId, organizationId });
+      if (!isCurrent()) return;
       if (outcome.kind === "pending") {
         setSalePendingApproval(true);
         setSaleAttemptUncertain(false);
@@ -1074,6 +1093,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       });
       await load();
     } catch (error) {
+      if (!isCurrent()) return;
       const status = error instanceof PosApiError ? error.status : 0;
       const definitiveRefusal = status >= 400 && status < 500 && status !== 404 && status !== 408;
       setSaleAttemptUncertain(!definitiveRefusal);
@@ -1086,20 +1106,24 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         setNotice(noticeFor(error, "Check the sale lines and payment amounts before submitting."));
       }
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
   async function startAnotherSale() {
+    const { scopeId, isCurrent } = captureRegisterScope();
+    if (!scopeId) return;
     const pendingAction = currentSaleAction();
     if (pendingAction) {
       try {
-        await clearPosSaleRetryIntent(pendingAction, actorId, saleAttemptIntentId ?? undefined);
+        await clearPosSaleRetryIntent(pendingAction, scopeId, saleAttemptIntentId ?? undefined);
       } catch {
+        if (!isCurrent()) return;
         setNotice({ tone: "error", title: "Could not reset this sale attempt", hint: "Keep this cart open and try again before starting another sale." });
         return;
       }
     }
+    if (!isCurrent()) return;
     clearCart();
     setCatalogQuery("");
     requestAnimationFrame(focusCatalogField);
@@ -1143,6 +1167,8 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
 
   async function retryQueuedSale(queued: QueuedSale) {
     if (!online || queuedSaleBusyId) return;
+    const { scopeId, isCurrent } = captureRegisterScope();
+    if (!scopeId) return;
     const session = (sessions ?? []).find((candidate) => candidate.id === queued.sessionId);
     if (!session || session.status !== "open") {
       const message = "The register used for this queued sale is no longer open. Open that register or contact your manager before sending it.";
@@ -1161,9 +1187,11 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         ...(queued.customerId ? { customerId: queued.customerId } : {}),
         ...(queued.cashReceivedMinor !== null ? { cashReceivedMinor: queued.cashReceivedMinor } : {}),
       };
-      const outcome = await submitPosSale(action, queued.intentId, undefined, { scopeId: actorId, useGo: useGoCompleteSale });
+      const outcome = await submitPosSale(action, queued.intentId, undefined, { scopeId, organizationId });
+      if (!isCurrent()) return;
       if (outcome.kind === "pending") {
-        await clearPosSaleRetryIntent(action, actorId, queued.intentId);
+        await clearPosSaleRetryIntent(action, scopeId, queued.intentId);
+        if (!isCurrent()) return;
         setQueuedSales((current) => current.filter((sale) => sale.id !== queued.id));
         setNotice({ tone: "pending", title: `Sale for ${money(queued.totalMinor)} was submitted and is waiting for approval.`, hint: "Check Approvals before taking payment again." });
         await load();
@@ -1190,6 +1218,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       setNotice({ tone: "success", title: `Queued sale${outcome.data.invoiceNumber ? ` #${outcome.data.invoiceNumber}` : ""} posted for ${money(outcome.data.totalMinor)}.`, hint: "Stock and prices were checked again." });
       await load();
     } catch (error) {
+      if (!isCurrent()) return;
       const detail = noticeFor(error, "Review current stock, prices, and register status before retrying.");
       const status = error instanceof PosApiError ? error.status : 0;
       const malformedSuccess = status === 202 || (status >= 200 && status < 300);
@@ -1199,12 +1228,14 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         ? { tone: "error", title: "Queued sale result is not confirmed", hint: "The server may have accepted this sale. Keep the queued attempt and retry with the same identity, or verify Sales and Approvals before discarding it." }
         : detail);
     } finally {
-      setQueuedSaleBusyId(null);
+      if (isCurrent()) setQueuedSaleBusyId(null);
     }
   }
 
   async function discardQueuedSale() {
     if (!discardQueuedId) return;
+    const { scopeId, isCurrent } = captureRegisterScope();
+    if (!scopeId) return;
     const queued = queuedSales.find((sale) => sale.id === discardQueuedId);
     if (queued) {
       const action: PosSaleAction = {
@@ -1217,12 +1248,14 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         ...(queued.cashReceivedMinor !== null ? { cashReceivedMinor: queued.cashReceivedMinor } : {}),
       };
       try {
-        await clearPosSaleRetryIntent(action, actorId, queued.intentId);
+        await clearPosSaleRetryIntent(action, scopeId, queued.intentId);
       } catch {
+        if (!isCurrent()) return;
         setNotice({ tone: "error", title: "Queued attempt could not be retired", hint: "Keep the queued sale and retry discarding it when browser storage is available." });
         return;
       }
     }
+    if (!isCurrent()) return;
     setQueuedSales((current) => current.filter((sale) => sale.id !== discardQueuedId));
     setDiscardQueuedId(null);
     setNotice(queued?.status === "uncertain"
@@ -1243,6 +1276,8 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       setNotice({ tone: "error", title: "Check the opening stock quantity", hint: "Enter a non-negative quantity with up to three decimal places." });
       return;
     }
+    const registerScope = captureRegisterScope();
+    if (!registerScope.scopeId) return;
     setBusy(true);
     const blank = { name: "", sku: "", barcode: "", price: "", openingStock: "", unitLabel: "unit" };
     try {
@@ -1257,15 +1292,19 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         ...(barcode ? { barcode } : {}),
       }, undefined, { actorId, organizationId });
       if (outcome.kind === "pending") {
-        setQuickProductRetryBlocked(true);
-        setNotice({ tone: "pending", title: `Adding ${name} is waiting for approval.`, hint: `${outcome.reason} Retry this exact item after approval to confirm completion.` });
+        if (registerScope.isCurrent()) {
+          setQuickProductRetryBlocked(true);
+          setNotice({ tone: "pending", title: `Adding ${name} is waiting for approval.`, hint: `${outcome.reason} Retry this exact item after approval to confirm completion.` });
+        }
         return;
       }
-      setQuickProductRetryBlocked(false);
-      setQuickProduct(blank);
-      setQuickProductOpen(false);
+      if (registerScope.isCurrent()) {
+        setQuickProductRetryBlocked(false);
+        setQuickProduct(blank);
+        setQuickProductOpen(false);
+      }
       if (stockThousandths <= 0) {
-        setNotice({ tone: "success", title: `${name} is in the catalog with zero stock.`, hint: "Add an opening balance in Inventory before selling it." });
+        if (registerScope.isCurrent()) setNotice({ tone: "success", title: `${name} is in the catalog with zero stock.`, hint: "Add an opening balance in Inventory before selling it." });
       } else {
         const stock = await adjustPosItemStock({
           action: "adjustStock",
@@ -1273,16 +1312,19 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
           quantityDelta: stockThousandths,
           note: "Opening stock from POS quick add",
         }, undefined, { actorId, organizationId });
-        setNotice(stock.kind === "pending"
-          ? { tone: "pending", title: `${name} was added.`, hint: "Its opening stock is waiting for approval before the item can be sold." }
-          : { tone: "success", title: `${name} is in the catalog with ${stockUnits} ${unitLabel} in opening stock.`, hint: "Scan its barcode or search to add it to this sale." });
+        if (registerScope.isCurrent()) {
+          setNotice(stock.kind === "pending"
+            ? { tone: "pending", title: `${name} was added.`, hint: "Its opening stock is waiting for approval before the item can be sold." }
+            : { tone: "success", title: `${name} is in the catalog with ${stockUnits} ${unitLabel} in opening stock.`, hint: "Scan its barcode or search to add it to this sale." });
+        }
       }
+      if (!registerScope.isCurrent()) return;
       await loadCatalog();
-      requestAnimationFrame(focusCatalogField);
+      if (registerScope.isCurrent()) requestAnimationFrame(focusCatalogField);
     } catch (error) {
-      setNotice(noticeFor(error, "Review the item details and try again."));
+      if (registerScope.isCurrent()) setNotice(noticeFor(error, "Review the item details and try again."));
     } finally {
-      setBusy(false);
+      if (registerScope.isCurrent()) setBusy(false);
     }
   }
 
@@ -1320,6 +1362,8 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       setNotice({ tone: "error", title: "Return recovery is incomplete", hint: "Refresh the register before retrying or requesting another refund." });
       return;
     }
+    const { scopeId, isCurrent } = captureRegisterScope();
+    if (!scopeId) return;
     let action = returnAttemptLocked ? returnAttemptAction : null;
     if (!action) {
       const trimmed = returnReason.trim();
@@ -1345,7 +1389,8 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
     }
     setBusy(true);
     try {
-      const outcome = await requestPosReturn(action, undefined, { useGo: useGoReturnSale, scopeId: actorId && organizationId ? `${organizationId}:${actorId}` : null });
+      const outcome = await requestPosReturn(action, undefined, { scopeId, organizationId });
+      if (!isCurrent()) return;
       if (outcome.kind === "pending") {
         setReturnAttemptPending(true);
         setReturnAttemptUncertain(false);
@@ -1365,6 +1410,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         await load();
       }
     } catch (error) {
+      if (!isCurrent()) return;
       if (!(error instanceof PosApiError) || error.status === 0 || error.status === 408 || error.status >= 500 || (error.status >= 200 && error.status < 300)) {
         setReturnAttemptUncertain(true);
         setNotice({ tone: "error", title: "Return result is unknown", hint: "The refund may have been accepted. Retry this exact return or verify the sale before starting another return." });
@@ -1375,7 +1421,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       setReturnAttemptAction(null);
       setNotice(noticeFor(error, "Check the return quantities and reason before submitting."));
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
@@ -1504,7 +1550,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
           <h2>Point of sale is not enabled</h2>
           <p>This workspace has the point of sale module switched off. Ask an owner to enable it, then reload this page.</p>
           <div className="pos-error-actions">
-            <a className="pos-button" href={legacyUrl("/settings")}>Open settings</a>
+            <a className="pos-button" href="/settings">Open settings</a>
           </div>
         </section>
       </main>
@@ -1960,8 +2006,8 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                                   <p>Add a first item with its selling price and barcode, or bring in your existing spreadsheet.</p>
                                   <div className="pos-catalog-actions">
                                     <button type="button" className="pos-button pos-button-small" onClick={() => { setQuickProductAdvancedOpen(false); setQuickProductOpen(true); }}>Add a product</button>
-                                    <a className="pos-button pos-button-small" href={legacyUrl("/products")}>Import spreadsheet</a>
-                                    <a className="pos-button pos-button-small pos-button-ghost" href={legacyUrl("/inventory")}>Open Inventory</a>
+                                    <a className="pos-button pos-button-small" href="/products">Import spreadsheet</a>
+                                    <a className="pos-button pos-button-small pos-button-ghost" href="/inventory">Open Inventory</a>
                                   </div>
                                 </div>
                               ) : (

@@ -777,9 +777,12 @@ describe("Vite sales page", () => {
     render(<SalesPage baseCurrency="USD" actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     const orderRow = await screen.findByRole("row", { name: /#41/ });
-    fireEvent.click(within(orderRow).getByRole("button", { name: "Deliver #41" }));
-    expect(screen.getByRole("dialog").textContent).toContain("invoice for those delivered lines");
-    expect(screen.getByRole("dialog").textContent).not.toContain("$1,299.00");
+    const deliverButton = within(orderRow).getByRole("button", { name: "Deliver #41" });
+    await waitFor(() => expect((deliverButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(deliverButton);
+    const deliveryDialog = await screen.findByRole("dialog");
+    expect(deliveryDialog.textContent).toContain("invoice for those delivered lines");
+    expect(deliveryDialog.textContent).not.toContain("$1,299.00");
     fireEvent.click(screen.getByRole("button", { name: "Deliver all and invoice" }));
 
     expect(await screen.findByText("Reserved quantities delivered and invoiced for order #41. The order remains confirmed.")).not.toBeNull();

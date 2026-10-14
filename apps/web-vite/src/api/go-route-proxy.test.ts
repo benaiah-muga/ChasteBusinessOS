@@ -10,7 +10,6 @@ import {
   goSupportKbArticleWriteFromEnv,
   goSupportConversationWritesFromEnv,
   goSupportTicketWritesFromEnv,
-  goPosCloseSessionSliceFromEnv,
   goMarketingCampaignWritesFromEnv,
   goMarketingOverviewReadsFromEnv,
   goProjectsWritesFromEnv,
@@ -31,9 +30,6 @@ import {
   goPurchasingFinanceWritesFromEnv,
   goPurchasingPaymentRunsFromEnv,
   goPurchasingAPAgingReadsFromEnv,
-  goDocumentsIngestedReadsFromEnv,
-  goDocumentsVersionReadsFromEnv,
-  goDocumentsEditorReadsFromEnv,
   goMessagingConversationListFromEnv,
   goMessagingConversationCreateFromEnv,
   goMessagingConversationUpdateFromEnv,
@@ -45,9 +41,7 @@ import {
   goMessagingReadCursorFromEnv,
   goMessagingReactionsFromEnv,
   goMessagingPinsFromEnv,
-  goMessagingPresenceFromEnv,
   goMessagingAttachmentUploadFromEnv,
-  goMessagingAttachmentDownloadsFromEnv,
   goMessagingAttachmentDeleteFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
   goPurchasingWorkflowReadsFromEnv,
@@ -64,7 +58,6 @@ import {
   goAccountingCreditNoteFromEnv,
   goAccountingReverseEntryFromEnv,
   goBankReconciliationWritesFromEnv,
-  goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
   isGoRouteRequest,
   type GoRouteProxyFlags,
@@ -95,22 +88,6 @@ describe("Marketing overview Go selector", () => {
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MARKETING_OVERVIEW_READS: "0" })).toBe(false);
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MARKETING_OVERVIEW_READS: "1" })).toBe(false);
     expect(goMarketingOverviewReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
-  });
-});
-
-describe("POS register opening Go selector", () => {
-  it("enables the existing Go capability with the session route and supports rollback", () => {
-    expect(goPosOpenSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
-    expect(goPosOpenSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_POS_OPEN_SESSION_SLICE: "0" })).toBe(false);
-    expect(goPosOpenSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
-  });
-});
-
-describe("POS register closing Go selector", () => {
-  it("enables the existing Go capability with the session route and supports rollback", () => {
-    expect(goPosCloseSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
-    expect(goPosCloseSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_POS_CLOSE_SESSION_SLICE: "0" })).toBe(false);
-    expect(goPosCloseSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
   });
 });
 
@@ -333,46 +310,18 @@ describe("Purchasing A/P aging Go selector", () => {
   });
 });
 
-describe("ingested documents Go selector", () => {
-  it("requires both the document selector and session capability route", () => {
-    expect(goDocumentsIngestedReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENT_INGESTED_READS: "1" })).toBe(true);
-    expect(goDocumentsIngestedReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goDocumentsIngestedReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENT_INGESTED_READS: "0" })).toBe(false);
-    expect(goDocumentsIngestedReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_DOCUMENT_INGESTED_READS: "1" })).toBe(false);
-  });
-});
-
-describe("authored document versions Go selector", () => {
-  it("requires both the version-read selector and session capability route", () => {
-    expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_VERSION_READS: "1" })).toBe(true);
-    expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_VERSION_READS: "0" })).toBe(false);
-    expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_DOCUMENTS_VERSION_READS: "1" })).toBe(false);
-  });
-});
-
-describe("authored document editor Go selector", () => {
-  it("requires editor, version-history, and session capability selectors", () => {
-    const enabled = {
-      CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1",
-      CHASTE_GO_DOCUMENTS_EDITOR_READS: "1",
-      CHASTE_GO_DOCUMENTS_VERSION_READS: "1",
-    };
-    expect(goDocumentsEditorReadsFromEnv(enabled)).toBe(true);
-    expect(goDocumentsEditorReadsFromEnv({ ...enabled, CHASTE_GO_DOCUMENTS_EDITOR_READS: "0" })).toBe(false);
-    expect(goDocumentsEditorReadsFromEnv({ ...enabled, CHASTE_GO_DOCUMENTS_VERSION_READS: "0" })).toBe(false);
-    expect(goDocumentsEditorReadsFromEnv({ ...enabled, CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
-  });
-});
-
 describe("authored document assist Go route", () => {
-  it("keeps assist requests and malformed assist paths inside Go", () => {
+  it("keeps the entire Documents namespace inside Go, including unsupported paths", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(flags, "POST", "/api/docs/assist")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/docs/assist?mode=chat")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/docs/assist")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/docs/assist/extra")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/docs/assistant")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/docs")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/docs/invalid/path")).toBe(true);
+    expect(isGoRouteRequest(flags, "PUT", "/api/docs/not-a-uuid/workspace/")).toBe(true);
+    expect(isGoRouteRequest(flags, "OPTIONS", "/api/docs/anything")).toBe(true);
   });
 });
 
@@ -385,9 +334,7 @@ describe("authored document editor workspace Go route", () => {
     expect(isGoRouteRequest(enabled, "DELETE", path)).toBe(true);
     for (const [method, url] of [
       ["GET", path], ["PUT", path], ["POST", `/api/docs/${documentId}/versions`],
-    ]) {
-      expect(isGoRouteRequest(enabled, method, url)).toBe(false);
-    }
+    ]) expect(isGoRouteRequest(enabled, method, url)).toBe(true);
     expect(isGoRouteRequest(enabled, "POST", `${path}?draft=1`)).toBe(true);
     expect(isGoRouteRequest(enabled, "POST", `${path}/`)).toBe(true);
     expect(isGoRouteRequest(enabled, "DELETE", `${path}/unexpected/segment`)).toBe(true);
@@ -489,23 +436,24 @@ describe("messaging pin Go selector", () => {
   });
 });
 
-describe("messaging presence Go selector", () => {
-  it("requires session capability routing, defaults on, and supports an explicit rollback", () => {
-    expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
-    expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_PRESENCE: "0" })).toBe(false);
-    expect(goMessagingPresenceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MESSAGING_PRESENCE: "1" })).toBe(false);
-  });
-
-  it("routes only the exact conversation presence URL and supported GET and POST methods", () => {
-    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" });
+describe("messaging session routes", () => {
+  it("keeps Go ownership of conversation presence and agent reply paths for invalid IDs and methods", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" });
     const conversationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     expect(isGoRouteRequest(flags, "GET", `/api/conversations/${conversationId}/presence`)).toBe(true);
     expect(isGoRouteRequest(flags, "GET", `/api/conversations/${conversationId}/presence?refresh=1`)).toBe(true);
     expect(isGoRouteRequest(flags, "POST", `/api/conversations/${conversationId}/presence`)).toBe(true);
-    expect(isGoRouteRequest(flags, "DELETE", `/api/conversations/${conversationId}/presence`)).toBe(false);
-    expect(isGoRouteRequest(flags, "PUT", `/api/conversations/${conversationId}/presence`)).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/conversations/not-a-uuid/presence")).toBe(false);
+    expect(isGoRouteRequest(flags, "DELETE", `/api/conversations/${conversationId}/presence`)).toBe(true);
+    expect(isGoRouteRequest(flags, "PUT", `/api/conversations/${conversationId}/presence`)).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/conversations/not-a-uuid/presence")).toBe(true);
+    expect(isGoRouteRequest(flags, "PATCH", "/api/conversations/not-a-uuid/agent-reply")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/conversations/" + conversationId + "/presence/")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/conversations/" + conversationId + "/presence/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/conversations/" + conversationId + "/agent-reply/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/conversations//presence")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", `/api/conversations/${conversationId}/messages`)).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", `/api/conversations/${conversationId}/agent-reply`)).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", `/api/conversations/${conversationId}/agent-reply`)).toBe(true);
   });
 });
 
@@ -562,15 +510,6 @@ describe("Support ticket writes Go selector", () => {
     expect(goSupportTicketWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goSupportTicketWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_SUPPORT_TICKET_WRITES: "0" })).toBe(false);
     expect(goSupportTicketWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_SUPPORT_TICKET_WRITES: "1" })).toBe(false);
-  });
-});
-
-describe("messaging attachment download Go selector", () => {
-  it("requires session capability routing and defaults on with an explicit legacy rollback", () => {
-    expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
-    expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD: "0" })).toBe(false);
-    expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
-    expect(goMessagingAttachmentDownloadsFromEnv({ CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD: "1" })).toBe(false);
   });
 });
 
@@ -821,8 +760,8 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.memory).toBe(true);
     expect(flags.moduleSettings).toBe(true);
     expect(flags.aiConfig).toBe(true);
-    expect(flags.onboarding).toBe(false);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "projects", "routines", "memory", "moduleSettings", "aiConfig", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "crmFollowUpDraft", "supportReplyDraft", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(flags.onboarding).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "modulesWrite", "projects", "routines", "memory", "moduleSettings", "aiConfig", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "crmFollowUpDraft", "supportReplyDraft", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision", "supportPublic", "branding", "ledger", "myWorkSummary", "signals", "notifications", "notificationsWrite", "onboarding", "scimRead", "scimWrite", "scimTokens"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -859,19 +798,20 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "PUT", "/api/policy")).toBe(false);
     expect(isGoRouteRequest(flags, "DELETE", "/api/policy")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/policy/extra")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/support/public")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/scim/v2/Users")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/scim/v2/Users")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/support/public")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/scim/v2/Users")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/scim/v2/Users")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/sessions")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/durable-runs")).toBe(true);
-    expect(isGoRouteRequest(flags, "GET", "/api/notifications")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/notifications")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/notifications")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics?dataset=analytics.invoiceAging")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/analytics")).toBe(true);
     expect(isGoRouteRequest(flags, "DELETE", "/api/analytics")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics/extra")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/my-work?status=open")).toBe(true);
-    expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(true);
   });
 
   it("routes only the setup checklist GET to Go by default and supports rollback", () => {
@@ -973,28 +913,23 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/analytics")).toBe(false);
   });
 
-  it("routes only exact message attachment GETs when the session selector is enabled", () => {
-    const defaults = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" });
+  it("keeps Go ownership of message attachment paths for invalid IDs and methods", () => {
+    const defaults = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" });
     const href = "/api/message-attachments/aaaaaaaa-0000-4000-8000-000000000001";
-    expect(defaults.messageAttachmentDownloads).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", href)).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", `${href}?download=1`)).toBe(true);
     for (const [method, path] of [
       ["HEAD", href],
       ["POST", href],
       ["GET", "/api/message-attachments/not-a-uuid"],
-      ["GET", `${href}/extra`],
-      ["GET", `${href}/`],
     ]) {
-      expect(isGoRouteRequest(defaults, method, path)).toBe(false);
+      expect(isGoRouteRequest(defaults, method, path)).toBe(true);
     }
-    const rollback = goRouteProxyFlagsFromEnv({
-      CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1",
-      CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD: "0",
-    });
-    expect(rollback.messageAttachmentDownloads).toBe(false);
-    expect(isGoRouteRequest(rollback, "GET", href)).toBe(false);
-    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "GET", href)).toBe(false);
+    expect(isGoRouteRequest(defaults, "GET", `${href}/extra`)).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", `${href}/`)).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/message-attachments/")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/message-attachments")).toBe(true);
+    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "GET", href)).toBe(true);
   });
 
   it("routes uploaded document content GETs to Go without a legacy selector", () => {
@@ -1158,7 +1093,7 @@ describe("Vite Go route proxy selection", () => {
     expect(await unsupported.json()).toMatchObject({ target: "go", method: "POST", url: "/api/docs/not-a-uuid/workspace" });
 
     const unsupportedMethod = await fetch(`http://127.0.0.1:${address.port}${path}`, { headers: { cookie } });
-    expect(await unsupportedMethod.json()).toMatchObject({ target: "legacy", method: "GET", url: path });
+    expect(await unsupportedMethod.json()).toMatchObject({ target: "go", method: "GET", url: path });
   });
 
   it("preserves the attachment href, session identity, and range headers when proxying to Go", async () => {
@@ -1244,23 +1179,23 @@ describe("Vite Go route proxy selection", () => {
     expect(await response.json()).toMatchObject({ target: "go", method: "GET", url: href, cookie });
   });
 
-  it("routes onboarding reads and writes when the explicit selector is enabled", () => {
+  it("routes onboarding reads and writes to Go regardless of the retired selector", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
-    expect(defaults.onboarding).toBe(false);
-    expect(isGoRouteRequest(defaults, "POST", "/api/onboarding")).toBe(false);
+    expect(defaults.onboarding).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/onboarding")).toBe(true);
 
     const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "1" });
     expect(isGoRouteRequest(enabled, "GET", "/api/onboarding")).toBe(true);
     expect(isGoRouteRequest(enabled, "POST", "/api/onboarding?source=wizard")).toBe(true);
     expect(isGoRouteRequest(enabled, "PATCH", "/api/onboarding")).toBe(true);
-    expect(isGoRouteRequest(enabled, "PUT", "/api/onboarding")).toBe(false);
-    expect(isGoRouteRequest(enabled, "DELETE", "/api/onboarding")).toBe(false);
-    expect(isGoRouteRequest(enabled, "POST", "/api/onboarding/extra")).toBe(false);
-    expect(isGoRouteRequest(enabled, "POST", "/api/onboarding/")).toBe(false);
-    const rollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "0" });
-    expect(isGoRouteRequest(rollback, "GET", "/api/onboarding")).toBe(false);
-    expect(isGoRouteRequest(rollback, "POST", "/api/onboarding")).toBe(false);
-    expect(isGoRouteRequest(rollback, "PATCH", "/api/onboarding")).toBe(false);
+    expect(isGoRouteRequest(enabled, "PUT", "/api/onboarding")).toBe(true);
+    expect(isGoRouteRequest(enabled, "DELETE", "/api/onboarding")).toBe(true);
+    expect(isGoRouteRequest(enabled, "POST", "/api/onboarding/extra")).toBe(true);
+    expect(isGoRouteRequest(enabled, "POST", "/api/onboarding/")).toBe(true);
+    const staleRollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "0" });
+    expect(isGoRouteRequest(staleRollback, "GET", "/api/onboarding")).toBe(true);
+    expect(isGoRouteRequest(staleRollback, "POST", "/api/onboarding")).toBe(true);
+    expect(isGoRouteRequest(staleRollback, "PATCH", "/api/onboarding")).toBe(true);
   });
 
   it("routes exact organization GET, POST, PUT, and PATCH requests to Go regardless of environment flags", () => {
@@ -1419,12 +1354,12 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, method, url)).toBe(true);
   });
 
-  it("keeps the modules write selector POST-only and exact", () => {
+  it("keeps the modules namespace on Go regardless of method and stale selectors", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MODULES_ROUTE: "0", CHASTE_GO_MODULES_WRITE_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "POST", "/api/modules")).toBe(true);
-    expect(isGoRouteRequest(flags, "GET", "/api/modules")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/modules/extra")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/modules/")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/modules")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/modules/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/modules/")).toBe(true);
   });
 
   it("routes only exact support channel GET and POST requests to Go regardless of old selectors", () => {
@@ -1442,57 +1377,58 @@ describe("Vite Go route proxy selection", () => {
     }
   });
 
-  it("keeps branding selection limited to exact GET and POST requests", () => {
+  it("keeps the branding namespace on Go for unsupported methods and paths", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_BRANDING_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "GET", "/api/branding")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/branding")).toBe(true);
-    expect(isGoRouteRequest(flags, "DELETE", "/api/branding")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/branding/extra")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/branding/")).toBe(false);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/branding")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/branding/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/branding/")).toBe(true);
   });
 
-  it("keeps the signals selector GET-only and exact", () => {
+  it("keeps the signals namespace on Go for unsupported methods and paths", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SIGNALS_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "GET", "/api/signals?severity=orange&module=sales")).toBe(true);
-    expect(isGoRouteRequest(flags, "POST", "/api/signals")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/signals/extra")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/signals/")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/signals")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/signals/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/signals/")).toBe(true);
   });
 
-  it("routes My Work through Go by default, GET-only and exact, with a legacy opt-out", () => {
+  it("keeps the My Work namespace on Go regardless of route flags", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(flags, "GET", "/api/my-work?status=open")).toBe(true);
-    expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/my-work/summarize")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/my-work/extra")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/my-work/")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work/summarize")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work/")).toBe(true);
 
     const legacyFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_ROUTE: "0" });
-    expect(isGoRouteRequest(legacyFlags, "GET", "/api/my-work")).toBe(false);
+    expect(isGoRouteRequest(legacyFlags, "GET", "/api/my-work")).toBe(true);
   });
 
-  it("routes only the enabled My Work summary POST endpoint through Go", () => {
+  it("keeps the My Work summary namespace on Go for its handler and invalid requests", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_SUMMARY_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "POST", "/api/my-work/summarize?scope=mine")).toBe(true);
-    expect(isGoRouteRequest(flags, "GET", "/api/my-work/summarize")).toBe(false);
-    expect(isGoRouteRequest(flags, "DELETE", "/api/my-work/summarize")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/my-work/summarize/extra")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/my-work/summarize/")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work/summarize")).toBe(true);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/my-work/summarize")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work/summarize/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work/summarize/")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(true);
 
-    const disabledFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_SUMMARY_ROUTE: "0" });
-    expect(isGoRouteRequest(disabledFlags, "POST", "/api/my-work/summarize")).toBe(false);
+    const staleRollbackFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_SUMMARY_ROUTE: "0" });
+    expect(isGoRouteRequest(staleRollbackFlags, "POST", "/api/my-work/summarize")).toBe(true);
   });
 
-  it("keeps unsupported routine methods and subpaths on the legacy route", () => {
+  it("keeps the routines namespace and external webhook endpoint on Go", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(flags, "GET", "/api/routines")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/routines")).toBe(true);
-    expect(isGoRouteRequest(flags, "DELETE", "/api/routines")).toBe(false);
-    expect(isGoRouteRequest(flags, "HEAD", "/api/routines")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/routines/webhook/secret-token")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/routines/unknown")).toBe(false);
-    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_ROUTINES_ROUTE: "0" }), "GET", "/api/routines")).toBe(false);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/routines")).toBe(true);
+    expect(isGoRouteRequest(flags, "HEAD", "/api/routines")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/routines/webhook/secret-token")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/routines/webhook/not-a-token/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/routines/unknown")).toBe(true);
+    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_ROUTINES_ROUTE: "0" }), "GET", "/api/routines")).toBe(true);
   });
 
   it("keeps unsupported memory methods and subpaths on the legacy route", () => {
@@ -1526,12 +1462,12 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_POLICY_ROUTE: "0" }), "GET", "/api/policy")).toBe(false);
   });
 
-  it("keeps unsupported ledger methods and subpaths on the legacy route", () => {
+  it("keeps the ledger namespace on Go for unsupported methods and paths", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_LEDGER_ROUTE: "1" });
-    expect(isGoRouteRequest(flags, "POST", "/api/ledger")).toBe(false);
-    expect(isGoRouteRequest(flags, "DELETE", "/api/ledger")).toBe(false);
-    expect(isGoRouteRequest(flags, "HEAD", "/api/ledger")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/ledger/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/ledger")).toBe(true);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/ledger")).toBe(true);
+    expect(isGoRouteRequest(flags, "HEAD", "/api/ledger")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/ledger/extra")).toBe(true);
   });
 
   it("routes exact inventory GETs to Go regardless of the removed Vite selector", () => {
@@ -1672,48 +1608,21 @@ describe("Vite Go route proxy selection", () => {
     expect(await suffix.json()).toMatchObject({ target: "legacy", method: "GET", url: "/api/customers/extra" });
   });
 
-  it("routes only exact GET /api/pos requests when the POS read selector is enabled", () => {
-    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_READ_ROUTE: "1" });
-    expect(isGoRouteRequest(flags, "GET", "/api/pos")).toBe(true);
-    expect(isGoRouteRequest(flags, "GET", "/api/pos?status=open")).toBe(true);
-    expect(isGoRouteRequest(flags, "POST", "/api/pos")).toBe(false);
-    expect(isGoRouteRequest(flags, "PUT", "/api/pos")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/pos/extra")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/pos/")).toBe(false);
-
-    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_READ_ROUTE: "0" });
-    expect(isGoRouteRequest(disabled, "GET", "/api/pos")).toBe(false);
+  it("keeps the POS namespace on Go for supported and unsupported requests", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_READ_ROUTE: "0", CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE: "0" });
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]) {
+      expect(isGoRouteRequest(flags, method, "/api/pos")).toBe(true);
+      expect(isGoRouteRequest(flags, method, "/api/pos/shift-summary")).toBe(true);
+      expect(isGoRouteRequest(flags, method, "/api/pos/unknown")).toBe(true);
+    }
   });
 
-  it("routes POS reads by default and allows explicit rollback", () => {
-    const defaults = goRouteProxyFlagsFromEnv({});
-    expect(defaults.posRead).toBe(true);
-    expect(isGoRouteRequest(defaults, "GET", "/api/pos")).toBe(true);
-
-    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_READ_ROUTE: "0" });
-    expect(disabled.posRead).toBe(false);
-    expect(isGoRouteRequest(disabled, "GET", "/api/pos")).toBe(false);
-  });
-
-  it("routes only the dedicated POS shift-summary POST under the Vite selector", () => {
-    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE: "1", GO_POS_SHIFT_SUMMARY_ROUTE: "1" });
-    expect(flags.posShiftSummary).toBe(true);
-    expect(isGoRouteRequest(flags, "POST", "/api/pos/shift-summary")).toBe(true);
-    expect(isGoRouteRequest(flags, "GET", "/api/pos/shift-summary")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/pos/shift-summary/extra")).toBe(false);
-
-    const viteDisabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE: "0", GO_POS_SHIFT_SUMMARY_ROUTE: "1" });
-    expect(viteDisabled.posShiftSummary).toBe(false);
-    const goUnmounted = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE: "1", GO_POS_SHIFT_SUMMARY_ROUTE: "0" });
-    expect(goUnmounted.posShiftSummary).toBe(true);
-  });
-
-  it("routes only the exact POS customer GET independently of the generic capability route", () => {
+  it("keeps POS customer requests on Go independently of the generic capability route", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" });
     expect(isGoRouteRequest(flags, "GET", "/api/pos/customers")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/pos/customers?active=1")).toBe(true);
-    expect(isGoRouteRequest(flags, "POST", "/api/pos/customers")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/pos/customers/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/pos/customers")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/pos/customers/extra")).toBe(true);
   });
 
   it("routes only the Support customer picker GET to Go", () => {
@@ -1725,30 +1634,33 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/customers")).toBe(true);
   });
 
-  it("keeps SCIM read and write selectors independent", () => {
+  it("keeps the SCIM Users and token namespaces on Go for active and invalid requests", () => {
     const userPath = "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001";
     const readOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SCIM_READ_ROUTE: "1" });
     expect(isGoRouteRequest(readOnly, "GET", "/api/scim/v2/Users")).toBe(true);
     expect(isGoRouteRequest(readOnly, "GET", userPath)).toBe(true);
-    expect(isGoRouteRequest(readOnly, "POST", "/api/scim/v2/Users")).toBe(false);
-    expect(isGoRouteRequest(readOnly, "DELETE", userPath)).toBe(false);
-    expect(isGoRouteRequest(readOnly, "GET", `${userPath}/extra`)).toBe(false);
-    expect(isGoRouteRequest(readOnly, "GET", `${userPath}/`)).toBe(false);
-    expect(isGoRouteRequest(readOnly, "GET", "/api/scim/v2/Users/not-a-uuid")).toBe(false);
-    expect(isGoRouteRequest(readOnly, "PATCH", userPath)).toBe(false);
-    expect(isGoRouteRequest(readOnly, "HEAD", "/api/scim/v2/Users")).toBe(false);
+    expect(isGoRouteRequest(readOnly, "POST", "/api/scim/v2/Users")).toBe(true);
+    expect(isGoRouteRequest(readOnly, "DELETE", userPath)).toBe(true);
+    expect(isGoRouteRequest(readOnly, "GET", `${userPath}/extra`)).toBe(true);
+    expect(isGoRouteRequest(readOnly, "GET", `${userPath}/`)).toBe(true);
+    expect(isGoRouteRequest(readOnly, "GET", "/api/scim/v2/Users/not-a-uuid")).toBe(true);
+    expect(isGoRouteRequest(readOnly, "PATCH", userPath)).toBe(true);
+    expect(isGoRouteRequest(readOnly, "HEAD", "/api/scim/v2/Users")).toBe(true);
 
     const writeOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SCIM_WRITE_ROUTE: "1" });
-    expect(isGoRouteRequest(writeOnly, "GET", "/api/scim/v2/Users")).toBe(false);
-    expect(isGoRouteRequest(writeOnly, "GET", userPath)).toBe(false);
+    expect(isGoRouteRequest(writeOnly, "GET", "/api/scim/v2/Users")).toBe(true);
+    expect(isGoRouteRequest(writeOnly, "GET", userPath)).toBe(true);
     expect(isGoRouteRequest(writeOnly, "POST", "/api/scim/v2/Users")).toBe(true);
     expect(isGoRouteRequest(writeOnly, "DELETE", userPath)).toBe(true);
-    expect(isGoRouteRequest(writeOnly, "POST", "/api/scim/v2/Users/extra")).toBe(false);
-    expect(isGoRouteRequest(writeOnly, "POST", "/api/scim/v2/Users/")).toBe(false);
-    expect(isGoRouteRequest(writeOnly, "DELETE", `${userPath}/extra`)).toBe(false);
-    expect(isGoRouteRequest(writeOnly, "DELETE", `${userPath}/`)).toBe(false);
-    expect(isGoRouteRequest(writeOnly, "DELETE", "/api/scim/v2/Users/not-a-uuid")).toBe(false);
-    expect(isGoRouteRequest(writeOnly, "PUT", userPath)).toBe(false);
+    expect(isGoRouteRequest(writeOnly, "POST", "/api/scim/v2/Users/extra")).toBe(true);
+    expect(isGoRouteRequest(writeOnly, "POST", "/api/scim/v2/Users/")).toBe(true);
+    expect(isGoRouteRequest(writeOnly, "DELETE", `${userPath}/extra`)).toBe(true);
+    expect(isGoRouteRequest(writeOnly, "DELETE", `${userPath}/`)).toBe(true);
+    expect(isGoRouteRequest(writeOnly, "DELETE", "/api/scim/v2/Users/not-a-uuid")).toBe(true);
+    expect(isGoRouteRequest(writeOnly, "PUT", userPath)).toBe(true);
+    const staleRollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_SCIM_READ_ROUTE: "0", CHASTE_GO_SCIM_WRITE_ROUTE: "0" });
+    expect(isGoRouteRequest(staleRollback, "GET", "/api/scim/v2/Users")).toBe(true);
+    expect(isGoRouteRequest(staleRollback, "DELETE", userPath)).toBe(true);
   });
 
   it("routes project operations and module switchboard reads to Go by default", () => {
@@ -1756,14 +1668,14 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(defaults, "GET", "/api/projects")).toBe(true);
     expect(isGoRouteRequest(defaults, "POST", "/api/projects")).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/modules")).toBe(true);
-    expect(isGoRouteRequest(defaults, "POST", "/api/modules")).toBe(false);
+    expect(isGoRouteRequest(defaults, "POST", "/api/modules")).toBe(true);
     expect(isGoRouteRequest(defaults, "HEAD", "/api/projects")).toBe(false);
     expect(isGoRouteRequest(defaults, "GET", "/api/projects/extra")).toBe(false);
 
     const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_PROJECTS_ROUTE: "0", CHASTE_GO_MODULES_ROUTE: "0" });
     expect(isGoRouteRequest(disabled, "GET", "/api/projects")).toBe(false);
     expect(isGoRouteRequest(disabled, "POST", "/api/projects")).toBe(false);
-    expect(isGoRouteRequest(disabled, "GET", "/api/modules")).toBe(false);
+    expect(isGoRouteRequest(disabled, "GET", "/api/modules")).toBe(true);
   });
 
   it("routes only the sales order collection GET to Go by default", () => {
@@ -1842,21 +1754,21 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(writeOnly, "POST", "/api/team/invite")).toBe(false);
   });
 
-  it("keeps sessions and durable-runs selectors independent and exact", () => {
+  it("keeps sessions and durable-runs namespaces on Go regardless of selectors", () => {
     const sessionItem = "/api/sessions/aaaaaaaa-0000-4000-8000-000000000001";
     const runsItem = "/api/durable-runs/aaaaaaaa-0000-4000-8000-000000000001";
     const sessionsOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSIONS_ROUTE: "1", CHASTE_GO_DURABLE_RUNS_ROUTE: "0" });
     expect(isGoRouteRequest(sessionsOnly, "GET", "/api/sessions?limit=10")).toBe(true);
     expect(isGoRouteRequest(sessionsOnly, "GET", `${sessionItem}?include=events`)).toBe(true);
     expect(isGoRouteRequest(sessionsOnly, "GET", `${sessionItem}/replay`)).toBe(true);
-    expect(isGoRouteRequest(sessionsOnly, "GET", "/api/durable-runs")).toBe(false);
-    expect(isGoRouteRequest(sessionsOnly, "GET", runsItem)).toBe(false);
+    expect(isGoRouteRequest(sessionsOnly, "GET", "/api/durable-runs")).toBe(true);
+    expect(isGoRouteRequest(sessionsOnly, "GET", runsItem)).toBe(true);
 
     const durableRunsOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSIONS_ROUTE: "0", CHASTE_GO_DURABLE_RUNS_ROUTE: "1" });
     expect(isGoRouteRequest(durableRunsOnly, "GET", "/api/durable-runs?limit=10")).toBe(true);
     expect(isGoRouteRequest(durableRunsOnly, "GET", `${runsItem}?include=steps`)).toBe(true);
-    expect(isGoRouteRequest(durableRunsOnly, "GET", "/api/sessions")).toBe(false);
-    expect(isGoRouteRequest(durableRunsOnly, "GET", sessionItem)).toBe(false);
+    expect(isGoRouteRequest(durableRunsOnly, "GET", "/api/sessions")).toBe(true);
+    expect(isGoRouteRequest(durableRunsOnly, "GET", sessionItem)).toBe(true);
 
     for (const [flags, method, path] of [
       [sessionsOnly, "POST", "/api/sessions"],
@@ -1866,18 +1778,18 @@ describe("Vite Go route proxy selection", () => {
       [durableRunsOnly, "GET", "/api/durable-runs/not-a-uuid"],
       [durableRunsOnly, "GET", `${runsItem}/steps`],
     ] as const) {
-      expect(isGoRouteRequest(flags, method, path)).toBe(false);
+      expect(isGoRouteRequest(flags, method, path)).toBe(true);
     }
   });
 
-  it("enables session and durable-run reads by default and allows explicit rollback", () => {
+  it("keeps session and durable-run reads on Go with stale rollback selectors", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(defaults, "GET", "/api/sessions")).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/durable-runs")).toBe(true);
 
     const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSIONS_ROUTE: "0", CHASTE_GO_DURABLE_RUNS_ROUTE: "0" });
-    expect(isGoRouteRequest(disabled, "GET", "/api/sessions")).toBe(false);
-    expect(isGoRouteRequest(disabled, "GET", "/api/durable-runs")).toBe(false);
+    expect(isGoRouteRequest(disabled, "GET", "/api/sessions")).toBe(true);
+    expect(isGoRouteRequest(disabled, "GET", "/api/durable-runs")).toBe(true);
   });
 
   it("routes metrics reads by default and allows rollback", () => {
@@ -2222,13 +2134,13 @@ describe("Vite Go route proxy selection", () => {
     expect((await posCustomers.json())).toMatchObject({ target: "go", method: "GET", url: "/api/pos/customers?active=1", cookie: "auth-session=browser" });
 
     const posCustomersUnsupportedMethod = await fetch(`${origin}/api/pos/customers`, { method: "POST" });
-    expect((await posCustomersUnsupportedMethod.json())).toMatchObject({ target: "legacy", method: "POST" });
+    expect((await posCustomersUnsupportedMethod.json())).toMatchObject({ target: "go", method: "POST" });
 
     const posUnsupportedMethod = await fetch(`${origin}/api/pos`, { method: "POST" });
-    expect((await posUnsupportedMethod.json())).toMatchObject({ target: "legacy", method: "POST" });
+    expect((await posUnsupportedMethod.json())).toMatchObject({ target: "go", method: "POST" });
 
     const posSuffixFallback = await fetch(`${origin}/api/pos/extra`);
-    expect((await posSuffixFallback.json())).toMatchObject({ target: "legacy", method: "GET" });
+    expect((await posSuffixFallback.json())).toMatchObject({ target: "go", method: "GET" });
 
     const modulesRead = await fetch(`${origin}/api/modules`);
     expect((await modulesRead.json()).target).toBe("go");
@@ -2237,7 +2149,7 @@ describe("Vite Go route proxy selection", () => {
     expect((await modulesWrite.json()).target).toBe("go");
 
     const modulesWriteSuffix = await fetch(`${origin}/api/modules/extra`, { method: "POST" });
-    expect((await modulesWriteSuffix.json()).target).toBe("legacy");
+    expect((await modulesWriteSuffix.json()).target).toBe("go");
 
     const brandingRead = await fetch(`${origin}/api/branding`);
     expect((await brandingRead.json()).target).toBe("go");
@@ -2250,8 +2162,8 @@ describe("Vite Go route proxy selection", () => {
     expect((await brandingWrite.json()).target).toBe("go");
 
     for (const path of ["/api/branding/extra", "/api/branding/"]) {
-      const fallback = await fetch(`${origin}${path}`);
-      expect((await fallback.json()).target).toBe("legacy");
+      const goOwned = await fetch(`${origin}${path}`);
+      expect((await goOwned.json()).target).toBe("go");
     }
 
     const prefixFallback = await fetch(`${origin}/api/setup/extra`);
@@ -2264,10 +2176,10 @@ describe("Vite Go route proxy selection", () => {
     expect((await analyticsSuffixFallback.json()).target).toBe("legacy");
 
     const myWorkUnsupportedMethod = await fetch(`${origin}/api/my-work`, { method: "POST" });
-    expect((await myWorkUnsupportedMethod.json()).target).toBe("legacy");
+    expect((await myWorkUnsupportedMethod.json()).target).toBe("go");
 
     const myWorkSuffixFallback = await fetch(`${origin}/api/my-work/extra`);
-    expect((await myWorkSuffixFallback.json()).target).toBe("legacy");
+    expect((await myWorkSuffixFallback.json()).target).toBe("go");
 
     for (const [method, path] of [
       ["GET", "/api/my-work/summarize"],
@@ -2292,8 +2204,8 @@ describe("Vite Go route proxy selection", () => {
       ["POST", "/api/notifications/extra"],
       ["GET", "/api/notifications/extra"],
     ] as const) {
-      const fallback = await fetch(`${origin}${path}`, { method });
-      expect((await fallback.json()).target).toBe("legacy");
+      const goOwned = await fetch(`${origin}${path}`, { method });
+      expect((await goOwned.json()).target, `${method} ${path}`).toBe("go");
     }
 
     const scimRead = await fetch(`${origin}/api/scim/v2/Users?startIndex=1`);
@@ -2322,8 +2234,8 @@ describe("Vite Go route proxy selection", () => {
       ["GET", "/api/scim/v2/Users/not-a-uuid"],
       ["GET", "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001/extra"],
     ] as const) {
-      const fallback = await fetch(`${origin}${path}`, { method });
-      expect((await fallback.json()).target).toBe("legacy");
+      const goOwned = await fetch(`${origin}${path}`, { method });
+      expect((await goOwned.json()).target).toBe("go");
     }
 
     const streamed = await fetch(`${origin}/api/support/public?widget=abc`, {
@@ -2339,13 +2251,15 @@ describe("Vite Go route proxy selection", () => {
     expect((await reader.read()).done).toBe(true);
 
     const unsupportedSupportMethod = await fetch(`${origin}/api/support/public?widget=abc`, { method: "PATCH" });
-    expect((await unsupportedSupportMethod.json()).target).toBe("legacy");
+    expect(unsupportedSupportMethod.status).toBe(202);
+    expect(await unsupportedSupportMethod.text()).toContain("accepted:complete");
 
     const supportSuffixFallback = await fetch(`${origin}/api/support/public/extra`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "start", token: "test-token" }),
     });
-    expect((await supportSuffixFallback.json()).target).toBe("legacy");
+    expect(supportSuffixFallback.status).toBe(202);
+    expect(await supportSuffixFallback.text()).toContain("accepted:complete");
   }, 15_000);
 });
