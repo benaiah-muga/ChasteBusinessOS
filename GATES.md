@@ -640,3 +640,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /VITE_DEFAULT_DEV_ONLY/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: The root package assertion passed. Running `pnpm dev` started Vite at `http://localhost:3000`; installed `agent-browser` loaded the not-found page with the URL unchanged and an empty browser error log. A TCP connection check confirmed port 3001 stayed closed.
+
+- [x] G124: The Vite marketplace listing client and Go capability match the legacy listing contract and preserve organization access.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/api/marketplace.test.ts src/components/MarketplacePage.test.tsx && GO_RUNTIME_INTEGRATION_REQUIRED=1 DATABASE_URL=postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2 CHASTE_APP_DB_PASSWORD=chaste_app_dev_only PATH=/home/benaiah/.local/share/go/1.27.1/bin:$PATH go -C apps/api test ./internal/capability -run '^TestGoCreatorMarketplace(ReadMatchesLegacyRowsAndWireFields|HumanReadPreservesLegacyOrgAccess)$' -count=1 -v && git diff --check
+  EXPECT: /Tests\s+31 passed|PASS.*TestGoCreatorMarketplace/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Both Vite marketplace suites passed all 31 tests. Database-backed Go marketplace listing parity and organization-access tests passed with runtime integration required. The listing returns exactly the legacy ten-field row shape, caps results at 100, and the reader preserves the legacy human access rule.

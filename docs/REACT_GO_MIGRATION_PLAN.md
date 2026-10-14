@@ -3093,14 +3093,17 @@ new owners and the manifest shows zero legacy runtime paths.
      denied without financial effects, including wrong-payload,
      wrong-organization, and wrong-capability approval links.
 
-276. (Implemented; focused client tests added, verification pending) Route the
+276. (Verified) Route the
      Vite marketplace listing read through Go's session-authenticated
      `creator.listMarketplace` capability. Preserve the legacy listing schema,
      and keep marketplace writes on their existing routes at this milestone.
      Marketplace signature verification later moved to Go in item 289 and
      publish moved in item 290. Go DB capability tests prove legacy listing
      parity; Vite client tests cover the capability request, response
-     validation, and fail-closed behavior without legacy fallback.
+     validation, and fail-closed behavior without legacy fallback. The
+     marketplace API and page suites passed 31 tests, and two DB-backed Go
+     marketplace listing parity and organization-access tests passed with
+     runtime integration required.
 
 277. (Implemented and verified) Route exact Vite `GET /api/portal/invoice/{token}`
      requests to Go by default, with no Vite rollback selector. Mount the Go
