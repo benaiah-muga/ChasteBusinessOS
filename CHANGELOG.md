@@ -27,6 +27,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Hiring can close an open role through Go and keeps it closed after refresh.
 - Vite Sales can quick-create a catalog item through Go's `inventory.createItem` capability and add it to a sales draft, with actor/org-scoped retry recovery.
 - Vite Support can file an internal request, bug, or capability-gap ticket through Go's `support.createTicket` capability with actor/org-scoped exact retry recovery.
+- Vite Sales can decline sent quotes through Go after explicit confirmation, with exact retry recovery and stale actor/workspace result suppression.
 
 ### Fixed
 

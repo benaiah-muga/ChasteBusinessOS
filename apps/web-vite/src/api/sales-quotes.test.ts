@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acceptSalesQuote, createSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes, SalesQuoteApiError } from "./sales-quotes";
+import { acceptSalesQuote, createSalesQuote, declineSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes, SalesQuoteApiError } from "./sales-quotes";
 
 const actorId = "10000000-0000-4000-8000-000000000001";
 const organizationId = "10000000-0000-4000-8000-000000000002";
@@ -109,6 +109,26 @@ describe("Vite Sales quote Go APIs", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ invoiceId: "invalid", invoiceNumber: 701, totalMinor: 25000 })));
     await expect(acceptSalesQuote(quoteId, scope)).rejects.toBeInstanceOf(SalesQuoteApiError);
+  });
+
+  it("declines a quote through Go and retries the exact scoped intent after an unknown result", async () => {
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: unknown; intentId: string };
+      expect(request.capabilityId).toBe("accounting.declineQuote");
+      expect(request.input).toEqual({ quoteId });
+      intentIds.push(request.intentId);
+      if (intentIds.length === 1) throw new TypeError("connection dropped");
+      return success({ status: "declined" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(declineSalesQuote(quoteId, scope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    await expect(declineSalesQuote(quoteId, scope)).resolves.toEqual({ kind: "completed", data: { status: "declined" } });
+    expect(intentIds[1]).toBe(intentIds[0]);
+    expect(Object.keys(localStorage).filter((key) => key.startsWith("chaste:sales-quotes:")).length).toBe(0);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ status: "accepted" })));
+    await expect(declineSalesQuote(quoteId, scope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
   });
 
   it("does not clear exact retry state after malformed success data", async () => {

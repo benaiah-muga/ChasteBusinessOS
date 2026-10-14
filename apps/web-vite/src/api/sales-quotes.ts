@@ -52,8 +52,10 @@ const CreateQuoteInputSchema = z.object({
   }
 });
 const AcceptQuoteInputSchema = z.object({ quoteId: uuid }).strict();
+const DeclineQuoteInputSchema = z.object({ quoteId: uuid }).strict();
 const CreateQuoteOutputSchema = z.object({ quoteId: uuid, quoteNumber: integer.positive(), totalMinor: integer.nonnegative() }).strict();
 const AcceptQuoteOutputSchema = z.object({ invoiceId: uuid, invoiceNumber: integer.positive(), totalMinor: integer.nonnegative() }).strict();
+const DeclineQuoteOutputSchema = z.object({ status: z.literal("declined") }).strict();
 
 export type SalesQuote = z.infer<typeof QuoteSchema>;
 export type SalesQuoteCustomer = z.infer<typeof CustomerSchema>;
@@ -69,7 +71,7 @@ export class SalesQuoteApiError extends Error {
   }
 }
 
-type QuoteWrite = { action: "create"; input: SalesQuoteInput } | { action: "accept"; input: { quoteId: string } };
+type QuoteWrite = { action: "create"; input: SalesQuoteInput } | { action: "accept"; input: { quoteId: string } } | { action: "decline"; input: { quoteId: string } };
 type QuoteWriteMarker = { intentId: string; fingerprint: string; scopeFingerprint: string; write: QuoteWrite };
 const MARKER_PREFIX = "chaste:sales-quotes:go-attempt:v1:";
 const validUUID = (value: string): boolean => uuid.safeParse(value).success;
@@ -100,6 +102,7 @@ function parseMarker(value: string | null): QuoteWriteMarker | null {
   const parsed = z.object({ intentId: uuid, fingerprint: z.string().length(64), scopeFingerprint: z.string().length(64), write: z.union([
     z.object({ action: z.literal("create"), input: CreateQuoteInputSchema }).strict(),
     z.object({ action: z.literal("accept"), input: AcceptQuoteInputSchema }).strict(),
+    z.object({ action: z.literal("decline"), input: DeclineQuoteInputSchema }).strict(),
   ]) }).strict().safeParse(decoded);
   if (!parsed.success) throw new SalesQuoteApiError(0, "The saved quote retry record is invalid. Contact support before retrying.");
   return parsed.data;
@@ -165,11 +168,15 @@ export async function fetchSalesQuoteDeals(signal?: AbortSignal): Promise<SalesQ
 async function submitWrite<T>(write: QuoteWrite, scope: SalesQuoteScope, schema: z.ZodType<T>): Promise<SalesQuoteActionOutcome<T>> {
   const parsedWrite = write.action === "create"
     ? CreateQuoteInputSchema.safeParse(write.input)
-    : AcceptQuoteInputSchema.safeParse(write.input);
+    : write.action === "accept"
+      ? AcceptQuoteInputSchema.safeParse(write.input)
+      : DeclineQuoteInputSchema.safeParse(write.input);
   if (!parsedWrite.success) throw new SalesQuoteApiError(0, "Quote quantities, prices, taxes, and total must fit the supported database amount range.");
   const safeWrite: QuoteWrite = write.action === "create"
     ? { action: "create", input: parsedWrite.data as SalesQuoteInput }
-    : { action: "accept", input: parsedWrite.data as { quoteId: string } };
+    : write.action === "accept"
+      ? { action: "accept", input: parsedWrite.data as { quoteId: string } }
+      : { action: "decline", input: parsedWrite.data as { quoteId: string } };
   const markerKey = await scopedMarkerKey(scope, safeWrite);
   return withMarkerLock(markerKey.key, async () => {
     let marker: QuoteWriteMarker | null;
@@ -190,7 +197,11 @@ async function submitWrite<T>(write: QuoteWrite, scope: SalesQuoteScope, schema:
 
     let response: Response;
     let body: unknown;
-    const capabilityId = safeWrite.action === "create" ? "accounting.createQuote" : "accounting.acceptQuote";
+    const capabilityId = safeWrite.action === "create"
+      ? "accounting.createQuote"
+      : safeWrite.action === "accept"
+        ? "accounting.acceptQuote"
+        : "accounting.declineQuote";
     try {
       response = await fetch("/api/capabilities/execute", {
         method: "POST",
@@ -228,4 +239,8 @@ export function createSalesQuote(input: SalesQuoteInput, scope: SalesQuoteScope)
 
 export function acceptSalesQuote(quoteId: string, scope: SalesQuoteScope): Promise<SalesQuoteActionOutcome<z.infer<typeof AcceptQuoteOutputSchema>>> {
   return submitWrite({ action: "accept", input: { quoteId } }, scope, AcceptQuoteOutputSchema);
+}
+
+export function declineSalesQuote(quoteId: string, scope: SalesQuoteScope): Promise<SalesQuoteActionOutcome<z.infer<typeof DeclineQuoteOutputSchema>>> {
+  return submitWrite({ action: "decline", input: { quoteId } }, scope, DeclineQuoteOutputSchema);
 }

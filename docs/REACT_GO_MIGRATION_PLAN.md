@@ -20,6 +20,12 @@ Vite deployment. TypeScript remains for the browser and generated API types.
 
 ## Current Vite and Go completion evidence
 
+Vite Sales can decline sent quotes through `accounting.declineQuote` after explicit
+confirmation. The write retains an actor- and organization-scoped exact retry,
+and Sales quote data and notices are invalidated synchronously when either scope
+changes. The focused API and page tests pass, and an authenticated browser proof
+created and declined a synthetic quote through Go with no browser errors.
+
 The active Vite CRM customer-create, CRM follow-up-draft, Support reply-draft,
 Messaging agent-reply, Accounting payment-reversal, and Purchasing
 purchase-request paths are Go-owned by default. CRM mutations and Purchasing

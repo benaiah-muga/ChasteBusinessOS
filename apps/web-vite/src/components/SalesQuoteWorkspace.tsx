@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { acceptSalesQuote, createSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes, SALES_QUOTE_DATABASE_INTEGER_MAX, SalesQuoteApiError, type SalesQuote, type SalesQuoteCustomer, type SalesQuoteDeal } from "../api/sales-quotes";
+import { acceptSalesQuote, createSalesQuote, declineSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes, SALES_QUOTE_DATABASE_INTEGER_MAX, SalesQuoteApiError, type SalesQuote, type SalesQuoteCustomer, type SalesQuoteDeal } from "../api/sales-quotes";
 import "./sales-page.css";
 
 type QuoteTab = "quotes" | "customers" | "deals";
@@ -49,12 +49,16 @@ function formatMoney(minor: number, currency: string, digits: number): string {
 
 export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: { actorId: string | null; organizationId: string | null; baseCurrency: string | null }) {
   const scope = useMemo(() => ({ actorId, organizationId }), [actorId, organizationId]);
+  const scopeIdentity = JSON.stringify([actorId?.trim() ?? "", organizationId?.trim() ?? ""]);
+  const currentScopeIdentity = useRef(scopeIdentity);
+  currentScopeIdentity.current = scopeIdentity;
   const [tab, setTab] = useState<QuoteTab>("quotes");
   const [quotes, setQuotes] = useState<SalesQuote[]>([]);
   const [customers, setCustomers] = useState<SalesQuoteCustomer[]>([]);
   const [deals, setDeals] = useState<SalesQuoteDeal[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedScopeIdentity, setLoadedScopeIdentity] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [customerId, setCustomerId] = useState("");
   const [memo, setMemo] = useState("");
@@ -62,6 +66,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [messageScopeIdentity, setMessageScopeIdentity] = useState(scopeIdentity);
   const [busy, setBusy] = useState(false);
   const [quoteFilter, setQuoteFilter] = useState("all");
   const [dealQuery, setDealQuery] = useState("");
@@ -69,34 +74,74 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
   const digits = currencyMinorUnits(currency) ?? 2;
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const requestedScopeIdentity = scopeIdentity;
     setLoading(true);
     setLoadError(null);
     try {
       const [nextQuotes, nextCustomers, nextDeals] = await Promise.all([
         fetchSalesQuotes(signal), fetchSalesQuoteCustomers(signal), fetchSalesQuoteDeals(signal),
       ]);
-      if (signal?.aborted) return;
+      if (signal?.aborted || currentScopeIdentity.current !== requestedScopeIdentity) return;
       setQuotes(nextQuotes);
       setCustomers(nextCustomers);
       setDeals(nextDeals);
+      setLoadedScopeIdentity(requestedScopeIdentity);
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || currentScopeIdentity.current !== requestedScopeIdentity) return;
       setLoadError(error instanceof SalesQuoteApiError ? error.message : "Could not load Sales from Go. Try again.");
+      setLoadedScopeIdentity(requestedScopeIdentity);
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && currentScopeIdentity.current === requestedScopeIdentity) setLoading(false);
     }
-  }, []);
+  }, [scopeIdentity]);
 
   useEffect(() => {
     const controller = new AbortController();
+    setQuotes([]);
+    setCustomers([]);
+    setDeals([]);
+    setLoadedScopeIdentity(null);
+    setLoadError(null);
+    setActionError(null);
+    setNotice(null);
+    setMessageScopeIdentity(scopeIdentity);
+    setBusy(false);
+    setFormOpen(false);
+    setCustomerId("");
+    setMemo("");
+    setExpiresAt("");
+    setLines([emptyLine()]);
     void load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [load, scopeIdentity]);
 
-  const filteredQuotes = quotes.filter((quote) => quoteFilter === "all" || quote.status === quoteFilter);
-  const filteredDeals = deals.filter((deal) => `${deal.title} ${deal.customerName ?? ""} ${deal.stage}`.toLowerCase().includes(dealQuery.toLowerCase()));
-  const customerNames = useMemo(() => new Map(customers.map((customer) => [customer.id, customer.name])), [customers]);
+  const hasCurrentData = loadedScopeIdentity === scopeIdentity;
+  const visibleQuotes = hasCurrentData ? quotes : [];
+  const visibleCustomers = hasCurrentData ? customers : [];
+  const visibleDeals = hasCurrentData ? deals : [];
+  const visibleLoadError = hasCurrentData ? loadError : null;
+  const visibleActionError = messageScopeIdentity === scopeIdentity ? actionError : null;
+  const visibleNotice = messageScopeIdentity === scopeIdentity ? notice : null;
+  const filteredQuotes = visibleQuotes.filter((quote) => quoteFilter === "all" || quote.status === quoteFilter);
+  const filteredDeals = visibleDeals.filter((deal) => `${deal.title} ${deal.customerName ?? ""} ${deal.stage}`.toLowerCase().includes(dealQuery.toLowerCase()));
+  const customerNames = useMemo(() => new Map(visibleCustomers.map((customer) => [customer.id, customer.name])), [visibleCustomers]);
   const total = quoteTotal(lines, digits);
+
+  function clearActionMessages(): void {
+    setMessageScopeIdentity(scopeIdentity);
+    setActionError(null);
+    setNotice(null);
+  }
+
+  function showActionError(message: string): void {
+    setMessageScopeIdentity(scopeIdentity);
+    setActionError(message);
+  }
+
+  function showNotice(message: string): void {
+    setMessageScopeIdentity(scopeIdentity);
+    setNotice(message);
+  }
 
   function setLine(index: number, key: keyof DraftLine, value: string) {
     setLines((current) => current.map((line, row) => row === index ? { ...line, [key]: value } : line));
@@ -104,10 +149,11 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
 
   async function submitQuote(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setActionError(null);
-    setNotice(null);
-    if (!actorId?.trim() || !organizationId) { setActionError("The active actor and workspace are required to create a quote."); return; }
-    if (total === null || total <= 0) { setActionError("Enter valid quantities, prices, and tax amounts. Each amount and the total must fit the database limit, and the total must be greater than zero."); return; }
+    clearActionMessages();
+    const submittedScopeIdentity = scopeIdentity;
+    const isCurrentScope = () => currentScopeIdentity.current === submittedScopeIdentity;
+    if (!actorId?.trim() || !organizationId) { showActionError("The active actor and workspace are required to create a quote."); return; }
+    if (total === null || total <= 0) { showActionError("Enter valid quantities, prices, and tax amounts. Each amount and the total must fit the database limit, and the total must be greater than zero."); return; }
     const payload = {
       customerId,
       ...(memo.trim() ? { memo: memo.trim() } : {}),
@@ -122,37 +168,61 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
     setBusy(true);
     try {
       const result = await createSalesQuote(payload, scope);
+      if (!isCurrentScope()) return;
       if (result.kind === "pending") {
-        setNotice(`Quote creation is waiting for approval. Retry this exact draft to check approval: ${result.reason}`);
+        showNotice(`Quote creation is waiting for approval. Retry this exact draft to check approval: ${result.reason}`);
         return;
       }
-      setNotice(`Quote #${result.data.quoteNumber} created and sent.`);
+      showNotice(`Quote #${result.data.quoteNumber} created and sent.`);
       setFormOpen(false);
       setMemo("");
       setExpiresAt("");
       setLines([emptyLine()]);
       await load();
     } catch (error) {
-      setActionError(error instanceof SalesQuoteApiError ? error.message : "The quote could not be created.");
-    } finally { setBusy(false); }
+      if (isCurrentScope()) showActionError(error instanceof SalesQuoteApiError ? error.message : "The quote could not be created.");
+    } finally { if (isCurrentScope()) setBusy(false); }
   }
 
   async function accept(quote: SalesQuote) {
-    if (!actorId || !organizationId) { setActionError("The active actor and workspace are required to accept a quote."); return; }
-    setActionError(null);
-    setNotice(null);
+    const submittedScopeIdentity = scopeIdentity;
+    const isCurrentScope = () => currentScopeIdentity.current === submittedScopeIdentity;
+    if (!actorId || !organizationId) { showActionError("The active actor and workspace are required to accept a quote."); return; }
+    clearActionMessages();
     setBusy(true);
     try {
       const result = await acceptSalesQuote(quote.id, scope);
+      if (!isCurrentScope()) return;
       if (result.kind === "pending") {
-        setNotice(`Quote #${quote.number} is waiting for approval. Retry the same action to check approval: ${result.reason}`);
+        showNotice(`Quote #${quote.number} is waiting for approval. Retry the same action to check approval: ${result.reason}`);
         return;
       }
-      setNotice(`Quote #${quote.number} accepted. Invoice #${result.data.invoiceNumber} was created.`);
+      showNotice(`Quote #${quote.number} accepted. Invoice #${result.data.invoiceNumber} was created.`);
       await load();
     } catch (error) {
-      setActionError(error instanceof SalesQuoteApiError ? error.message : "The quote could not be accepted.");
-    } finally { setBusy(false); }
+      if (isCurrentScope()) showActionError(error instanceof SalesQuoteApiError ? error.message : "The quote could not be accepted.");
+    } finally { if (isCurrentScope()) setBusy(false); }
+  }
+
+  async function decline(quote: SalesQuote) {
+    const submittedScopeIdentity = scopeIdentity;
+    const isCurrentScope = () => currentScopeIdentity.current === submittedScopeIdentity;
+    if (!actorId || !organizationId) { showActionError("The active actor and workspace are required to decline a quote."); return; }
+    if (!window.confirm(`Decline quote #${quote.number}? This cannot be undone.`)) return;
+    clearActionMessages();
+    setBusy(true);
+    try {
+      const result = await declineSalesQuote(quote.id, scope);
+      if (!isCurrentScope()) return;
+      if (result.kind === "pending") {
+        showNotice(`Quote #${quote.number} decline is waiting for approval. Retry the same action to check approval: ${result.reason}`);
+        return;
+      }
+      showNotice(`Quote #${quote.number} declined.`);
+      await load();
+    } catch (error) {
+      if (isCurrentScope()) showActionError(error instanceof SalesQuoteApiError ? error.message : "The quote could not be declined.");
+    } finally { if (isCurrentScope()) setBusy(false); }
   }
 
   return (
@@ -164,15 +234,15 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
       <nav className="sales-quotes-tabs" aria-label="Sales workspace">
         {(["quotes", "customers", "deals"] as const).map((value) => <button type="button" key={value} aria-pressed={tab === value} onClick={() => setTab(value)}>{value[0]!.toUpperCase()}{value.slice(1)}</button>)}
       </nav>
-      {actionError && <p className="sales-action-notice sales-action-notice-error" role="alert">{actionError}</p>}
-      {notice && <p className="sales-action-notice sales-action-notice-success" role="status">{notice}</p>}
-      {loading && <p role="status">Loading quotes and customer relationships from Go…</p>}
-      {loadError && <section className="sales-error" role="alert"><div><h3>Sales workspace unavailable</h3><p>{loadError}</p></div><button type="button" onClick={() => void load()}>Try again</button></section>}
+      {visibleActionError && <p className="sales-action-notice sales-action-notice-error" role="alert">{visibleActionError}</p>}
+      {visibleNotice && <p className="sales-action-notice sales-action-notice-success" role="status">{visibleNotice}</p>}
+      {(loading || !hasCurrentData) && <p role="status">Loading quotes and customer relationships from Go…</p>}
+      {visibleLoadError && <section className="sales-error" role="alert"><div><h3>Sales workspace unavailable</h3><p>{visibleLoadError}</p></div><button type="button" onClick={() => void load()}>Try again</button></section>}
 
-      {formOpen && tab === "quotes" && <form className="sales-quote-form" onSubmit={(event) => void submitQuote(event)}>
+      {hasCurrentData && formOpen && tab === "quotes" && <form className="sales-quote-form" onSubmit={(event) => void submitQuote(event)}>
         <h3>Create and send quote</h3>
         <div className="sales-quote-fields">
-          <label>Customer<select required value={customerId} onChange={(event) => setCustomerId(event.currentTarget.value)}><option value="">Choose customer</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+          <label>Customer<select required value={customerId} onChange={(event) => setCustomerId(event.currentTarget.value)}><option value="">Choose customer</option>{visibleCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
           <label>Expiry date<input type="date" min={today()} value={expiresAt} onChange={(event) => setExpiresAt(event.currentTarget.value)} /></label>
           <label className="sales-quote-memo">Memo<textarea maxLength={4000} value={memo} onChange={(event) => setMemo(event.currentTarget.value)} /></label>
         </div>
@@ -189,15 +259,15 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
         <p className="sales-quote-help">Quotes are created with sent status and can be accepted into an invoice.</p>
       </form>}
 
-      {!loading && !loadError && tab === "quotes" && <div className="sales-quote-list">
+      {!loading && hasCurrentData && !visibleLoadError && tab === "quotes" && <div className="sales-quote-list">
         <div className="sales-quote-list-heading"><h3>Quotes</h3><label>Filter<select value={quoteFilter} onChange={(event) => setQuoteFilter(event.currentTarget.value)}><option value="all">All statuses</option>{["sent", "accepted", "declined", "expired", "draft"].map((status) => <option key={status}>{status}</option>)}</select></label></div>
         {filteredQuotes.length === 0 ? <p className="sales-quote-empty">No quotes in this view.</p> : <div className="sales-table-scroll"><table className="sales-table"><thead><tr><th>Quote</th><th>Customer</th><th>Status</th><th>Expires</th><th>Total</th><th>Actions</th></tr></thead><tbody>{filteredQuotes.map((quote) => <tr key={quote.id}>
-          <th scope="row">#{quote.number}</th><td>{customerNames.get(quote.customerId) ?? "Unknown customer"}</td><td><span className="sales-status">{quote.status}</span></td><td>{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "No expiry"}</td><td className="sales-total">{formatMoney(quote.totalMinor, currency, digits)}</td><td>{quote.status === "sent" && <button type="button" disabled={busy} onClick={() => void accept(quote)}>Accept and create invoice</button>}{quote.invoiceId && <a href="/accounting/invoices">Open invoices</a>}</td>
+          <th scope="row">#{quote.number}</th><td>{customerNames.get(quote.customerId) ?? "Unknown customer"}</td><td><span className="sales-status">{quote.status}</span></td><td>{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "No expiry"}</td><td className="sales-total">{formatMoney(quote.totalMinor, currency, digits)}</td><td>{quote.status === "sent" && <><button type="button" disabled={busy} onClick={() => void accept(quote)}>Accept and create invoice</button><button type="button" disabled={busy} onClick={() => void decline(quote)}>Decline quote</button></>}{quote.invoiceId && <a href="/accounting/invoices">Open invoices</a>}</td>
         </tr>)}</tbody></table></div>}
       </div>}
 
-      {!loading && !loadError && tab === "customers" && <div className="sales-relationship-list"><h3>Customers</h3>{customers.length === 0 ? <p>No active customers found.</p> : <ul>{customers.map((customer) => <li key={customer.id}><div><strong>{customer.name}</strong><span>{customer.email ?? "No email recorded"}</span></div><a href="/crm">Open CRM</a></li>)}</ul>}</div>}
-      {!loading && !loadError && tab === "deals" && <div className="sales-relationship-list"><div className="sales-quote-list-heading"><h3>Deals</h3><label>Search<input type="search" value={dealQuery} onChange={(event) => setDealQuery(event.currentTarget.value)} /></label></div>{filteredDeals.length === 0 ? <p>No deals match this search.</p> : <ul>{filteredDeals.map((deal: SalesQuoteDeal) => <li key={deal.id}><div><strong>{deal.title}</strong><span>{deal.customerName ?? "Unlinked customer"} · {deal.stage} · {formatMoney(deal.valueMinor, currency, digits)}</span></div><a href="/crm">Open CRM</a></li>)}</ul>}</div>}
+      {!loading && hasCurrentData && !visibleLoadError && tab === "customers" && <div className="sales-relationship-list"><h3>Customers</h3>{visibleCustomers.length === 0 ? <p>No active customers found.</p> : <ul>{visibleCustomers.map((customer) => <li key={customer.id}><div><strong>{customer.name}</strong><span>{customer.email ?? "No email recorded"}</span></div><a href="/crm">Open CRM</a></li>)}</ul>}</div>}
+      {!loading && hasCurrentData && !visibleLoadError && tab === "deals" && <div className="sales-relationship-list"><div className="sales-quote-list-heading"><h3>Deals</h3><label>Search<input type="search" value={dealQuery} onChange={(event) => setDealQuery(event.currentTarget.value)} /></label></div>{filteredDeals.length === 0 ? <p>No deals match this search.</p> : <ul>{filteredDeals.map((deal: SalesQuoteDeal) => <li key={deal.id}><div><strong>{deal.title}</strong><span>{deal.customerName ?? "Unlinked customer"} · {deal.stage} · {formatMoney(deal.valueMinor, currency, digits)}</span></div><a href="/crm">Open CRM</a></li>)}</ul>}</div>}
     </section>
   );
 }
