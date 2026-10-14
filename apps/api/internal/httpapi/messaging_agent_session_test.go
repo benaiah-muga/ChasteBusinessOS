@@ -114,6 +114,34 @@ func TestMessagingAgentToolExecutesWithUserAndSessionScope(t *testing.T) {
 	}
 }
 
+func TestMessagingAgentExecutesARAgingThroughGovernedExecutor(t *testing.T) {
+	orgID := "22222222-2222-4222-8222-222222222222"
+	actorID := "33333333-3333-4333-8333-333333333333"
+	sessionID := "44444444-4444-4444-8444-444444444444"
+	rootIntent := "55555555-5555-4555-8555-555555555555"
+	user := &session.ResolvedUser{UserID: actorID, OrgID: &orgID, AuthSessionID: "auth-session", Permissions: map[string]bool{"accounting.read": true}}
+	executor := &recordingMessagingAgentExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"buckets":{"totalOutstanding":5000}}`)}}
+	handler := NewMessagingAgentHandler(nil, nil, executor, nil).(*messagingAgentHandler)
+	tool := capability.AgentToolSpec{ID: "accounting.arAging", Permission: "accounting.read", Risk: "read"}
+	call := messagingAgentToolCall{ID: "call-aging", Type: "function"}
+	call.Function.Name = messagingToolName(tool.ID)
+	call.Function.Arguments = `{}`
+	result := handler.executeMessagingAgentTool(context.Background(), user, sessionID, rootIntent, 1, 0, map[string]capability.AgentToolSpec{call.Function.Name: tool}, call)
+	if !reflect.DeepEqual(result, executor.result) || executor.capabilityID != "accounting.arAging" || string(executor.input) != `{}` {
+		t.Fatalf("result=%+v executed=%q input=%s", result, executor.capabilityID, executor.input)
+	}
+	if executor.claims.OrganizationID != orgID || executor.claims.Subject != actorID || executor.claims.AgentSessionID != sessionID || executor.claims.ActorType != "agent" {
+		t.Fatalf("ar aging capability claims=%+v", executor.claims)
+	}
+	permissionForwarded := false
+	for _, permission := range executor.claims.Permissions {
+		permissionForwarded = permissionForwarded || permission == "accounting.read"
+	}
+	if !permissionForwarded {
+		t.Fatalf("accounting.read was not forwarded to governed executor: %+v", executor.claims)
+	}
+}
+
 func TestMessagingAgentIntentIDIsDeterministicUUID(t *testing.T) {
 	first := deterministicMessagingUUID("chat-reply:action")
 	if first != deterministicMessagingUUID("chat-reply:action") || !isUUID(first) || first == deterministicMessagingUUID("chat-reply:other") {

@@ -44,6 +44,25 @@ func TestAgentToolsExposeOnlyAuthoredContracts(t *testing.T) {
 	}
 }
 
+func TestAgentToolsExposeARAgingOnlyWithAccountingRead(t *testing.T) {
+	for _, tool := range AgentTools(map[string]bool{"crm.read": true}) {
+		if tool.ID == arAgingCapabilityID {
+			t.Fatal("ar aging was exposed without accounting.read")
+		}
+	}
+	for _, tool := range AgentTools(map[string]bool{"accounting.read": true}) {
+		if tool.ID != arAgingCapabilityID {
+			continue
+		}
+		if tool.Permission != "accounting.read" || tool.Risk != "read" || !supportedCapability(tool.ID) {
+			t.Fatalf("unexpected ar aging tool: %+v", tool)
+		}
+		assertUsefulAgentToolContract(t, tool)
+		return
+	}
+	t.Fatal("ar aging was not exposed to accounting.read")
+}
+
 func assertUsefulAgentToolContract(t *testing.T, tool AgentToolSpec) {
 	t.Helper()
 	var schema struct {
@@ -67,6 +86,7 @@ func assertUsefulAgentToolContract(t *testing.T, tool AgentToolSpec) {
 		}
 	}
 	fieldTypes := map[string]map[string]string{
+		"accounting.arAging": {},
 		"crm.listCustomers":  {"query": "string"},
 		"crm.listTasks":      {"openOnly": "boolean"},
 		"crm.createCustomer": {"name": "string"},

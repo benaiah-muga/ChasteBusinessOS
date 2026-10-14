@@ -14,6 +14,10 @@ type agentToolDefinition struct {
 // A tool is advertised only after its model-facing contract is documented here.
 // Every call is still parsed and authorized by the capability executor.
 var agentToolDefinitions = map[string]agentToolDefinition{
+	arAgingCapabilityID: {
+		description: "Summarize outstanding customer invoices by age, including current, 30, 60, and 90-plus day totals and invoice-level balances. This tool takes no input.",
+		schema:      `{"type":"object","properties":{},"additionalProperties":false}`,
+	},
 	listCustomersCapabilityID: {
 		description: "Search organization customers by name, email, or phone. Returns customer IDs, names, and email addresses. Leave query out to list the first matching customers.",
 		schema:      `{"type":"object","properties":{"query":{"type":"string","description":"Optional text to match against customer name, email, or phone."}},"additionalProperties":false}`,

@@ -613,6 +613,12 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
 
 - [x] G119: Delayed POS recovery and quick-add responses cannot change another organization's register, and Go routine webhooks fail closed.
   CHECK: pnpm typecheck && pnpm lint && pnpm test && GO_RUNTIME_INTEGRATION_REQUIRED=1 pnpm go:verify && git diff --check
-  EXPECT: /25 successful, 25 total|GO_VERIFY_EXIT=0/
+  EXPECT: /25 successful, 25 total|ok.*internal\/httpapi/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Workspace typecheck passed all 27 packages, lint reported 206 existing warnings and no errors, and all 25 Turbo test tasks passed (including 2,045 Vite tests). Go verification passed with runtime integration required. POS tests cover delayed sale, return recovery, item creation, and opening-stock responses after an organization switch; webhook tests cover disabled-token refusal, persistent rate limiting, trusted proxy IP handling, and fail-closed behavior. Independent read-only reviews found no remaining webhook or POS scope issue. Authenticated agent-browser opened the active Vite POS register, showed the paid synthetic sale after reload, observed Go POS reads and capability writes return HTTP 200, and reported no page errors.
+
+- [x] G120: Go Messaging agents can invoke the permission-scoped accounting receivables aging capability.
+  CHECK: GO_RUNTIME_INTEGRATION_REQUIRED=1 pnpm go:verify && git diff --check
+  EXPECT: /ok.*internal\/capability/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Go verification passed with runtime integration required. The capability catalog exposes `accounting.arAging` only when the signed user has `accounting.read`; the closed empty-object tool contract and dispatch tests passed. Dispatch preserves the signed subject, organization, agent session, actor type, and permission claims through the governed executor. Existing executor integration tests cover tenant isolation and permission denial. Independent review found no actionable issue.

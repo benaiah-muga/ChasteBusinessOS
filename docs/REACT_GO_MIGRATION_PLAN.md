@@ -31,11 +31,11 @@ and trigger message, derives effect intent IDs from that source message, and
 returns the stored reply on a retry. Runtime proofs use a local
 OpenAI-compatible stub when no provider key is configured; that verifies
 routing and persistence, not a production AI provider integration. Go
-Messaging currently advertises only the CRM read and write capabilities with
-authored descriptions and closed input schemas. Other supported Go
-capabilities are not exposed to model tool calls until their input contracts
-are authored and tested, so broad operational tool-call reliability remains
-unverified. The messaging trigger lock is process-local, so this path currently
+Messaging advertises authored descriptions and closed input schemas for CRM
+read and write capabilities and the Accounting receivables aging report. Other
+supported Go capabilities are not exposed to model tool calls until their input
+contracts are authored and tested, so broad operational tool-call reliability
+remains unverified. The messaging trigger lock is process-local, so this path currently
 assumes one Go API instance. Add shared coordination before running multiple
 API replicas.
 
@@ -4046,3 +4046,17 @@ new owners and the manifest shows zero legacy runtime paths.
      return recovery, item creation, and opening-stock responses after an
      organization switch. Independent webhook and POS reviews found no
      remaining actionable issue. This completes item 376.
+
+378. (Complete) Add `accounting.arAging` to the Go Messaging agent tool catalog
+     with a closed empty-object input schema and descriptive output guidance.
+     Advertise it only to users with `accounting.read`, and execute it through
+     the existing tenant-scoped capability executor with the agent session and
+     signed user claims intact. Tests cover catalog permission filtering and
+     governed executor dispatch. This advances Go agent operational breadth;
+     additional supported capabilities still need authored contracts.
+
+379. (Verified) On 2026-10-14, `GO_RUNTIME_INTEGRATION_REQUIRED=1 pnpm
+     go:verify` passed after the new Messaging tool was added. The tool
+     catalog permission test, governed dispatch test, existing receivables
+     aging executor integration tests, all Go HTTP tests, and `go vet` passed.
+     Independent review found no actionable issue. This completes item 378.

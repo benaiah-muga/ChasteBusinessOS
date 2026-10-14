@@ -11,6 +11,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+
+- Go Messaging agents can query organization-scoped receivables aging through the governed `accounting.arAging` capability when the signed-in user has `accounting.read`.
+
 ### Changed
 
 - Vite Documents capability writes now pin the requested organization in the Go request, and malformed messaging presence or attachment paths stay owned by Go instead of reaching the legacy API proxy.
