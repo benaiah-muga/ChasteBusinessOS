@@ -102,6 +102,46 @@ describe("Vite marketplace page", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
   });
 
+  it("offers install only for verified listings and keeps uninstall available for existing installs", async () => {
+    const submitted = { ...listing, id: "8de066f0-4bdb-4f46-9b6a-193064f5b235", name: "Awaiting review", status: "submitted" };
+    let rejectedInstalled = true;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return modules();
+      if (isCapabilityRequest(input, init, "creator.uninstallListing")) {
+        const payload = JSON.parse(String(init?.body)) as { input?: { listingId?: string }; intentId?: string };
+        expect(payload).toMatchObject({ input: { listingId: "9de066f0-4bdb-4f46-9b6a-193064f5b235" }, intentId: expect.any(String) });
+        rejectedInstalled = false;
+        return Response.json({ ok: true, data: { uninstalled: true } });
+      }
+      if (isCapabilityRequest(input, init, "creator.listMarketplace")) {
+        return marketplaceListings([
+          submitted,
+          { ...listing, id: "9de066f0-4bdb-4f46-9b6a-193064f5b235", name: "Previously installed package", status: "rejected", installedHere: rejectedInstalled },
+        ]);
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MarketplacePage {...retryScope} />);
+
+    expect(await screen.findByRole("heading", { name: submitted.name })).not.toBeNull();
+    expect(screen.getByText("Installation is unavailable while this listing is submitted.")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Uninstall" })).not.toBeNull();
+    expect(screen.getByText("rejected")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Install (signature-checked)" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([input, init]) => isCapabilityRequest(input, init, "creator.installListing"))).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+
+    expect(await screen.findByText("Plugin uninstalled.")).not.toBeNull();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Uninstall" })).toBeNull());
+    expect(screen.getByText("Installation is unavailable while this listing is rejected.")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([input, init]) => isCapabilityRequest(input, init, "creator.uninstallListing"))).toBe(true);
+    expect(fetchMock.mock.calls.filter(([input, init]) => isCapabilityRequest(input, init, "creator.listMarketplace"))).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/marketplace")).toBe(false);
+  });
+
   it("publishes through Go, clears the form, and refreshes listing data", async () => {
     let published = false;
     const publishedListing = { ...listing, name: "Published from Go", slug: "acme-warehouse" };

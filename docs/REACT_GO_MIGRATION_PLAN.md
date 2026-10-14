@@ -4362,3 +4362,16 @@ new owners and the manifest shows zero legacy runtime paths.
      Focused Go projection and Vite component tests cover the persisted state.
      The authenticated Purchasing proof above also verified the hidden action
      after reload.
+
+408. (Implemented and verified: focused tests, independent review, and
+     authenticated browser proof) Vite Marketplace offers Install only for
+     verified listings. Existing installations remain uninstallable after a
+     listing changes status, and the listing displays both its status and
+     installed state. The Go install capability independently enforces
+     verified status and signature validity; uninstall remains organization
+     scoped. The focused Marketplace API/page tests cover a rejected
+     installed listing, capability dispatch, and refreshed uninstall state.
+     Authenticated browser proof installed and then uninstalled the synthetic
+     `Migration Browser Proof` listing. Both capability requests returned
+     HTTP 200, no legacy marketplace request occurred, and the browser error
+     log was empty.

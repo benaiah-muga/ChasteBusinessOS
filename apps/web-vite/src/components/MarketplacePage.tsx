@@ -180,11 +180,12 @@ export function MarketplacePage({ actorId, organizationId }: MarketplaceRetrySco
               <div className="marketplace-listing-heading">
                 <h2>{listing.name}</h2>
                 <span className={`marketplace-status${listing.installedHere ? " marketplace-status-installed" : ""}`}>{listing.installedHere ? "installed" : listing.status}</span>
+                {listing.installedHere && listing.status !== "verified" && <span className="marketplace-status">{listing.status}</span>}
               </div>
               <p>{listing.summary}</p>
               <p className="marketplace-metadata">{listing.slug} v{listing.version}</p>
               <p className="marketplace-metadata">Capabilities: {listing.capabilityIds.join(", ")}</p>
-              {state.creatorEnabled && <button
+              {state.creatorEnabled && (listing.installedHere || listing.status === "verified") && <button
                 className="shell-button shell-button-secondary"
                 type="button"
                 disabled={busyListingId !== null}
@@ -192,6 +193,9 @@ export function MarketplacePage({ actorId, organizationId }: MarketplaceRetrySco
               >
                 {busyListingId === listing.id ? "Working…" : listing.installedHere ? "Uninstall" : "Install (signature-checked)"}
               </button>}
+              {state.creatorEnabled && !listing.installedHere && listing.status !== "verified" && (
+                <p className="marketplace-metadata">Installation is unavailable while this listing is {listing.status}.</p>
+              )}
             </article>
           ))}
         </section>
