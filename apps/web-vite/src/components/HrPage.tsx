@@ -345,7 +345,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
       } else {
         setHiringRecoveryAction(null);
         const completedLabel = exactRecovery
-          ? action.action === "createOpening" ? "Opening creation" : action.action === "addApplicant" ? "Applicant creation" : "Applicant stage update"
+          ? action.action === "createOpening" ? "Opening creation" : action.action === "closeOpening" ? "Opening closure" : action.action === "addApplicant" ? "Applicant creation" : "Applicant stage update"
           : label;
         setNotice({ tone: "success", text: `${completedLabel} completed.` });
         if (action.action === "createOpening") setOpeningTitle("");
@@ -499,6 +499,8 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
         {tab === "hiring" && <Hiring openings={openings} applicants={data.applicants} busy={busy || Boolean(hiringRecoveryAction)} openingTitle={openingTitle} setOpeningTitle={setOpeningTitle} applicantForm={applicantForm} setApplicantForm={setApplicantForm} onCreateOpening={() => {
           if (!openingTitle.trim()) return;
           void runHiringAction({ action: "createOpening", title: openingTitle.trim() }, "Opening creation");
+        }} onCloseOpening={(opening) => {
+          void runHiringAction({ action: "closeOpening", openingId: opening.id }, "Opening closure");
         }} onAddApplicant={() => {
           if (!selectedOpening || !applicantForm.name.trim()) return;
           void runHiringAction({ action: "addApplicant", openingId: selectedOpening.id, name: applicantForm.name.trim(), email: applicantForm.email.trim() || undefined }, "Applicant creation");
@@ -757,14 +759,14 @@ function People({ employees, currency, hire, setHire, busy, onHire, onDeactivate
   </>;
 }
 
-function Hiring({ openings, applicants, busy, openingTitle, setOpeningTitle, applicantForm, setApplicantForm, onCreateOpening, onAddApplicant, onMove }: { openings: HrOpening[]; applicants: HrApplicant[]; busy: boolean; openingTitle: string; setOpeningTitle: (value: string) => void; applicantForm: { openingId: string; name: string; email: string }; setApplicantForm: (value: { openingId: string; name: string; email: string }) => void; onCreateOpening: () => void; onAddApplicant: () => void; onMove: (applicant: HrApplicant, stage: string) => void }) {
+function Hiring({ openings, applicants, busy, openingTitle, setOpeningTitle, applicantForm, setApplicantForm, onCreateOpening, onCloseOpening, onAddApplicant, onMove }: { openings: HrOpening[]; applicants: HrApplicant[]; busy: boolean; openingTitle: string; setOpeningTitle: (value: string) => void; applicantForm: { openingId: string; name: string; email: string }; setApplicantForm: (value: { openingId: string; name: string; email: string }) => void; onCreateOpening: () => void; onCloseOpening: (opening: HrOpening) => void; onAddApplicant: () => void; onMove: (applicant: HrApplicant, stage: string) => void }) {
   const selectableOpenings = openings.filter((opening) => opening.status === "open");
   const openingId = applicantForm.openingId || selectableOpenings[0]?.id || "";
   const pipeline = applicants.filter((applicant) => applicant.openingId === openingId);
   return <>
     <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Recruitment</p><h2>Open roles</h2></div><span className="hr-count">{selectableOpenings.length} open</span></div>
       <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); onCreateOpening(); }}><label className="hr-grow">Role title<input required disabled={busy} maxLength={120} value={openingTitle} onChange={(event) => setOpeningTitle(event.currentTarget.value)} placeholder="For example, Operations associate" /></label><button className="hr-primary-button" disabled={busy || !openingTitle.trim()}>Create opening</button></form>
-      {openings.length === 0 ? <p className="hr-muted">No roles yet. Create an opening to start a pipeline.</p> : <ul className="hr-opening-list">{openings.map((opening) => <li key={opening.id}><span><strong>{opening.title}</strong><small>{opening.department || "General"}</small></span><span className={`hr-pill ${opening.status === "open" ? "is-active" : "is-muted"}`}>{opening.status}</span></li>)}</ul>}
+      {openings.length === 0 ? <p className="hr-muted">No roles yet. Create an opening to start a pipeline.</p> : <ul className="hr-opening-list">{openings.map((opening) => <li key={opening.id}><span><strong>{opening.title}</strong><small>{opening.department || "General"}</small></span><span className={`hr-pill ${opening.status === "open" ? "is-active" : "is-muted"}`}>{opening.status}</span>{opening.status === "open" && <button type="button" disabled={busy} onClick={() => onCloseOpening(opening)}>Close {opening.title}</button>}</li>)}</ul>}
     </section>
     <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Candidate pipeline</p><h2>Applicants</h2></div>{selectableOpenings.length > 0 && <label className="hr-select-label">Opening<select disabled={busy} value={openingId} onChange={(event) => setApplicantForm({ ...applicantForm, openingId: event.currentTarget.value })}>{selectableOpenings.map((opening) => <option value={opening.id} key={opening.id}>{opening.title}</option>)}</select></label>}</div>
       {selectableOpenings.length > 0 && <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); onAddApplicant(); }}><label className="hr-grow">Candidate name<input required disabled={busy} maxLength={120} value={applicantForm.name} onChange={(event) => setApplicantForm({ ...applicantForm, name: event.currentTarget.value })} /></label><label>Email<input type="email" disabled={busy} maxLength={254} value={applicantForm.email} onChange={(event) => setApplicantForm({ ...applicantForm, email: event.currentTarget.value })} /></label><button className="hr-primary-button" disabled={busy || !applicantForm.name.trim()}>Add applicant</button></form>}

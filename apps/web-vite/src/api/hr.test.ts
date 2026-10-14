@@ -476,6 +476,41 @@ describe("Vite People API", () => {
     ]);
   });
 
+  it("closes an opening through Go with an actor and organization scoped exact retry", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "closeOpening" as const, openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const requests: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      requests.push(body);
+      return requests.length === 1
+        ? Response.json({ pendingApproval: true, reason: "Hiring approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: { closed: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(action);
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { closed: true } });
+    await expect(readPendingHrHiringAction(scope)).resolves.toBeNull();
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({ capabilityId: "hr.closeOpening", input: { openingId: action.openingId } });
+    expect(requests[1]).toEqual(requests[0]);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": scope.organizationId });
+  });
+
+  it("retains a close-opening intent when Go returns malformed output", async () => {
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "closeOpening" as const, openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { closed: "true" } })));
+
+    await expect(submitHrHiringAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(action);
+  });
+
   it("serializes cross-tab Go Hiring reservations for one actor and organization", async () => {
     vi.stubGlobal("__GO_HR_HIRING__", true);
     stubHrWriteLocks();

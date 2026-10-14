@@ -381,6 +381,7 @@ describe("Vite People page", () => {
     const intents: string[] = [];
     const writeCalls: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
     let openingCreated = false;
+    let openingClosed = false;
     let applicantAdded = false;
     let createCount = 0;
     let addApplicantCount = 0;
@@ -393,7 +394,7 @@ describe("Vite People page", () => {
         const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
         if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: {
           ...report,
-          openings: openingCreated ? [{ id: openingId, title: "Field Technician", department: null, note: null, status: "open", createdAt: "2026-10-01T10:00:00.000Z" }] : [],
+          openings: openingCreated ? [{ id: openingId, title: "Field Technician", department: null, note: null, status: openingClosed ? "closed" : "open", createdAt: "2026-10-01T10:00:00.000Z" }] : [],
           applicants: applicantAdded ? [{ id: applicantId, openingId, name: "Mira Patel", stage: "applied", note: null }] : [],
         } });
         intents.push(body.intentId);
@@ -409,6 +410,10 @@ describe("Vite People page", () => {
           if (addApplicantCount === 1) return Response.json({ pendingApproval: true, reason: "Candidate approval required." }, { status: 202 });
           applicantAdded = true;
           return Response.json({ ok: true, data: { applicantId } });
+        }
+        if (body.capabilityId === "hr.closeOpening") {
+          openingClosed = true;
+          return Response.json({ ok: true, data: { closed: true } });
         }
         return Response.json({ ok: true, data: { moved: true, stage: "interview" } });
       }
@@ -446,6 +451,9 @@ describe("Vite People page", () => {
     await screen.findByText("Mira Patel");
     fireEvent.change(screen.getByLabelText("Stage"), { target: { value: "interview" } });
     expect(await screen.findByText("Applicant stage update completed.")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close Field Technician" }));
+    expect(await screen.findByText("Opening closure completed.")).not.toBeNull();
+    expect(await screen.findByText("closed", { selector: ".hr-pill" })).not.toBeNull();
 
     expect(intents[1]).toBe(intents[0]);
     expect(intents[3]).toBe(intents[2]);
@@ -455,6 +463,7 @@ describe("Vite People page", () => {
       { capabilityId: "hr.addApplicant", input: { openingId, name: "Mira Patel", email: "mira@example.com" } },
       { capabilityId: "hr.addApplicant", input: { openingId, name: "Mira Patel", email: "mira@example.com" } },
       { capabilityId: "hr.moveApplicant", input: { applicantId, stage: "interview" } },
+      { capabilityId: "hr.closeOpening", input: { openingId } },
     ]);
     expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/capabilities/execute")).toBe(true);

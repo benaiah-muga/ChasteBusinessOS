@@ -24,6 +24,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Accounting reports the net base-currency adjustment and number of foreign currencies after a completed Go revaluation.
 - Vite CRM supports undoing the latest single or bulk customer profile update through Go, with scoped recovery after pending or uncertain results.
 - Vite Inventory can cancel an untouched pending stock transfer draft through Go after explicit confirmation, with scoped exact retry recovery.
+- Vite Hiring can close an open role through Go and keeps it closed after refresh.
 
 ### Fixed
 

@@ -4405,3 +4405,13 @@ new owners and the manifest shows zero legacy runtime paths.
      of a synthetic transfer, cancelled it, and confirmed it disappeared from
      refreshed history. Both capability requests returned HTTP 200 and the
      browser error log was empty.
+
+410. (Implemented and verified: focused tests, independent review, and
+     authenticated browser proof) Vite Hiring now closes open roles through
+     Go's `hr.closeOpening` capability. The client validates the request and
+     response, retains an exact actor/org-scoped retry, and refreshes the
+     hiring report after success. Focused API and page tests pass 66 cases.
+     Authenticated browser proof created and closed the synthetic
+     `Migration Proof Role 20261014` opening, then reloaded the Hiring tab and
+     confirmed it stayed closed. Capability requests returned HTTP 200, no
+     legacy HR write occurred, and the browser error log was empty.
