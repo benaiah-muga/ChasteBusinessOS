@@ -71,7 +71,6 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), goRouteProxy],
     define: {
-      __LEGACY_WEB_ORIGIN__: JSON.stringify(legacyWebOrigin),
       __GO_INVENTORY_ITEM_SLICE__: JSON.stringify(goInventoryItemSlice),
       __GO_INVENTORY_IMPORT_SLICE__: JSON.stringify(goInventoryImportSlice),
       __GO_INVENTORY_CYCLE_COUNT_WRITES__: JSON.stringify(goInventoryCycleCountWrites),

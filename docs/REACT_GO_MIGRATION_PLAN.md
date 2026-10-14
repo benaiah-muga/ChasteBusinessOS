@@ -4060,3 +4060,15 @@ new owners and the manifest shows zero legacy runtime paths.
      catalog permission test, governed dispatch test, existing receivables
      aging executor integration tests, all Go HTTP tests, and `go vet` passed.
      Independent review found no actionable issue. This completes item 378.
+
+380. (Complete) Keep unknown Vite page URLs inside the React app. Remove the
+     browser redirect to the legacy app, render an explicit not-found page, and
+     keep all visible navigation links on Vite-owned routes.
+
+381. (Runtime verified) On 2026-10-14, authenticated `agent-browser` loaded
+     an unknown URL directly in Vite, rendered its not-found page and home link,
+     remained on the Vite origin, and reported no browser errors. The 34 focused
+     Vite app tests passed; workspace typecheck passed all 27 packages; lint
+     reported 206 existing warnings and no errors; all 25 Turbo test tasks and
+     `pnpm go:verify` with runtime integration required passed. Independent
+     review found no route regressions. This completes item 380.

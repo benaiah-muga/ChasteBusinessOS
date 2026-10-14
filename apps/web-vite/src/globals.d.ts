@@ -1,4 +1,3 @@
-declare const __LEGACY_WEB_ORIGIN__: string;
 declare const __GO_INVENTORY_ITEM_SLICE__: boolean;
 declare const __GO_INVENTORY_IMPORT_SLICE__: boolean;
 declare const __GO_INVENTORY_CYCLE_COUNT_WRITES__: boolean;

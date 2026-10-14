@@ -85,11 +85,11 @@
 .mobile-brand { display: none; align-items: center; gap: 8px; color: var(--ink); font-size: 11px; font-weight: 650; text-decoration: none; }
 .shell-error { margin: 14px 32px 0; border: 1px solid #e9c6bd; border-radius: 8px; padding: 10px 13px; background: #fff7f4; color: #994838; font-size: 12px; }
 
-.auth-wait, .auth-problem, .legacy-route { width: min(100% - 40px, 660px); margin: 12vh auto; }
+.auth-wait, .auth-problem, .route-not-found { width: min(100% - 40px, 660px); margin: 12vh auto; }
 .auth-wait { color: #72756c; font-size: 13px; }
-.auth-problem, .legacy-route { border: 1px solid #e4e2d9; border-radius: 14px; padding: clamp(24px, 5vw, 44px); background: #fffefa; box-shadow: 0 18px 55px rgb(48 45 36 / 7%); }
-.auth-problem h1, .legacy-route h1 { margin: 7px 0 12px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(30px, 5vw, 42px); font-weight: 500; letter-spacing: -.04em; }
-.auth-problem p:not(.shell-kicker), .legacy-route p:not(.shell-kicker) { max-width: 470px; color: #76786f; font-size: 13px; line-height: 1.65; }
+.auth-problem, .route-not-found { border: 1px solid #e4e2d9; border-radius: 14px; padding: clamp(24px, 5vw, 44px); background: #fffefa; box-shadow: 0 18px 55px rgb(48 45 36 / 7%); }
+.auth-problem h1, .route-not-found h1 { margin: 7px 0 12px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(30px, 5vw, 42px); font-weight: 500; letter-spacing: -.04em; }
+.auth-problem p:not(.shell-kicker), .route-not-found p:not(.shell-kicker) { max-width: 470px; color: #76786f; font-size: 13px; line-height: 1.65; }
 .shell-kicker { margin: 0; color: #947c49; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
 .shell-button { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; margin: 8px 10px 0 0; border: 1px solid #d9d7cd; border-radius: 7px; padding: 0 13px; background: #f7f6f0; color: #354238; cursor: pointer; font-size: 12px; font-weight: 600; text-decoration: none; }
 .shell-button:hover { border-color: #b1a47d; background: #f2efe5; }

@@ -8,11 +8,6 @@ const authMocks = vi.hoisted(() => ({
   signOut: vi.fn(),
 }));
 
-const legacyMocks = vi.hoisted(() => ({
-  legacyUrl: vi.fn((path: string) => new URL(path, "http://localhost:3001").toString()),
-  redirectToLegacy: vi.fn(),
-}));
-
 vi.mock("./api/auth", () => ({
   authClient: {
     getSession: authMocks.getSession,
@@ -20,7 +15,6 @@ vi.mock("./api/auth", () => ({
   },
 }));
 
-vi.mock("./legacy", () => legacyMocks);
 
 const firstOrgId = "62d994c0-a6d8-4ac2-9ec6-6689ba2bfc12";
 const secondOrgId = "21e89f2b-996f-4b18-9078-c0f2f743a5ab";
@@ -44,8 +38,6 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
   activeOrgId = firstOrgId;
   emptyOrganizationList = false;
-  legacyMocks.redirectToLegacy.mockClear();
-  legacyMocks.legacyUrl.mockClear();
   authMocks.getSession.mockResolvedValue({ data: { user: { id: "user-1", name: "Ada Lovelace", email: "ada@example.test" } } });
   authMocks.signOut.mockImplementation(async () => {
     authMocks.getSession.mockResolvedValue({ data: { user: null } });
@@ -414,7 +406,6 @@ describe("Vite app frame", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "Good to see you." })).not.toBeNull();
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("serves public invoice links in Vite without session auth or credential forwarding", async () => {
@@ -425,7 +416,6 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("alert")).not.toBeNull();
     expect(authMocks.getSession).not.toHaveBeenCalled();
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(`/api/portal/invoice/${token}`, expect.objectContaining({
       method: "GET",
       credentials: "omit",
@@ -436,14 +426,13 @@ describe("Vite app frame", () => {
     }));
   });
 
-  it("keeps extra portal path segments on the legacy fallback", () => {
+  it("shows the Vite not-found page for extra portal path segments", () => {
     const path = "/portal/share-token-1234567890123456/extra";
     window.history.replaceState(null, "", path);
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Opening this page in the current app." })).not.toBeNull();
-    expect(legacyMocks.redirectToLegacy).toHaveBeenCalledWith(path);
+    expect(screen.getByRole("heading", { name: "Page not found" })).not.toBeNull();
     expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/portal/invoice/"))).toBe(false);
   });
 
@@ -455,7 +444,6 @@ describe("Vite app frame", () => {
 
     expect(screen.getByText("Chat with us")).not.toBeNull();
     expect(authMocks.getSession).not.toHaveBeenCalled();
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Your email"), { target: { value: "visitor@example.test" } });
@@ -473,13 +461,12 @@ describe("Vite app frame", () => {
   it.each([
     "/widget/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/extra",
     "/widget/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/",
-  ])("keeps non-exact widget path %s on the legacy fallback", (path) => {
+  ])("shows the Vite not-found page for non-exact widget path %s", (path) => {
     window.history.replaceState(null, "", path);
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Opening this page in the current app." })).not.toBeNull();
-    expect(legacyMocks.redirectToLegacy).toHaveBeenCalledWith(path);
+    expect(screen.getByRole("heading", { name: "Page not found" })).not.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -491,7 +478,6 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("alert")).not.toBeNull();
     expect(authMocks.getSession).not.toHaveBeenCalled();
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(`/api/sales/${orderId}`, expect.objectContaining({
       credentials: "same-origin",
       cache: "no-store",
@@ -502,13 +488,12 @@ describe("Vite app frame", () => {
   it.each([
     "/print/invoice/aaaaaaaa-0000-4000-8000-000000000001/extra",
     "/print/invoice/aaaaaaaa-0000-4000-8000-000000000001/",
-  ])("keeps non-exact invoice print path %s on the legacy fallback", (path) => {
+  ])("shows the Vite not-found page for non-exact invoice print path %s", (path) => {
     window.history.replaceState(null, "", path);
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Opening this page in the current app." })).not.toBeNull();
-    expect(legacyMocks.redirectToLegacy).toHaveBeenCalledWith(path);
+    expect(screen.getByRole("heading", { name: "Page not found" })).not.toBeNull();
     expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/sales/"))).toBe(false);
   });
 
@@ -545,8 +530,6 @@ describe("Vite app frame", () => {
     expect(window.location.pathname).toBe("/onboarding");
     expect(replaceState).toHaveBeenCalledWith(null, "", "/onboarding");
     expect(pushState).not.toHaveBeenCalled();
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
-    expect(legacyMocks.legacyUrl).not.toHaveBeenCalledWith("/onboarding");
     replaceState.mockRestore();
     pushState.mockRestore();
   });
@@ -591,7 +574,6 @@ describe("Vite app frame", () => {
     expect(screen.getByRole("link", { name: "Documents" }).getAttribute("aria-current")).toBe("page");
     expect(await screen.findByText("Supplier agreement")).not.toBeNull();
     expect(await screen.findByText("Terms for supplier orders.")).not.toBeNull();
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("opens the People workspace within the authenticated shell", async () => {
@@ -600,7 +582,6 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "People" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "People" }).getAttribute("aria-current")).toBe("page");
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("routes Manufacturing to its Vite workspace and loads its Go report", async () => {
@@ -610,8 +591,6 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Manufacturing" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Manufacturing" }).getAttribute("aria-current")).toBe("page");
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
-    expect(legacyMocks.legacyUrl).not.toHaveBeenCalledWith(expect.stringContaining("manufacturing"));
     await waitFor(() => {
       const capabilityCalls = fetchMock.mock.calls
         .filter(([input]) => String(input) === "/api/capabilities/execute")
@@ -635,7 +614,6 @@ describe("Vite app frame", () => {
     expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute"
       && JSON.parse(String(init?.body)).capabilityId === "accounting.periodCloseWorkbench")).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/accounting/close"))).toBe(false);
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("opens the supplier payment-run preview within the authenticated shell", async () => {
@@ -666,7 +644,6 @@ describe("Vite app frame", () => {
     expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute"
       && JSON.parse(String(init?.body)).capabilityId === "purchasing.apAging")).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/purchasing")).toBe(false);
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("opens the purchase receipt history preview within the authenticated shell", async () => {
@@ -688,7 +665,6 @@ describe("Vite app frame", () => {
       expect.objectContaining({ capabilityId: "purchasing.listWorkspace", input: {} }),
       expect.objectContaining({ capabilityId: "purchasing.listReceipts", input: { poNumber: 204 } }),
     ]));
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("refreshes dashboard context and currency after switching organizations", async () => {
@@ -739,7 +715,6 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "Event Ledger" })).not.toBeNull();
     expect(await screen.findByText("invoice.created")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Ledger" }).getAttribute("aria-current")).toBe("page");
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=100", expect.objectContaining({ credentials: "same-origin" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: "Active organization" }), { target: { value: secondOrgId } });
@@ -756,7 +731,6 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Agent sessions" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Sessions" }).getAttribute("aria-current")).toBe("page");
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/sessions", expect.objectContaining({ credentials: "same-origin" }));
       expect(fetchMock).toHaveBeenCalledWith("/api/durable-runs", expect.objectContaining({ credentials: "same-origin" }));
@@ -773,7 +747,6 @@ describe("Vite app frame", () => {
     expect(screen.getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Team" }).getAttribute("href")).toBe("/team");
     expect(screen.getByRole("link", { name: "Team" }).getAttribute("aria-current")).toBe("page");
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByRole("combobox", { name: "Active organization" }), { target: { value: secondOrgId } });
     await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/team")).toHaveLength(2));
@@ -787,7 +760,6 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "CRM" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "CRM" }).getAttribute("href")).toBe("/crm");
     expect(screen.getByRole("link", { name: "CRM" }).getAttribute("aria-current")).toBe("page");
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     await waitFor(() => {
       const goReads = fetchMock.mock.calls
         .filter(([input]) => String(input) === "/api/capabilities/execute")
@@ -823,7 +795,6 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "Analytics" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Analytics" }).getAttribute("aria-current")).toBe("page");
     expect(await screen.findByRole("combobox", { name: /Add a dataset/ })).not.toBeNull();
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith("/api/analytics", expect.objectContaining({ credentials: "same-origin" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: "Active organization" }), { target: { value: secondOrgId } });
@@ -843,22 +814,16 @@ describe("Vite app frame", () => {
     fireEvent.click(screen.getByRole("button", { name: "Products & Services" }));
     expect(await screen.findByText("Ceramic mug")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Products" }).getAttribute("aria-current")).toBe("page");
-    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({ credentials: "same-origin" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/inventory", expect.objectContaining({ credentials: "same-origin" }));
   });
 
-  it("keeps unported route ownership in legacy and preserves query and hash on the fallback", async () => {
-    // Every route-manifest page is ported now, so this covers a path the Vite
-    // app does not serve: unknown routes must still fall back to legacy with
-    // their query and hash intact rather than rendering a broken shell.
+  it("keeps unknown routes inside Vite and offers a home link", async () => {
     window.history.replaceState(null, "", "/not-a-workspace-route?step=profile#business");
     expect(isViteAppPath("/not-a-workspace-route")).toBe(false);
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Opening this page in the current app." })).not.toBeNull();
-    expect(legacyMocks.redirectToLegacy).toHaveBeenCalledWith("/not-a-workspace-route?step=profile#business");
-    expect(screen.getByRole("link", { name: "Continue to the existing app" }).getAttribute("href"))
-      .toBe("http://localhost:3001/not-a-workspace-route?step=profile#business");
+    expect(screen.getByRole("heading", { name: "Page not found" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Return to home" }).getAttribute("href")).toBe("/");
   });
 });

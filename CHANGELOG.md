@@ -17,6 +17,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite keeps unknown page URLs in its own not-found page instead of redirecting them to the legacy app.
 - Vite Documents capability writes now pin the requested organization in the Go request, and malformed messaging presence or attachment paths stay owned by Go instead of reaching the legacy API proxy.
 - Vite invoice and settings email requests always route through the authenticated Go email handler; the legacy route toggle has been removed.
 - Vite Creator proposals now use Go for proposal and capability-gap reads,

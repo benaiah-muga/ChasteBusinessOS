@@ -622,3 +622,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /ok.*internal\/capability/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Go verification passed with runtime integration required. The capability catalog exposes `accounting.arAging` only when the signed user has `accounting.read`; the closed empty-object tool contract and dispatch tests passed. Dispatch preserves the signed subject, organization, agent session, actor type, and permission claims through the governed executor. Existing executor integration tests cover tenant isolation and permission denial. Independent review found no actionable issue.
+
+- [x] G121: Unknown page URLs remain inside the Vite app and visible rail links target Vite-owned routes.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite exec vitest run --reporter=dot src/App.test.tsx && PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm --filter @chaste/web-vite typecheck && git diff --check
+  EXPECT: /Tests  34 passed|tsc --noEmit|git diff --check/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Focused Vite app tests passed 34 cases, workspace typecheck passed all 27 packages, lint reported 206 existing warnings and no errors, all 25 Turbo test tasks passed, and Go verification passed with runtime integration required. `git diff --check` passed. Authenticated `agent-browser` loaded an unknown URL directly in Vite and showed the app's not-found page with a home link; the page URL stayed on Vite and browser errors were empty. Independent review found no route regressions. The route no longer calls `redirectToLegacy`, and visible rail entries are direct Vite paths.

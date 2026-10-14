@@ -21,7 +21,6 @@ import { InvoicePrintPage } from "./components/InvoicePrintPage";
 import { InvitationPage } from "./components/InvitationPage";
 import { authClient } from "./api/auth";
 import { navigate } from "./navigation";
-import { legacyUrl, redirectToLegacy } from "./legacy";
 import "./app-shell.css";
 
 const InventoryPage = lazy(() => import("./components/InventoryPage").then((module) => ({ default: module.InventoryPage })));
@@ -90,7 +89,7 @@ const navigationItems = [
 ];
 // Paths the Vite app serves that deliberately have no rail item of their own,
 // because an existing rail item already points at a sibling view in the same
-// workspace. They must stay in the routing set or they fall back to legacy.
+// workspace.
 const additionalVitePaths = ["/accounting", "/purchasing"];
 
 const viteAppPaths = new Set(["/", "/login", ...navigationItems.map((item) => item.href), ...additionalVitePaths]);
@@ -212,13 +211,13 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
             <a
               className={`rail-link${pathname === item.href ? " rail-link-current" : ""}`}
               key={item.href}
-              href={viteAppPaths.has(item.href) ? item.href : legacyUrl(item.href)}
+              href={item.href}
               {...(pathname === item.href ? { "aria-current": "page" as const } : {})}
             >
               <span aria-hidden="true">{item.icon}</span><span>{item.label}</span>
             </a>
           ))}
-          <p className="rail-note">{pathname === "/" ? "Approvals, the event ledger, agent sessions, projects, analytics, team roles, marketplace, CRM, sales orders, products, accounting invoices and close readiness, purchasing payment runs, payables aging and receipts, POS shift summaries, and inventory stock levels are available in this Vite preview. Other pages still open in the current app." : "This Vite preview uses the existing workspace APIs. Other pages still open in the current app."}</p>
+          <p className="rail-note">{pathname === "/" ? "Approvals, accounting, sales, purchasing, inventory, people, documents, projects, analytics, CRM, messages, support, manufacturing, marketing, and settings are available in this workspace." : "Business actions run through the workspace API."}</p>
         </nav>
         <div className="rail-account">
           <div className="account-initial" aria-hidden="true">{(auth.user.name || auth.user.email).slice(0, 1).toUpperCase()}</div>
@@ -320,19 +319,13 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   );
 }
 
-function LegacyRoute({ pathname }: { pathname: string }) {
-  const destination = legacyUrl(`${pathname}${window.location.search}${window.location.hash}`);
-
-  useEffect(() => {
-    redirectToLegacy(`${pathname}${window.location.search}${window.location.hash}`);
-  }, [pathname]);
-
+function NotFoundRoute() {
   return (
-    <main className="legacy-route">
-      <p className="shell-kicker">Existing workspace</p>
-      <h1>Opening this page in the current app.</h1>
-      <p>This business page has not moved to the React workspace yet.</p>
-      <a className="shell-button" href={destination}>Continue to the existing app</a>
+    <main className="route-not-found">
+      <p className="shell-kicker">Workspace</p>
+      <h1>Page not found</h1>
+      <p>This address does not match a page in this workspace.</p>
+      <a className="shell-button" href="/">Return to home</a>
     </main>
   );
 }
@@ -358,6 +351,6 @@ export function App() {
   // The print sheet renders outside the shell: it is chrome-less on purpose so
   // the printed page carries only the invoice.
   if (/^\/print\/invoice\/[^/]+$/.test(pathname)) return <InvoicePrintPage pathname={pathname} />;
-  if (!isViteAppPath(pathname)) return <LegacyRoute pathname={pathname} />;
+  if (!isViteAppPath(pathname)) return <NotFoundRoute />;
   return <AuthenticatedApp pathname={pathname} />;
 }
