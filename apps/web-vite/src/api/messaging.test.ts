@@ -21,6 +21,7 @@ import {
   reportConversationPresence,
   searchMessages,
   sendConversationMessage,
+  setPendingMessageDeleteRetryLocked,
   setMessagePin,
   setMessageReaction,
   uploadConversationAttachment,
@@ -111,39 +112,34 @@ describe("messaging API client", () => {
   });
 
   it("validates the conversation list and carries the same-origin session", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ conversations: [conversation], me: "user-1" }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { conversations: [conversation], me: "user-1" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchConversations()).resolves.toEqual({ conversations: [conversation], me: "user-1" });
-    expect(fetchMock).toHaveBeenCalledWith("/api/conversations", expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
       cache: "no-store",
       credentials: "same-origin",
       signal: expect.any(AbortSignal),
     }));
 
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ conversations: [{ id: conversationId }], me: "user-1" })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { conversations: [{ id: conversationId }], me: "user-1" } })));
     await expect(fetchConversations()).rejects.toBeInstanceOf(MessagingApiError);
   });
 
-  it("routes the conversation list through Go and validates the complete list contract", async () => {
-    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LIST__", true);
+  it("reads the conversation list through Go and validates the complete contract", async () => {
+    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LIST__", false);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { conversations: [conversation], me: "user-1" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchConversations()).resolves.toEqual({ conversations: [conversation], me: "user-1" });
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
-    expect(lastBody(fetchMock)).toMatchObject({
-      capabilityId: "messaging.listConversations",
-      input: { limit: 100 },
-      intentId: expect.any(String),
-    });
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { conversations: [{ ...conversation, unreadCount: "2" }], me: "user-1" } })));
     await expect(fetchConversations()).rejects.toBeInstanceOf(MessagingApiError);
   });
 
-  it("fails closed when selected Go conversation-list routing fails", async () => {
-    vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LIST__", true);
+  it("fails closed when Go conversation-list capability fails", async () => {
     const fetchMock = vi.fn(async () => Response.json({ error: "capability unavailable" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -153,22 +149,17 @@ describe("messaging API client", () => {
   });
 
   it("rejects a message list that is not a strict match for the legacy shape", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json(thread({ messages: [message({ extra: true })] }))));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: thread({ messages: [message({ extra: true })] }) })));
     await expect(fetchConversationThread(conversationId)).rejects.toBeInstanceOf(MessagingApiError);
   });
 
-  it("routes initial and refresh thread reads through Go and validates the complete thread result", async () => {
-    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
+  it("reads threads through Go and validates the complete result", async () => {
+    vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", false);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: thread() }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchConversationThread(conversationId)).resolves.toEqual(thread());
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
-    expect(lastBody(fetchMock)).toMatchObject({
-      capabilityId: "messaging.readMessages",
-      input: { conversationId, limit: 60 },
-      intentId: expect.any(String),
-    });
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: thread({
       conversation: { id: conversationId },
@@ -182,7 +173,7 @@ describe("messaging API client", () => {
     });
   });
 
-  it("fails closed when the selected Go thread read fails", async () => {
+  it("fails closed when the Go thread capability fails", async () => {
     vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
     const fetchMock = vi.fn(async () => Response.json({ error: "capability unavailable" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -194,26 +185,13 @@ describe("messaging API client", () => {
 
   it("routes around windows and older pages through Go", async () => {
     vi.stubGlobal("__GO_MESSAGING_THREAD_READ__", true);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
-      String(input) === "/api/capabilities/execute"
-        ? Response.json({ ok: true, data: thread() })
-        : Response.json(thread()));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: thread() }));
     vi.stubGlobal("fetch", fetchMock);
 
     await fetchConversationThread(conversationId, { aroundId: messageId });
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
-    expect(lastBody(fetchMock)).toMatchObject({
-      capabilityId: "messaging.readMessages",
-      input: { conversationId, limit: 60, around: messageId },
-      intentId: expect.any(String),
-    });
     await fetchOlderMessages(conversationId, messageId);
     expect(lastUrl(fetchMock, 1)).toBe("/api/capabilities/execute");
-    expect(lastBody(fetchMock, 1)).toMatchObject({
-      capabilityId: "messaging.readMessages",
-      input: { conversationId, limit: 60, before: messageId },
-      intentId: expect.any(String),
-    });
   });
 
   it("fails closed when a selected Go around read fails", async () => {
@@ -242,14 +220,14 @@ describe("messaging API client", () => {
   });
 
   it("encodes thread cursors for the around and before windows", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json(thread()));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: thread() }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchConversationThread(conversationId, { aroundId: messageId })).resolves.toMatchObject({ me: "user-1" });
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/messages?around=${messageId}`);
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
 
     await expect(fetchOlderMessages(conversationId, messageId)).resolves.toMatchObject({ me: "user-1" });
-    expect(lastUrl(fetchMock, 1)).toBe(`/api/conversations/${conversationId}/messages?before=${messageId}`);
+    expect(lastUrl(fetchMock, 1)).toBe("/api/capabilities/execute");
   });
 
   it("turns a permission failure into a readable message", async () => {
@@ -261,16 +239,15 @@ describe("messaging API client", () => {
   });
 
   it("reports a pending send as pending, not as success or failure", async () => {
-    vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", false);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ pendingApproval: true }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const outcome = await sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] });
     expect(outcome).toEqual({ kind: "pending", reason: "Your message is waiting for approval. It is still saved in this composer." });
     const body = lastBody(fetchMock);
-    expect(body).toMatchObject({ body: "Ship it", intentId: expect.any(String) });
-    expect(body.parentMessageId).toBeUndefined();
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/messages`);
+    expect(body).toMatchObject({ capabilityId: "messaging.sendMessage", input: { body: "Ship it" }, intentId: expect.any(String) });
+    expect((body.input as Record<string, unknown>).parentMessageId).toBeUndefined();
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
   });
 
   it("sends a Go message through the governed capability endpoint and validates its output", async () => {
@@ -283,7 +260,7 @@ describe("messaging API client", () => {
       mentions: [{ type: "user", id: "user-1" }],
       parentMessageId: messageId,
       attachmentIds: ["72b99920-8c21-463a-9c5b-479216017501"],
-    }, undefined, { allowGo: true })).resolves.toEqual({ kind: "completed", data: { ok: true, agentReply: null, messageId } });
+    }, undefined, {  })).resolves.toEqual({ kind: "completed", data: { ok: true, agentReply: null, messageId } });
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
     expect(lastBody(fetchMock)).toMatchObject({
       capabilityId: "messaging.sendMessage",
@@ -312,7 +289,6 @@ describe("messaging API client", () => {
     const intentId = "72b99920-8c21-463a-9c5b-479216017501";
 
     await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, {
-      allowGo: true,
       intentId,
       requestAgentReply: true,
     })).resolves.toEqual({ kind: "completed", data: { ok: true, agentReply: "On it", messageId } });
@@ -326,11 +302,11 @@ describe("messaging API client", () => {
     vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
     const approvalId = "550e8400-e29b-41d4-a716-446655440000";
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, approvalId, reason: "Manager review required." }, { status: 202 })));
-    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, { allowGo: true, intentId: messageId }))
+    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, { intentId: messageId }))
       .resolves.toEqual({ kind: "pending", reason: "Manager review required." });
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { unexpected: true } })));
-    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, { allowGo: true }))
+    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, {  }))
       .rejects.toMatchObject({ name: "MessagingApiError" });
   });
 
@@ -344,8 +320,8 @@ describe("messaging API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const intentId = "72b99920-8c21-463a-9c5b-479216017501";
     const input = { body: "Ship it", mentions: [], attachmentIds: [] };
-    await sendConversationMessage(conversationId, input, undefined, { allowGo: true, intentId });
-    await sendConversationMessage(conversationId, input, undefined, { allowGo: true, intentId });
+    await sendConversationMessage(conversationId, input, undefined, { intentId });
+    await sendConversationMessage(conversationId, input, undefined, { intentId });
     expect(bodies.map((body) => body.intentId)).toEqual([intentId, intentId]);
   });
 
@@ -358,7 +334,7 @@ describe("messaging API client", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const scope = { actorId: "user-1", organizationId: "org-1" };
-    const options = { allowGo: true, ...scope, conversationId };
+    const options = { ...scope, conversationId };
 
     await expect(editMessage(messageId, "Corrected wording", undefined, options)).resolves.toEqual({
       kind: "pending", reason: "A manager must review this edit.",
@@ -379,18 +355,18 @@ describe("messaging API client", () => {
     await expect(getPendingMessageEdit({ actorId: "user-1", organizationId: "org-2" })).resolves.toBeNull();
   });
 
-  it("keeps unresolved Go edits blocked if the selector is rolled back", async () => {
+  it("keeps unresolved Go edits blocked while preserving the saved attempt", async () => {
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
     const scope = { actorId: "rollback-user", organizationId: "rollback-org" };
-    const options = { allowGo: true, ...scope, conversationId };
+    const options = { ...scope, conversationId };
     await editMessage(messageId, "Saved exact edit", undefined, options);
 
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", false);
     const legacyFetch = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal("fetch", legacyFetch);
     await expect(editMessage(messageId, "Different edit", undefined, { ...scope, conversationId })).rejects.toMatchObject({
-      message: expect.stringContaining("Go message edit is unresolved"),
+      message: expect.stringContaining("unresolved"),
     });
     expect(legacyFetch).not.toHaveBeenCalled();
     await expect(getPendingMessageEdit(scope)).resolves.toMatchObject({ messageId, body: "Saved exact edit" });
@@ -399,7 +375,7 @@ describe("messaging API client", () => {
   it("keeps the Go edit intent after an uncertain transport failure and clears it on success", async () => {
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
     const scope = { actorId: "user-2", organizationId: "org-2" };
-    const options = { allowGo: true, ...scope, conversationId };
+    const options = { ...scope, conversationId };
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("offline"); }));
     await expect(editMessage(messageId, "Retry me", undefined, options)).rejects.toBeInstanceOf(MessagingApiError);
     const recovered = await getPendingMessageEdit(scope);
@@ -422,7 +398,7 @@ describe("messaging API client", () => {
   ])("keeps the exact Go edit marker after a successful response with %s", async (_case, invalidBody) => {
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
     const scope = { actorId: "user-invalid-success", organizationId: "org-invalid-success" };
-    const options = { allowGo: true, ...scope, conversationId };
+    const options = { ...scope, conversationId };
     let responseBody: unknown = invalidBody;
     const bodies: Record<string, unknown>[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -455,7 +431,7 @@ describe("messaging API client", () => {
       return Response.json({ ok: true, data: { messageId, body: "Morning all", expectedBody: "Retry exact edit", expectedEditedAt: "2026-10-01T09:00:00.000Z", editedAt: "2026-10-01T09:00:00.000Z" } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const options = { allowGo: true, ...scope, conversationId };
+    const options = { ...scope, conversationId };
     await expect(editMessage(messageId, "Retry exact edit", undefined, options)).rejects.toMatchObject({ status: 404 });
     const pending = await getPendingMessageEdit(scope);
     expect(pending).toMatchObject({ messageId, body: "Retry exact edit", intentId: expect.any(String) });
@@ -487,7 +463,7 @@ describe("messaging API client", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const scope = { actorId: "user-delete", organizationId: "org-delete" };
-    const options = { allowGo: true, ...scope, conversationId };
+    const options = { ...scope, conversationId };
 
     await expect(deleteMessage(messageId, undefined, options)).resolves.toEqual({ kind: "pending", reason: "Manager review required." });
     const recovered = await getPendingMessageDelete(scope);
@@ -506,20 +482,85 @@ describe("messaging API client", () => {
     await expect(getPendingMessageDelete({ actorId: "user-delete", organizationId: "org-other" })).resolves.toBeNull();
   });
 
-  it("blocks legacy deletion after selector rollback while the scoped Go delete is unresolved", async () => {
+  it("rejects a message deletion marker with a non-boolean retryLocked field", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const scope = { actorId: "user-delete-malformed-marker", organizationId: "org-delete-malformed-marker" };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
+    await deleteMessage(messageId, undefined, { ...scope, conversationId });
+    const key = Object.keys(localStorage).find((candidate) => candidate.startsWith("chaste:message-delete-attempt:"));
+    expect(key).toBeDefined();
+    const marker = JSON.parse(localStorage.getItem(key!) ?? "null") as Record<string, unknown>;
+    localStorage.setItem(key!, JSON.stringify({ ...marker, retryLocked: "locked" }));
+    await expect(getPendingMessageDelete(scope)).rejects.toMatchObject({ message: expect.stringContaining("could not be verified") });
+  });
+
+  it("does not apply stale retry-lock updates to a newer deletion intent", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const scope = { actorId: "user-delete-race", organizationId: "org-delete-race" };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
+    await deleteMessage(messageId, undefined, { ...scope, conversationId });
+    const original = await getPendingMessageDelete(scope);
+    expect(original?.intentId).toBeDefined();
+
+    const key = Object.keys(localStorage).find((candidate) => candidate.startsWith("chaste:message-delete-attempt:"));
+    expect(key).toBeDefined();
+    const newerIntentId = crypto.randomUUID();
+    localStorage.setItem(key!, JSON.stringify({
+      messageId,
+      conversationId,
+      intentId: newerIntentId,
+      retryLocked: false,
+    }));
+
+    await expect(setPendingMessageDeleteRetryLocked(scope, original!.intentId, true)).resolves.toBe(false);
+    await expect(getPendingMessageDelete(scope)).resolves.toEqual({
+      messageId,
+      conversationId,
+      intentId: newerIntentId,
+      retryLocked: false,
+    });
+  });
+
+  it("unlocks a legacy locked marker and retries the same intent after a transient failure", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const scope = { actorId: "user-delete-transient", organizationId: "org-delete-transient" };
+    const options = { ...scope, conversationId };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
+    await deleteMessage(messageId, undefined, options);
+    const pending = await getPendingMessageDelete(scope);
+    expect(pending?.intentId).toBeDefined();
+    await expect(setPendingMessageDeleteRetryLocked(scope, pending!.intentId, true)).resolves.toBe(true);
+
+    const bodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (bodies.length === 1) return Response.json({ error: "service unavailable" }, { status: 503 });
+      return Response.json({ ok: true, data: { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteMessage(messageId, undefined, options)).rejects.toMatchObject({ status: 503 });
+    await expect(getPendingMessageDelete(scope)).resolves.toMatchObject({ intentId: pending!.intentId, retryLocked: false });
+    await expect(deleteMessage(messageId, undefined, options)).resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(bodies).toHaveLength(2);
+    expect(bodies.map((body) => body.intentId)).toEqual([pending!.intentId, pending!.intentId]);
+    await expect(getPendingMessageDelete(scope)).resolves.toBeNull();
+  });
+
+  it("blocks a different deletion while the scoped Go delete is unresolved", async () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
     const scope = { actorId: "user-delete-rollback", organizationId: "org-delete-rollback" };
-    await deleteMessage(messageId, undefined, { allowGo: true, ...scope, conversationId });
+    await deleteMessage(messageId, undefined, { ...scope, conversationId });
 
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
-    const legacyFetch = vi.fn(async () => Response.json({ ok: true }));
-    vi.stubGlobal("fetch", legacyFetch);
-    await expect(deleteMessage(messageId, undefined, { ...scope, conversationId })).rejects.toMatchObject({
-      message: expect.stringContaining("Go message deletion is unresolved"),
-    });
-    expect(legacyFetch).not.toHaveBeenCalled();
-    await expect(getPendingMessageDelete(scope)).resolves.toMatchObject({ messageId, conversationId });
+    const pending = await getPendingMessageDelete(scope);
+    const retryFetch = vi.fn(async () => Response.json({ ok: true, data: { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" } }));
+    vi.stubGlobal("fetch", retryFetch);
+    await expect(deleteMessage(messageId, undefined, { ...scope, conversationId })).resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastUrl(retryFetch)).toBe("/api/capabilities/execute");
+    expect(lastBody(retryFetch)).toMatchObject({ intentId: pending?.intentId, capabilityId: "messaging.deleteMessage" });
+    await expect(getPendingMessageDelete(scope)).resolves.toBeNull();
   });
 
   it("blocks selector-off deletion when actor or organization scope is missing", async () => {
@@ -539,7 +580,7 @@ describe("messaging API client", () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
     const scope = { actorId: "user-delete-unscoped", organizationId: "org-delete-unscoped" };
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
-    await deleteMessage(messageId, undefined, { allowGo: true, ...scope, conversationId });
+    await deleteMessage(messageId, undefined, { ...scope, conversationId });
     expect(await getPendingMessageDelete(scope)).toMatchObject({ messageId, conversationId });
 
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
@@ -552,21 +593,22 @@ describe("messaging API client", () => {
     await expect(getPendingMessageDelete(scope)).resolves.toMatchObject({ messageId, conversationId });
   });
 
-  it("keeps fresh selector-off deletions on the legacy route", async () => {
+  it("keeps fresh deletions on Go when the old selector is false", async () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" } }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(deleteMessage(messageId, undefined, {
       actorId: "user-delete-legacy", organizationId: "org-delete-legacy", conversationId,
     })).resolves.toEqual({ kind: "completed", data: { ok: true } });
-    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(new RegExp(`^/api/messages/${messageId}\\?intentId=`));
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.deleteMessage", input: { messageId }, intentId: expect.any(String) });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a Go deletion after an uncertain result and validates the tombstone output", async () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
     const scope = { actorId: "user-delete-retry", organizationId: "org-delete-retry" };
-    const options = { allowGo: true, ...scope, conversationId };
+    const options = { ...scope, conversationId };
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("offline"); }));
     await expect(deleteMessage(messageId, undefined, options)).rejects.toBeInstanceOf(MessagingApiError);
     const recovered = await getPendingMessageDelete(scope);
@@ -593,7 +635,7 @@ describe("messaging API client", () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
     const scope = { actorId: `user-delete-invalid-${String(_case).replaceAll(" ", "-")}`, organizationId: "org-delete-invalid" };
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data })));
-    await expect(deleteMessage(messageId, undefined, { allowGo: true, ...scope, conversationId }))
+    await expect(deleteMessage(messageId, undefined, { ...scope, conversationId }))
       .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
     await expect(getPendingMessageDelete(scope)).resolves.toMatchObject({ messageId, conversationId, intentId: expect.any(String) });
   });
@@ -608,7 +650,7 @@ describe("messaging API client", () => {
       return Response.json({ ok: true, data: { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const options = { allowGo: true, ...scope, conversationId };
+    const options = { ...scope, conversationId };
     await expect(deleteMessage(messageId, undefined, options)).rejects.toMatchObject({ status: 404 });
     const pending = await getPendingMessageDelete(scope);
     expect(pending).toMatchObject({ messageId, conversationId, intentId: expect.any(String) });
@@ -622,7 +664,7 @@ describe("messaging API client", () => {
   it("preserves Go capability errors for the composer", async () => {
     vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, error: "reply target not found in this conversation" }, { status: 422 })));
-    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, { allowGo: true }))
+    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, {  }))
       .rejects.toMatchObject({ status: 422, message: "reply target not found in this conversation" });
   });
 
@@ -633,20 +675,28 @@ describe("messaging API client", () => {
   });
 
   it("returns the completed send result and the agent reply", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, agentReply: "On it" })));
-    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [{ type: "agent", id: "agent-1" }], parentMessageId: messageId, attachmentIds: [] }))
-      .resolves.toEqual({ kind: "completed", data: { ok: true, agentReply: "On it" } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/capabilities/execute"
+      ? Response.json({ ok: true, data: { messageId } })
+      : Response.json({ ok: true, messageId, reply: "On it", replayed: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [{ type: "agent", id: "agent-1" }], parentMessageId: messageId, attachmentIds: [] }, undefined, { requestAgentReply: true }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true, agentReply: "On it", messageId } });
   });
 
   it("carries an intent id on every governed write", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/capabilities/execute") {
         const body = JSON.parse(String(init?.body)) as { capabilityId?: string };
+        if (body.capabilityId === "messaging.setMessageReaction") return Response.json({ ok: true, data: { previousActive: false, active: true } });
+        if (body.capabilityId === "messaging.setMessagePin") return Response.json({ ok: true, data: { previousPinned: false, pinned: true } });
+        if (body.capabilityId === "messaging.deletePendingAttachment") return Response.json({ ok: true, data: { removed: true } });
+        if (body.capabilityId === "messaging.editMessage") return Response.json({ ok: true, data: { messageId, body: "Corrected", expectedBody: "Corrected", expectedEditedAt: "2026-10-01T09:00:00.000Z", editedAt: "2026-10-01T09:00:00.000Z" } });
         if (body.capabilityId === "messaging.advanceReadCursor") {
           return Response.json({ ok: true, data: { conversationId, previousReadAt: null } });
         }
       }
-      return Response.json({ ok: true });
+      if (String(input).endsWith("/presence")) return Response.json({ ok: true, data: { previousLastSeenAt: null, previousTypingUntil: null } });
+      return Response.json({ ok: true, data: { previousActive: false, active: true } });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_MESSAGING_READ_CURSOR__", true);
@@ -703,16 +753,16 @@ describe("messaging API client", () => {
     await expect(deletePendingAttachment(conversationId, messageId)).rejects.toThrow("unexpected response");
   });
 
-  it("keeps the legacy pending attachment DELETE transport when the Go selector is rolled back", async () => {
+  it("uses the Go pending attachment capability even when its old selector is false", async () => {
     vi.stubGlobal("__GO_MESSAGING_ATTACHMENT_DELETE__", false);
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { removed: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await deletePendingAttachment(conversationId, messageId);
 
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/attachments`);
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("DELETE");
-    expect(lastBody(fetchMock)).toMatchObject({ attachmentId: messageId, intentId: expect.any(String) });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.deletePendingAttachment", input: { attachmentId: messageId }, intentId: expect.any(String) });
   });
 
   it("fails closed when the Go read-cursor capability returns an error or malformed output", async () => {
@@ -724,14 +774,14 @@ describe("messaging API client", () => {
     await expect(advanceReadCursor(conversationId, "2026-10-01T09:00:00.000Z")).rejects.toMatchObject({ status: 403 });
   });
 
-  it("preserves the legacy read route when the Go selector is off", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+  it("uses the Go read-cursor capability regardless of old selector state", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { conversationId, previousReadAt: null } }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_MESSAGING_READ_CURSOR__", false);
 
     await advanceReadCursor(conversationId, "2026-10-01T09:00:00.000Z");
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/read`);
-    expect(lastBody(fetchMock)).toMatchObject({ readAt: "2026-10-01T09:00:00.000Z", intentId: expect.any(String) });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.advanceReadCursor", input: { conversationId, readAt: "2026-10-01T09:00:00.000Z" }, intentId: expect.any(String) });
   });
 
   it("updates conversation presence through the Go session route", async () => {
@@ -763,9 +813,9 @@ describe("messaging API client", () => {
     await expect(reportConversationPresence(conversationId, false)).rejects.toThrow("unexpected format");
   });
 
-  it("keeps conversation presence writes on the legacy route when Go is rolled back", async () => {
+  it("keeps conversation presence writes on the Go session route when its old selector is false", async () => {
     vi.stubGlobal("__GO_MESSAGING_PRESENCE__", false);
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { previousLastSeenAt: null, previousTypingUntil: null } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await reportConversationPresence(conversationId, true);
@@ -824,8 +874,13 @@ describe("messaging API client", () => {
     expect(invalidIdFetch).not.toHaveBeenCalled();
   });
 
-  it("keeps reaction and pin writes on legacy routes when their Go selectors are rolled back", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+  it("keeps reaction and pin writes on Go capabilities when their old selectors are false", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId?: string };
+      return body.capabilityId === "messaging.setMessageReaction"
+        ? Response.json({ ok: true, data: { previousActive: false, active: true } })
+        : Response.json({ ok: true, data: { previousPinned: false, pinned: true } });
+    });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_MESSAGING_REACTIONS__", false);
     vi.stubGlobal("__GO_MESSAGING_PINS__", false);
@@ -833,16 +888,14 @@ describe("messaging API client", () => {
     await setMessageReaction(messageId, "👍", true);
     await setMessagePin(messageId, true);
 
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(`/api/messages/${messageId}/reactions`);
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
-    expect(lastBody(fetchMock, 0)).toMatchObject({ emoji: "👍", active: true, intentId: expect.any(String) });
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`/api/messages/${messageId}/pin`);
-    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).method).toBe("PATCH");
-    expect(lastBody(fetchMock, 1)).toMatchObject({ pinned: true, intentId: expect.any(String) });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock, 0)).toMatchObject({ capabilityId: "messaging.setMessageReaction", input: { emoji: "👍", active: true }, intentId: expect.any(String) });
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock, 1)).toMatchObject({ capabilityId: "messaging.setMessagePin", input: { pinned: true }, intentId: expect.any(String) });
   });
 
   it("uses a fresh intent id per write so retries never collide", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { previousPinned: false, pinned: true } }));
     vi.stubGlobal("fetch", fetchMock);
     await setMessagePin(messageId, true);
     await setMessagePin(messageId, true);
@@ -850,18 +903,18 @@ describe("messaging API client", () => {
   });
 
   it("passes the message tombstone intent id in the query string", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { deleted: true, messageId, deletedAt: null, expectedDeletedAt: "2026-10-01T09:00:00.000Z" } }));
     vi.stubGlobal("fetch", fetchMock);
     await deleteMessage(messageId, undefined, { actorId: "user-delete-query", organizationId: "org-delete-query" });
-    expect(lastUrl(fetchMock)).toMatch(new RegExp(`^/api/messages/${messageId}\\?intentId=.+$`));
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("DELETE");
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.deleteMessage", input: { messageId }, intentId: expect.any(String) });
   });
 
   it("sends a distinct intent id alongside the conversation action", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: {} }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { conversationId, archived: true } }));
     vi.stubGlobal("fetch", fetchMock);
     await changeConversation(conversationId, { action: "archive", archived: true });
-    expect(lastBody(fetchMock)).toMatchObject({ action: "archive", archived: true, intentId: expect.any(String) });
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.archiveConversation", input: { conversationId, archived: true }, intentId: expect.any(String) });
   });
 
   it("treats a pending conversation change as pending", async () => {
@@ -892,7 +945,7 @@ describe("messaging API client", () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { left: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(changeConversation(conversationId, { action: "leave" }, undefined, { forceGo: true, intentId }))
+    await expect(changeConversation(conversationId, { action: "leave" }, undefined, { intentId }))
       .resolves.toEqual({ kind: "completed", data: { ok: true } });
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
     expect(lastBody(fetchMock)).toEqual({ capabilityId: "messaging.leaveConversation", input: { conversationId }, intentId });
@@ -918,18 +971,14 @@ describe("messaging API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("requires the saved leave intent for forceGo and keeps the legacy route when rolled back", async () => {
+  it("keeps leave on Go even when the old selector is false", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_LEAVE__", false);
-    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { left: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(() => changeConversation(conversationId, { action: "leave" }, undefined, { forceGo: true }))
-      .toThrow("original intent id");
-    expect(fetchMock).not.toHaveBeenCalled();
-
     await changeConversation(conversationId, { action: "leave" });
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
-    expect(lastBody(fetchMock)).toMatchObject({ action: "leave", intentId: expect.any(String) });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.leaveConversation", input: { conversationId }, intentId: expect.any(String) });
   });
 
   it("adds conversation members through Go with a stable intent and exact capability contract", async () => {
@@ -956,7 +1005,7 @@ describe("messaging API client", () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { added: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(changeConversation(conversationId, { action: "addMember", userId }, undefined, { forceGo: true, intentId }))
+    await expect(changeConversation(conversationId, { action: "addMember", userId }, undefined, { intentId }))
       .resolves.toEqual({ kind: "completed", data: { ok: true } });
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
     expect(lastBody(fetchMock)).toEqual({ capabilityId: "messaging.addMember", input: { conversationId, userId }, intentId });
@@ -983,19 +1032,15 @@ describe("messaging API client", () => {
     expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
-  it("requires the saved member-addition intent for forceGo and keeps addMember legacy when rolled back", async () => {
+  it("keeps member additions on Go when the old selector is false", async () => {
     const userId = "f93bb823-a6a8-41f4-8969-97328629b4d4";
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ADD_MEMBER__", false);
-    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { added: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(() => changeConversation(conversationId, { action: "addMember", userId }, undefined, { forceGo: true }))
-      .toThrow("original intent id");
-    expect(fetchMock).not.toHaveBeenCalled();
-
     await changeConversation(conversationId, { action: "addMember", userId });
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
-    expect(lastBody(fetchMock)).toMatchObject({ action: "addMember", userId, intentId: expect.any(String) });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.addMember", input: { conversationId, userId }, intentId: expect.any(String) });
   });
 
   it("updates conversations through Go with a stable intent and exact capability contract", async () => {
@@ -1036,7 +1081,7 @@ describe("messaging API client", () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { conversationId, archived: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(changeConversation(conversationId, { action: "archive", archived: true }, undefined, { forceGo: true, intentId }))
+    await expect(changeConversation(conversationId, { action: "archive", archived: true }, undefined, { intentId }))
       .resolves.toEqual({ kind: "completed", data: { ok: true } });
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
     expect(lastBody(fetchMock)).toEqual({
@@ -1046,18 +1091,19 @@ describe("messaging API client", () => {
     });
   });
 
-  it("requires the saved intent for forced archive and leave retries", async () => {
+  it("keeps archive and leave on Go regardless of old selector state", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", false);
-    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId?: string };
+      return body.capabilityId === "messaging.archiveConversation"
+        ? Response.json({ ok: true, data: { conversationId, archived: true } })
+        : Response.json({ ok: true, data: { left: true } });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(() => changeConversation(conversationId, { action: "archive", archived: true }, undefined, { forceGo: true }))
-      .toThrow("original intent id");
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    expect(() => changeConversation(conversationId, { action: "leave" }, undefined, { forceGo: true }))
-      .toThrow("original intent id");
-    expect(fetchMock).not.toHaveBeenCalled();
+    await changeConversation(conversationId, { action: "archive", archived: true });
+    await changeConversation(conversationId, { action: "leave" });
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
   it("handles Go archive approval and fails closed on malformed or mismatched receipts", async () => {
@@ -1078,9 +1124,9 @@ describe("messaging API client", () => {
     expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
-  it("validates Go archive inputs and keeps the legacy route when its selector is off", async () => {
+  it("validates archive inputs and uses Go when its old selector is off", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", true);
-    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { conversationId, archived: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
     expect(() => changeConversation("bad-id", { action: "archive", archived: true })).toThrow(MessagingApiError);
@@ -1088,8 +1134,8 @@ describe("messaging API client", () => {
 
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_ARCHIVE__", false);
     await changeConversation(conversationId, { action: "archive", archived: true });
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
-    expect(lastBody(fetchMock)).toMatchObject({ action: "archive", archived: true });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.archiveConversation", input: { conversationId, archived: true } });
   });
 
   it("handles Go update approval and rejects malformed receipts without legacy fallback", async () => {
@@ -1107,9 +1153,9 @@ describe("messaging API client", () => {
     expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
-  it("validates selected Go update inputs before dispatch and keeps unrelated lifecycle actions legacy", async () => {
+  it("validates update inputs and routes all lifecycle actions to Go", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_UPDATE__", true);
-    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: {} }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { conversationId, archived: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
     expect(() => changeConversation("bad-id", { action: "update", title: "ops" })).toThrow(MessagingApiError);
@@ -1119,7 +1165,7 @@ describe("messaging API client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
 
     await changeConversation(conversationId, { action: "archive", archived: true });
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
   });
 
   it("deletes conversations through Go with a stable intent and the exact capability contract", async () => {
@@ -1138,16 +1184,13 @@ describe("messaging API client", () => {
     });
   });
 
-  it("forces only a saved conversation-delete retry through Go after selector rollback", async () => {
+  it("keeps conversation deletion on Go when the old selector is false", async () => {
     const intentId = "8155c723-aed2-4ab1-a51e-72a9705eb97f";
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_DELETE__", false);
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { deleted: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(() => changeConversation(conversationId, { action: "delete" }, undefined, { forceGo: true }))
-      .toThrow("original intent id");
-    expect(fetchMock).not.toHaveBeenCalled();
-    await expect(changeConversation(conversationId, { action: "delete" }, undefined, { forceGo: true, intentId }))
+    await expect(changeConversation(conversationId, { action: "delete" }, undefined, { intentId }))
       .resolves.toEqual({ kind: "completed", data: { ok: true } });
     expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
     expect(lastBody(fetchMock)).toEqual({ capabilityId: "messaging.deleteConversation", input: { conversationId }, intentId });
@@ -1175,23 +1218,23 @@ describe("messaging API client", () => {
     expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
-  it("keeps conversation delete on the legacy route when its selector is rolled back", async () => {
+  it("keeps conversation delete on Go when its old selector is false", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_DELETE__", false);
-    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { deleted: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await changeConversation(conversationId, { action: "delete" });
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}`);
-    expect(lastBody(fetchMock)).toMatchObject({ action: "delete", intentId: expect.any(String) });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.deleteConversation", input: { conversationId }, intentId: expect.any(String) });
   });
 
-  it("creates a conversation from the 201 body and reports a pending create", async () => {
+  it("creates a conversation through Go and reports a pending create", async () => {
     vi.stubGlobal("__GO_MESSAGING_CONVERSATION_CREATE__", false);
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ conversationId }, { status: 201 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { conversationId } }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(createConversation({ title: "ops", agentEnabled: true }))
       .resolves.toEqual({ kind: "completed", data: { conversationId } });
-    expect(lastBody(fetchMock)).toMatchObject({ title: "ops", agentEnabled: true, intentId: expect.any(String) });
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.createConversation", input: { title: "ops", agentEnabled: true }, intentId: expect.any(String) });
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
     await expect(createConversation({ title: "ops", agentEnabled: true }))
@@ -1242,16 +1285,14 @@ describe("messaging API client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("uploads an attachment as multipart form data and validates the receipt", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ attachmentId: "attach-1", filename: "brief.pdf", mimeType: "application/pdf", sizeBytes: 2048 }));
+  it("uploads an attachment through Go and validates the receipt", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { attachmentId: "c59110a4-b16e-46c3-bc18-a9664a89c1b5" } }));
     vi.stubGlobal("fetch", fetchMock);
     const file = new File(["hello"], "brief.pdf", { type: "application/pdf" });
 
-    await expect(uploadConversationAttachment(conversationId, file)).resolves.toMatchObject({ attachmentId: "attach-1" });
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(lastUrl(fetchMock)).toBe(`/api/conversations/${conversationId}/attachments`);
-    expect(init.body).toBeInstanceOf(FormData);
-    expect((init.headers as Record<string, string>)["content-type"]).toBeUndefined();
+    await expect(uploadConversationAttachment(conversationId, file)).resolves.toMatchObject({ attachmentId: "c59110a4-b16e-46c3-bc18-a9664a89c1b5" });
+    expect(lastUrl(fetchMock)).toBe("/api/capabilities/execute");
+    expect(lastBody(fetchMock)).toMatchObject({ capabilityId: "messaging.uploadMessageAttachment", input: { conversationId, filename: "brief.pdf", mimeType: "application/pdf" }, intentId: expect.any(String) });
   });
 
   it("uploads attachment bytes through Go with the exact capability contract", async () => {

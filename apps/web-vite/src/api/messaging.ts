@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const IsoTimestampSchema = z.string().datetime();
 
-/** The legacy contract caps one message at five files of five megabytes each. */
+/** Messaging uploads allow at most five files of five megabytes each. */
 export const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
@@ -154,7 +154,6 @@ const GoPeopleOutputSchema = z.object({
 }).strict();
 const PresenceResponseSchema = z.object({ people: z.array(PresenceSchema) }).strict();
 const SearchResponseSchema = z.object({ results: z.array(SearchResultSchema) }).strict();
-const CreateConversationSchema = z.object({ conversationId: z.string().min(1) }).strict();
 const CreateConversationInputSchema = z.object({
   title: z.string().min(1).max(80),
   agentEnabled: z.boolean(),
@@ -198,8 +197,7 @@ const GoDeleteConversationEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ deleted: z.literal(true) }).strict(),
 }).strict();
-const SendMessageSchema = z.object({ ok: z.literal(true), agentReply: z.string().nullable(), messageId: z.string().uuid().optional() }).strict();
-export type SendMessageResult = z.infer<typeof SendMessageSchema>;
+export type SendMessageResult = { ok: true; agentReply: string | null; messageId?: string };
 const GoSendMessageEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ messageId: z.string().min(1) }).strict(),
@@ -214,15 +212,7 @@ const GoUploadMessageAttachmentEnvelopeSchema = z.object({
 }).strict();
 const attachmentUploadIntentIds = new WeakMap<File, Map<string, string>>();
 
-const AttachmentUploadSchema = z.object({
-  attachmentId: z.string().min(1),
-  filename: z.string(),
-  mimeType: z.string(),
-  sizeBytes: z.number().int().nonnegative(),
-}).strict();
-export type AttachmentUpload = z.infer<typeof AttachmentUploadSchema>;
-
-const OkEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown().optional() }).strict();
+export type AttachmentUpload = { attachmentId: string; filename: string; mimeType: string; sizeBytes: number };
 const PendingApprovalSchema = z.object({
   ok: z.literal(false).optional(),
   pendingApproval: z.literal(true),
@@ -247,7 +237,7 @@ export type MessagingOutcome<T = Record<string, unknown>> =
   | { kind: "pending"; reason: string };
 
 export type PendingMessageEdit = { messageId: string; conversationId: string | null; body: string; intentId: string };
-export type PendingMessageDelete = { messageId: string; conversationId: string | null; intentId: string };
+export type PendingMessageDelete = { messageId: string; conversationId: string | null; intentId: string; retryLocked: boolean };
 
 export type MessageRetryScope = { actorId: string | null; organizationId: string | null };
 const pendingMessageEditPrefix = "chaste:message-edit-attempt:";
@@ -295,11 +285,7 @@ function readError(status: number, body: unknown, subject: string): string {
   return `Could not load ${subject}. Check your connection and try again.`;
 }
 
-/**
- * Every governed write carries an intent id so a retried request is the same
- * audited intent, not a second one. The legacy routes read it from the JSON
- * body, except the message tombstone which reads it from the query string.
- */
+/** Every state-changing capability receives one intent id for replay-safe retries. */
 function newIntentId(): string {
   return crypto.randomUUID();
 }
@@ -341,34 +327,6 @@ async function getJson<T>(path: string, subject: string, schema: z.ZodType<T>, s
   return parsed.data;
 }
 
-/** Governed writes answer 202 while an approval is pending: that is neither success nor failure. */
-async function governed<T>(
-  path: string,
-  init: RequestInit,
-  action: string,
-  schema: z.ZodType<T>,
-  pendingReason: string,
-  signal?: AbortSignal,
-): Promise<MessagingOutcome<T>> {
-  const { response, body } = await send(path, init, action, signal);
-  if (response.status === 202) {
-    const parsed = PendingApprovalSchema.safeParse(body);
-    if (!parsed.success) throw new MessagingApiError(202, `The messaging service returned an unexpected approval response to ${action}.`);
-    return { kind: "pending", reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? pendingReason };
-  }
-  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, action));
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) throw new MessagingApiError(response.status, `The messaging service returned an unexpected response to ${action}.`);
-  return { kind: "completed", data: parsed.data };
-}
-
-async function acknowledge(path: string, init: RequestInit, action: string, signal?: AbortSignal): Promise<void> {
-  const { response, body } = await send(path, init, action, signal);
-  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, action));
-  const parsed = OkEnvelopeSchema.safeParse(body);
-  if (!parsed.success) throw new MessagingApiError(response.status, `The messaging service returned an unexpected response to ${action}.`);
-}
-
 export async function fetchMessagingEnabled(signal?: AbortSignal): Promise<boolean> {
   const body = await getJson("/api/modules", "the Messaging module status", z.unknown(), signal);
   const parsed = ModuleSwitchboardSchema.safeParse(body);
@@ -381,20 +339,13 @@ export async function fetchMessagingEnabled(signal?: AbortSignal): Promise<boole
 }
 
 export function fetchConversations(signal?: AbortSignal): Promise<{ conversations: Conversation[]; me: string }> {
-  if (typeof __GO_MESSAGING_CONVERSATION_LIST__ !== "undefined" && __GO_MESSAGING_CONVERSATION_LIST__) {
-    return fetchGoConversations(signal);
-  }
-  return getJson("/api/conversations", "your conversations", ConversationsResponseSchema, signal);
+  return fetchGoConversations(signal);
 }
 
 async function fetchGoConversations(signal?: AbortSignal): Promise<{ conversations: Conversation[]; me: string }> {
   const { response, body } = await send("/api/capabilities/execute", {
     method: "POST",
-    body: JSON.stringify({
-      capabilityId: "messaging.listConversations",
-      input: { limit: 100 },
-      intentId: newIntentId(),
-    }),
+    body: JSON.stringify({ capabilityId: "messaging.listConversations", input: { limit: 100 }, intentId: newIntentId() }),
   }, "your conversations", signal);
   if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "your conversations"));
   const envelope = GoCapabilityEnvelopeSchema.safeParse(body);
@@ -409,18 +360,10 @@ export function createConversation(
   signal?: AbortSignal,
   options: { intentId?: string } = {},
 ): Promise<MessagingOutcome<{ conversationId: string }>> {
-  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_CREATE__?: boolean }).__GO_MESSAGING_CONVERSATION_CREATE__;
-  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_CONVERSATION_CREATE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_CREATE__);
-  if (goSelected) {
-    const parsedInput = CreateConversationInputSchema.safeParse(input);
-    if (!parsedInput.success) throw new MessagingApiError(400, "Enter a conversation title using 1 to 80 characters and choose whether its agent is enabled.");
-    const intentId = options.intentId === undefined ? newIntentId() : z.string().uuid().parse(options.intentId);
-    return createConversationThroughGo(parsedInput.data, intentId, signal);
-  }
-  return governed("/api/conversations", {
-    method: "POST",
-    body: JSON.stringify({ title: input.title, agentEnabled: input.agentEnabled, intentId: options.intentId ?? newIntentId() }),
-  }, "create this conversation", CreateConversationSchema, "Creating this conversation is waiting for approval.", signal);
+  const parsedInput = CreateConversationInputSchema.safeParse(input);
+  if (!parsedInput.success) throw new MessagingApiError(400, "Enter a conversation title using 1 to 80 characters and choose whether its agent is enabled.");
+  const intentId = options.intentId === undefined ? newIntentId() : z.string().uuid().parse(options.intentId);
+  return createConversationThroughGo(parsedInput.data, intentId, signal);
 }
 
 async function createConversationThroughGo(
@@ -478,19 +421,11 @@ export function fetchConversationThread(
   options: { aroundId?: string } = {},
   signal?: AbortSignal,
 ): Promise<ConversationThread> {
-  if (
-    typeof __GO_MESSAGING_THREAD_READ__ !== "undefined" &&
-    __GO_MESSAGING_THREAD_READ__
-  ) {
-    return fetchGoConversationThread(conversationId, signal, undefined, options.aroundId);
-  }
-  const query = options.aroundId ? `?around=${encodeURIComponent(options.aroundId)}` : "";
-  return getJson(
-    `/api/conversations/${encodeURIComponent(conversationId)}/messages${query}`,
-    "this conversation",
-    ConversationThreadSchema,
-    signal,
-  );
+  return fetchGoConversationThread(conversationId, signal, undefined, options.aroundId);
+}
+
+export function fetchOlderMessages(conversationId: string, before: string, signal?: AbortSignal): Promise<ConversationThread> {
+  return fetchGoConversationThread(conversationId, signal, before);
 }
 
 async function fetchGoConversationThread(
@@ -515,44 +450,21 @@ async function fetchGoConversationThread(
   return parsed.data;
 }
 
-export function fetchOlderMessages(conversationId: string, before: string, signal?: AbortSignal): Promise<ConversationThread> {
-  if (
-    typeof __GO_MESSAGING_THREAD_READ__ !== "undefined" &&
-    __GO_MESSAGING_THREAD_READ__
-  ) {
-    return fetchGoConversationThread(conversationId, signal, before);
-  }
-  return getJson(
-    `/api/conversations/${encodeURIComponent(conversationId)}/messages?before=${encodeURIComponent(before)}`,
-    "earlier messages",
-    ConversationThreadSchema,
-    signal,
-  );
-}
-
 export async function advanceReadCursor(conversationId: string, readAt: string, signal?: AbortSignal): Promise<void> {
-  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_READ_CURSOR__?: boolean }).__GO_MESSAGING_READ_CURSOR__;
-  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_READ_CURSOR__ !== "undefined" && __GO_MESSAGING_READ_CURSOR__);
-  if (goSelected) {
-    const { response, body } = await send("/api/capabilities/execute", {
-      method: "POST",
-      body: JSON.stringify({
-        capabilityId: "messaging.advanceReadCursor",
-        input: { conversationId, readAt },
-        intentId: newIntentId(),
-      }),
-    }, "your read position", signal);
-    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "your read position"));
-    const parsed = GoReadCursorEnvelopeSchema.safeParse(body);
-    if (!parsed.success || parsed.data.data.conversationId !== conversationId) {
-      throw new MessagingApiError(response.status, "The messaging service returned your read position in an unexpected format.");
-    }
-    return;
-  }
-  await acknowledge(`/api/conversations/${encodeURIComponent(conversationId)}/read`, {
+  const { response, body } = await send("/api/capabilities/execute", {
     method: "POST",
-    body: JSON.stringify({ readAt, intentId: newIntentId() }),
+    body: JSON.stringify({
+      capabilityId: "messaging.advanceReadCursor",
+      input: { conversationId, readAt },
+      intentId: newIntentId(),
+    }),
   }, "your read position", signal);
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "your read position"));
+  const parsed = GoReadCursorEnvelopeSchema.safeParse(body);
+  if (!parsed.success || parsed.data.data.conversationId !== conversationId) {
+    throw new MessagingApiError(response.status, "The messaging service returned your read position in an unexpected format.");
+  }
+  return;
 }
 
 export async function fetchConversationPresence(conversationId: string, signal?: AbortSignal): Promise<ConversationPresence[]> {
@@ -561,31 +473,20 @@ export async function fetchConversationPresence(conversationId: string, signal?:
 }
 
 export async function reportConversationPresence(conversationId: string, typing: boolean, signal?: AbortSignal): Promise<void> {
-  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_PRESENCE__?: boolean }).__GO_MESSAGING_PRESENCE__;
-  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_PRESENCE__ !== "undefined" && __GO_MESSAGING_PRESENCE__);
-  if (goSelected) {
-    const validatedConversationId = z.string().uuid().parse(conversationId);
-    const validatedTyping = z.boolean().parse(typing);
-    const { response, body } = await send(`/api/conversations/${encodeURIComponent(validatedConversationId)}/presence`, {
-      method: "POST",
-      body: JSON.stringify({ typing: validatedTyping, intentId: newIntentId() }),
-    }, "your presence", signal);
-    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "your presence"));
-    if (!GoConversationPresenceEnvelopeSchema.safeParse(body).success) {
-      throw new MessagingApiError(response.status, "The messaging service returned your presence in an unexpected format.");
-    }
-    return;
-  }
-  await acknowledge(`/api/conversations/${encodeURIComponent(conversationId)}/presence`, {
+  const validatedConversationId = z.string().uuid().parse(conversationId);
+  const validatedTyping = z.boolean().parse(typing);
+  const { response, body } = await send(`/api/conversations/${encodeURIComponent(validatedConversationId)}/presence`, {
     method: "POST",
-    body: JSON.stringify({ typing, intentId: newIntentId() }),
+    body: JSON.stringify({ typing: validatedTyping, intentId: newIntentId() }),
   }, "your presence", signal);
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "your presence"));
+  if (!GoConversationPresenceEnvelopeSchema.safeParse(body).success) {
+    throw new MessagingApiError(response.status, "The messaging service returned your presence in an unexpected format.");
+  }
+  return;
 }
 
 export async function uploadConversationAttachment(conversationId: string, file: File, signal?: AbortSignal): Promise<AttachmentUpload> {
-  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_ATTACHMENT_UPLOAD__?: boolean }).__GO_MESSAGING_ATTACHMENT_UPLOAD__;
-  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_ATTACHMENT_UPLOAD__ !== "undefined" && __GO_MESSAGING_ATTACHMENT_UPLOAD__);
-  if (goSelected) {
     const validatedConversationId = z.string().uuid().parse(conversationId);
     const problem = checkAttachmentLimits(0, [file]);
     if (problem) throw new MessagingApiError(400, problem);
@@ -615,20 +516,6 @@ export async function uploadConversationAttachment(conversationId: string, file:
       mimeType,
       sizeBytes: file.size,
     };
-  }
-
-  const form = new FormData();
-  form.append("file", file);
-  const { response, body } = await send(
-    `/api/conversations/${encodeURIComponent(conversationId)}/attachments`,
-    { method: "POST", body: form },
-    `the upload of ${file.name}`,
-    signal,
-  );
-  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, `the upload of ${file.name}`));
-  const parsed = AttachmentUploadSchema.safeParse(body);
-  if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected upload response.");
-  return parsed.data;
 }
 
 function attachmentUploadIntentId(conversationId: string, file: File): string {
@@ -659,7 +546,6 @@ async function attachmentToBase64(file: File): Promise<string> {
 }
 
 export async function deletePendingAttachment(conversationId: string, attachmentId: string, signal?: AbortSignal): Promise<void> {
-  if (typeof __GO_MESSAGING_ATTACHMENT_DELETE__ !== "undefined" && __GO_MESSAGING_ATTACHMENT_DELETE__) {
     z.string().uuid().parse(conversationId);
     const validatedAttachmentId = z.string().uuid().parse(attachmentId);
     const { response, body } = await send("/api/capabilities/execute", {
@@ -676,36 +562,16 @@ export async function deletePendingAttachment(conversationId: string, attachment
       throw new MessagingApiError(response.status, "The messaging service returned an unexpected response while removing that pending file.");
     }
     return;
-  }
-  await acknowledge(`/api/conversations/${encodeURIComponent(conversationId)}/attachments`, {
-    method: "DELETE",
-    body: JSON.stringify({ attachmentId, intentId: newIntentId() }),
-  }, "that pending file", signal);
 }
 
 export function sendConversationMessage(
   conversationId: string,
   input: { body: string; mentions: MessageMention[]; parentMessageId?: string; attachmentIds: string[] },
   signal?: AbortSignal,
-	options?: { allowGo?: boolean; intentId?: string; requestAgentReply?: boolean },
+	options?: { intentId?: string; requestAgentReply?: boolean },
 ): Promise<MessagingOutcome<SendMessageResult>> {
-  const useGo = options?.allowGo === true
-    && typeof __GO_MESSAGING_SEND_SLICE__ !== "undefined"
-    && __GO_MESSAGING_SEND_SLICE__;
-  if (useGo) {
-    const intentId = options.intentId == null ? newIntentId() : z.string().uuid().parse(options.intentId);
-    return sendConversationMessageThroughGo(conversationId, input, intentId, signal, options?.requestAgentReply === true);
-  }
-  return governed(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
-    method: "POST",
-    body: JSON.stringify({
-      body: input.body,
-      mentions: input.mentions,
-      parentMessageId: input.parentMessageId,
-      attachmentIds: input.attachmentIds,
-      intentId: newIntentId(),
-    }),
-  }, "send this message", SendMessageSchema, "Your message is waiting for approval. It is still saved in this composer.", signal);
+  const intentId = options?.intentId == null ? newIntentId() : z.string().uuid().parse(options.intentId);
+  return sendConversationMessageThroughGo(conversationId, input, intentId, signal, options?.requestAgentReply === true);
 }
 
 async function sendConversationMessageThroughGo(
@@ -781,45 +647,25 @@ export function changeConversation(
   conversationId: string,
   action: ConversationLifecycleAction,
   signal?: AbortSignal,
-  options: { intentId?: string; forceGo?: boolean } = {},
+  options: { intentId?: string } = {},
 ): Promise<MessagingOutcome<{ ok: true }>> {
-  if (options.forceGo === true && action.action === "delete" && options.intentId === undefined) {
-    throw new MessagingApiError(400, "Retrying a saved conversation delete requires its original intent id.");
-  }
-  if (options.forceGo === true && action.action === "archive" && options.intentId === undefined) {
-    throw new MessagingApiError(400, "Retrying a saved conversation archive requires its original intent id.");
-  }
-  if (options.forceGo === true && action.action === "leave" && options.intentId === undefined) {
-    throw new MessagingApiError(400, "Retrying a saved conversation leave requires its original intent id.");
-  }
-  if (options.forceGo === true && action.action === "addMember" && options.intentId === undefined) {
-    throw new MessagingApiError(400, "Retrying a saved member addition requires its original intent id.");
-  }
   const intentId = options.intentId === undefined ? newIntentId() : z.string().uuid().parse(options.intentId);
-  const goDeleteOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_DELETE__?: boolean }).__GO_MESSAGING_CONVERSATION_DELETE__;
-  const goDeleteSelected = options.forceGo === true || (goDeleteOverride ?? (typeof __GO_MESSAGING_CONVERSATION_DELETE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_DELETE__));
-  if (action.action === "delete" && goDeleteSelected) {
+  if (action.action === "delete") {
     const parsedInput = DeleteConversationInputSchema.safeParse({ conversationId });
     if (!parsedInput.success) throw new MessagingApiError(400, "Enter a valid conversation id to delete.");
     return deleteConversationThroughGo(parsedInput.data, intentId, signal);
   }
-  const goLeaveOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_LEAVE__?: boolean }).__GO_MESSAGING_CONVERSATION_LEAVE__;
-  const goLeaveSelected = options.forceGo === true || (goLeaveOverride ?? (typeof __GO_MESSAGING_CONVERSATION_LEAVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_LEAVE__));
-  if (action.action === "leave" && goLeaveSelected) {
+  if (action.action === "leave") {
     const parsedInput = LeaveConversationInputSchema.safeParse({ conversationId });
     if (!parsedInput.success) throw new MessagingApiError(400, "Enter a valid conversation id to leave.");
     return leaveConversationThroughGo(parsedInput.data, intentId, signal);
   }
-  const goArchiveOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_ARCHIVE__?: boolean }).__GO_MESSAGING_CONVERSATION_ARCHIVE__;
-  const goArchiveSelected = options.forceGo === true || (goArchiveOverride ?? (typeof __GO_MESSAGING_CONVERSATION_ARCHIVE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_ARCHIVE__));
-  if (action.action === "archive" && goArchiveSelected) {
+  if (action.action === "archive") {
     const parsedInput = ArchiveConversationInputSchema.safeParse({ conversationId, archived: action.archived });
     if (!parsedInput.success) throw new MessagingApiError(400, "Enter a valid conversation id and archive state.");
     return archiveConversationThroughGo(parsedInput.data, intentId, signal);
   }
-  const goUpdateOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_UPDATE__?: boolean }).__GO_MESSAGING_CONVERSATION_UPDATE__;
-  const goUpdateSelected = goUpdateOverride ?? (typeof __GO_MESSAGING_CONVERSATION_UPDATE__ !== "undefined" && __GO_MESSAGING_CONVERSATION_UPDATE__);
-  if (action.action === "update" && goUpdateSelected) {
+  if (action.action === "update") {
     const parsedInput = UpdateConversationInputSchema.safeParse({
       conversationId,
       ...(action.title !== undefined ? { title: action.title } : {}),
@@ -830,17 +676,12 @@ export function changeConversation(
     }
     return updateConversationThroughGo(parsedInput.data, intentId, signal);
   }
-  const goAddMemberOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_CONVERSATION_ADD_MEMBER__?: boolean }).__GO_MESSAGING_CONVERSATION_ADD_MEMBER__;
-  const goAddMemberSelected = options.forceGo === true || (goAddMemberOverride ?? (typeof __GO_MESSAGING_CONVERSATION_ADD_MEMBER__ !== "undefined" && __GO_MESSAGING_CONVERSATION_ADD_MEMBER__));
-  if (action.action === "addMember" && goAddMemberSelected) {
+  if (action.action === "addMember") {
     const parsedInput = AddConversationMemberInputSchema.safeParse({ conversationId, userId: action.userId });
     if (!parsedInput.success) throw new MessagingApiError(400, "Enter a valid conversation id and team member to add.");
     return addConversationMemberThroughGo(parsedInput.data, intentId, signal);
   }
-  return governed(`/api/conversations/${encodeURIComponent(conversationId)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ ...action, intentId }),
-  }, `apply "${action.action}"`, OkEnvelopeSchema, "This change is waiting for approval.", signal);
+  throw new MessagingApiError(400, "This conversation action is not supported.");
 }
 
 async function deleteConversationThroughGo(
@@ -979,32 +820,12 @@ export async function searchMessages(query: string, signal?: AbortSignal): Promi
   return result.data.results;
 }
 
-function editMessageLegacy(messageId: string, body: string, signal?: AbortSignal): Promise<MessagingOutcome<{ ok: true }>> {
-  return governed(`/api/messages/${encodeURIComponent(messageId)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ body, intentId: newIntentId() }),
-  }, "edit this message", OkEnvelopeSchema, "Your edit is waiting for approval.", signal);
-}
-
 export async function editMessage(
   messageId: string,
   body: string,
   signal?: AbortSignal,
-  options: { allowGo?: boolean; actorId?: string | null; organizationId?: string | null; conversationId?: string | null } = {},
+  options: { actorId?: string | null; organizationId?: string | null; conversationId?: string | null } = {},
 ): Promise<MessagingOutcome<{ ok: true }>> {
-  const useGo = options.allowGo === true && typeof __GO_MESSAGING_EDIT_SLICE__ !== "undefined" && __GO_MESSAGING_EDIT_SLICE__;
-  if (!useGo) {
-    const actorId = options.actorId?.trim();
-    const organizationId = options.organizationId?.trim();
-    if (!actorId || !organizationId) {
-      throw new MessagingApiError(0, "Message editing needs a signed-in actor and active organization so unresolved Go edits can be checked.");
-    }
-    const pending = await getPendingMessageEdit({ actorId, organizationId });
-    if (pending) {
-      throw new MessagingApiError(0, "A Go message edit is unresolved. Restore Go message editing to retry the saved edit before starting another edit.");
-    }
-    return editMessageLegacy(messageId, body, signal);
-  }
   return editMessageThroughGo(messageId, body, { actorId: options.actorId ?? null, organizationId: options.organizationId ?? null }, signal, options.conversationId ?? null);
 }
 
@@ -1101,36 +922,21 @@ export async function editMessageThroughGo(
   return { kind: "completed", data: { ok: true } };
 }
 
-function deleteMessageLegacy(messageId: string, signal?: AbortSignal, intentId = newIntentId()): Promise<MessagingOutcome<{ ok: true }>> {
-  // The legacy tombstone route reads the idempotency key from the query string.
-  return governed(`/api/messages/${encodeURIComponent(messageId)}?intentId=${intentId}`, {
-    method: "DELETE",
-  }, "delete this message", OkEnvelopeSchema, "Deleting this message is waiting for approval.", signal);
-}
-
 export async function deleteMessage(
   messageId: string,
   signal?: AbortSignal,
-  options: { allowGo?: boolean; actorId?: string | null; organizationId?: string | null; conversationId?: string | null } = {},
+  options: { actorId?: string | null; organizationId?: string | null; conversationId?: string | null; onIntentId?: (intentId: string) => void } = {},
 ): Promise<MessagingOutcome<{ ok: true }>> {
   const actorId = options.actorId?.trim();
   const organizationId = options.organizationId?.trim();
   if (!actorId || !organizationId) {
     throw new MessagingApiError(0, "Message deletion needs a signed-in actor and active organization.");
   }
-  const useGo = options.allowGo === true && typeof __GO_MESSAGING_DELETE_SLICE__ !== "undefined" && __GO_MESSAGING_DELETE_SLICE__;
-  if (!useGo) {
-    const pending = await getPendingMessageDelete({ actorId, organizationId });
-    if (pending) {
-      throw new MessagingApiError(0, "A Go message deletion is unresolved. Restore Go message deletion to retry the saved deletion before starting another deletion.");
-    }
-    return deleteMessageLegacy(messageId, signal);
-  }
   return deleteMessageThroughGo(messageId, {
     actorId,
     organizationId,
     conversationId: options.conversationId ?? null,
-  }, signal);
+  }, signal, options.onIntentId);
 }
 
 async function messageDeleteStorageKey(scope: MessageRetryScope): Promise<string> {
@@ -1154,8 +960,14 @@ function readPendingMessageDelete(key: string): PendingMessageDelete | null {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed === "object" && parsed !== null && "messageId" in parsed && typeof parsed.messageId === "string" &&
       "conversationId" in parsed && (typeof parsed.conversationId === "string" || parsed.conversationId === null) &&
-      "intentId" in parsed && typeof parsed.intentId === "string" && z.string().uuid().safeParse(parsed.intentId).success) {
-      return { messageId: parsed.messageId, conversationId: parsed.conversationId, intentId: parsed.intentId };
+      "intentId" in parsed && typeof parsed.intentId === "string" && z.string().uuid().safeParse(parsed.intentId).success &&
+      (!("retryLocked" in parsed) || typeof parsed.retryLocked === "boolean")) {
+      return {
+        messageId: parsed.messageId,
+        conversationId: parsed.conversationId,
+        intentId: parsed.intentId,
+        retryLocked: "retryLocked" in parsed && parsed.retryLocked === true,
+      };
     }
   } catch {
     // A damaged retry marker must not silently issue another tombstone.
@@ -1165,6 +977,19 @@ function readPendingMessageDelete(key: string): PendingMessageDelete | null {
 
 export async function getPendingMessageDelete(scope: MessageRetryScope): Promise<PendingMessageDelete | null> {
   return readPendingMessageDelete(await messageDeleteStorageKey(scope));
+}
+
+export async function setPendingMessageDeleteRetryLocked(scope: MessageRetryScope, expectedIntentId: string, retryLocked: boolean): Promise<boolean> {
+  if (!z.string().uuid().safeParse(expectedIntentId).success) return false;
+  const key = await messageDeleteStorageKey(scope);
+  const pending = readPendingMessageDelete(key);
+  if (!pending || pending.intentId !== expectedIntentId) return false;
+  try {
+    localStorage.setItem(key, JSON.stringify({ ...pending, retryLocked }));
+    return true;
+  } catch {
+    throw new MessagingApiError(0, "Saved message-deletion recovery could not record its retry state.");
+  }
 }
 
 function clearPendingMessageDelete(key: string, intentId: string): void {
@@ -1179,6 +1004,7 @@ async function deleteMessageThroughGo(
   messageId: string,
   scope: MessageRetryScope & { conversationId: string | null },
   signal?: AbortSignal,
+  onIntentId?: (intentId: string) => void,
 ): Promise<MessagingOutcome<{ ok: true }>> {
   const key = await messageDeleteStorageKey(scope);
   const pending = readPendingMessageDelete(key);
@@ -1192,7 +1018,14 @@ async function deleteMessageThroughGo(
     } catch {
       throw new MessagingApiError(0, "Message-deletion retry protection is unavailable. Check browser storage settings and try again.");
     }
+  } else if (pending.retryLocked) {
+    try {
+      localStorage.setItem(key, JSON.stringify({ ...pending, retryLocked: false }));
+    } catch {
+      throw new MessagingApiError(0, "Saved message-deletion recovery could not record its retry state.");
+    }
   }
+  onIntentId?.(action.intentId);
 
   const result = await send("/api/capabilities/execute", {
     method: "POST",
@@ -1217,58 +1050,42 @@ async function deleteMessageThroughGo(
 }
 
 export async function setMessageReaction(messageId: string, emoji: string, active: boolean, signal?: AbortSignal): Promise<void> {
-  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_REACTIONS__?: boolean }).__GO_MESSAGING_REACTIONS__;
-  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_REACTIONS__ !== "undefined" && __GO_MESSAGING_REACTIONS__);
-  if (goSelected) {
-    const validatedMessageId = z.string().uuid().parse(messageId);
-    const { response, body } = await send("/api/capabilities/execute", {
-      method: "POST",
-      body: JSON.stringify({
-        capabilityId: "messaging.setMessageReaction",
-        input: { messageId: validatedMessageId, emoji, active },
-        intentId: newIntentId(),
-      }),
-    }, "save that reaction", signal);
-    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "save that reaction"));
-    const parsed = GoMessageReactionEnvelopeSchema.safeParse(body);
-    if (!parsed.success || parsed.data.data.active !== active) {
-      throw new MessagingApiError(response.status, "The messaging service returned that reaction in an unexpected format.");
-    }
-    return;
-  }
-  await acknowledge(`/api/messages/${encodeURIComponent(messageId)}/reactions`, {
+  const validatedMessageId = z.string().uuid().parse(messageId);
+  const { response, body } = await send("/api/capabilities/execute", {
     method: "POST",
-    body: JSON.stringify({ emoji, active, intentId: newIntentId() }),
+    body: JSON.stringify({
+      capabilityId: "messaging.setMessageReaction",
+      input: { messageId: validatedMessageId, emoji, active },
+      intentId: newIntentId(),
+    }),
   }, "save that reaction", signal);
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "save that reaction"));
+  const parsed = GoMessageReactionEnvelopeSchema.safeParse(body);
+  if (!parsed.success || parsed.data.data.active !== active) {
+    throw new MessagingApiError(response.status, "The messaging service returned that reaction in an unexpected format.");
+  }
+  return;
 }
 
 export async function setMessagePin(messageId: string, pinned: boolean, signal?: AbortSignal): Promise<void> {
-  const selectorOverride = (globalThis as typeof globalThis & { __GO_MESSAGING_PINS__?: boolean }).__GO_MESSAGING_PINS__;
-  const goSelected = selectorOverride ?? (typeof __GO_MESSAGING_PINS__ !== "undefined" && __GO_MESSAGING_PINS__);
-  if (goSelected) {
-    const validatedMessageId = z.string().uuid().parse(messageId);
-    const { response, body } = await send("/api/capabilities/execute", {
-      method: "POST",
-      body: JSON.stringify({
-        capabilityId: "messaging.setMessagePin",
-        input: { messageId: validatedMessageId, pinned },
-        intentId: newIntentId(),
-      }),
-    }, "pin that message", signal);
-    if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "pin that message"));
-    const parsed = GoMessagePinEnvelopeSchema.safeParse(body);
-    if (!parsed.success || parsed.data.data.pinned !== pinned) {
-      throw new MessagingApiError(response.status, "The messaging service returned that pin in an unexpected format.");
-    }
-    return;
-  }
-  await acknowledge(`/api/messages/${encodeURIComponent(messageId)}/pin`, {
-    method: "PATCH",
-    body: JSON.stringify({ pinned, intentId: newIntentId() }),
+  const validatedMessageId = z.string().uuid().parse(messageId);
+  const { response, body } = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      capabilityId: "messaging.setMessagePin",
+      input: { messageId: validatedMessageId, pinned },
+      intentId: newIntentId(),
+    }),
   }, "pin that message", signal);
+  if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "pin that message"));
+  const parsed = GoMessagePinEnvelopeSchema.safeParse(body);
+  if (!parsed.success || parsed.data.data.pinned !== pinned) {
+    throw new MessagingApiError(response.status, "The messaging service returned that pin in an unexpected format.");
+  }
+  return;
 }
 
-/** Mirrors the legacy composer guard: at most five files, each 1 byte to 5 MB. */
+/** The composer accepts at most five files, each from 1 byte to 5 MB. */
 export function checkAttachmentLimits(pending: number, files: File[]): string | null {
   if (pending + files.length > MAX_ATTACHMENTS_PER_MESSAGE) return "Add up to five files to one message.";
   const outOfRange = files.find((file) => file.size > MAX_ATTACHMENT_BYTES || file.size === 0);

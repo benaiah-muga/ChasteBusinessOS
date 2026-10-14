@@ -36,6 +36,8 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Sales orders and customer lookup now use organization-scoped Go APIs;
   customer options require Sales read permission and stay isolated across actor
   or workspace changes.
+- Vite message deletion recovery retries uncertain outcomes with the original
+  Go intent and remains actionable after transient failures.
 - Vite purchasing vendor and bill creation, bill payment, and bill credits now
   use Go capabilities. Credits on foreign-currency bills fail closed until an
   exchange rate is available.
