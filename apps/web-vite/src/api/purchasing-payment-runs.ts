@@ -81,7 +81,7 @@ export function goPurchasingPaymentRunsUseGo(): boolean {
 }
 
 export async function fetchPurchasingEnabled(organizationId: string | null | undefined, signal?: AbortSignal): Promise<boolean> {
-  const scoped = await paymentRunScope({ actorId: "purchasing-module-read", organizationId });
+  const scoped = await paymentRunScope({ actorId: "purchasing-module-read", organizationId: organizationId ?? null });
   let response: Response;
   try {
     response = await fetch("/api/modules", {
@@ -146,7 +146,7 @@ async function executeRead<TData>(
   signal?: AbortSignal,
 ): Promise<TData> {
   if (!goPurchasingPaymentRunsUseGo()) throw new PurchasingPaymentRunsApiError(503, "Go supplier payment runs are disabled. Enable CHASTE_GO_PURCHASING_PAYMENT_RUNS and the session capability route.");
-  const scoped = await paymentRunScope({ actorId: "purchasing-read", organizationId });
+  const scoped = await paymentRunScope({ actorId: "purchasing-read", organizationId: organizationId ?? null });
   let response: Response;
   try {
     response = await fetch("/api/capabilities/execute", {
