@@ -5,6 +5,7 @@ import {
   type SupportConversation,
   type SupportCustomerOption,
   type SupportLibrary,
+  type SupportTicket,
   type SupportMessage,
   type SupportTeamMember,
   type SupportCannedResponseRetryScope,
@@ -19,6 +20,7 @@ import {
   fetchSupportDraft,
   fetchSupportEnabled,
   fetchSupportLibrary,
+  fetchSupportTickets,
   fetchSupportTeamMembers,
   fetchSupportThread,
   readPendingSupportConversationWrite,
@@ -43,6 +45,12 @@ type LoadState =
   | { status: "failed"; message: string }
   | { status: "disabled" }
   | { status: "ready"; conversations: SupportConversation[] };
+type TicketListScope = { actorId: string | null | undefined; organizationId: string | null | undefined };
+type TicketListState = TicketListScope & (
+  | { status: "loading" }
+  | { status: "failed"; message: string }
+  | { status: "ready"; tickets: SupportTicket[] }
+);
 type TicketDraft = { priority: string; category: string; assigneeUserId: string; slaDueAt: string };
 
 const SENDER_LABEL: Record<string, string> = {
@@ -89,6 +97,7 @@ function ticketFrom(conversation: SupportConversation): TicketDraft {
 
 export function SupportPage({ actorId = null, organizationId = null }: { actorId?: string | null; organizationId?: string | null } = {}) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [ticketList, setTicketList] = useState<TicketListState>({ actorId, organizationId, status: "loading" });
   const [tab, setTab] = useState<Tab>("overview");
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("all");
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -116,6 +125,8 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
   const [ticketSaved, setTicketSaved] = useState(false);
   const [fileTicket, setFileTicket] = useState<PendingSupportTicket>({ title: "", description: "", origin: "request" });
   const threadRef = useRef<HTMLDivElement>(null);
+  const ticketScopeRef = useRef<TicketListScope>({ actorId, organizationId });
+  ticketScopeRef.current = { actorId, organizationId };
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -144,11 +155,33 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
     }
   }, [organizationId]);
 
+  const refreshTickets = useCallback(async (signal?: AbortSignal) => {
+    const scope = { actorId, organizationId };
+    setTicketList({ ...scope, status: "loading" });
+    try {
+      const tickets = await fetchSupportTickets(organizationId, signal);
+      if (!signal?.aborted && ticketScopeRef.current.actorId === scope.actorId && ticketScopeRef.current.organizationId === scope.organizationId) {
+        setTicketList({ ...scope, status: "ready", tickets });
+      }
+    } catch (error) {
+      if (!signal?.aborted && ticketScopeRef.current.actorId === scope.actorId && ticketScopeRef.current.organizationId === scope.organizationId) {
+        setTicketList({ ...scope, status: "failed", message: friendlyError(error) });
+      }
+    }
+  }, [actorId, organizationId]);
+
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  useEffect(() => {
+    if (state.status !== "ready") return;
+    const controller = new AbortController();
+    void refreshTickets(controller.signal);
+    return () => controller.abort();
+  }, [refreshTickets, state.status]);
 
   const retryScope = useMemo<SupportConversationWriteRetryScope>(() => ({ actorId, organizationId }), [actorId, organizationId]);
 
@@ -478,6 +511,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       }
       setFileTicket({ title: "", description: "", origin: "request" });
       setNotice({ tone: "success", text: `Support ticket filed (${outcome.data.ticketId}).` });
+      await refreshTickets();
     } catch (error) {
       try {
         const pending = readPendingSupportTicket(retryScope);
@@ -512,6 +546,9 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
 
   const filterCount = (filter: InboxFilter) => (filter === "all" ? conversations.length : conversations.filter((item) => item.status === filter).length);
   const filterLabel = (filter: InboxFilter) => (filter[0]!.toUpperCase() + filter.slice(1));
+  const visibleTicketList: TicketListState = ticketList.actorId === actorId && ticketList.organizationId === organizationId
+    ? ticketList
+    : { actorId, organizationId, status: "loading" };
 
   return (
     <main className="support-page">
@@ -602,6 +639,35 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
                             <small>{item.customerName} · {item.lastMessageAt ? timeAgo(item.lastMessageAt) : "no messages"}</small>
                           </span>
                           <span className={`support-badge support-badge-${item.status}`}>{item.status}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+                <section className="support-panel" aria-label="Filed support tickets">
+                  <header>
+                    <h2>Filed tickets</h2>
+                    {visibleTicketList.status === "ready" && <span>{visibleTicketList.tickets.length}</span>}
+                  </header>
+                  {visibleTicketList.status === "loading" && <p className="support-muted" role="status">Loading filed tickets…</p>}
+                  {visibleTicketList.status === "failed" && (
+                    <div>
+                      <p className="support-muted" role="alert">{visibleTicketList.message}</p>
+                      <button className="shell-button" type="button" onClick={() => void refreshTickets()}>Retry</button>
+                    </div>
+                  )}
+                  {visibleTicketList.status === "ready" && visibleTicketList.tickets.length === 0 && (
+                    <p className="support-muted">No internal support tickets have been filed.</p>
+                  )}
+                  {visibleTicketList.status === "ready" && visibleTicketList.tickets.length > 0 && (
+                    <ul className="support-rows">
+                      {visibleTicketList.tickets.map((item) => (
+                        <li key={item.id}>
+                          <span className="support-row-copy">
+                            <strong>{item.title}</strong>
+                            <small>{item.origin.replaceAll("_", " ")} · {item.status} · {timeAgo(item.createdAt)}</small>
+                            <small>{item.description}</small>
+                          </span>
                         </li>
                       ))}
                     </ul>

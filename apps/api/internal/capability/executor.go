@@ -357,6 +357,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	supportStartConversationCapabilityID:    {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.resolveConversation"},
 	supportPostMessageCapabilityID:          {module: "support", permission: "support.write", risk: "write"},
 	supportListConversationsCapabilityID:    {module: "support", permission: "support.read", risk: "read"},
+	supportListTicketsCapabilityID:          {module: "support", permission: "support.read", risk: "read"},
 	supportListLibraryCapabilityID:          {module: "support", permission: "support.read", risk: "read"},
 	supportReadConversationCapabilityID:     {module: "support", permission: "support.read", risk: "read"},
 	supportLookupOrderStatusCapabilityID:    {module: "support", permission: "support.read", risk: "read"},
@@ -537,7 +538,7 @@ func supportedCapability(capabilityID string) bool {
 		creatorStageCandidateCapabilityID, creatorPromoteCandidateCapabilityID, creatorRollbackCandidateCapabilityID,
 		creatorRecordCanaryOutcomeCapabilityID,
 		supportStartConversationCapabilityID, supportPostMessageCapabilityID,
-		supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
+		supportListConversationsCapabilityID, supportListTicketsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 		supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
 		supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
 		supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
@@ -1369,7 +1370,7 @@ func (e *Executor) executeWithFinalizer(
 			}
 			input = parsed
 		case supportStartConversationCapabilityID, supportPostMessageCapabilityID,
-			supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
+			supportListConversationsCapabilityID, supportListTicketsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 			supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
 			supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
 			supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
@@ -3432,6 +3433,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case SupportListTicketsInput:
+			output, err := supportListTickets(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case SupportLibraryInput:
 			output, err := supportListLibrary(ctx, tx, claims.OrganizationID)
 			if err != nil {
@@ -3684,7 +3691,7 @@ func canonicalInputHash(input any) (string, error) {
 		AnalyticsRenderReportInput, AnalyticsPipelineByStageInput, AnalyticsRevenueByMonthInput,
 		AnalyticsInvoiceAgingInput, AnalyticsSalesByCustomerInput, AnalyticsStockLevelsInput,
 		AnalyticsExplainChangeInput, AnalyticsAskYourBusinessInput,
-		SupportStartConversationInput, SupportPostMessageInput, SupportListConversationsInput, SupportLibraryInput,
+		SupportStartConversationInput, SupportPostMessageInput, SupportListConversationsInput, SupportListTicketsInput, SupportLibraryInput,
 		SupportReadConversationInput, SupportLookupOrderStatusInput, SupportSearchKnowledgeInput,
 		SupportEscalateConversationInput, SupportStatusInput, SupportCreateTicketInput,
 		SupportUpdateTicketInput, SupportSuggestCategoryInput, SupportCreateCannedResponseInput,

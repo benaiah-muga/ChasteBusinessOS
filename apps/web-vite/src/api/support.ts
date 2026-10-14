@@ -109,6 +109,16 @@ export const SupportConversationSchema = z.object({
 }).strict();
 export type SupportConversation = z.infer<typeof SupportConversationSchema>;
 
+export const SupportTicketSchema = z.object({
+  id: uuid,
+  title: z.string(),
+  description: z.string(),
+  origin: z.enum(["capability_gap", "bug", "request"]),
+  status: z.string().min(1),
+  createdAt: z.string().datetime({ offset: true }),
+}).strict();
+export type SupportTicket = z.infer<typeof SupportTicketSchema>;
+
 const ConversationListSchema = z.object({ conversations: z.array(SupportConversationSchema) }).strict();
 
 const GoSupportThreadConversationSchema = SupportConversationSchema.extend({
@@ -382,7 +392,7 @@ async function clearSupportCannedResponseAttempt(storageKey: string, intentId: s
 }
 
 async function readGoSupportCapability<T>(
-  capabilityId: "support.listConversations" | "support.readConversation" | "support.listLibrary" | "support.suggestCategory",
+  capabilityId: "support.listConversations" | "support.listTickets" | "support.readConversation" | "support.listLibrary" | "support.suggestCategory",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   organizationId: string | null | undefined,
@@ -407,6 +417,13 @@ async function readGoSupportCapability<T>(
 export async function fetchSupportConversations(organizationId: string | null | undefined, signal?: AbortSignal): Promise<SupportConversation[]> {
   const parsed = await readGoSupportCapability("support.listConversations", { customerBoundOnly: true, limit: 100 }, ConversationListSchema, organizationId, signal);
   return parsed.conversations;
+}
+
+const SupportTicketListSchema = z.object({ tickets: z.array(SupportTicketSchema) }).strict();
+
+export async function fetchSupportTickets(organizationId: string | null | undefined, signal?: AbortSignal): Promise<SupportTicket[]> {
+  const parsed = await readGoSupportCapability("support.listTickets", { limit: 20 }, SupportTicketListSchema, organizationId, signal);
+  return parsed.tickets;
 }
 
 export const SupportMessageSchema = z.object({

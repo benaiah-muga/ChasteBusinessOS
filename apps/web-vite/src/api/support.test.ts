@@ -8,6 +8,7 @@ import {
   fetchSupportDraft,
   fetchSupportEnabled,
   fetchSupportLibrary,
+  fetchSupportTickets,
   fetchSupportThread,
   readPendingSupportCannedResponse,
   readPendingSupportKbArticle,
@@ -222,6 +223,42 @@ describe("support Go library read", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
+  });
+});
+
+describe("support Go filed-ticket read", () => {
+  const ticket = {
+    id: "4a2b1c0d-8e7f-4a3b-9c2d-1e0f9a8b7c6d",
+    title: "Export fails on large reports",
+    description: "Reports over 500 rows do not finish exporting.",
+    origin: "bug" as const,
+    status: "open",
+    createdAt: "2026-10-14T08:30:00.000Z",
+  };
+
+  it("reads recent tickets through Go with an organization header and bounded input", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { tickets: [ticket] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSupportTickets(organizationId)).resolves.toEqual([ticket]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      body: expect.stringContaining('"capabilityId":"support.listTickets"'),
+    }));
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe(organizationId);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ input: { limit: 20 } });
+  });
+
+  it("rejects malformed ticket rows and never falls back to a legacy read", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { tickets: [{ ...ticket, unexpected: true }] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSupportTickets(organizationId)).rejects.toMatchObject({
+      status: 200,
+      message: "The Go support service returned data in an unexpected format.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

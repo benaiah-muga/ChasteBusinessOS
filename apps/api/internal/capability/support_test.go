@@ -31,6 +31,38 @@ func TestParseSupportListConversationsCustomerBoundOnly(t *testing.T) {
 	}
 }
 
+func TestParseSupportListTicketsInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    int64
+		wantErr bool
+	}{
+		{name: "default limit", input: `{}`, want: 50},
+		{name: "bounded explicit limit", input: `{"limit":20}`, want: 20},
+		{name: "rejects zero", input: `{"limit":0}`, wantErr: true},
+		{name: "rejects excessive limit", input: `{"limit":101}`, wantErr: true},
+		{name: "rejects fractional limit", input: `{"limit":1.5}`, wantErr: true},
+		{name: "rejects organization override", input: `{"organizationId":"22222222-2222-4222-8222-222222222222"}`, wantErr: true},
+		{name: "rejects null", input: `null`, wantErr: true},
+		{name: "rejects trailing data", input: `{} {}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := ParseSupportListTicketsInput(json.RawMessage(tt.input))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseSupportListTicketsInput(%s) error=%v, wantErr=%t", tt.input, err, tt.wantErr)
+			}
+			if err == nil && parsed.Limit != tt.want {
+				t.Fatalf("limit=%d, want %d", parsed.Limit, tt.want)
+			}
+		})
+	}
+	if permission, ok := PermissionForCapability(supportListTicketsCapabilityID); !ok || permission != "support.read" {
+		t.Fatalf("support.listTickets permission=(%q, %t), want support.read", permission, ok)
+	}
+}
+
 func TestParseSupportLibraryInput(t *testing.T) {
 	tests := []struct {
 		name    string

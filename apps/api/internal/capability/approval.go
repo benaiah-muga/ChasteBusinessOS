@@ -583,7 +583,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
 		case supportStartConversationCapabilityID, supportPostMessageCapabilityID,
-			supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
+			supportListConversationsCapabilityID, supportListTicketsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 			supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
 			supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
 			supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
@@ -971,7 +971,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		supportUpdateTicketCapabilityID, supportCreateCannedResponseCapabilityID,
 		supportCreateKbArticleCapabilityID:
 		return "support.write", true
-	case supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
+	case supportListConversationsCapabilityID, supportListTicketsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 		supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
 		supportSuggestCategoryCapabilityID:
 		return "support.read", true

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SupportPage } from "./SupportPage";
 import { stubWebLocks } from "../test/web-locks";
@@ -67,7 +67,7 @@ function moduleSwitchboard(enabled = true) {
 
 interface Handlers {
   post?: (payload: Record<string, unknown>) => Response;
-  execute?: (payload: Record<string, unknown>) => Response;
+  execute?: (payload: Record<string, unknown>) => Response | Promise<Response>;
   draft?: (conversationId: string) => Response;
   getThread?: () => Response;
   team?: () => Response;
@@ -91,18 +91,19 @@ function supportFetch(handlers: Handlers = {}) {
         if (payload.capabilityId === "support.listLibrary") return Response.json({ ok: true, data: { canned: [], articles: [] } });
         const defaultRead = () => {
           if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
+          if (payload.capabilityId === "support.listTickets") return Response.json({ ok: true, data: { tickets: [] } });
           if (payload.capabilityId === "support.readConversation") return Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } });
           return Response.json({ ok: true, data: { canned: [], articles: [] } });
         };
         if (handlers.execute) {
-          const response = handlers.execute(payload);
-          if (["support.listConversations", "support.readConversation", "support.listLibrary"].includes(String(payload.capabilityId))) {
+          const response = await handlers.execute(payload);
+          if (["support.listConversations", "support.listTickets", "support.readConversation", "support.listLibrary"].includes(String(payload.capabilityId))) {
             const result = await response.clone().json().catch(() => null) as { data?: unknown } | null;
             if (result?.data && typeof result.data === "object" && Object.keys(result.data).length === 0) return defaultRead();
           }
           return response;
         }
-        if (["support.listConversations", "support.readConversation", "support.listLibrary"].includes(String(payload.capabilityId))) return defaultRead();
+        if (["support.listConversations", "support.listTickets", "support.readConversation", "support.listLibrary"].includes(String(payload.capabilityId))) return defaultRead();
         if (payload.capabilityId === "support.postMessage") return Response.json({ ok: true, data: { messageId: "m1", senderType: "staff" } });
         if (payload.capabilityId === "support.resolveConversation") return Response.json({ ok: true, data: { status: "resolved" } });
         if (payload.capabilityId === "support.escalateConversation") return Response.json({ ok: true, data: { status: "escalated" } });
@@ -149,6 +150,105 @@ describe("Vite support page", () => {
     expect(await screen.findByRole("heading", { name: "Support" })).not.toBeNull();
     expect(await screen.findByText("Invoice question")).not.toBeNull();
     expect(fetchMock.mock.calls.map(([path]) => String(path))).toContain("/api/capabilities/execute");
+    expect(fetchMock.mock.calls.some(([, init]) => {
+      if (init?.method !== "POST") return false;
+      const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return payload.capabilityId === "support.listTickets";
+    })).toBe(true);
+  }, SLOW);
+
+  it("displays filed internal tickets from the Go support capability", async () => {
+    const ticketId = "4a2b1c0d-8e7f-4a3b-9c2d-1e0f9a8b7c6d";
+    const { calls } = supportFetch({
+      execute: (payload) => payload.capabilityId === "support.listTickets"
+        ? Response.json({ ok: true, data: { tickets: [{
+            id: ticketId,
+            title: "Export fails on large reports",
+            description: "Reports over 500 rows do not finish exporting.",
+            origin: "bug",
+            status: "open",
+            createdAt: "2026-10-14T08:30:00.000Z",
+          }] } })
+        : Response.json({ ok: true, data: {} }),
+    });
+    render(<SupportPage organizationId={organizationId} />);
+
+    expect(await screen.findByText("Export fails on large reports")).not.toBeNull();
+    expect(screen.getByText("Reports over 500 rows do not finish exporting.")).not.toBeNull();
+    const call = calls.find((entry) => entry.payload?.capabilityId === "support.listTickets");
+    expect(call?.payload).toMatchObject({ capabilityId: "support.listTickets", input: { limit: 20 } });
+  }, SLOW);
+
+  it("hides cached filed tickets immediately when the actor changes within the same organization", async () => {
+    const firstActor = "55555555-5555-4555-8555-555555555555";
+    const secondActor = "77777777-7777-4777-8777-777777777777";
+    const ticket = {
+      id: "4a2b1c0d-8e7f-4a3b-9c2d-1e0f9a8b7c6d",
+      title: "Private support note",
+      description: "Only visible to an actor with support.read.",
+      origin: "request",
+      status: "open",
+      createdAt: "2026-10-14T08:30:00.000Z",
+    };
+    let ticketReads = 0;
+    const { fetchMock } = supportFetch({
+      execute: (payload) => {
+        if (payload.capabilityId !== "support.listTickets") return Response.json({ ok: true, data: {} });
+        ticketReads += 1;
+        return ticketReads === 1
+          ? Response.json({ ok: true, data: { tickets: [ticket] } })
+          : Response.json({ ok: true, data: { tickets: [] } });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<SupportPage actorId={firstActor} organizationId={organizationId} />);
+
+    expect(await screen.findByText(ticket.title)).not.toBeNull();
+    rerender(<SupportPage actorId={secondActor} organizationId={organizationId} />);
+
+    expect(screen.queryByText(ticket.title)).toBeNull();
+    expect(screen.queryByText(ticket.description)).toBeNull();
+    await waitFor(() => expect(ticketReads).toBe(2));
+    expect(await screen.findByText("No internal support tickets have been filed.")).not.toBeNull();
+  }, SLOW);
+
+  it("ignores a filed-ticket response from the previous actor", async () => {
+    const firstActor = "55555555-5555-4555-8555-555555555555";
+    const secondActor = "77777777-7777-4777-8777-777777777777";
+    const oldTicket = {
+      id: "4a2b1c0d-8e7f-4a3b-9c2d-1e0f9a8b7c6d",
+      title: "Previous actor ticket",
+      description: "This result belongs to the prior actor.",
+      origin: "request",
+      status: "open",
+      createdAt: "2026-10-14T08:30:00.000Z",
+    };
+    const currentTicket = { ...oldTicket, id: "5b3c2d1e-9f80-4b5c-ad3e-2f1a0b9c8d7e", title: "Current actor ticket" };
+    let ticketReads = 0;
+    const resolvers: Array<(response: Response) => void> = [];
+    const { fetchMock } = supportFetch({
+      execute: (payload) => {
+        if (payload.capabilityId !== "support.listTickets") return Response.json({ ok: true, data: {} });
+        ticketReads += 1;
+        return new Promise<Response>((resolve) => { resolvers.push(resolve); });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<SupportPage actorId={firstActor} organizationId={organizationId} />);
+    await waitFor(() => expect(ticketReads).toBe(1));
+    rerender(<SupportPage actorId={secondActor} organizationId={organizationId} />);
+    await waitFor(() => expect(ticketReads).toBe(2));
+
+    await act(async () => {
+      resolvers[0]?.(Response.json({ ok: true, data: { tickets: [oldTicket] } }));
+    });
+    expect(screen.queryByText(oldTicket.title)).toBeNull();
+
+    await act(async () => {
+      resolvers[1]?.(Response.json({ ok: true, data: { tickets: [currentTicket] } }));
+    });
+    expect(await screen.findByText(currentTicket.title)).not.toBeNull();
+    expect(screen.queryByText(oldTicket.title)).toBeNull();
   }, SLOW);
 
   it("files an internal request through support.createTicket", async () => {
@@ -220,14 +320,14 @@ describe("Vite support page", () => {
     expect(await screen.findByText("Invoice question")).not.toBeNull();
     await waitFor(() => {
       const paths = fetchMock.mock.calls.map(([path]) => String(path));
-      expect(paths.filter((path) => path === "/api/capabilities/execute")).toHaveLength(2);
+      expect(paths.filter((path) => path === "/api/capabilities/execute")).toHaveLength(3);
       expect(paths).not.toContain("/api/support");
       expect(paths).not.toContain(`/api/support?id=${conversationId}`);
       expect(calls[0]?.payload).toMatchObject({
         capabilityId: "support.listConversations",
         input: { customerBoundOnly: true, limit: 100 },
       });
-      expect(calls[1]?.payload).toMatchObject({
+      expect(calls.find((call) => call.payload?.capabilityId === "support.readConversation")?.payload).toMatchObject({
         capabilityId: "support.readConversation",
         input: { conversationId, limit: 200 },
       });

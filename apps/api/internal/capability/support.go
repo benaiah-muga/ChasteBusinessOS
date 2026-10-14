@@ -18,6 +18,7 @@ const (
 	supportStartConversationCapabilityID    = "support.startConversation"
 	supportPostMessageCapabilityID          = "support.postMessage"
 	supportListConversationsCapabilityID    = "support.listConversations"
+	supportListTicketsCapabilityID          = "support.listTickets"
 	supportListLibraryCapabilityID          = "support.listLibrary"
 	supportReadConversationCapabilityID     = "support.readConversation"
 	supportLookupOrderStatusCapabilityID    = "support.lookupOrderStatus"
@@ -125,6 +126,23 @@ type SupportConversationListItem struct {
 
 type SupportListConversationsOutput struct {
 	Conversations []SupportConversationListItem `json:"conversations"`
+}
+
+type SupportListTicketsInput struct {
+	Limit int64 `json:"limit"`
+}
+
+type SupportTicketListItem struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Origin      string `json:"origin"`
+	Status      string `json:"status"`
+	CreatedAt   string `json:"createdAt"`
+}
+
+type SupportListTicketsOutput struct {
+	Tickets []SupportTicketListItem `json:"tickets"`
 }
 
 type SupportLibraryInput struct{}
@@ -403,6 +421,28 @@ func ParseSupportListConversationsInput(raw json.RawMessage) (SupportListConvers
 	return input, nil
 }
 
+func ParseSupportListTicketsInput(raw json.RawMessage) (SupportListTicketsInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return SupportListTicketsInput{}, err
+	}
+	for field := range fields {
+		if field != "limit" {
+			return SupportListTicketsInput{}, fmt.Errorf("unexpected field %q", field)
+		}
+	}
+	input := SupportListTicketsInput{Limit: 50}
+	if _, ok := fields["limit"]; ok {
+		if input.Limit, err = requiredSafeInteger(fields, "limit"); err != nil {
+			return SupportListTicketsInput{}, err
+		}
+	}
+	if input.Limit < 1 || input.Limit > 100 {
+		return SupportListTicketsInput{}, errors.New("limit must be between 1 and 100")
+	}
+	return input, nil
+}
+
 func ParseSupportLibraryInput(raw json.RawMessage) (SupportLibraryInput, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
@@ -677,6 +717,8 @@ func parseSupportInput(capabilityID string, raw json.RawMessage) (any, error) {
 		return ParseSupportPostMessageInput(raw)
 	case supportListConversationsCapabilityID:
 		return ParseSupportListConversationsInput(raw)
+	case supportListTicketsCapabilityID:
+		return ParseSupportListTicketsInput(raw)
 	case supportListLibraryCapabilityID:
 		return ParseSupportLibraryInput(raw)
 	case supportReadConversationCapabilityID, supportLookupOrderStatusCapabilityID:
@@ -817,6 +859,30 @@ func supportListConversations(ctx context.Context, tx pgx.Tx, orgID string, inpu
 		}
 		item.LastMessageAt = lastMessageAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		out.Conversations = append(out.Conversations, item)
+	}
+	return out, rows.Err()
+}
+
+func supportListTickets(ctx context.Context, tx pgx.Tx, orgID string, input SupportListTicketsInput) (SupportListTicketsOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, title, description, origin, status, created_at
+		FROM tickets
+		WHERE org_id=$1::uuid
+		ORDER BY created_at DESC, id DESC
+		LIMIT $2`, orgID, input.Limit)
+	if err != nil {
+		return SupportListTicketsOutput{}, err
+	}
+	defer rows.Close()
+	out := SupportListTicketsOutput{Tickets: []SupportTicketListItem{}}
+	for rows.Next() {
+		var item SupportTicketListItem
+		var createdAt time.Time
+		if err := rows.Scan(&item.ID, &item.Title, &item.Description, &item.Origin, &item.Status, &createdAt); err != nil {
+			return SupportListTicketsOutput{}, err
+		}
+		item.CreatedAt = createdAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		out.Tickets = append(out.Tickets, item)
 	}
 	return out, rows.Err()
 }

@@ -33,6 +33,15 @@ states that it shows only the 100 most recent reservations when the result is
 capped. Focused API and page suites cover tenant and actor changes, stale reads,
 and the cap notice.
 
+Vite Support lists the 20 newest internal tickets through the governed
+`support.listTickets` capability, restricted to `support.read` and scoped to the
+active organization. Go validates a limit of 1 to 100, runs the query inside
+`dbx.WithOrgTx`, and filters by organization. The Vite panel validates the
+response and clears cached descriptions on actor or organization changes. The Go
+database integration test covers tenant isolation, permission denial, order, and
+limits; an authenticated browser proof loaded a synthetic filed ticket from Go
+with no browser errors.
+
 The active Vite CRM customer-create, CRM follow-up-draft, Support reply-draft,
 Messaging agent-reply, Accounting payment-reversal, and Purchasing
 purchase-request paths are Go-owned by default. CRM mutations and Purchasing
