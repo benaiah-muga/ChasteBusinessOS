@@ -452,7 +452,7 @@ describe("Vite inventory page", () => {
           locationCode: null,
           actorType: "human",
           createdAt: "2026-09-30T10:15:00.000Z",
-        }] });
+        }], hasMore: false });
       }
       return Response.json(report);
     }));
