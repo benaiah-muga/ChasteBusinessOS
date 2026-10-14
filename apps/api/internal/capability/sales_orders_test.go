@@ -81,9 +81,9 @@ func TestSalesOrdersParserContracts(t *testing.T) {
 			wantJSON: `{"status":"delivered"}`,
 			output: SalesListOrdersOutput{Orders: []SalesListOrderItem{{
 				ID: orderID, Number: 3, CustomerID: customerID, Status: "draft", Backordered: false,
-				TotalMinor: 660000, CreatedAt: "2026-09-27T10:00:00.000Z",
+				TotalMinor: 660000, CreatedAt: "2026-09-27T10:00:00.000Z", Lines: []SalesListOrderLineItem{},
 			}}},
-			outputJS: `{"orders":[{"id":"` + orderID + `","number":3,"customerId":"` + customerID + `","status":"draft","backordered":false,"totalMinor":660000,"createdAt":"2026-09-27T10:00:00.000Z"}]}`,
+			outputJS: `{"orders":[{"id":"` + orderID + `","number":3,"customerId":"` + customerID + `","status":"draft","backordered":false,"totalMinor":660000,"createdAt":"2026-09-27T10:00:00.000Z","lines":[]}]}`,
 		},
 		{
 			name:     "listOrdersMinimal",
@@ -848,6 +848,24 @@ func TestSalesOrdersCancelReleasesReservations(t *testing.T) {
 		lines := []SalesDeliverOrderLineInput{{LineID: partialLineID, QuantityThousandths: 18000}}
 		return salesDeliverOrder(fx.ctx, tx, claims, SalesDeliverOrderInput{OrderID: partialOrder.OrderID, Lines: &lines}, now)
 	})
+	partialList := salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesListOrdersOutput, error) {
+		return salesListOrders(fx.ctx, tx, fx.orgID, SalesListOrdersInput{})
+	})
+	var listedPartialOrder *SalesListOrderItem
+	for index := range partialList.Orders {
+		if partialList.Orders[index].ID == partialOrder.OrderID {
+			listedPartialOrder = &partialList.Orders[index]
+			break
+		}
+	}
+	if listedPartialOrder == nil || len(listedPartialOrder.Lines) != 1 {
+		t.Fatalf("partial order list = %+v, want the delivered order line", partialList.Orders)
+	}
+	listedLine := listedPartialOrder.Lines[0]
+	if listedLine.LineID != partialLineID || listedLine.QuantityThousandths != 30000 ||
+		listedLine.DeliveredThousandths != 18000 || listedLine.DeliverableThousandths != 12000 {
+		t.Fatalf("partial delivery line = %+v, want qty 30000 delivered 18000 deliverable 12000", listedLine)
+	}
 	err = salesErrInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) error {
 		_, err := salesCancelOrder(fx.ctx, tx, fx.orgID, SalesCancelOrderInput{OrderID: partialOrder.OrderID}, now)
 		return err

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearRouteLessSalesOrderAttempt, fetchSalesCustomers, fetchSalesEnabled, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite } from "./sales";
+import { clearRouteLessSalesOrderAttempt, fetchSalesCustomers, fetchSalesEnabled, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderAction, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite } from "./sales";
 
 const scope = { actorId: "actor-1", organizationId: "org-1" };
 const orderId = "10000000-0000-4000-8000-000000000001";
@@ -148,6 +148,37 @@ describe("sales order writes", () => {
     expect(requests[0]).toMatchObject({ capabilityId: "sales.deliverOrder", input: { orderId } });
     expect(requests[0]?.input).not.toHaveProperty("lines");
     expect(requests[1]).toMatchObject({ capabilityId: "sales.cancelOrder", input: { orderId } });
+  });
+
+  it("sends selected partial delivery quantities and preserves the exact retry payload", async () => {
+    const lineId = "30000000-0000-4000-8000-000000000001";
+    const action = { action: "deliver" as const, orderId, lines: [{ lineId, quantityThousandths: 1250 }] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Delivery review required" }, { status: 202 }))
+      .mockResolvedValueOnce(success({ invoiceId: orderId, invoiceNumber: 901, invoiceTotalMinor: 2500, orderStatus: "confirmed" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSalesOrderWrite(action, scope)).resolves.toEqual({ kind: "pending", reason: "Delivery review required" });
+    await expect(submitSalesOrderWrite(action, scope)).resolves.toMatchObject({ kind: "completed", action: "deliver" });
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> });
+    expect(requests[0]).toMatchObject({ capabilityId: "sales.deliverOrder", input: { orderId, lines: [{ lineId, quantityThousandths: 1250 }] } });
+    expect(requests[1]?.intentId).toBe(requests[0]?.intentId);
+    expect(requests[1]?.input).toEqual(requests[0]?.input);
+  });
+
+  it("restores pending delivery and cancellation actions with their exact payloads", async () => {
+    const partialDelivery = { action: "deliver" as const, orderId, lines: [{ lineId: "30000000-0000-4000-8000-000000000001", quantityThousandths: 1250 }] };
+    const cancellation = { action: "cancel" as const, orderId };
+    const fetchMock = vi.fn(async () => Response.json({ ok: false, pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submitSalesOrderWrite(partialDelivery, scope);
+    await expect(restorePendingSalesOrderAction(scope)).resolves.toEqual(partialDelivery);
+    await expect(restorePendingSalesOrderCreate(scope)).resolves.toBeNull();
+    window.localStorage.clear();
+
+    await submitSalesOrderWrite(cancellation, scope);
+    await expect(restorePendingSalesOrderAction(scope)).resolves.toEqual(cancellation);
   });
 
   it.each(goWrite404Cases)("fails closed on Go 404 for %s and retries the exact action through Go", async (_name, action, output) => {
@@ -320,6 +351,13 @@ describe("sales order reads", () => {
       backordered: false,
       totalMinor: 3250,
       createdAt: "2026-09-27T10:15:00.000Z",
+      lines: [{
+        lineId: "30000000-0000-4000-8000-000000000001",
+        description: "Coffee beans",
+        quantityThousandths: 2500,
+        deliveredThousandths: 500,
+        deliverableThousandths: 2000,
+      }],
     }],
   };
 

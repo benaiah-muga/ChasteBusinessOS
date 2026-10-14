@@ -12,6 +12,10 @@ const orders = [
     backordered: true,
     totalMinor: 129900,
     createdAt: "2026-09-27T10:15:00.000Z",
+    lines: [
+      { lineId: "30000000-0000-4000-8000-000000000001", description: "Desk", quantityThousandths: 3000, deliveredThousandths: 0, deliverableThousandths: 2000 },
+      { lineId: "30000000-0000-4000-8000-000000000002", description: "Assembly service", quantityThousandths: 1000, deliveredThousandths: 0, deliverableThousandths: 1000 },
+    ],
   },
   {
     id: "10000000-0000-4000-8000-000000000002",
@@ -207,8 +211,7 @@ describe("Vite sales page", () => {
   });
 
   it("confirms a draft through the governed Go capability endpoint", async () => {
-    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
-      void init;
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/sales/customers") return Response.json(customers);
       if (input === "test-fixture:sales-orders") return Response.json({ orders });
@@ -755,6 +758,89 @@ describe("Vite sales page", () => {
     expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
   });
 
+  it("restores an uncertain partial delivery after reload and retries its exact Go intent", async () => {
+    const action = {
+      action: "deliver" as const,
+      orderId: orders[0]!.id,
+      lines: [{ lineId: "30000000-0000-4000-8000-000000000001", quantityThousandths: 1250 }],
+    };
+    let deliveryWrites = 0;
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (body.capabilityId === "sales.deliverOrder") {
+          deliveryWrites += 1;
+          return deliveryWrites === 1
+            ? Response.json({ error: "connection lost" }, { status: 503 })
+            : Response.json({ ok: true, data: { invoiceId: "40000000-0000-4000-8000-000000000008", invoiceNumber: 908, invoiceTotalMinor: 25000, orderStatus: "confirmed" } });
+        }
+      }
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    vi.stubGlobal("__GO_SALES_ORDER_READS__", true);
+    await expect(submitSalesOrderWrite(action, { actorId: "actor-1", organizationId: "40000000-0000-4000-8000-000000000004" })).rejects.toMatchObject({ status: 503 });
+
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
+    expect(await screen.findByRole("heading", { name: "Retry the unresolved delivery" })).not.toBeNull();
+    expect((screen.getByRole("button", { name: "Retry saved delivery" }) as HTMLButtonElement).disabled).toBe(false);
+    const row = await screen.findByRole("row", { name: /#41/ });
+    expect((within(row).getByRole("button", { name: "Deliver #41" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Create sales order" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry saved delivery" }));
+    expect(await screen.findByText("Reserved quantities delivered and invoiced for order #41. The order remains confirmed.")).not.toBeNull();
+    const bodies = salesWriteCalls(fetchMock).map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string; input: Record<string, unknown> });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+    expect(bodies[1]?.input).toEqual(bodies[0]?.input);
+    expect(fetchMock.mock.calls.every(([input]) => input !== "/api/sales")).toBe(true);
+  });
+
+  it("delivers selected reserved quantities through Go and leaves the order open", async () => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") return Response.json({
+        ok: true,
+        data: { invoiceId: "40000000-0000-4000-8000-000000000009", invoiceNumber: 909, invoiceTotalMinor: 25000, orderStatus: "confirmed" },
+      });
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
+
+    const orderRow = await screen.findByRole("row", { name: /#41/ });
+    const partialDelivery = within(orderRow).getByRole("button", { name: "Partial delivery" });
+    await waitFor(() => expect((partialDelivery as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(partialDelivery);
+    const amount = screen.getByRole("spinbutton", { name: "Quantity to deliver for Desk" }) as HTMLInputElement;
+    const submit = screen.getByRole("button", { name: "Deliver selected quantities and invoice" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.change(amount, { target: { value: "2.5" } });
+    expect(submit.disabled).toBe(true);
+    fireEvent.change(amount, { target: { value: "1.25" } });
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+
+    expect(await screen.findByText("Reserved quantities delivered and invoiced for order #41. The order remains confirmed.")).not.toBeNull();
+    const write = salesWriteCalls(fetchMock).find(([, init]) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+      return body.capabilityId === "sales.deliverOrder";
+    });
+    expect(write).toBeDefined();
+    expect(JSON.parse(String(write?.[1]?.body))).toMatchObject({
+      capabilityId: "sales.deliverOrder",
+      input: { orderId: orders[0]!.id, lines: [{ lineId: "30000000-0000-4000-8000-000000000001", quantityThousandths: 1250 }] },
+    });
+  });
+
   it("keeps the Go partial-delivery status when refreshing the order list fails", async () => {
     let salesReads = 0;
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
@@ -954,10 +1040,8 @@ describe("Vite sales page", () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
     render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
-    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm #43" }));
-
     expect((await screen.findByRole("alert")).textContent).toContain("Web Locks support");
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(true));
     expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
     expect(localStorage.getItem(confirmAttemptKey("actor-1", "40000000-0000-4000-8000-000000000004", orders[2]!.id))).toBeNull();
   });

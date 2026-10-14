@@ -1734,11 +1734,18 @@ new owners and the manifest shows zero legacy runtime paths.
      retain form drafts and action targets until success. Create lines preserve
      optional SKU inventory linking. Delivery omits explicit lines to deliver
      all remaining reserved quantities, including service lines, matching the
-     existing Next flow; partial line delivery and catalog quick-create remain
-     outside this Vite form. Go rejects duplicate delivery line IDs and the
+     existing Next flow. `sales.listOrders` includes each order line's
+     deliverable reserved balance, and Vite supports an exact partial quantity
+     selection that sends line IDs and thousandth quantities through the same
+     retry-safe capability. Catalog quick-create remains outside this Vite form.
+     Go rejects duplicate delivery line IDs and the
      internal deliver-all sentinel as explicit quantities. Confirmation and
      delivery/cancellation results are ignored after a scope change; stale
-     targets are cleared. Focused checks pass; browser proof remains open.
+     targets are cleared. Focused checks pass. Authenticated `agent-browser`
+     proof on 2026-10-14 created and confirmed synthetic order #1 with two
+     units, delivered 1.25 units, then reloaded the page. Go reported 0.750
+     units still available. Capability requests returned HTTP 200, no legacy
+     Sales write occurred, and the browser reported no errors.
 166a. (Implemented) Route Vite Sales order list and refresh reads through Go's
      session-authenticated `sales.listOrders` capability when
      `CHASTE_GO_SALES_ORDER_READS=1` and
@@ -4314,3 +4321,15 @@ new owners and the manifest shows zero legacy runtime paths.
      page then reported zero active people and disabled draft creation. The
      capability request returned HTTP 200, no legacy HR write occurred, and
      the browser reported no errors.
+
+405. (Implemented and browser verified) Vite Sales can partially deliver
+     confirmed orders by line, limited to quantities reserved by Go. The Go
+     `sales.listOrders` response reports each line's quantity delivered and
+     remaining deliverable balance; the Vite form validates positive
+     thousandth quantities and submits them through `sales.deliverOrder` with
+     actor/org scoped retry recovery. Go integration, Vite API, and Sales page
+     tests cover the balance and partial-invoice flow. Authenticated
+     `agent-browser` proof on 2026-10-14 created and confirmed synthetic order
+     #1 with two units, delivered 1.25 units, then reloaded the page. Go
+     reported 0.750 units remaining. Capability requests returned HTTP 200, no
+     legacy Sales write occurred, and the browser reported no errors.

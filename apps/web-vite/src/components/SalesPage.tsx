@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { clearRouteLessSalesOrderAttempt, confirmSalesOrder, fetchSalesCustomers, fetchSalesEnabled, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite, type RouteLessSalesOrderMarker, type SalesCustomer, type SalesOrder } from "../api/sales";
+import { clearRouteLessSalesOrderAttempt, confirmSalesOrder, fetchSalesCustomers, fetchSalesEnabled, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderAction, SalesApiError, submitSalesOrderWrite, type RouteLessSalesOrderMarker, type SalesCustomer, type SalesOrder, type SalesOrderWrite } from "../api/sales";
 import { SalesQuoteWorkspace } from "./SalesQuoteWorkspace";
 import "./sales-page.css";
 
@@ -13,7 +13,7 @@ type PageState =
 type CurrencyStyle = { symbol: string; minorUnits: number };
 type OrderFilter = "all" | "draft" | "confirmed" | "delivered" | "cancelled";
 type OrderDraftLine = { sku: string; description: string; quantity: string; unitPrice: string; tax: string };
-type OrderActionTarget = { action: "deliver" | "cancel"; order: SalesOrder };
+type OrderActionTarget = { action: "deliver" | "deliverPartial" | "cancel"; order: SalesOrder };
 const emptyOrderDraftLine = (): OrderDraftLine => ({ sku: "", description: "", quantity: "1", unitPrice: "0", tax: "0" });
 const ORDER_FILTERS: { value: OrderFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -77,6 +77,22 @@ function quantityFromInput(value: string): number | null {
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   const thousandths = Math.round(parsed * 1000);
   return Number.isSafeInteger(thousandths) && thousandths > 0 ? thousandths : null;
+}
+
+function partialDeliverySelection(order: SalesOrder, values: Record<string, string>): { lines: Array<{ lineId: string; quantityThousandths: number }>; valid: boolean } {
+  const lines: Array<{ lineId: string; quantityThousandths: number }> = [];
+  let invalid = false;
+  for (const line of order.lines) {
+    const value = values[line.lineId] ?? "";
+    if (!value.trim()) continue;
+    const quantityThousandths = quantityFromInput(value);
+    if (quantityThousandths === null || quantityThousandths > line.deliverableThousandths) {
+      invalid = true;
+      continue;
+    }
+    lines.push({ lineId: line.lineId, quantityThousandths });
+  }
+  return { lines, valid: !invalid && lines.length > 0 };
 }
 
 type ConfirmAttempt = { orderId: string; intentId: string; allowBackorder: boolean; pending: boolean };
@@ -164,6 +180,8 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const [routeLessReviewConfirmed, setRouteLessReviewConfirmed] = useState(false);
   const [routeLessRecoveryBusy, setRouteLessRecoveryBusy] = useState(false);
   const [orderActionTarget, setOrderActionTarget] = useState<OrderActionTarget | null>(null);
+  const [partialDeliveryQuantities, setPartialDeliveryQuantities] = useState<Record<string, string>>({});
+  const [recoveredWriteAction, setRecoveredWriteAction] = useState<SalesOrderWrite | null>(null);
   const previousCreateScope = useRef<string | null>(null);
   const currentCreateScope = useRef<string | null>(null);
   const confirmationScope = useRef<string | null>(null);
@@ -184,6 +202,9 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const createScopeReady = createScopeIdentity !== null && createAttemptRestoredScope === createScopeIdentity;
   const routeLessAttemptCurrent = routeLessAttempt?.scopeIdentity === createScopeIdentity;
   const createWriteLocked = !createScopeReady || createAttemptPending || routeLessAttemptCurrent || scopedWriteRecoveryLocked;
+  const partialSelection = orderActionTarget?.action === "deliverPartial"
+    ? partialDeliverySelection(orderActionTarget.order, partialDeliveryQuantities)
+    : null;
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
@@ -239,6 +260,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       setShowCreateForm(false);
       setCreateError(null);
       setOrderActionTarget(null);
+      setRecoveredWriteAction(null);
       setActionNotice(null);
     }
     if (!actorId || !organizationId || !createScopeIdentity) return () => { current = false; };
@@ -254,10 +276,16 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         setActionNotice({ tone: "error", message: "A saved sales order retry marker has no usable backend route. Review sales order history before choosing whether to clear it." });
         return;
       }
-      const action = await restorePendingSalesOrderCreate({ actorId, organizationId });
+      const action = await restorePendingSalesOrderAction({ actorId, organizationId });
       if (!current) return;
       setCreateAttemptRestoredScope(createScopeIdentity);
       if (!action) return;
+      if (action.action !== "create") {
+        setRecoveredWriteAction(action);
+        setCreateAttemptPending(true);
+        setActionNotice({ tone: "pending", message: `An earlier sales order ${action.action === "deliver" ? "delivery" : "cancellation"} is unresolved. Retry the saved action to check its result.` });
+        return;
+      }
       setCreateForm({
         customerId: action.customerId,
         note: action.note ?? "",
@@ -303,6 +331,46 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The reviewed sales retry marker could not be cleared." });
     } finally {
       if (currentCreateScope.current === submittedScope) setRouteLessRecoveryBusy(false);
+    }
+  }
+
+  async function retryRecoveredWriteAction(): Promise<void> {
+    if (!recoveredWriteAction || recoveredWriteAction.action === "create" || routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady || !createScopeIdentity) return;
+    const action = recoveredWriteAction;
+    const submittedScope = createScopeIdentity;
+    setWriteBusy(true);
+    setActionNotice(null);
+    try {
+      const result = await submitSalesOrderWrite(action, { actorId, organizationId });
+      if (currentCreateScope.current !== submittedScope) return;
+      if (result.kind === "pending") {
+        setActionNotice({ tone: "pending", message: result.reason });
+        return;
+      }
+      setRecoveredWriteAction(null);
+      setCreateAttemptPending(false);
+      const orderNumber = visibleState.status === "ready"
+        ? visibleState.orders.find((order) => order.id === action.orderId)?.number
+        : undefined;
+      const orderLabel = orderNumber ? `#${orderNumber}` : action.orderId;
+      setActionNotice({
+        tone: "success",
+        message: result.action === "cancel"
+          ? `Order ${orderLabel} cancelled.`
+          : result.data.orderStatus === "delivered"
+            ? `Order ${orderLabel} fully delivered and invoiced.`
+            : `Reserved quantities delivered and invoiced for order ${orderLabel}. The order remains confirmed.`,
+      });
+      await refreshOrderList(submittedScope);
+    } catch (error) {
+      if (currentCreateScope.current !== submittedScope) return;
+      if (error instanceof SalesApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && error.status !== 404) {
+        setRecoveredWriteAction(null);
+        setCreateAttemptPending(false);
+      }
+      setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The saved sales order action could not be retried." });
+    } finally {
+      if (currentCreateScope.current === submittedScope) setWriteBusy(false);
     }
   }
 
@@ -475,11 +543,18 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   async function handleOrderAction(): Promise<void> {
     if (!orderActionTarget || routeLessAttemptCurrent || scopedWriteRecoveryLocked || !createScopeReady || !createScopeIdentity) return;
     const target = orderActionTarget;
+    const selection = target.action === "deliverPartial" ? partialDeliverySelection(target.order, partialDeliveryQuantities) : null;
+    if (target.action === "deliverPartial" && !selection?.valid) {
+      setActionNotice({ tone: "error", message: "Enter a positive quantity no greater than the reserved balance for at least one line." });
+      return;
+    }
     const submittedScope = createScopeIdentity;
     setWriteBusy(true);
     setActionNotice(null);
     try {
-      const result = await submitSalesOrderWrite({ action: target.action, orderId: target.order.id }, { actorId, organizationId });
+      const result = await submitSalesOrderWrite(target.action === "cancel"
+        ? { action: "cancel", orderId: target.order.id }
+        : { action: "deliver", orderId: target.order.id, ...(selection ? { lines: selection.lines } : {}) }, { actorId, organizationId });
       if (currentCreateScope.current !== submittedScope) return;
       if (result.kind === "pending") {
         setActionNotice({ tone: "pending", message: result.reason });
@@ -515,6 +590,27 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
 
   return (
     <main className="sales-page">
+      {recoveredWriteAction && recoveredWriteAction.action !== "create" && (
+        <section className="sales-write-card" aria-labelledby="sales-retry-title">
+          <div className="sales-write-heading">
+            <div>
+              <p className="sales-eyebrow">Saved Go action</p>
+              <h2 id="sales-retry-title">Retry the unresolved {recoveredWriteAction.action === "deliver" ? "delivery" : "cancellation"}</h2>
+            </div>
+            <button
+              type="button"
+              className="sales-write-primary"
+              disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady}
+              onClick={() => void retryRecoveredWriteAction()}
+            >
+              {writeBusy ? "Checking…" : recoveredWriteAction.action === "deliver" ? "Retry saved delivery" : "Retry saved cancellation"}
+            </button>
+          </div>
+          <p>
+            This sends the saved {recoveredWriteAction.action === "deliver" ? "delivery quantities" : "cancellation"} to Go again with the original intent ID. Other Sales writes stay locked until the action is resolved.
+          </p>
+        </section>
+      )}
       <header className="sales-page-header">
         <div>
           <p className="sales-eyebrow">Revenue · preview</p>
@@ -677,11 +773,12 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
                       />
                       Allow backorder
                     </label>
-                    <button type="button" disabled={!createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked || confirmingOrderId !== null} onClick={() => void handleConfirm(order)}>{confirmingOrderId === order.id ? "Checking…" : approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(createScopeIdentity, order.id) ? `Check approval #${order.number}` : `Confirm #${order.number}`}</button>
-                    <button type="button" className="sales-row-action" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady || confirmingOrderId !== null} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
+                    <button type="button" disabled={!createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked || recoveredWriteAction !== null || confirmingOrderId !== null} onClick={() => void handleConfirm(order)}>{confirmingOrderId === order.id ? "Checking…" : approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(createScopeIdentity, order.id) ? `Check approval #${order.number}` : `Confirm #${order.number}`}</button>
+                    <button type="button" className="sales-row-action" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || recoveredWriteAction !== null || writeBusy || !createScopeReady || confirmingOrderId !== null} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
                   </>}{order.status === "confirmed" && <>
-                    <button type="button" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "deliver", order })}>Deliver #{order.number}</button>
-                    <button type="button" className="sales-row-action" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
+                    <button type="button" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || recoveredWriteAction !== null || writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "deliver", order })}>Deliver #{order.number}</button>
+                    {order.lines.some((line) => line.deliverableThousandths > 0) && <button type="button" className="sales-row-action" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || recoveredWriteAction !== null || writeBusy || !createScopeReady} onClick={() => { setPartialDeliveryQuantities({}); setOrderActionTarget({ action: "deliverPartial", order }); }}>Partial delivery</button>}
+                    <button type="button" className="sales-row-action" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || recoveredWriteAction !== null || writeBusy || !createScopeReady} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
                   </>}</td>
                 </tr>
               ))}</tbody>
@@ -693,13 +790,33 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         <div className="sales-modal-backdrop">
           <section className="sales-modal" role="dialog" aria-modal="true" aria-labelledby="sales-action-title">
             <p className="sales-eyebrow">Order #{orderActionTarget.order.number}</p>
-            <h2 id="sales-action-title">{orderActionTarget.action === "deliver" ? "Deliver and invoice order?" : "Cancel sales order?"}</h2>
-            <p>{orderActionTarget.action === "deliver"
-              ? "This delivers all remaining reserved quantities, including service lines, and creates an invoice for those delivered lines."
-              : "This withdraws the order and releases its remaining stock reservations. Delivered or partially delivered orders must be reversed through the invoice."}</p>
+            <h2 id="sales-action-title">{orderActionTarget.action === "cancel" ? "Cancel sales order?" : orderActionTarget.action === "deliverPartial" ? "Deliver selected quantities?" : "Deliver and invoice order?"}</h2>
+            <p>{orderActionTarget.action === "cancel"
+              ? "This withdraws the order and releases its remaining stock reservations. Delivered or partially delivered orders must be reversed through the invoice."
+              : orderActionTarget.action === "deliverPartial"
+                ? "Enter quantities to deliver now. Each amount is limited to the reserved balance, and the order stays open until all lines are delivered."
+                : "This delivers all remaining reserved quantities, including service lines, and creates an invoice for those delivered lines."}</p>
+            {orderActionTarget.action === "deliverPartial" && <div className="sales-partial-delivery-lines">
+              {orderActionTarget.order.lines.filter((line) => line.deliverableThousandths > 0).map((line) => (
+                <label key={line.lineId}>
+                  <span>{line.description} <small>Available: {(line.deliverableThousandths / 1000).toFixed(3)}</small></span>
+                  <input
+                    aria-label={`Quantity to deliver for ${line.description}`}
+                    type="number"
+                    min="0"
+                    max={(line.deliverableThousandths / 1000).toString()}
+                    step="0.001"
+                    inputMode="decimal"
+                    value={partialDeliveryQuantities[line.lineId] ?? ""}
+                    onChange={(event) => { const value = event.currentTarget.value; setPartialDeliveryQuantities((current) => ({ ...current, [line.lineId]: value })); }}
+                    disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady}
+                  />
+                </label>
+              ))}
+            </div>}
             <div className="sales-write-actions">
               <button type="button" className="sales-write-secondary" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady} onClick={() => setOrderActionTarget(null)}>Keep order</button>
-              <button type="button" className="sales-write-primary" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady} onClick={() => void handleOrderAction()}>{writeBusy ? "Working…" : orderActionTarget.action === "deliver" ? "Deliver all and invoice" : "Cancel order"}</button>
+              <button type="button" className="sales-write-primary" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady || (orderActionTarget.action === "deliverPartial" && !partialSelection?.valid)} onClick={() => void handleOrderAction()}>{writeBusy ? "Working…" : orderActionTarget.action === "cancel" ? "Cancel order" : orderActionTarget.action === "deliverPartial" ? "Deliver selected quantities and invoice" : "Deliver all and invoice"}</button>
             </div>
           </section>
         </div>

@@ -86,13 +86,22 @@ type SalesListOrdersInput struct {
 }
 
 type SalesListOrderItem struct {
-	ID          string `json:"id"`
-	Number      int64  `json:"number"`
-	CustomerID  string `json:"customerId"`
-	Status      string `json:"status"`
-	Backordered bool   `json:"backordered"`
-	TotalMinor  int64  `json:"totalMinor"`
-	CreatedAt   string `json:"createdAt"`
+	ID          string                   `json:"id"`
+	Number      int64                    `json:"number"`
+	CustomerID  string                   `json:"customerId"`
+	Status      string                   `json:"status"`
+	Backordered bool                     `json:"backordered"`
+	TotalMinor  int64                    `json:"totalMinor"`
+	CreatedAt   string                   `json:"createdAt"`
+	Lines       []SalesListOrderLineItem `json:"lines"`
+}
+
+type SalesListOrderLineItem struct {
+	LineID                 string `json:"lineId"`
+	Description            string `json:"description"`
+	QuantityThousandths    int64  `json:"quantityThousandths"`
+	DeliveredThousandths   int64  `json:"deliveredThousandths"`
+	DeliverableThousandths int64  `json:"deliverableThousandths"`
 }
 
 type SalesListOrdersOutput struct {
@@ -1087,18 +1096,33 @@ func salesListOrders(ctx context.Context, tx pgx.Tx, orgID string, input SalesLi
 	orders := make([]SalesListOrderItem, 0, len(collected))
 	for _, listed := range collected {
 		lineRows, err := tx.Query(ctx, `
-			SELECT quantity, unit_price_minor, tax_minor FROM sales_order_lines WHERE order_id = $1::uuid`, listed.id)
+			SELECT sales_order_lines.id::text, description, quantity, delivered_thousandths,
+			       reserved_thousandths, sales_order_lines.item_id::text, items.kind,
+			       unit_price_minor, tax_minor
+			FROM sales_order_lines
+			LEFT JOIN items ON items.id = sales_order_lines.item_id AND items.org_id = $2::uuid
+			WHERE sales_order_lines.order_id = $1::uuid ORDER BY sales_order_lines.id`, listed.id, orgID)
 		if err != nil {
 			return SalesListOrdersOutput{}, err
 		}
 		var total int64
+		type listedLine struct {
+			item     SalesListOrderLineItem
+			reserved int64
+			itemID   *string
+			kind     *string
+		}
+		lines := make([]listedLine, 0)
 		for lineRows.Next() {
-			var quantity, unitPriceMinor, taxMinor int64
-			if err := lineRows.Scan(&quantity, &unitPriceMinor, &taxMinor); err != nil {
+			var line listedLine
+			var unitPriceMinor, taxMinor int64
+			if err := lineRows.Scan(&line.item.LineID, &line.item.Description, &line.item.QuantityThousandths,
+				&line.item.DeliveredThousandths, &line.reserved, &line.itemID, &line.kind, &unitPriceMinor, &taxMinor); err != nil {
 				lineRows.Close()
 				return SalesListOrdersOutput{}, err
 			}
-			total += int64(math.Round(float64(quantity)*float64(unitPriceMinor)/1000)) + taxMinor
+			total += int64(math.Round(float64(line.item.QuantityThousandths)*float64(unitPriceMinor)/1000)) + taxMinor
+			lines = append(lines, line)
 		}
 		if err := lineRows.Err(); err != nil {
 			lineRows.Close()
@@ -1106,6 +1130,18 @@ func salesListOrders(ctx context.Context, tx pgx.Tx, orgID string, input SalesLi
 		}
 		lineRows.Close()
 		listed.item.TotalMinor = total
+		listed.item.Lines = make([]SalesListOrderLineItem, 0, len(lines))
+		for _, line := range lines {
+			deliverable := line.item.QuantityThousandths - line.item.DeliveredThousandths
+			if line.itemID != nil && (line.kind == nil || *line.kind != "service") {
+				deliverable = line.reserved - line.item.DeliveredThousandths
+			}
+			if deliverable < 0 {
+				deliverable = 0
+			}
+			line.item.DeliverableThousandths = deliverable
+			listed.item.Lines = append(listed.item.Lines, line.item)
+		}
 		orders = append(orders, listed.item)
 	}
 	return SalesListOrdersOutput{Orders: orders}, nil

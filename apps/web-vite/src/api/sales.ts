@@ -8,6 +8,13 @@ const GoSalesOrderSchema = z.object({
   backordered: z.boolean(),
   totalMinor: z.number().int().safe(),
   createdAt: z.string().datetime({ offset: true }),
+  lines: z.array(z.object({
+    lineId: z.string().uuid(),
+    description: z.string().min(1),
+    quantityThousandths: z.number().int().positive().safe(),
+    deliveredThousandths: z.number().int().nonnegative().safe(),
+    deliverableThousandths: z.number().int().nonnegative().safe(),
+  }).strict()).default([]),
 }).strict();
 const GoSalesOrdersSchema = z.object({ orders: z.array(GoSalesOrderSchema) }).strict();
 const GoSalesCustomersSchema = z.object({ customers: z.array(z.object({ id: z.string().uuid(), name: z.string().min(1) }).strict()) }).strict();
@@ -49,7 +56,10 @@ const CreateOrderSchema = z.object({
   note: z.string().optional(),
   lines: z.array(SalesWriteLineSchema).min(1),
 }).strict();
-const DeliverOrderSchema = z.object({ action: z.literal("deliver"), orderId: z.string().uuid() }).strict();
+const DeliverOrderLineSchema = z.object({ lineId: z.string().uuid(), quantityThousandths: z.number().int().positive().safe() }).strict();
+const DeliverOrderSchema = z.object({
+  action: z.literal("deliver"), orderId: z.string().uuid(), lines: z.array(DeliverOrderLineSchema).min(1).optional(),
+}).strict();
 const CancelOrderSchema = z.object({ action: z.literal("cancel"), orderId: z.string().uuid() }).strict();
 const SalesOrderWriteSchema = z.discriminatedUnion("action", [CreateOrderSchema, DeliverOrderSchema, CancelOrderSchema]);
 const PendingWriteSchema = z.object({
@@ -69,7 +79,7 @@ const CancelOrderOutputSchema = z.object({ status: z.literal("cancelled"), relea
 const SalesOrderAttemptPrefix = "chaste:sales-order-write-attempt:";
 
 type SalesRetryScope = { actorId: string | null; organizationId: string | null };
-type SalesOrderWrite = z.infer<typeof SalesOrderWriteSchema>;
+export type SalesOrderWrite = z.infer<typeof SalesOrderWriteSchema>;
 export type RouteLessSalesOrderMarker = { action: SalesOrderWrite["action"]; intentId: string; fingerprint: string };
 const StoredSalesOrderAttemptSchema = z.object({
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
@@ -243,22 +253,24 @@ export async function clearRouteLessSalesOrderAttempt(retryScope: SalesRetryScop
   }, true);
 }
 
-export async function restorePendingSalesOrderCreate(retryScope: SalesRetryScope): Promise<Extract<SalesOrderWrite, { action: "create" }> | null> {
+export async function restorePendingSalesOrderAction(retryScope: SalesRetryScope): Promise<SalesOrderWrite | null> {
   const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
   if (!scope.actorId || !scope.organizationId) return null;
   let storageKey: string;
   try { storageKey = `${SalesOrderAttemptPrefix}${await salesOrderDigest(JSON.stringify(scope))}`; }
   catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
-  const stored = readSalesOrderAttempt(storageKey);
-  if (!stored || stored.action.action !== "create") return null;
-  if (stored.route !== "go") throw routeLessAttemptError();
-  let fingerprint: string;
-  try { fingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action })); }
-  catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
-  if (fingerprint !== stored.fingerprint) {
-    throw new SalesApiError(0, "A saved sales order retry marker does not match its action. Verify order history before submitting another change.");
-  }
-  return stored.action;
+  return withSalesOrderMarkerLock(storageKey, async () => {
+    const stored = readSalesOrderAttempt(storageKey);
+    if (!stored) return null;
+    if (stored.route !== "go") throw routeLessAttemptError();
+    await verifySalesOrderAttemptScope(scope, stored);
+    return stored.action;
+  }, true);
+}
+
+export async function restorePendingSalesOrderCreate(retryScope: SalesRetryScope): Promise<Extract<SalesOrderWrite, { action: "create" }> | null> {
+  const action = await restorePendingSalesOrderAction(retryScope);
+  return action?.action === "create" ? action : null;
 }
 
 export class SalesApiError extends Error {

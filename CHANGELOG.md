@@ -13,6 +13,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Sales can deliver selected quantities from confirmed orders and invoice each delivery through Go, with Go-reported reserved balances and retry-safe line quantities.
 - Vite Payroll can execute and void draft runs and reverse executed postings through Go, with explicit confirmation and actor/org scoped exact retry recovery.
 - Vite People can deactivate active employees through Go after confirmation; deactivated records remain visible and no longer appear as eligible for future payroll runs.
 - Vite Inventory can reconcile stock value to the General Ledger and reverse recent valuation summaries through Go, with policy-dependent approval handling and exact retry recovery for uncertain actions. Posting remains available to `inventory.write` users when the separate Accounting history read is denied; reversing a prior summary requires `accounting.read`.
