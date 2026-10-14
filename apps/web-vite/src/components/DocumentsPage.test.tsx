@@ -266,6 +266,137 @@ describe("Vite documents page", () => {
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/documents")).toBe(false);
   });
 
+  it("requires confirmation before deleting an ingested document through Go", async () => {
+    vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+    const actorId = "11111111-aaaa-4aaa-8aaa-111111111111";
+    const organizationId = "22222222-bbbb-4bbb-8bbb-222222222222";
+    let remaining = [{ ...rows[0]!, id: goDocumentId }];
+    const requests: Array<{ url: string; capabilityId?: string; input?: Record<string, unknown>; intentId?: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: actorId, name: "Ada", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: actorId, expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
+      if (url === "/api/org") return Response.json({ activeOrgId: organizationId, orgs: [{ id: organizationId, name: "Workspace" }] });
+      const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: Record<string, unknown>; intentId?: string };
+      requests.push({ url, ...request });
+      if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+      if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listIngestedDocuments") {
+        if (request.input?.id) return Response.json({ ok: true, data: { document: detail(goDocumentId, "Supplier invoice", "parsed", "Invoice 42").document } });
+        return Response.json({ ok: true, data: { documents: remaining, vendors: [] } });
+      }
+      if (request.capabilityId === "documents.deleteDocument") {
+        expect(request.input).toEqual({ documentId: goDocumentId });
+        expect(request.intentId).toMatch(/^[0-9a-f-]{36}$/u);
+        remaining = [];
+        return Response.json({ ok: true, data: { deleted: true } });
+      }
+      throw new Error(`Unexpected capability ${request.capabilityId}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete record" }));
+    expect(screen.getByText(/permanently deletes the uploaded record/u)).not.toBeNull();
+    expect(requests.some((request) => request.capabilityId === "documents.deleteDocument")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+
+    expect(await screen.findByRole("heading", { name: "No documents yet" })).not.toBeNull();
+    expect(await screen.findByText("Document deleted.")).not.toBeNull();
+    expect(requests.filter((request) => request.capabilityId === "documents.deleteDocument")).toHaveLength(1);
+    expect(requests.some((request) => request.url === "/api/documents")).toBe(false);
+  });
+
+  it("keeps delete confirmation bound to the document that opened it", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string } };
+      if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+      if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listIngestedDocuments") {
+        return request.input?.id
+          ? Response.json({ ok: true, data: { document: detail(request.input.id, request.input.id === goDocumentId ? "Supplier invoice" : "Warehouse notes", "parsed", null).document } })
+          : Response.json({ ok: true, data: { documents: rows, vendors: [] } });
+      }
+      throw new Error(`Unexpected capability ${request.capabilityId}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete record" }));
+    expect(screen.getByRole("button", { name: "Confirm delete" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Warehouse notes/ }));
+    expect(await screen.findByRole("heading", { name: "Warehouse notes" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirm delete" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body ?? "{}")).capabilityId === "documents.deleteDocument")).toBe(false);
+  });
+
+  it.each(["actor", "workspace"] as const)("offers exact retry after reload and refuses it after the %s changes", async (changedScope) => {
+    vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+    const actorId = "11111111-aaaa-4aaa-8aaa-111111111111";
+    const organizationId = "22222222-bbbb-4bbb-8bbb-222222222222";
+    let activeActorId = actorId;
+    let activeOrganizationId = organizationId;
+    let documentExists = true;
+    const deleteRequests: Array<{ intentId?: string; documentId?: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: activeActorId, name: "Ada", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: activeActorId, expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
+      if (url === "/api/org") return Response.json({ activeOrgId: activeOrganizationId, orgs: [{ id: activeOrganizationId, name: "Workspace" }] });
+      const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string; documentId?: string }; intentId?: string };
+      if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
+      if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listIngestedDocuments") {
+        if (request.input?.id) {
+          if (!documentExists) return Response.json({ error: "The document was not found." }, { status: 404 });
+          return Response.json({ ok: true, data: { document: detail(goDocumentId, "Supplier invoice", "parsed", null).document } });
+        }
+        return Response.json({ ok: true, data: { documents: documentExists ? [{ ...rows[0]!, id: goDocumentId }] : [], vendors: [] } });
+      }
+      if (request.capabilityId === "documents.deleteDocument") {
+        deleteRequests.push({ intentId: request.intentId, documentId: request.input?.documentId });
+        if (deleteRequests.length === 1) {
+          documentExists = false;
+          throw new TypeError("connection reset after server commit");
+        }
+        return Response.json({ ok: true, data: { deleted: false } });
+      }
+      throw new Error(`Unexpected capability ${request.capabilityId}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
+    const firstRender = render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete record" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    expect(await screen.findByText(/The result for document/u)).not.toBeNull();
+    expect(deleteRequests).toHaveLength(1);
+    firstRender.unmount();
+    window.history.replaceState(null, "", "/documents");
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Previous deletion needs confirmation" })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "No documents yet" })).not.toBeNull();
+    if (changedScope === "actor") activeActorId = "33333333-cccc-4ccc-8ccc-333333333333";
+    else activeOrganizationId = "44444444-dddd-4ddd-8ddd-444444444444";
+    fireEvent.click(screen.getByRole("button", { name: "Retry previous deletion" }));
+    expect(await screen.findByText(/Switch back to the original scope/u)).not.toBeNull();
+    expect(deleteRequests).toHaveLength(1);
+    activeActorId = actorId;
+    activeOrganizationId = organizationId;
+    fireEvent.click(screen.getByRole("button", { name: "Retry previous deletion" }));
+    expect(await screen.findByText("This document was already deleted.")).not.toBeNull();
+    expect(deleteRequests).toHaveLength(2);
+    expect(deleteRequests[0]?.intentId).toBe(deleteRequests[1]?.intentId);
+    expect(deleteRequests.every((request) => request.documentId === goDocumentId)).toBe(true);
+    expect(screen.queryByRole("heading", { name: "Previous deletion needs confirmation" })).toBeNull();
+  });
+
   it("shows selected Go list errors without retrying the legacy document route", async () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -10,9 +10,13 @@ import {
   fetchAuthoredDocuments,
   fetchDocumentFolders,
   renameDocumentFolder,
+  deleteIngestedDocument,
+  hasPendingIngestedDocumentDeletionMarker,
+  pendingIngestedDocumentDeletion,
   type AuthoredDocumentRow,
   type DocumentFolder,
   type DocumentsLibraryScope,
+  type PendingIngestedDocumentDeletion,
 } from "../api/documents-library";
 import { navigate } from "../navigation";
 import "./documents-page.css";
@@ -72,7 +76,25 @@ function statusClass(status: string): string {
   return "documents-status-neutral";
 }
 
-function DocumentDetails({ state, selected }: { state: DetailState; selected: DocumentRow }) {
+function DocumentDetails({
+  state,
+  selected,
+  deleteConfirm,
+  deleteBlocked,
+  deleting,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
+}: {
+  state: DetailState;
+  selected: DocumentRow;
+  deleteConfirm: boolean;
+  deleteBlocked: boolean;
+  deleting: boolean;
+  onRequestDelete: () => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
+}) {
   if (state.status === "loading" || state.status === "idle") {
     return <p className="documents-detail-message" role="status">Loading document details…</p>;
   }
@@ -95,6 +117,17 @@ function DocumentDetails({ state, selected }: { state: DetailState; selected: Do
           <h2>{document.title}</h2>
         </div>
         <span className={`documents-status ${statusClass(document.status)}`}>{document.status}</span>
+      </div>
+      <div className="documents-ingest-actions">
+        {deleteConfirm ? (
+          <>
+            <span>This permanently deletes the uploaded record and its extracted content.</span>
+            <button type="button" className="documents-secondary-action" disabled={deleting} onClick={onCancelDelete}>Cancel</button>
+            <button type="button" className="documents-primary-link" disabled={deleting} onClick={onConfirmDelete}>{deleting ? "Deleting…" : "Confirm delete"}</button>
+          </>
+        ) : (
+          <button type="button" className="documents-secondary-action" disabled={deleting || deleteBlocked} onClick={onRequestDelete}>Delete record</button>
+        )}
       </div>
       <dl className="documents-metadata">
         <div><dt>Added</dt><dd><time dateTime={document.createdAt}>{formatDate(document.createdAt)}</time></dd></div>
@@ -159,6 +192,10 @@ export function DocumentsPage() {
   const [folderNewPath, setFolderNewPath] = useState("");
   const [folderDeleteConfirm, setFolderDeleteConfirm] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
+  const [documentDeleteConfirmId, setDocumentDeleteConfirmId] = useState<string | null>(null);
+  const [documentDeleting, setDocumentDeleting] = useState(false);
+  const [documentDeleteNotice, setDocumentDeleteNotice] = useState<string | null>(null);
+  const [pendingDocumentDelete, setPendingDocumentDelete] = useState<PendingIngestedDocumentDeletion | null>(null);
   const [retry, setRetry] = useState(0);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -207,6 +244,17 @@ export function DocumentsPage() {
     }
   }, []);
 
+  const libraryScope = useCallback(async (): Promise<DocumentsLibraryScope> => {
+    const session = await authClient.getSession();
+    const actorId = session.data?.user.id;
+    if (session.error || !actorId) throw new Error("Sign in again before changing documents.");
+    const organizations = await fetchOrganizations();
+    if (!organizations.activeOrgId || !organizations.orgs.some((organization) => organization.id === organizations.activeOrgId)) {
+      throw new Error("Choose an active workspace before changing documents.");
+    }
+    return { actorId, organizationId: organizations.activeOrgId };
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
@@ -223,6 +271,24 @@ export function DocumentsPage() {
     });
     return () => controller.abort();
   }, [state.status, retry]);
+
+  useEffect(() => {
+    if (state.status !== "ready") return;
+    if (!hasPendingIngestedDocumentDeletionMarker()) {
+      setPendingDocumentDelete(null);
+      return;
+    }
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const pendingId = await pendingIngestedDocumentDeletion(await libraryScope());
+        if (!controller.signal.aborted) setPendingDocumentDelete(pendingId);
+      } catch (error) {
+        if (!controller.signal.aborted) setDocumentDeleteNotice(error instanceof Error ? error.message : "Could not check for a pending document deletion.");
+      }
+    })();
+    return () => controller.abort();
+  }, [state.status, retry, libraryScope]);
 
   useEffect(() => {
     if (state.status !== "ready") return;
@@ -269,17 +335,6 @@ export function DocumentsPage() {
     return authoredDocuments.filter((document) => [document.title, document.status, document.folder ?? "", document.documentType ?? "", document.linkedRecordLabel ?? ""]
       .some((value) => value.toLocaleLowerCase().includes(needle)));
   }, [authoredDocuments, authoredQuery]);
-
-  async function libraryScope(): Promise<DocumentsLibraryScope> {
-    const session = await authClient.getSession();
-    const actorId = session.data?.user.id;
-    if (session.error || !actorId) throw new Error("Sign in again before changing folders.");
-    const organizations = await fetchOrganizations();
-    if (!organizations.activeOrgId || !organizations.orgs.some((organization) => organization.id === organizations.activeOrgId)) {
-      throw new Error("Choose an active workspace before changing folders.");
-    }
-    return { actorId, organizationId: organizations.activeOrgId };
-  }
 
   async function reloadFolders() {
     const result = await fetchDocumentFolders();
@@ -347,6 +402,46 @@ export function DocumentsPage() {
     } finally {
       setFolderBusy(false);
     }
+  }
+
+  async function submitDocumentDelete(documentId: string, recovery = false, originalScope?: PendingIngestedDocumentDeletion) {
+    if (documentDeleting || (pendingDocumentDelete && pendingDocumentDelete.documentId !== documentId)) return;
+    if (!recovery && (selected?.id !== documentId || documentDeleteConfirmId !== documentId)) return;
+    setDocumentDeleting(true);
+    setDocumentDeleteNotice(null);
+    let scope: DocumentsLibraryScope | null = null;
+    try {
+      scope = await libraryScope();
+      if (recovery && originalScope && (scope.actorId !== originalScope.actorId || scope.organizationId !== originalScope.organizationId)) {
+        setDocumentDeleteNotice("This deletion belongs to a different account or workspace. Switch back to the original scope before retrying it.");
+        return;
+      }
+      const outcome = await deleteIngestedDocument(documentId, scope);
+      if (outcome.kind === "pending") {
+        setDocumentDeleteNotice(outcome.hint);
+        setPendingDocumentDelete({ documentId, actorId: scope.actorId, organizationId: scope.organizationId });
+        return;
+      }
+      setDocumentDeleteConfirmId(null);
+      setPendingDocumentDelete(null);
+      setDocumentDeleteNotice(outcome.data.deleted ? "Document deleted." : "This document was already deleted.");
+      if (selected?.id === documentId) setSelectedId(null);
+      await load();
+    } catch (error) {
+      setDocumentDeleteNotice(error instanceof Error ? error.message : "Could not delete the document.");
+      try {
+        scope ??= await libraryScope();
+        setPendingDocumentDelete(await pendingIngestedDocumentDeletion(scope));
+      } catch {
+        if (scope) setPendingDocumentDelete({ documentId, actorId: scope.actorId, organizationId: scope.organizationId });
+      }
+    } finally {
+      setDocumentDeleting(false);
+    }
+  }
+
+  async function retryPendingDocumentDelete() {
+    if (pendingDocumentDelete) await submitDocumentDelete(pendingDocumentDelete.documentId, true, pendingDocumentDelete);
   }
 
   const createDraft = async () => {
@@ -431,6 +526,16 @@ export function DocumentsPage() {
 
       {createError && <p className="documents-error" role="alert">{createError}</p>}
       {ingestSuccess && <p className="documents-ingest-success" role="status">Document added to the records library.</p>}
+      {documentDeleteNotice && <p className="documents-folder-notice" role="status">{documentDeleteNotice}</p>}
+      {pendingDocumentDelete && (
+        <section className="documents-detail-error" role="alert">
+          <h2>Previous deletion needs confirmation</h2>
+          <p>The result for document {pendingDocumentDelete.documentId} was not confirmed. Retry the same deletion to confirm whether it was removed.</p>
+          <button type="button" disabled={documentDeleting} onClick={() => void retryPendingDocumentDelete()}>
+            {documentDeleting ? "Retrying…" : "Retry previous deletion"}
+          </button>
+        </section>
+      )}
 
       {ingestMode && (
         <section className="documents-ingest-form" aria-labelledby="documents-ingest-title">
@@ -572,7 +677,7 @@ export function DocumentsPage() {
                       type="button"
                       className={`documents-list-button${selectedId === document.id ? " documents-list-button-current" : ""}`}
                       aria-current={selectedId === document.id ? "true" : undefined}
-                      onClick={() => { setRequestedSelectionError(null); setSelectedId(document.id); }}
+                      onClick={() => { setRequestedSelectionError(null); setDocumentDeleteConfirmId(null); setSelectedId(document.id); }}
                     >
                       <span className="documents-list-heading"><strong>{document.title}</strong><span className={`documents-status ${statusClass(document.status)}`}>{document.status}</span></span>
                       <span className="documents-list-meta">{document.folder || "Unfiled"}<span aria-hidden="true"> · </span>{formatDate(document.createdAt)}</span>
@@ -585,7 +690,16 @@ export function DocumentsPage() {
             )}
           </aside>
           <section className="documents-detail-panel" aria-label="Selected document">
-            {selected ? <DocumentDetails state={detailState} selected={selected} /> : requestedSelectionError ? null : <p className="documents-detail-message">Select a document to review its details.</p>}
+            {selected ? <DocumentDetails
+              state={detailState}
+              selected={selected}
+              deleteConfirm={documentDeleteConfirmId === selected.id}
+              deleteBlocked={pendingDocumentDelete !== null}
+              deleting={documentDeleting}
+              onRequestDelete={() => { setDocumentDeleteConfirmId(selected.id); setDocumentDeleteNotice(null); }}
+              onCancelDelete={() => setDocumentDeleteConfirmId(null)}
+              onConfirmDelete={() => void submitDocumentDelete(selected.id)}
+            /> : requestedSelectionError ? null : <p className="documents-detail-message">Select a document to review its details.</p>}
           </section>
         </section>
       )}

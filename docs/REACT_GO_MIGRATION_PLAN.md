@@ -4575,3 +4575,13 @@ new owners and the manifest shows zero legacy runtime paths.
      typecheck and lint pass. Authenticated browser proof showed the order
      disclosure values, loaded Quotes and Deals without a shape error, and
      recorded no console errors or failed requests.
+
+424. (Runtime verified) Vite Documents can delete an ingested record through
+     Go's `documents.deleteDocument` capability after explicit confirmation.
+     Exact retries persist the document ID, intent, actor, and organization;
+     reload recovery remains available when a response is lost, and the action
+     refuses to replay under another actor or organization. Confirmation stays
+     bound to the selected record. Focused tests pass 25 cases, with Vite
+     typecheck and lint passing. Authenticated browser proof aborted the first
+     request, recovered after reload, refused a different workspace without a
+     capability call, then replayed successfully in the original workspace.

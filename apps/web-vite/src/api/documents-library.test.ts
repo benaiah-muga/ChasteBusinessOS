@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDocumentFolder,
+  deleteIngestedDocument,
   deleteDocumentFolder,
   DocumentsLibraryApiError,
   fetchAuthoredDocuments,
   fetchDocumentFolders,
+  pendingIngestedDocumentDeletion,
   renameDocumentFolder,
   searchDocumentRecords,
 } from "./documents-library";
@@ -107,5 +109,36 @@ describe("Go document library capability client", () => {
     expect(requests.map((request) => request.body.capabilityId)).toEqual(["documents.renameFolder", "documents.deleteFolder"]);
     expect(requests.every((request) => typeof request.body.intentId === "string")).toBe(true);
     expect(requests.every((request) => organizationHeaderOf(request.init) === organizationId)).toBe(true);
+  });
+
+  it("deletes an ingested record through Go with the same intent after a lost response", async () => {
+    stubWebLocks();
+    const requests: Array<{ body: Record<string, unknown>; init?: RequestInit }> = [];
+    let attempt = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ body: bodyOf(init), init });
+      attempt += 1;
+      if (attempt === 1) throw new TypeError("connection reset");
+      return Response.json({ ok: true, data: { deleted: true } });
+    }));
+
+    await expect(deleteIngestedDocument(authored.id, { actorId, organizationId })).rejects.toBeInstanceOf(DocumentsLibraryApiError);
+    await expect(pendingIngestedDocumentDeletion({ actorId, organizationId })).resolves.toEqual({ documentId: authored.id, actorId, organizationId });
+    await expect(deleteIngestedDocument(authored.id, { actorId, organizationId })).resolves.toMatchObject({ kind: "completed", data: { deleted: true } });
+    await expect(pendingIngestedDocumentDeletion({ actorId, organizationId })).resolves.toBeNull();
+    expect(requests).toHaveLength(2);
+    expect(requests.map(({ body }) => body)).toMatchObject([
+      { capabilityId: "documents.deleteDocument", input: { documentId: authored.id }, intentId: expect.any(String) },
+      { capabilityId: "documents.deleteDocument", input: { documentId: authored.id }, intentId: expect.any(String) },
+    ]);
+    expect(requests[0]?.body.intentId).toBe(requests[1]?.body.intentId);
+    expect(requests.every(({ init }) => organizationHeaderOf(init) === organizationId)).toBe(true);
+  });
+
+  it("rejects invalid ingested document IDs before sending a delete", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    expect(() => deleteIngestedDocument("bad-id", { actorId, organizationId })).toThrow(/invalid ID/u);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
