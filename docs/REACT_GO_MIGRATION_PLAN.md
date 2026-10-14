@@ -237,28 +237,22 @@ Sessions
 preserve the existing selection, event sequence, replay, durable-run, and
 metrics response contracts. Projects preserve module availability, board and
 task ordering, governed writes, archive confirmation, and `202` approval
-notices. Both use existing legacy APIs and retain legacy production route
-ownership. Projects component, API, shell, typecheck, build, and lint tests
-pass; its browser runtime proof remains open.
+notices. Vite Projects reads use Go's `/api/projects` and `/api/team` routes;
+mutations use Go capabilities. Proof 389 confirms the authenticated browser
+flow for project and task writes, assignment, movement, and reload recovery.
 
-Go now implements all five Projects write capabilities through the existing
-governed executor. DB-backed proofs cover input parser parity, module and grant
-checks, verified-session and tenant scope, approval payload replay, audit
-rollback, and durable receipts. The public `POST /api/projects` bridge is
-available behind `GO_PROJECTS_WRITE=1`. It preserves legacy response shapes
-and fails closed on uncertain outcomes. The flag defaults off, while
-`GET /api/projects` now has an independent `GO_PROJECTS_READ=1` opt-in for the
-Go collection and board readers. The collection reader keeps its legacy
-no-audit behavior; the board continues through the audited capability. The
-development shadow flag compares collection reads only, because shadowing the
-board would append an extra capability audit event. All flags default off and
-the public route remains legacy-owned pending the remaining browser parity
-gates.
+Go implements all five Projects write capabilities through the governed
+executor. DB-backed proofs cover module and grant checks, verified-session and
+tenant scope, approval payload replay, audit rollback, and durable receipts.
+Vite sends project collection reads to Go's `/api/projects` route, board reads
+through Go capabilities, and project mutations through session-authenticated
+capabilities. The route manifest marks both `/api/projects` methods Go-owned
+and verified; proof 389 verifies the Vite flow.
 
 The React Projects page can independently send project creation, archival, task
 creation, movement, and assignment straight to Go's session capability endpoint
 with `CHASTE_GO_PROJECTS_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`.
-This keeps the existing project and board read path while Go owns these writes.
+Project and board reads use Go APIs, and these mutations use Go capabilities.
 The browser stores exact actor and organization scoped action intents for reload
 recovery and blocks legacy writes while a Go action has an unresolved result.
 
@@ -295,7 +289,8 @@ Local verification on 2026-10-04 passed `pnpm typecheck`, `pnpm lint`,
 least-privilege runtime role. The verified local demo set includes the Go
 slice, M2-M13, M4b, and support. At that time, the Dashboard, Projects, and
 Analytics browser gates remained open. Subsequent Dashboard and Analytics
-proofs passed with `agent-browser`; the Projects browser gate remains open.
+proofs passed with `agent-browser`; the Projects browser gate later passed in
+proof 389.
 Remaining routes retain their recorded owners until their parity and runtime
 gates pass.
 
@@ -2379,8 +2374,8 @@ new owners and the manifest shows zero legacy runtime paths.
      current value. Fail closed while actor or organization scope is loading.
      The Go capability pipeline enforces authenticated active organization
      membership and `projects.write`. Existing focused API, proxy, page, parser,
-     receipt replay, guard, and tenant tests cover the behavior; browser proof
-     remains open. The focused Projects API/page/proxy suite passed all 182
+     receipt replay, guard, and tenant tests cover the behavior. The focused
+     Projects API/page/proxy suite passed all 182
      tests; Go capability contract, parser, lifecycle, reciprocal inverse,
      permission, identity, organization isolation, approval, and rollback tests
      passed with runtime integration required. Vite typecheck and lint passed.
@@ -3052,13 +3047,15 @@ new owners and the manifest shows zero legacy runtime paths.
      returned 200 through Go, and the Vite component tests cover the page's
      write controls with Better Auth's opaque user ID format.
 
-270. (Implemented and tested; authenticated write browser proof remains open)
+270. (Complete)
      Accept Better Auth's bounded opaque user IDs in local retry scopes for all
      Vite Go-backed writes. This covers CRM, products, accounting, HR, expenses,
      marketing, support, projects, and purchasing payment runs. Organization
      IDs remain UUID-validated, and the actor ID is only a local recovery key;
      Go derives identity and authorization from the verified session. Focused
      tests cover the opaque actor format and fail-closed invalid scopes.
+     Authenticated Vite browser proof using an opaque Better Auth ID is
+     recorded in proof 389.
 
 271. (Runtime verified) Remove
      the Vite Manufacturing page's link to the legacy workspace. The Vite page
@@ -4160,3 +4157,13 @@ new owners and the manifest shows zero legacy runtime paths.
      directions. The Accounting Tax tab displayed only `MIGOUT18`; Purchasing's
      vendor-bill form offered only `MIGIN18` under Input tax. The browser error
      log was empty. This completes item 283.
+
+389. (Runtime verified) On 2026-10-14, authenticated Vite loaded Projects
+     collection and board data through Go's `/api/projects` and `/api/team`
+     routes. The authenticated Better Auth user ID was opaque and not a UUID.
+     Vite created a synthetic project and a task assigned to the synthetic
+     teammate, then moved the task to Doing through Go's
+     `projects.createProject`, `projects.createTask`, and `projects.moveTask`
+     capabilities; all returned HTTP 200. After reload, the project, task
+     status, and assignment remained. No browser errors occurred. This
+     completes item 270 and verifies the Projects browser flow.
