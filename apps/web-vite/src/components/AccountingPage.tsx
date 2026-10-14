@@ -5,6 +5,7 @@ import {
   emailInvoice,
   fetchAccountingBanking,
   fetchAccountingBudgetScenarios,
+  fetchBudgetActualVsPlan,
   fetchAccountingCashBasis,
   fetchAccountingEnabled,
   fetchAccountingOverview,
@@ -26,6 +27,7 @@ import {
   type AccountingBill,
   type AccountingBanking,
   type AccountingBudgetScenario,
+  type AccountingBudgetActualVsPlan,
   type AccountingCashBasis,
   type AccountingCustomer,
   type AccountingEntry,
@@ -53,6 +55,8 @@ import {
 import "./AccountingPage.css";
 
 /* ------------------------------------------------------------------ money -- */
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -3781,6 +3785,10 @@ function BudgetsSection({ baseCurrency }: { baseCurrency: string }) {
   const [forecast, setForecast] = useState<AccountingForecast | null>(null);
   const [forecastError, setForecastError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [comparison, setComparison] = useState<AccountingBudgetActualVsPlan | null>(null);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [comparisonAttempt, setComparisonAttempt] = useState(0);
+  const [comparisonMonth, setComparisonMonth] = useState(new Date().getUTCMonth() + 1);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -3820,6 +3828,28 @@ function BudgetsSection({ baseCurrency }: { baseCurrency: string }) {
       });
     return () => controller.abort();
   }, [scenarioId, attempt]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setComparison(null);
+    setComparisonError(null);
+    if (!scenarioId) return () => controller.abort();
+    void fetchBudgetActualVsPlan(scenarioId, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setComparison(result);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setComparisonError(
+          error instanceof AccountingApiError
+            ? error.message
+            : "Could not compare this budget with actuals. Try again.",
+        );
+      });
+    return () => controller.abort();
+  }, [scenarioId, comparisonAttempt]);
+
+  const comparisonLines = comparison?.months.find((row) => row.month === comparisonMonth)?.lines ?? [];
 
   return (
     <section className="accounting-stack accounting-narrow">
@@ -3861,6 +3891,60 @@ function BudgetsSection({ baseCurrency }: { baseCurrency: string }) {
             </button>
           ))}
         </div>
+      )}
+
+      {scenarioId && (
+        <section className="accounting-stack" aria-labelledby="budget-actuals-heading">
+          <div className="accounting-section-heading">
+            <div>
+              <h3 id="budget-actuals-heading">Plan versus actuals</h3>
+              <p className="accounting-hint">Posted activity and open purchase commitments are compared with the selected scenario.</p>
+            </div>
+            <label>
+              Month
+              <select aria-label="Budget comparison month" value={comparisonMonth} onChange={(event) => setComparisonMonth(Number(event.target.value))}>
+                {MONTH_NAMES.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}
+              </select>
+            </label>
+          </div>
+          {comparisonError ? (
+            <div className="accounting-button-row">
+              <p className="accounting-callout accounting-callout-danger" role="alert">{comparisonError}</p>
+              <button type="button" onClick={() => setComparisonAttempt((value) => value + 1)}>Retry comparison</button>
+            </div>
+          ) : !comparison ? (
+            <p className="accounting-quiet">Loading plan comparison.</p>
+          ) : (
+            <>
+              {comparison.unconvertedEntryCount > 0 && (
+                <p className="accounting-callout" role="status">
+                  {comparison.unconvertedEntryCount} posted {comparison.unconvertedEntryCount === 1 ? "entry" : "entries"} in another currency {comparison.unconvertedEntryCount === 1 ? "is" : "are"} excluded from this comparison.
+                </p>
+              )}
+              {comparisonLines.length === 0 ? (
+                <p className="accounting-quiet">No plan, posted activity, or purchase commitments for {MONTH_NAMES[comparisonMonth - 1]}.</p>
+              ) : (
+                <div className="accounting-table-scroll" tabIndex={0}>
+                  <table className="accounting-table">
+                    <thead><tr><th>Account</th><th className="is-numeric">Plan</th><th className="is-numeric">Actual</th><th className="is-numeric">Committed</th><th className="is-numeric">Projected</th><th className="is-numeric">Variance</th></tr></thead>
+                    <tbody>
+                      {comparisonLines.map((line) => (
+                        <tr key={line.accountCode}>
+                          <th scope="row">{line.accountCode} · {line.accountName}</th>
+                          <td className="is-numeric">{formatMoneyOrMinor(comparison.currency, line.planMinor)}</td>
+                          <td className="is-numeric">{formatMoneyOrMinor(comparison.currency, line.actualMinor)}</td>
+                          <td className="is-numeric">{formatMoneyOrMinor(comparison.currency, line.committedMinor)}</td>
+                          <td className="is-numeric">{formatMoneyOrMinor(comparison.currency, line.projectedMinor)}</td>
+                          <td className={`is-numeric${line.varianceMinor < 0 ? " is-negative" : ""}`}>{formatMoneyOrMinor(comparison.currency, line.varianceMinor)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </section>
       )}
 
       {forecastError ? (

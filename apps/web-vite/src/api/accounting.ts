@@ -278,6 +278,30 @@ const GoBudgetScenariosSchema = z.object({
   scenarios: z.array(GoBudgetScenarioSchema),
 }).strict();
 
+const BudgetActualVsPlanLineSchema = z.object({
+  accountCode: z.string().regex(/^\d{4}$/),
+  accountName: z.string(),
+  accountType: z.enum(["income", "expense"]),
+  planMinor: minor,
+  actualMinor: minor,
+  committedMinor: minor,
+  projectedMinor: minor,
+  varianceMinor: minor,
+  utilizationBps: z.number().int().safe().nullable(),
+}).strict();
+
+const BudgetActualVsPlanSchema = z.object({
+  scenarioId: z.string().uuid(),
+  name: z.string(),
+  fiscalYear: z.number().int().min(2000).max(2100),
+  currency,
+  unconvertedEntryCount: z.number().int().safe().nonnegative(),
+  months: z.array(z.object({
+    month: z.number().int().min(1).max(12),
+    lines: z.array(BudgetActualVsPlanLineSchema),
+  }).strict()).length(12),
+}).strict();
+
 const CashBasisSchema = z.object({
   cashInMinor: minor,
   cashOutMinor: minor,
@@ -590,6 +614,7 @@ export type AccountingCashBasis = z.infer<typeof CashBasisSchema>;
 export type AccountingBanking = z.infer<typeof BankingSchema>;
 export type AccountingTaxCode = z.infer<typeof TaxCodeSchema>;
 export type AccountingBudgetScenario = z.infer<typeof BudgetScenarioSchema>;
+export type AccountingBudgetActualVsPlan = z.infer<typeof BudgetActualVsPlanSchema>;
 export type AccountingForecast = z.infer<typeof ForecastSchema>;
 export type AccountingReminder = z.infer<typeof ReminderSchema>;
 export type AccountingStatement = z.infer<typeof StatementSchema>;
@@ -883,8 +908,21 @@ export async function fetchAccountingBudgetScenarios(signal?: AbortSignal): Prom
   return result.scenarios.map(({ id, name, fiscalYear, version, isCurrent }) => ({ id, name, fiscalYear, version, isCurrent }));
 }
 
+export async function fetchBudgetActualVsPlan(scenarioId: string, signal?: AbortSignal): Promise<AccountingBudgetActualVsPlan> {
+  if (!z.string().uuid().safeParse(scenarioId).success) {
+    throw new AccountingApiError(400, "Choose a valid budget scenario.");
+  }
+  return readGoAccountingCapability(
+    "accounting.budgetActualVsPlan",
+    { scenarioId },
+    BudgetActualVsPlanSchema,
+    "compare budget actuals and commitments",
+    signal,
+  );
+}
+
 async function readGoAccountingCapability<T>(
-  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.listTaxCodes" | "accounting.buildReminders" | "accounting.cashBasisReport" | "accounting.overview" | "accounting.bankSummary" | "accounting.listBankingWorkspace",
+  capabilityId: "accounting.cashForecast" | "accounting.listBudgetScenarios" | "accounting.budgetActualVsPlan" | "accounting.listTaxCodes" | "accounting.buildReminders" | "accounting.cashBasisReport" | "accounting.overview" | "accounting.bankSummary" | "accounting.listBankingWorkspace",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   context: string,

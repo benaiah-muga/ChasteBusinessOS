@@ -4,6 +4,7 @@ import {
   emailInvoice,
   fetchAccountingBanking,
   fetchAccountingBudgetScenarios,
+  fetchBudgetActualVsPlan,
   fetchAccountingCashBasis,
   fetchAccountingEnabled,
   fetchAccountingOverview,
@@ -365,6 +366,60 @@ describe("accounting API: books and reports", () => {
     await expect(fetchAccountingReports(ORG_ID)).rejects.toMatchObject({
       message: "The Accounting reports service returned an unexpected result.",
     });
+  });
+
+  it("loads a strictly validated Go budget actual-versus-plan comparison", async () => {
+    const scenarioId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const mock = stubFetch(() => Response.json({ ok: true, data: {
+      scenarioId,
+      name: "Base plan",
+      fiscalYear: 2026,
+      currency: "USD",
+      unconvertedEntryCount: 1,
+      months: Array.from({ length: 12 }, (_, index) => ({
+        month: index + 1,
+        lines: index === 9 ? [{
+          accountCode: "6000",
+          accountName: "Office expense",
+          accountType: "expense",
+          planMinor: 25_000,
+          actualMinor: 10_000,
+          committedMinor: 2_500,
+          projectedMinor: 12_500,
+          varianceMinor: 12_500,
+          utilizationBps: 5000,
+        }] : [],
+      })),
+    } }));
+
+    await expect(fetchBudgetActualVsPlan(scenarioId)).resolves.toMatchObject({
+      scenarioId,
+      currency: "USD",
+      months: expect.arrayContaining([expect.objectContaining({ month: 10, lines: [expect.objectContaining({ accountCode: "6000", actualMinor: 10_000 })] })]),
+    });
+    expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.budgetActualVsPlan",
+      input: { scenarioId },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("rejects malformed Go budget actual-versus-plan rows", async () => {
+    const scenarioId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const mock = stubFetch(() => Response.json({ ok: true, data: {
+      scenarioId,
+      name: "Base plan",
+      fiscalYear: 2026,
+      currency: "USD",
+      unconvertedEntryCount: 0,
+      months: Array.from({ length: 12 }, (_, index) => ({
+        month: index + 1,
+        lines: index === 0 ? [{ accountCode: "6000", accountName: "Bad line", accountType: "other" }] : [],
+      })),
+    } }));
+
+    await expect(fetchBudgetActualVsPlan(scenarioId)).rejects.toMatchObject({ name: "AccountingApiError", status: 200 });
+    expect(mock.mock.calls).toHaveLength(1);
   });
 
   it.each([

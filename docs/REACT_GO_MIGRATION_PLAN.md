@@ -4502,3 +4502,15 @@ new owners and the manifest shows zero legacy runtime paths.
      generated a suggestion through Go's governed capability, and reloaded the
      Vite detail view. The account suggestion appeared from Go, requests
      returned HTTP 200, and the browser error log was empty.
+
+417. (Runtime verified) Vite Accounting now compares the
+     selected budget scenario against posted actuals and open purchase
+     commitments for each month through Go's authenticated
+     `accounting.budgetActualVsPlan` capability. The page validates the complete
+     response shape, supports month selection, and identifies posted entries in
+     currencies that cannot be converted. Focused Accounting API and page tests
+     cover the validated result, malformed rows, selected scenario request, and
+     rendered comparison. Authenticated `agent-browser` proof created a
+     synthetic budget through Go in the Migration Verification Workspace, then
+     showed October plan, actual, and commitment values on Vite after reload.
+     Capability reads returned HTTP 200 and browser page-error output was empty.

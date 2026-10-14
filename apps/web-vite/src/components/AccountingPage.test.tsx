@@ -137,6 +137,7 @@ interface StubOptions {
   goCustomerStatementResponse?: () => Response | Promise<Response>;
   goPaymentReminderResponse?: () => Response;
   goBudgetScenarioResponse?: () => Response;
+  goBudgetActualsResponse?: () => Response;
   goCashForecastResponse?: () => Response;
   goCashBasisResponse?: () => Response;
   goOverviewResponse?: () => Response;
@@ -197,6 +198,16 @@ function stubAccounting(options: StubOptions = {}) {
       }
       if (capabilityId === "accounting.listBudgetScenarios") {
         return options.goBudgetScenarioResponse?.() ?? Response.json({ ok: true, data: { scenarios: [] } });
+      }
+      if (capabilityId === "accounting.budgetActualVsPlan") {
+        return options.goBudgetActualsResponse?.() ?? Response.json({ ok: true, data: {
+          scenarioId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          name: "Base plan",
+          fiscalYear: 2026,
+          currency: "USD",
+          unconvertedEntryCount: 0,
+          months: Array.from({ length: 12 }, (_, index) => ({ month: index + 1, lines: [] })),
+        } });
       }
       if (capabilityId === "accounting.listTaxCodes") {
         return Response.json({ ok: true, data: options.taxCodes ?? { codes: [] } });
@@ -1729,15 +1740,43 @@ describe("AccountingPage tabs", () => {
         unsupportedCurrencies: [],
         weeks: [{ weekStart: "2026-10-05T00:00:00.000Z", inflowMinor: 3_000, outflowMinor: 1_000, closeMinor: 12_000 }],
       } }),
+      goBudgetActualsResponse: () => Response.json({ ok: true, data: {
+        scenarioId: scenarioID,
+        name: "Base plan",
+        fiscalYear: 2026,
+        currency: "USD",
+        unconvertedEntryCount: 1,
+        months: Array.from({ length: 12 }, (_, index) => ({
+          month: index + 1,
+          lines: index === new Date().getUTCMonth() ? [{
+            accountCode: "6000",
+            accountName: "Office expense",
+            accountType: "expense",
+            planMinor: 25_000,
+            actualMinor: 10_000,
+            committedMinor: 2_500,
+            projectedMinor: 12_500,
+            varianceMinor: 12_500,
+            utilizationBps: 5000,
+          }] : [],
+        })),
+      } }),
     });
     await renderReady();
 
     fireEvent.click(screen.getByRole("button", { name: /Budgets/ }));
     expect(await screen.findByRole("button", { name: /Base plan.*2026.*Current/ })).toBeTruthy();
     expect(await screen.findByText("Closing cash in 13 weeks")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Plan versus actuals" })).toBeTruthy();
+    expect(await screen.findByText("6000 · Office expense")).toBeTruthy();
+    expect(screen.getByText("1 posted entry in another currency is excluded from this comparison.")).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Budget comparison month" }), { target: { value: "1" } });
+    expect(await screen.findByText("No plan, posted activity, or purchase commitments for January.")).toBeTruthy();
     await waitFor(() => {
       const forecastCalls = calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.cashForecast"));
       expect(forecastCalls.some((call) => call.body?.includes(scenarioID))).toBe(true);
+      const comparisonCalls = calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.budgetActualVsPlan"));
+      expect(comparisonCalls.some((call) => call.body?.includes(scenarioID))).toBe(true);
     });
     expect(calls.some((call) => call.url === "/api/accounting/budgets" || call.body?.includes('"action":"cashForecast"'))).toBe(false);
   });
