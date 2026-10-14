@@ -24,21 +24,30 @@ describe("Expenses API", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { policies: [{ category: "travel", limitMinor: 25000 }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchExpenses()).resolves.toEqual({ claims: [claim], policies: [{ category: "travel", limitMinor: 25000 }] });
+    await expect(fetchExpenses(scope.organizationId)).resolves.toEqual({ claims: [claim], policies: [{ category: "travel", limitMinor: 25000 }] });
     expect(fetchMock.mock.calls.map(([path, init]) => [path, JSON.parse(String(init?.body))])).toEqual([
       ["/api/capabilities/execute", expect.objectContaining({ capabilityId: "accounting.listExpenseClaims", input: {}, intentId: expect.any(String) })],
       ["/api/capabilities/execute", expect.objectContaining({ capabilityId: "accounting.listExpensePolicies", input: {}, intentId: expect.any(String) })],
     ]);
+    expect(fetchMock.mock.calls.every(([, init]) => (init?.headers as Record<string, string>)?.["X-Organization-ID"] === scope.organizationId)).toBe(true);
+  });
+
+  it("fails closed on an invalid organization before loading expenses", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchExpenses("invalid-org-id")).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects malformed Go read payloads and retains permission-denied responses", async () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: true, data: { claims: [{ ...claim, amountMinor: 1.5 }] } }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { policies: [] } })));
-    await expect(fetchExpenses()).rejects.toMatchObject({ name: "ExpensesApiError", status: 200, message: expect.stringContaining("unexpected format") });
+    await expect(fetchExpenses(scope.organizationId)).rejects.toMatchObject({ name: "ExpensesApiError", status: 200, message: expect.stringContaining("unexpected format") });
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: missing expenses.decide" }, { status: 403 })));
-    await expect(fetchExpenses()).rejects.toMatchObject({ name: "ExpensesApiError", status: 403, message: "forbidden: missing expenses.decide" });
+    await expect(fetchExpenses(scope.organizationId)).rejects.toMatchObject({ name: "ExpensesApiError", status: 403, message: "forbidden: missing expenses.decide" });
   });
 
   it("submits integer minor units with an idempotent intent and validates success", async () => {
@@ -52,6 +61,7 @@ describe("Expenses API", () => {
 
     await expect(submitExpenseAction({ action: "submit", amountMinor: 12500, memo: "Taxi" }, undefined, scope)).resolves.toMatchObject({ kind: "completed" });
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store" }));
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": scope.organizationId });
   });
 
   it("surfaces pending approval without treating it as a completed action", async () => {

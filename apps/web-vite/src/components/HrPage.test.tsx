@@ -131,6 +131,7 @@ afterEach(() => {
 
 describe("Vite People page", () => {
   it("loads the default Overview report through Go", async () => {
+    const organizationId = "33333333-3333-4333-8333-333333333333";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
@@ -145,11 +146,12 @@ describe("Vite People page", () => {
       return Response.json({ error: "Unexpected route" }, { status: 404 });
     });
     stubFetchWithGoTimeReads(fetchMock);
-    render(<HrPage />);
+    render(<HrPage organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "Recently added" })).not.toBeNull();
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities/execute")).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities/execute").every(([, init]) => (init?.headers as Record<string, string>)?.["X-Organization-ID"] === organizationId)).toBe(true);
   });
 
   it("fails closed on a Go Overview report error", async () => {
@@ -160,7 +162,7 @@ describe("Vite People page", () => {
       return Response.json({ error: "Unexpected route" }, { status: 404 });
     });
     stubFetchWithGoTimeReads(fetchMock);
-    render(<HrPage />);
+    render(<HrPage organizationId="33333333-3333-4333-8333-333333333333" />);
 
     expect(await screen.findByText("capability unavailable")).not.toBeNull();
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities/execute")).toHaveLength(1);
@@ -183,7 +185,7 @@ describe("Vite People page", () => {
       return Response.json({ error: "Unexpected route" }, { status: 404 });
     });
     stubFetchWithGoTimeReads(fetchMock);
-    render(<HrPage />);
+    render(<HrPage organizationId="33333333-3333-4333-8333-333333333333" />);
 
     expect(await screen.findByText("amina@example.com")).not.toBeNull();
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities/execute")).toHaveLength(1);
@@ -243,6 +245,89 @@ describe("Vite People page", () => {
       { name: "Mira Patel", email: "mira@example.com", title: "Field technician", monthlySalaryMinor: 125000 },
     ]);
     expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
+  });
+
+  it("drops employee hire recovery state immediately when the active organization changes", async () => {
+    stubHrWriteLocks();
+    window.history.replaceState(null, "", "/hr?tab=people");
+    const actorId = "77777777-7777-4777-8777-777777777777";
+    const firstOrg = "88888888-8888-4888-8888-888888888888";
+    const secondOrg = "99999999-9999-4999-8999-999999999999";
+    const hireCalls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: report });
+        if (body.capabilityId === "hr.hireEmployee") {
+          hireCalls.push(body.capabilityId);
+          return Response.json({ pendingApproval: true, reason: "HR approval required." }, { status: 202 });
+        }
+        if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [] } });
+        if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [] } });
+      }
+      return Response.json({ error: `Unexpected route: ${path}` }, { status: 404 });
+    });
+    stubFetchWithGoTimeReads(fetchMock);
+
+    const page = render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={firstOrg} />);
+    await screen.findByRole("heading", { name: "Hire an employee" });
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Mira Patel" } });
+    fireEvent.change(screen.getByLabelText("Monthly salary (UGX)"), { target: { value: "125000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add employee" }));
+    expect(await screen.findByRole("button", { name: "Retry exact employee hire" })).not.toBeNull();
+
+    page.rerender(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={secondOrg} />);
+    await screen.findByRole("heading", { name: "Hire an employee" });
+    expect(screen.queryByRole("button", { name: "Retry exact employee hire" })).toBeNull();
+    expect(hireCalls).toHaveLength(1);
+  });
+
+  it("does not let an old organization mutation refresh data into the new organization", async () => {
+    stubHrWriteLocks();
+    window.history.replaceState(null, "", "/hr?tab=people");
+    const actorId = "66666666-6666-4666-8666-666666666666";
+    const firstOrg = "77777777-7777-4777-8777-777777777777";
+    const secondOrg = "88888888-8888-4888-8888-888888888888";
+    const secondEmployee = { ...employee, id: "55555555-5555-4555-8555-555555555555", name: "Beatrice Example", email: "bea@example.com" };
+    const secondReport = { ...report, employees: [secondEmployee], leave: [] };
+    let finishHire!: (response: Response) => void;
+    const hireResponse = new Promise<Response>((resolve) => { finishHire = resolve; });
+    const reportScopes: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const organization = (init?.headers as Record<string, string> | undefined)?.["X-Organization-ID"];
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (body.capabilityId === "hr.report") {
+          reportScopes.push(organization ?? "missing");
+          return Response.json({ ok: true, data: organization === secondOrg ? secondReport : report });
+        }
+        if (body.capabilityId === "hr.hireEmployee") return hireResponse;
+        if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [] } });
+        if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [] } });
+      }
+      return Response.json({ error: `Unexpected route: ${path}` }, { status: 404 });
+    });
+    stubFetchWithGoTimeReads(fetchMock);
+
+    const page = render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={firstOrg} />);
+    await screen.findByRole("heading", { name: "Hire an employee" });
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Mira Patel" } });
+    fireEvent.change(screen.getByLabelText("Monthly salary (UGX)"), { target: { value: "125000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add employee" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST" && JSON.parse(String(init.body)).capabilityId === "hr.hireEmployee")).toBe(true));
+
+    page.rerender(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={secondOrg} />);
+    expect(await screen.findByText("Beatrice Example")).not.toBeNull();
+    finishHire(Response.json({ ok: true, data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } }));
+
+    await waitFor(() => expect(reportScopes.filter((scope) => scope === secondOrg)).toHaveLength(1));
+    expect(screen.getByText("Beatrice Example")).not.toBeNull();
+    expect(screen.queryByText("Amina Wanjiru")).toBeNull();
+    expect(reportScopes.filter((scope) => scope === firstOrg)).toHaveLength(1);
   });
 
   it("uses Go for the Hiring report and all exposed pipeline changes, with exact retry after reload", async () => {
@@ -382,7 +467,7 @@ describe("Vite People page", () => {
   it("loads the overview and exposes keyboard accessible section tabs", async () => {
     const fetchMock = hrFetch();
     stubFetchWithGoTimeReads(fetchMock);
-    render(<HrPage baseCurrency="UGX" />);
+    render(<HrPage baseCurrency="UGX" organizationId="33333333-3333-4333-8333-333333333333" />);
 
     expect(await screen.findByRole("heading", { name: "People" })).not.toBeNull();
     expect(screen.getByText("Active people")).not.toBeNull();
@@ -504,7 +589,7 @@ describe("Vite People page", () => {
     window.history.replaceState(null, "", "/hr?tab=expenses");
     const fetchMock = hrFetch();
     stubFetchWithGoTimeReads(fetchMock);
-    render(<HrPage baseCurrency="USD" />);
+    render(<HrPage baseCurrency="USD" organizationId="33333333-3333-4333-8333-333333333333" />);
 
     expect(await screen.findByRole("heading", { name: "Submit an expense claim" })).not.toBeNull();
     expect(screen.getByRole("tab", { name: "Expenses" }).getAttribute("aria-selected")).toBe("true");
@@ -521,7 +606,7 @@ describe("Vite People page", () => {
     const baseFetch = hrFetch();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => baseFetch(input, init));
     stubFetchWithGoTimeReads(fetchMock);
-    render(<HrPage />);
+    render(<HrPage organizationId="33333333-3333-4333-8333-333333333333" />);
     await screen.findByRole("heading", { name: "Submit an expense claim" });
 
     const memo = screen.getByRole("textbox", { name: "Expense explanation" }) as HTMLInputElement;
@@ -656,7 +741,7 @@ describe("Vite People page", () => {
       }
       return Response.json({ error: `Unexpected route: ${path}` }, { status: 404 });
     }));
-    render(<HrPage />);
+    render(<HrPage organizationId="33333333-3333-4333-8333-333333333333" />);
 
     expect(await screen.findByRole("heading", { name: "Access denied" })).not.toBeNull();
     expect(screen.getByText("forbidden: missing expenses.decide")).not.toBeNull();
@@ -690,7 +775,8 @@ describe("Vite People page", () => {
       return Response.json({ error: `Unexpected route: ${path}` }, { status: 404 });
     });
     stubFetchWithGoTimeReads(fetchMock);
-    const page = render(<HrPage baseCurrency="USD" actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
+    const organizationId = "66666666-6666-4666-8666-666666666666";
+    const page = render(<HrPage baseCurrency="USD" actorId="55555555-5555-4555-8555-555555555555" organizationId={organizationId} />);
 
     await screen.findByRole("heading", { name: "Submit an expense claim" });
     expect(readCapabilities).toEqual(["hr.report"]);
@@ -711,6 +797,7 @@ describe("Vite People page", () => {
     expect(requests[0]?.intentId).toBe(requests[1]?.intentId);
     expect(requests[0]?.input).toEqual({ amountMinor: 4250, memo: "Client travel" });
     expect(requests[1]?.input).toEqual(requests[0]?.input);
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities/execute").every(([, init]) => (init?.headers as Record<string, string>)?.["X-Organization-ID"] === organizationId)).toBe(true);
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/expenses")).toBe(false);
     expect(fetchMock).not.toHaveBeenCalledWith("/api/expenses", expect.anything());
   });
@@ -856,7 +943,7 @@ describe("Vite People page", () => {
   it("does not enable salary entry until the organization currency is known", async () => {
     window.history.replaceState(null, "", "/hr?tab=people");
     vi.stubGlobal("fetch", hrFetch());
-    render(<HrPage baseCurrency={null} />);
+    render(<HrPage baseCurrency={null} organizationId="33333333-3333-4333-8333-333333333333" />);
     const salaryField = await screen.findByLabelText(/Monthly salary/);
     expect(salaryField.hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Add employee" }).hasAttribute("disabled")).toBe(true);

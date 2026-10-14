@@ -183,8 +183,8 @@ const GoPendingEntriesSchema = z.object({
   }).strict()),
 }).strict();
 
-export async function fetchHrEnabled(signal?: AbortSignal): Promise<boolean> {
-  const response = await request("/api/modules", { method: "GET" }, signal);
+export async function fetchHrEnabled(organizationId: string, signal?: AbortSignal): Promise<boolean> {
+  const response = await request("/api/modules", { method: "GET" }, signal, organizationId);
   if (!response.ok) throw new HrApiError(response.status, "Could not check whether the People module is enabled.");
   const parsed = ModuleSwitchboardSchema.safeParse(await readJson(response));
   if (!parsed.success) throw new HrApiError(response.status, "The module switchboard returned an unexpected response.");
@@ -195,15 +195,15 @@ export async function fetchHrEnabled(signal?: AbortSignal): Promise<boolean> {
   return parsed.data.enabledModules.includes("hr");
 }
 
-export async function fetchHrReport(signal?: AbortSignal): Promise<HrReport> {
-  return fetchGoHrReport(signal);
+export async function fetchHrReport(organizationId: string, signal?: AbortSignal): Promise<HrReport> {
+  return fetchGoHrReport(organizationId, signal);
 }
 
-export async function fetchGoHrReport(signal?: AbortSignal): Promise<HrReport> {
+export async function fetchGoHrReport(organizationId: string, signal?: AbortSignal): Promise<HrReport> {
   const response = await request("/api/capabilities/execute", {
     method: "POST",
     body: JSON.stringify({ capabilityId: "hr.report", input: {}, intentId: crypto.randomUUID() }),
-  }, signal);
+  }, signal, organizationId);
   if (!response.ok) throw await apiError(response, "people records");
   const parsed = z.object({ ok: z.literal(true), data: HrReportSchema }).strict().safeParse(await readJson(response));
   if (!parsed.success) throw new HrApiError(response.status, "The Go People service returned data in an unexpected format.");
@@ -231,7 +231,7 @@ export async function submitHrLeaveAction(
     const response = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId, input, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scoped.organizationId);
     const body = await readJson(response);
     if (response.status === 202) {
       const pending = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() }).safeParse(body);
@@ -277,7 +277,7 @@ export async function submitHrPayrollAction(
     const response = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "hr.createPayrollRun", input: { year: action.year, month: action.month }, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scoped.organizationId);
     const body = await readJson(response);
     if (response.status === 202) {
       const pending = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() }).safeParse(body);
@@ -326,7 +326,7 @@ export async function submitHrHiringAction(
     const response = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ ...capability, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scoped.organizationId);
     const body = await readJson(response);
     if (response.status === 202) {
       const pending = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() }).safeParse(body);
@@ -374,7 +374,7 @@ export async function submitHrEmployeeHireAction(
     const response = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "hr.hireEmployee", input: hrEmployeeHireCapabilityInput(parsedAction.data), intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scoped.organizationId);
     const body = await readJson(response);
     if (response.status === 202) {
       const pending = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() }).safeParse(body);
@@ -750,22 +750,22 @@ function goHrLeaveCapabilityInput(action: HrLeaveAction): { capabilityId: string
   }
 }
 
-export async function fetchHrTime(from: string, to: string, signal?: AbortSignal): Promise<HrTimeReport> {
+export async function fetchHrTime(from: string, to: string, organizationId: string, signal?: AbortSignal): Promise<HrTimeReport> {
   const response = await request("/api/capabilities/execute", {
     method: "POST",
     body: JSON.stringify({ capabilityId: "hr.timeReport", input: { from, to }, intentId: crypto.randomUUID() }),
-  }, signal);
+  }, signal, organizationId);
   if (!response.ok) throw await apiError(response, "time report");
   const parsed = z.object({ ok: z.literal(true), data: TimeReportSchema }).strict().safeParse(await readJson(response));
   if (!parsed.success) throw new HrApiError(response.status, "The Go time service returned data in an unexpected format.");
   return parsed.data.data;
 }
 
-export async function fetchHrPendingEntries(signal?: AbortSignal): Promise<HrPendingEntry[]> {
+export async function fetchHrPendingEntries(organizationId: string, signal?: AbortSignal): Promise<HrPendingEntry[]> {
   const response = await request("/api/capabilities/execute", {
     method: "POST",
     body: JSON.stringify({ capabilityId: "hr.pendingTimeEntries", input: {}, intentId: crypto.randomUUID() }),
-  }, signal);
+  }, signal, organizationId);
   if (!response.ok) throw await apiError(response, "pending time entries");
   const parsed = GoPendingEntriesSchema.safeParse(await parseCapabilityData(response));
   if (!parsed.success) throw new HrApiError(response.status, "The Go time service returned pending entries in an unexpected format.");
@@ -793,7 +793,7 @@ export async function submitHrTimeAction(
     const response = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId, input, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scoped.organizationId);
     const body = await readJson(response);
     if (response.status === 202) {
       const pending = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() }).safeParse(body);
@@ -916,13 +916,21 @@ function goHrTimeCapabilityInput(action: HrTimeAction): { capabilityId: string; 
   return { capabilityId: "hr.decideTimeEntry", input: { entryId: action.entryId, decision: action.decision === "approve" ? "approved" : "rejected" } };
 }
 
-async function request(path: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+async function request(path: string, init: RequestInit, signal: AbortSignal | undefined, organizationId: string): Promise<Response> {
+  if (!z.string().uuid().safeParse(organizationId).success) {
+    throw new HrApiError(0, "People requests need a valid organization before they can be sent.");
+  }
   try {
     return await fetch(path, {
       ...init,
       credentials: "same-origin",
       cache: "no-store",
-      headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
+      headers: {
+        accept: "application/json",
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        "X-Organization-ID": organizationId,
+        ...init.headers,
+      },
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
   } catch (error) {

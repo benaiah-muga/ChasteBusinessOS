@@ -3,6 +3,7 @@ import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, 
 import type { HrApiError } from "./hr";
 
 const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
+const organizationId = "33333333-3333-4333-8333-333333333333";
 const report = {
   employees: [],
   leave: [],
@@ -59,6 +60,7 @@ describe("Vite People API", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]).toMatchObject({ path: "/api/capabilities/execute", capabilityId: "hr.hireEmployee", input: { name: "Mira Patel", email: "mira@example.com", title: "Field technician", monthlySalaryMinor: 125_000 } });
     expect(calls[1]?.intentId).toBe(calls[0]?.intentId);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": scope.organizationId });
     expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
   });
 
@@ -194,16 +196,16 @@ describe("Vite People API", () => {
       : Response.json({ ok: true, data: report }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchHrEnabled()).resolves.toBe(true);
-    await expect(fetchHrReport()).resolves.toEqual(report);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/modules", expect.objectContaining({ credentials: "same-origin", cache: "no-store" }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store" }));
+    await expect(fetchHrEnabled(organizationId)).resolves.toBe(true);
+    await expect(fetchHrReport(organizationId)).resolves.toEqual(report);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/modules", expect.objectContaining({ credentials: "same-origin", cache: "no-store", headers: expect.objectContaining({ "X-Organization-ID": organizationId }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store", headers: expect.objectContaining({ "X-Organization-ID": organizationId }) }));
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
   });
 
   it("rejects malformed HR data instead of rendering partial records", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { ...report, employees: [{ id: "incomplete" }] } })));
-    await expect(fetchHrReport()).rejects.toMatchObject({
+    await expect(fetchHrReport(organizationId)).rejects.toMatchObject({
       name: "HrApiError",
       message: "The Go People service returned data in an unexpected format.",
     });
@@ -211,7 +213,7 @@ describe("Vite People API", () => {
 
   it("surfaces permission failures as actionable API errors", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: hr.read" }, { status: 403 })));
-    await expect(fetchHrReport()).rejects.toEqual(expect.objectContaining({
+    await expect(fetchHrReport(organizationId)).rejects.toEqual(expect.objectContaining({
       status: 403,
       message: "forbidden: hr.read",
     } satisfies Partial<HrApiError>));
@@ -226,8 +228,16 @@ describe("Vite People API", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchGoHrReport()).resolves.toEqual(report);
-    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ credentials: "same-origin", cache: "no-store" }));
+    await expect(fetchGoHrReport(organizationId)).resolves.toEqual(report);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ credentials: "same-origin", cache: "no-store", headers: expect.objectContaining({ "X-Organization-ID": organizationId }) }));
+  });
+
+  it("rejects an invalid organization before requesting HR data", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchHrReport("invalid-org-id")).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("retries payroll draft creation with its exact actor/org intent after pending approval and Go 404", async () => {
@@ -539,8 +549,8 @@ describe("Vite People API", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchHrTime("2026-10-01", "2026-10-31")).resolves.toEqual({ rows: [{ employeeId: pendingEntry.employeeId, approvedMinutes: 60, pendingMinutes: 60 }] });
-    await expect(fetchHrPendingEntries()).resolves.toEqual([pendingEntry]);
+    await expect(fetchHrTime("2026-10-01", "2026-10-31", organizationId)).resolves.toEqual({ rows: [{ employeeId: pendingEntry.employeeId, approvedMinutes: 60, pendingMinutes: 60 }] });
+    await expect(fetchHrPendingEntries(organizationId)).resolves.toEqual([pendingEntry]);
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
   });
 

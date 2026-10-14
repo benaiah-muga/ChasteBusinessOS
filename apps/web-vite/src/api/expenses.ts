@@ -53,13 +53,21 @@ function requestSignal(signal?: AbortSignal, timeout = 15_000): AbortSignal {
   return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 }
 
-async function request(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
+async function request(path: string, init: RequestInit = {}, signal: AbortSignal | undefined, organizationId: string): Promise<{ response: Response; body: unknown }> {
+  if (!uuid.safeParse(organizationId).success) {
+    throw new ExpensesApiError(0, "Expense requests need a valid organization before they can be sent.");
+  }
   let response: Response;
   try {
     response = await fetch(path, {
       ...init,
       credentials: "same-origin",
-      headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
+      headers: {
+        accept: "application/json",
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        "X-Organization-ID": organizationId,
+        ...init.headers,
+      },
       cache: "no-store",
       signal: requestSignal(signal, init.method === "POST" ? 20_000 : 15_000),
     });
@@ -84,21 +92,21 @@ function errorMessage(status: number, raw: unknown): string {
   return "The expenses service could not complete that request.";
 }
 
-async function executeRead<T>(capabilityId: string, input: Record<string, never>, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
+async function executeRead<T>(capabilityId: string, input: Record<string, never>, schema: z.ZodType<T>, organizationId: string, signal?: AbortSignal): Promise<T> {
   const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
     body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
-  }, signal);
+  }, signal, organizationId);
   if (!response.ok) throw new ExpensesApiError(response.status, errorMessage(response.status, body));
   const parsed = z.object({ ok: z.literal(true), data: schema }).strict().safeParse(body);
   if (!parsed.success) throw new ExpensesApiError(response.status, "The expenses service returned data in an unexpected format.");
   return parsed.data.data;
 }
 
-export async function fetchExpenses(signal?: AbortSignal): Promise<{ claims: ExpenseClaim[]; policies: ExpensePolicy[] }> {
+export async function fetchExpenses(organizationId: string, signal?: AbortSignal): Promise<{ claims: ExpenseClaim[]; policies: ExpensePolicy[] }> {
   const [claims, policies] = await Promise.all([
-    executeRead("accounting.listExpenseClaims", {}, ListClaimsSchema, signal),
-    executeRead("accounting.listExpensePolicies", {}, ListPoliciesSchema, signal),
+    executeRead("accounting.listExpenseClaims", {}, ListClaimsSchema, organizationId, signal),
+    executeRead("accounting.listExpensePolicies", {}, ListPoliciesSchema, organizationId, signal),
   ]);
   return { claims: claims.claims, policies: policies.policies };
 }
@@ -134,7 +142,7 @@ export async function submitExpenseAction(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId, input, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 202) {
       const pending = PendingSchema.safeParse(body);
       if (!pending.success) throw new ExpensesApiError(response.status, "The expenses service returned an unexpected approval response.", true);

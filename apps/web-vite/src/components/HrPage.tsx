@@ -44,7 +44,17 @@ function formatMinutes(minutes: number): string {
   return remainder === 0 ? `${hours}h` : hours === 0 ? `${remainder}m` : `${hours}h ${remainder}m`;
 }
 
-export function HrPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
+type HrPageProps = { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null };
+
+export function HrPage(props: HrPageProps) {
+  const scopeKey = JSON.stringify([props.actorId ?? null, props.organizationId ?? null]);
+  return <HrPageContent key={scopeKey} {...props} />;
+}
+
+function HrPageContent({ baseCurrency = null, actorId = null, organizationId = null }: HrPageProps) {
+  const scopeKey = JSON.stringify([actorId, organizationId]);
+  const activeScopeRef = useRef<string | null>(scopeKey);
+  const isCurrentScope = useCallback(() => activeScopeRef.current === scopeKey, [scopeKey]);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [tab, setTab] = useState<TabId>(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
@@ -72,40 +82,48 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   });
   const currency = baseCurrency;
 
+  useEffect(() => {
+    activeScopeRef.current = scopeKey;
+    return () => { activeScopeRef.current = null; };
+  }, [scopeKey]);
+
   const load = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     if (!signal && !reportLoaded.current) setState({ status: "loading" });
     try {
-      const enabled = await fetchHrEnabled(signal);
-      if (signal?.aborted) return false;
+      const enabled = await fetchHrEnabled(organizationId ?? "", signal);
+      if (signal?.aborted || !isCurrentScope()) return false;
       if (!enabled) {
         setState({ status: "disabled" });
         return false;
       }
-      const report = await fetchGoHrReport(signal);
-      if (!signal?.aborted) {
+      const report = await fetchGoHrReport(organizationId ?? "", signal);
+      if (!signal?.aborted && isCurrentScope()) {
         reportLoaded.current = true;
         setState({ status: "ready", report });
       }
-      return !signal?.aborted;
+      return !signal?.aborted && isCurrentScope();
     } catch (error) {
-      if (signal?.aborted) return false;
+      if (signal?.aborted || !isCurrentScope()) return false;
       const apiError = error instanceof HrApiError ? error : new HrApiError(0, "Could not load People workspace data.");
       setState({ status: "failed", message: apiError.message, statusCode: apiError.status });
       return false;
     }
-  }, []);
+  }, [isCurrentScope, organizationId, scopeKey]);
 
   const refreshTime = useCallback(async (from: string, to: string, signal?: AbortSignal) => {
     try {
-      const [report, entries] = await Promise.all([fetchHrTime(from, to, signal), fetchHrPendingEntries(signal)]);
-      if (!signal?.aborted) {
+      const [report, entries] = await Promise.all([
+        fetchHrTime(from, to, organizationId ?? "", signal),
+        fetchHrPendingEntries(organizationId ?? "", signal),
+      ]);
+      if (!signal?.aborted && isCurrentScope()) {
         setTimeReport(report);
         setPendingEntries(entries);
       }
     } catch (error) {
-      if (!signal?.aborted) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load time data." });
+      if (!signal?.aborted && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load time data." });
     }
-  }, []);
+  }, [isCurrentScope, organizationId, scopeKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -116,20 +134,28 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   }, [load, range.from, range.to, refreshTime]);
 
   useEffect(() => {
+    reportLoaded.current = false;
+    setState({ status: "loading" });
+    setTimeReport(null);
+    setPendingEntries([]);
+    setNotice(null);
+  }, [organizationId]);
+
+  useEffect(() => {
     if (tab !== "payroll") {
       setPayrollRecoveryAction(null);
       return;
     }
     let active = true;
     void readPendingHrPayrollAction({ actorId, organizationId }).then((action) => {
-      if (!active) return;
+      if (!active || !isCurrentScope()) return;
       setPayrollRecoveryAction(action);
       if (action) setNotice({ tone: "pending", text: "A payroll draft is unresolved. Retry the exact period to recover its result before creating another draft." });
     }).catch((error) => {
-      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved payroll draft." });
+      if (active && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved payroll draft." });
     });
     return () => { active = false; };
-  }, [tab, actorId, organizationId]);
+  }, [tab, actorId, organizationId, isCurrentScope]);
 
   useEffect(() => {
     if (tab !== "hiring") {
@@ -138,14 +164,14 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     }
     let active = true;
     void readPendingHrHiringAction({ actorId, organizationId }).then((action) => {
-      if (!active) return;
+      if (!active || !isCurrentScope()) return;
       setHiringRecoveryAction(action);
       if (action) setNotice({ tone: "pending", text: "A Hiring action is unresolved. Retry its exact details before making another change." });
     }).catch((error) => {
-      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved Hiring action." });
+      if (active && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved Hiring action." });
     });
     return () => { active = false; };
-  }, [tab, actorId, organizationId]);
+  }, [tab, actorId, organizationId, isCurrentScope]);
 
   useEffect(() => {
     if (tab !== "people") {
@@ -154,14 +180,14 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     }
     let active = true;
     void readPendingHrEmployeeHireAction({ actorId, organizationId }).then((action) => {
-      if (!active) return;
+      if (!active || !isCurrentScope()) return;
       setEmployeeHireRecoveryAction(action);
       if (action) setNotice({ tone: "pending", text: "An employee hire is unresolved. Retry the exact details to recover its result before hiring another employee." });
     }).catch((error) => {
-      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved employee hire." });
+      if (active && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved employee hire." });
     });
     return () => { active = false; };
-  }, [tab, actorId, organizationId]);
+  }, [tab, actorId, organizationId, isCurrentScope]);
 
   useEffect(() => {
     if (tab !== "leave") {
@@ -170,26 +196,26 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     }
     let active = true;
     void readPendingHrLeaveAction({ actorId, organizationId }).then((action) => {
-      if (!active) return;
+      if (!active || !isCurrentScope()) return;
       setLeaveRecoveryAction(action);
       if (action) setNotice({ tone: "pending", text: "A leave action is unresolved. Retry the exact action to recover its result before making another change." });
     }).catch((error) => {
-      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved leave action." });
+      if (active && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved leave action." });
     });
     return () => { active = false; };
-  }, [tab, actorId, organizationId]);
+  }, [tab, actorId, organizationId, isCurrentScope]);
 
   useEffect(() => {
     let active = true;
     void readPendingHrTimeAction({ actorId, organizationId }).then((action) => {
-      if (!active) return;
+      if (!active || !isCurrentScope()) return;
       setTimeRecoveryAction(action);
       if (action) setNotice({ tone: "pending", text: "A time action is unresolved. Retry the exact action to recover its result before making another change." });
     }).catch((error) => {
-      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved time action." });
+      if (active && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved time action." });
     });
     return () => { active = false; };
-  }, [actorId, organizationId]);
+  }, [actorId, organizationId, isCurrentScope]);
 
   const report = state.status === "ready" ? state.report : null;
   const employees = report?.employees ?? [];
@@ -205,7 +231,8 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   }
 
   async function refreshAll(): Promise<void> {
-    if (await load()) await refreshTime(range.from, range.to);
+    const expectedScope = scopeKey;
+    if (await load() && isCurrentScope() && expectedScope === scopeKey) await refreshTime(range.from, range.to);
   }
 
   async function runLeaveAction(action: HrLeaveAction, label: string, after: () => void = () => undefined): Promise<void> {
@@ -214,6 +241,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     setNotice(null);
     try {
       const result = await submitHrLeaveAction(action, { actorId, organizationId });
+      if (!isCurrentScope()) return;
       if (result.kind === "pending") {
         setLeaveRecoveryAction(action);
         setNotice({ tone: "pending", text: `${label} needs approval or result recovery. Retry the exact action after approval is complete.` });
@@ -224,11 +252,15 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         await refreshAll();
       }
     } catch (error) {
-      try { setLeaveRecoveryAction(await readPendingHrLeaveAction({ actorId, organizationId })); }
-      catch { setLeaveRecoveryAction(action); }
+      if (!isCurrentScope()) return;
+      let pendingAction: HrLeaveAction | null;
+      try { pendingAction = await readPendingHrLeaveAction({ actorId, organizationId }); }
+      catch { pendingAction = action; }
+      if (!isCurrentScope()) return;
+      setLeaveRecoveryAction(pendingAction);
       setNotice({ tone: "error", text: error instanceof Error ? error.message : `${label} failed.` });
     } finally {
-      setBusy(false);
+      if (isCurrentScope()) setBusy(false);
     }
   }
 
@@ -238,6 +270,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     setNotice(null);
     try {
       const result = await submitHrEmployeeHireAction(action, { actorId, organizationId });
+      if (!isCurrentScope()) return;
       if (result.kind === "pending") {
         setEmployeeHireRecoveryAction(action);
         setNotice({ tone: "pending", text: "Employee hire is waiting for approval or result recovery. Retry the exact details when ready." });
@@ -248,11 +281,15 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         await refreshAll();
       }
     } catch (error) {
-      try { setEmployeeHireRecoveryAction(await readPendingHrEmployeeHireAction({ actorId, organizationId })); }
-      catch { setEmployeeHireRecoveryAction(action); }
+      if (!isCurrentScope()) return;
+      let pendingAction: HrEmployeeHireAction | null;
+      try { pendingAction = await readPendingHrEmployeeHireAction({ actorId, organizationId }); }
+      catch { pendingAction = action; }
+      if (!isCurrentScope()) return;
+      setEmployeeHireRecoveryAction(pendingAction);
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Employee hire failed." });
     } finally {
-      setBusy(false);
+      if (isCurrentScope()) setBusy(false);
     }
   }
 
@@ -262,6 +299,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     setNotice(null);
     try {
       const result = await submitHrPayrollAction(action, { actorId, organizationId });
+      if (!isCurrentScope()) return;
       if (result.kind === "pending") {
         setPayrollRecoveryAction(action);
         setNotice({ tone: "pending", text: "Payroll draft is waiting for approval or result recovery. Retry the exact period when ready." });
@@ -271,11 +309,15 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         await refreshAll();
       }
     } catch (error) {
-      try { setPayrollRecoveryAction(await readPendingHrPayrollAction({ actorId, organizationId })); }
-      catch { setPayrollRecoveryAction(action); }
+      if (!isCurrentScope()) return;
+      let pendingAction: HrPayrollAction | null;
+      try { pendingAction = await readPendingHrPayrollAction({ actorId, organizationId }); }
+      catch { pendingAction = action; }
+      if (!isCurrentScope()) return;
+      setPayrollRecoveryAction(pendingAction);
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Payroll draft failed." });
     } finally {
-      setBusy(false);
+      if (isCurrentScope()) setBusy(false);
     }
   }
 
@@ -285,6 +327,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     setNotice(null);
     try {
       const result = await submitHrHiringAction(action, { actorId, organizationId });
+      if (!isCurrentScope()) return;
       if (result.kind === "pending") {
         setHiringRecoveryAction(action);
         setNotice({ tone: "pending", text: `${label} is waiting for approval or result recovery. Retry the exact action when ready.` });
@@ -299,11 +342,15 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         await refreshAll();
       }
     } catch (error) {
-      try { setHiringRecoveryAction(await readPendingHrHiringAction({ actorId, organizationId })); }
-      catch { setHiringRecoveryAction(action); }
+      if (!isCurrentScope()) return;
+      let pendingAction: HrHiringAction | null;
+      try { pendingAction = await readPendingHrHiringAction({ actorId, organizationId }); }
+      catch { pendingAction = action; }
+      if (!isCurrentScope()) return;
+      setHiringRecoveryAction(pendingAction);
       setNotice({ tone: "error", text: error instanceof Error ? error.message : `${label} failed.` });
     } finally {
-      setBusy(false);
+      if (isCurrentScope()) setBusy(false);
     }
   }
 
@@ -337,6 +384,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     setNotice(null);
     try {
       const result = await submitHrTimeAction(action, { actorId, organizationId });
+      if (!isCurrentScope()) return;
       if (result.kind === "pending") {
         setTimeRecoveryAction(action);
         setNotice({ tone: "pending", text: `${label} needs approval or result recovery. Retry the exact action after approval is complete.` });
@@ -348,11 +396,15 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
         await refreshAll();
       }
     } catch (error) {
-      try { setTimeRecoveryAction(await readPendingHrTimeAction({ actorId, organizationId })); }
-      catch { setTimeRecoveryAction(action); }
+      if (!isCurrentScope()) return;
+      let pendingAction: HrTimeAction | null;
+      try { pendingAction = await readPendingHrTimeAction({ actorId, organizationId }); }
+      catch { pendingAction = action; }
+      if (!isCurrentScope()) return;
+      setTimeRecoveryAction(pendingAction);
       setNotice({ tone: "error", text: error instanceof Error ? error.message : `${label} failed.` });
     } finally {
-      setBusy(false);
+      if (isCurrentScope()) setBusy(false);
     }
   }
 
@@ -462,6 +514,9 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
 }
 
 function ExpensesTab({ currency, actorId, organizationId }: { currency: string | null; actorId: string | null; organizationId: string | null }) {
+  const scopeKey = JSON.stringify([actorId, organizationId]);
+  const activeScopeRef = useRef<string | null>(scopeKey);
+  const isCurrentScope = useCallback(() => activeScopeRef.current === scopeKey, [scopeKey]);
   const [claims, setClaims] = useState<ExpenseClaim[] | null>(null);
   const [policies, setPolicies] = useState<ExpensePolicy[]>([]);
   const [error, setError] = useState<ExpensesApiError | null>(null);
@@ -470,22 +525,27 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
   const [recoveryAction, setRecoveryAction] = useState<ExpenseAction | null>(null);
   const [form, setForm] = useState({ amount: "", memo: "", accountCode: "" });
   const [policyForm, setPolicyForm] = useState({ category: "", limit: "" });
-  const retryScope = { actorId, organizationId };
+  const retryScope = useMemo(() => ({ actorId, organizationId }), [actorId, organizationId]);
+
+  useEffect(() => {
+    activeScopeRef.current = scopeKey;
+    return () => { activeScopeRef.current = null; };
+  }, [scopeKey]);
 
   const loadClaims = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     try {
-      const data = await fetchExpenses(signal);
-      if (signal?.aborted) return false;
+      const data = await fetchExpenses(organizationId ?? "", signal);
+      if (signal?.aborted || !isCurrentScope()) return false;
       setClaims(data.claims);
       setPolicies(data.policies);
       setError(null);
       return true;
     } catch (reason) {
-      if (signal?.aborted) return false;
+      if (signal?.aborted || !isCurrentScope()) return false;
       setError(reason instanceof ExpensesApiError ? reason : new ExpensesApiError(0, "Could not load expense claims."));
       return false;
     }
-  }, []);
+  }, [isCurrentScope, organizationId, scopeKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -496,14 +556,16 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
   useEffect(() => {
     if (!actorId || !organizationId) return;
     void readPendingExpenseAction(retryScope).then((action) => {
+      if (!isCurrentScope()) return;
       if (action) {
         setRecoveryAction(action);
         setNotice({ tone: "pending", text: "An earlier expense action is unresolved. Retry its exact action to recover the saved result." });
       }
     }).catch((reason: unknown) => {
+      if (!isCurrentScope()) return;
       setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not check for an unresolved expense action." });
     });
-  }, [actorId, organizationId]);
+  }, [actorId, isCurrentScope, organizationId, retryScope]);
 
   async function post(action: ExpenseAction, label: string, isRecovery = false): Promise<boolean> {
     if (busy || recoveryAction && !isRecovery) return false;
@@ -511,6 +573,7 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
     setNotice(null);
     try {
       const result = await submitExpenseAction(action, undefined, retryScope);
+      if (!isCurrentScope()) return false;
       if (result.kind === "pending") {
         setRecoveryAction(action);
         setNotice({ tone: "pending", text: `${label} is above the payment threshold and is in the Approvals inbox. ${result.reason}` });
@@ -519,16 +582,22 @@ function ExpensesTab({ currency, actorId, organizationId }: { currency: string |
       setRecoveryAction(null);
       setNotice({ tone: "success", text: `${label} done.` });
       await loadClaims();
+      if (!isCurrentScope()) return false;
       return true;
     } catch (reason) {
+      if (!isCurrentScope()) return false;
       if (actorId && organizationId) {
-        try { setRecoveryAction(await readPendingExpenseAction(retryScope)); }
-        catch { setRecoveryAction(action); }
+        let pendingAction: ExpenseAction | null;
+        try { pendingAction = await readPendingExpenseAction(retryScope); }
+        catch { pendingAction = action; }
+        if (!isCurrentScope()) return false;
+        setRecoveryAction(pendingAction);
       }
+      if (!isCurrentScope()) return false;
       setNotice({ tone: "error", text: reason instanceof Error ? reason.message : `${label} failed.` });
       return false;
     } finally {
-      setBusy(false);
+      if (isCurrentScope()) setBusy(false);
     }
   }
 

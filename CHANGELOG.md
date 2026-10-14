@@ -48,6 +48,8 @@ The full v1 changelog is preserved at the bottom of this file.
   unavailable to model tool calls until their contracts are authored.
 - Vite HR Leave and Time reads and writes use the Go capability API directly;
   obsolete HR-specific route selectors have been removed.
+- Vite People reports, hiring actions, and expense data now use organization-scoped
+  Go requests, with stale report and recovery state discarded when the workspace changes.
 - Vite CRM customer creation now uses the Go `crm.createCustomer` capability
   by default. Vite reports Go errors directly and keeps the exact retry intent
   for uncertain writes.
