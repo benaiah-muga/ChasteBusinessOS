@@ -1471,7 +1471,11 @@ new owners and the manifest shows zero legacy runtime paths.
      response envelope, and no-store headers match the legacy route. The Vite
      selector is limited to GET `/api/signals`; unmatched methods and paths
      continue to the legacy API. Handler, capability, and middleware selector
-     tests pass. Runtime proof and route ownership remain open.
+     tests pass. Authenticated `agent-browser` direct load of
+     `http://localhost:3002/api/signals` returned the Go `{"signals":[]}`
+     envelope with HTTP 200; the Vite selector sent `GET /api/signals` to Go,
+     and the browser error log was empty. Production route-manifest ownership
+     remains open.
 144. (Implemented; Go owns the routes in the manifest) Add Go session-admin
      `GET`, `POST`, and `DELETE /api/scim/tokens` behind
      `GO_SCIM_TOKENS_ROUTE=1` and paired `CHASTE_GO_SCIM_TOKENS_ROUTE=1`.
