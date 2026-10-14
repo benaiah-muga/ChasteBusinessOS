@@ -562,6 +562,12 @@
       "path": "/manufacturing",
       "owner": "vite",
       "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/sales",
+      "owner": "vite",
+      "parity": "verified"
     }
   ],
   "goRoutes": [
@@ -586,6 +592,14 @@
       "path": "/api/support/customers",
       "method": "GET",
       "source": "apps/api/internal/httpapi/support_customers_session.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sales/customers",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/sales_customers_session.go",
       "owner": "go",
       "parity": "verified"
     }

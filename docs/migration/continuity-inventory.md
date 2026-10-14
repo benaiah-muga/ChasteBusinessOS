@@ -80,6 +80,18 @@ production requests and writes. No production traffic has moved to Go.
 
 ## Vite Go route cutovers
 
+- Vite `/sales` renders the React Sales workspace. Its customer picker sends
+  exact `GET /api/sales/customers` requests to Go, which verifies the Better
+  Auth session, active organization, and `sales.read` permission before reading
+  customers through `dbx.WithOrgTx`. Authenticated agent-browser proof loaded
+  the empty sales order state and quotes workspace, received HTTP 200 from the
+  Go customer route and capability calls, showed no requests to `localhost:3001`,
+  and reported no browser errors. The proof required restarting a stale local
+  Go API process so the current route implementation was serving on port
+  18083. See [`SalesPage.tsx`](../../apps/web-vite/src/components/SalesPage.tsx),
+  [`sales.ts`](../../apps/web-vite/src/api/sales.ts),
+  [`sales_customers_session.go`](../../apps/api/internal/httpapi/sales_customers_session.go),
+  and [`route-ownership-overrides.json`](route-ownership-overrides.json).
 - Vite Support channel settings use exact `GET` and `POST /api/support/channels`
   requests. Both route directly to Go regardless of the former Vite selectors;
   the Go handler mounts by default, and `GO_SUPPORT_CHANNELS_ROUTE=0` unmounts
