@@ -26,6 +26,13 @@ and Sales quote data and notices are invalidated synchronously when either scope
 changes. The focused API and page tests pass, and an authenticated browser proof
 created and declined a synthetic quote through Go with no browser errors.
 
+Vite Inventory reads open reservations through the governed
+`inventory.listReservations` capability, validates the full Go response, and
+hides results immediately when the actor or organization changes. The panel
+states that it shows only the 100 most recent reservations when the result is
+capped. Focused API and page suites cover tenant and actor changes, stale reads,
+and the cap notice.
+
 The active Vite CRM customer-create, CRM follow-up-draft, Support reply-draft,
 Messaging agent-reply, Accounting payment-reversal, and Purchasing
 purchase-request paths are Go-owned by default. CRM mutations and Purchasing

@@ -124,6 +124,74 @@ describe("InventoryLocationsReservationsPanel", () => {
     expect((screen.getByRole("button", { name: "Create location" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("hides cached reservations and ignores a late read when the actor changes within the same organization", async () => {
+    const organizationId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
+    const firstActor = "d574e26a-6c64-419f-921b-909be248f40c";
+    const secondActor = "f418d421-cd7d-4fd5-8c3c-2d2f63702943";
+    const makeRow = (reason: string) => ({
+      id: "07363742-7f2b-4b18-8f65-6874f17e88e4",
+      orgId: organizationId,
+      itemId: "39b78356-54ed-4cc0-8d87-30a628740df7",
+      sku: "BAG-50",
+      quantityThousandths: 1250,
+      reason,
+      refType: null,
+      refId: null,
+      status: "open",
+      createdByActorType: "human",
+      createdByActorId: firstActor,
+      releasedAt: null,
+      createdAt: "2026-10-14T10:30:00.000Z",
+    });
+    let reservationReads = 0;
+    const pendingReads: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as { capabilityId: string };
+      if (payload.capabilityId === "inventory.listReservations") {
+        reservationReads += 1;
+        if (reservationReads === 1) return jsonResponse({ ok: true, data: { reservations: [makeRow("Prior actor hold")] } });
+        return new Promise<Response>((resolve) => { pendingReads.push(resolve); });
+      }
+      if (payload.capabilityId === "inventory.reserveStock") {
+        return jsonResponse({ ok: true, data: { reservationId: "reservation-new", availableAfterThousandths: 8750 } });
+      }
+      throw new Error(`Unexpected capability: ${payload.capabilityId}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const props = {
+      items,
+      locations,
+      reservations: [],
+      organizationId,
+      onChanged,
+      retryScope: { actorId: firstActor, organizationId },
+    };
+    const { rerender } = render(<InventoryLocationsReservationsPanel {...props} />);
+    expect(await screen.findByText(/Prior actor hold/)).not.toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Stock item"), { target: { value: "BAG-50" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1.25" } });
+    fireEvent.change(screen.getByLabelText("Reason or order reference"), { target: { value: "SO-1044" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reserve stock" }));
+    await waitFor(() => expect(reservationReads).toBe(2));
+
+    rerender(<InventoryLocationsReservationsPanel {...props} retryScope={{ actorId: secondActor, organizationId }} />);
+    expect(screen.queryByText(/Prior actor hold/)).toBeNull();
+    await waitFor(() => expect(reservationReads).toBe(3));
+
+    await act(async () => {
+      pendingReads[0]?.(jsonResponse({ ok: true, data: { reservations: [makeRow("Late prior actor hold")] } }));
+    });
+    expect(screen.queryByText(/Prior actor hold|Late prior actor hold/)).toBeNull();
+
+    await act(async () => {
+      pendingReads[1]?.(jsonResponse({ ok: true, data: { reservations: [makeRow("Current actor hold")] } }));
+    });
+    expect(await screen.findByText(/Current actor hold/)).not.toBeNull();
+    expect(screen.queryByText(/Prior actor hold|Late prior actor hold/)).toBeNull();
+  });
+
   it("reserves stock with exact thousandths and releases open reservations", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: { reservationId: "reservation-new", availableAfterThousandths: 8750 } }))

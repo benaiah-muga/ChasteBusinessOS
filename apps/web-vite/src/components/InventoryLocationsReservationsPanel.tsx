@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { InventoryItem, InventoryLocation } from "../api/inventory";
+import { fetchInventoryReservations, InventoryReservationsApiError, type InventoryReservationListItem } from "../api/inventory-reservations";
 import {
   createInventoryLocation,
   InventoryLocationActionError,
@@ -9,29 +10,28 @@ import {
 } from "../api/inventory-locations-reservations";
 import "./inventory-locations-reservations.css";
 
-export interface InventoryReservation {
-  id: string;
-  sku: string;
-  quantityThousandths: number;
-  reason: string;
-  status: string;
-  createdAt: string;
-}
+export type InventoryReservation = InventoryReservationListItem;
 
 interface InventoryLocationsReservationsPanelProps {
   items: InventoryItem[];
   locations: InventoryLocation[];
-  reservations: InventoryReservation[];
+  reservations: InventoryReservationListItem[];
+  organizationId?: string | null;
   onChanged: () => Promise<void>;
   retryScope?: InventoryLocationRetryScope;
 }
 
 type Notice = { tone: "success" | "pending" | "error"; message: string };
+type ReservationsState =
+  | { scopeKey: string; status: "loading" }
+  | { scopeKey: string; status: "failed"; message: string }
+  | { scopeKey: string; status: "ready"; reservations: InventoryReservationListItem[] };
 
 export function InventoryLocationsReservationsPanel({
   items,
   locations,
   reservations,
+  organizationId = null,
   onChanged,
   retryScope,
 }: InventoryLocationsReservationsPanelProps) {
@@ -53,8 +53,40 @@ export function InventoryLocationsReservationsPanel({
   const [busy, setBusy] = useState(false);
   const activeWrites = useRef(0);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [reservationRetry, setReservationRetry] = useState(0);
+  const normalizedOrganizationId = organizationId?.trim() ?? "";
+  const reservationScopeKey = JSON.stringify([
+    retryScope?.actorId.trim() ?? "",
+    normalizedOrganizationId,
+  ]);
+  const [goReservations, setGoReservations] = useState<ReservationsState>({ scopeKey: "", status: "loading" });
+  useEffect(() => {
+    if (!normalizedOrganizationId) {
+      setGoReservations({ scopeKey: reservationScopeKey, status: "loading" });
+      return;
+    }
+    const controller = new AbortController();
+    setGoReservations({ scopeKey: reservationScopeKey, status: "loading" });
+    void fetchInventoryReservations(normalizedOrganizationId, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setGoReservations({ scopeKey: reservationScopeKey, status: "ready", reservations: result });
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setGoReservations({
+        scopeKey: reservationScopeKey,
+        status: "failed",
+        message: error instanceof InventoryReservationsApiError
+          ? error.message
+          : "Could not load inventory reservations. Try again.",
+      });
+    });
+    return () => controller.abort();
+  }, [normalizedOrganizationId, reservationRetry, reservationScopeKey]);
+  const reservationStateIsCurrent = goReservations.scopeKey === reservationScopeKey;
+  const visibleReservations = normalizedOrganizationId
+    ? reservationStateIsCurrent && goReservations.status === "ready" ? goReservations.reservations : []
+    : reservations;
   const stockItems = useMemo(() => items.filter((item) => item.kind !== "service"), [items]);
-  const openReservations = useMemo(() => reservations.filter((reservation) => reservation.status === "open"), [reservations]);
+  const openReservations = useMemo(() => visibleReservations.filter((reservation) => reservation.status === "open"), [visibleReservations]);
 
   useEffect(() => {
     activeWrites.current = 0;
@@ -82,6 +114,7 @@ export function InventoryLocationsReservationsPanel({
       activeWrites.current = Math.max(0, activeWrites.current - 1);
       setBusy(activeWrites.current > 0);
       setNotice({ tone: "success", message: successMessage });
+      if (normalizedOrganizationId) setReservationRetry((retry) => retry + 1);
       try {
         await onChanged();
       } catch {
@@ -186,7 +219,17 @@ export function InventoryLocationsReservationsPanel({
 
         <section className="inventory-lr-card inventory-lr-reservations" aria-labelledby="inventory-lr-reservations-heading">
           <h3 id="inventory-lr-reservations-heading">Open reservations</h3>
-          {openReservations.length === 0 ? (
+          {normalizedOrganizationId && reservationStateIsCurrent && goReservations.status === "ready" && goReservations.reservations.length === 100 && (
+            <p className="inventory-lr-empty">Showing the 100 most recent open reservations. Older reservations are not shown here.</p>
+          )}
+          {normalizedOrganizationId && (!reservationStateIsCurrent || goReservations.status === "loading") ? (
+            <p className="inventory-lr-empty" role="status">Loading reservations…</p>
+          ) : normalizedOrganizationId && reservationStateIsCurrent && goReservations.status === "failed" ? (
+            <div role="alert">
+              <p className="inventory-lr-empty">{goReservations.message}</p>
+              <button type="button" onClick={() => setReservationRetry((retry) => retry + 1)}>Retry reservations</button>
+            </div>
+          ) : openReservations.length === 0 ? (
             <p className="inventory-lr-empty">No open reservations.</p>
           ) : (
             <ul>

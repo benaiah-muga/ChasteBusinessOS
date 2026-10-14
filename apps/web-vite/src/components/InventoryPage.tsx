@@ -229,7 +229,7 @@ export function InventoryPage({
       {state.status === "ready" && <InventoryItemActions items={state.items} currency={currency} onChanged={refresh} retryScope={{ actorId, organizationId }} />}
       {state.status === "ready" && (!actorId || !organizationId)
         ? <p className="inventory-empty" role="status">Loading the active workspace before location and reservation actions are available.</p>
-        : state.status === "ready" && <InventoryLocationsReservationsPanel items={state.items} locations={state.locations} reservations={state.reservations} onChanged={refresh} retryScope={actorId && organizationId ? { actorId, organizationId } : undefined} />}
+        : state.status === "ready" && <InventoryLocationsReservationsPanel items={state.items} locations={state.locations} reservations={organizationId?.trim() ? [] : state.reservations} organizationId={organizationId} onChanged={refresh} retryScope={actorId && organizationId ? { actorId, organizationId } : undefined} />}
       {state.status === "ready" && <InventoryCycleCountPanel items={state.items} locations={state.locations} counts={state.cycleCounts} onChanged={refresh} retryScope={actorId && organizationId ? { actorId, organizationId } : undefined} />}
       {state.status === "ready" && <InventoryTransfersPanel items={state.items} locations={state.locations} transfers={state.transfers} onChanged={refresh} retryScope={{ actorId, organizationId }} />}
       {state.status === "ready" && <InventoryStockHistoryPanel items={state.items} currency={baseCurrency ?? currency} organizationId={organizationId ?? undefined} />}

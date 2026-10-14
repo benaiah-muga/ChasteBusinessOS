@@ -199,27 +199,112 @@ describe("Vite inventory page", () => {
     expect((screen.getByRole("button", { name: "Draft transfer" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("connects locations, reservations, and stock history to the inventory report", async () => {
-    const reservations = [{
-      id: "reservation-1",
+  it("connects Go reservations, locations, and stock history to the inventory page", async () => {
+    const organizationId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
+    const reservations = Array.from({ length: 100 }, (_, index) => ({
+      id: `07363742-7f2b-4b18-8f65-${index.toString(16).padStart(12, "0")}`,
+      orgId: organizationId,
+      itemId: "39b78356-54ed-4cc0-8d87-30a628740df7",
       sku: "MUG-1",
       quantityThousandths: 500,
-      reason: "Hold for customer pickup",
+      reason: index === 0 ? "Hold for customer pickup" : `Hold for customer pickup ${index}`,
+      refType: null,
+      refId: null,
       status: "open",
+      createdByActorType: "human",
+      createdByActorId: null,
+      releasedAt: null,
       createdAt: "2026-05-12T10:30:00.000Z",
-    }];
+    }));
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { reservations } });
       return Response.json({ ...report, locations: [{ id: "location-1", code: "MAIN", name: "Main warehouse" }], reservations });
     }));
-    render(<InventoryPage actorId="actor-inventory-test" organizationId="org-inventory-test" />);
+    render(<InventoryPage actorId="actor-inventory-test" organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "Locations and reservations" })).not.toBeNull();
     expect(screen.getByRole("heading", { name: "Movement history" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Create location" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Reserve stock" })).not.toBeNull();
-    expect(screen.getByText((_, element) => element?.tagName === "SPAN" && element.textContent?.includes("Hold for customer pickup") === true)).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Release" })).not.toBeNull();
+    expect(await screen.findByText((_, element) => element?.tagName === "SPAN" && element.textContent === "0.5 · Hold for customer pickup")).not.toBeNull();
+    expect((await screen.findAllByRole("button", { name: "Release" })).length).toBe(100);
+    expect(screen.getByText("Showing the 100 most recent open reservations. Older reservations are not shown here.")).not.toBeNull();
+  });
+
+  it("hides prior-organization reservations synchronously and ignores a late response", async () => {
+    vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", true);
+    const actorId = "actor-inventory-test";
+    const oldOrganizationId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
+    const newOrganizationId = "6670af8c-3e8a-46a4-b28d-8cb9e8dd4b60";
+    const resolvers = new Map<string, Array<(response: Response) => void>>();
+    const makeReservations = (orgId: string, reason: string) => [{
+      id: orgId === oldOrganizationId ? "07363742-7f2b-4b18-8f65-6874f17e88e4" : "869b98f1-a55d-44d9-ae42-4f8c2428fd04",
+      orgId,
+      itemId: "39b78356-54ed-4cc0-8d87-30a628740df7",
+      sku: "MUG-1",
+      quantityThousandths: 500,
+      reason,
+      refType: null,
+      refId: null,
+      status: "open",
+      createdByActorType: "human",
+      createdByActorId: null,
+      releasedAt: null,
+      createdAt: "2026-05-12T10:30:00.000Z",
+    }];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json(switchboard);
+      if (path === "/api/inventory") return Response.json(report);
+      if (path === "/api/capabilities/execute") {
+        const organizationId = new Headers(init?.headers).get("X-Organization-ID") ?? "";
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (body.capabilityId === "inventory.releaseReservation") {
+          return Response.json({ ok: true, data: { released: true } });
+        }
+        if (body.capabilityId !== "inventory.listReservations") {
+          return Response.json({ ok: true, data: {} });
+        }
+        return new Promise<Response>((resolve) => {
+          const pending = resolvers.get(organizationId) ?? [];
+          pending.push(resolve);
+          resolvers.set(organizationId, pending);
+        });
+      }
+      throw new Error(`Unexpected inventory request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<InventoryPage actorId={actorId} organizationId={oldOrganizationId} />);
+    expect(await screen.findByRole("heading", { name: "Inventory" })).not.toBeNull();
+    await waitFor(() => expect(resolvers.get(oldOrganizationId)?.length).toBeGreaterThanOrEqual(1));
+
+    await act(async () => {
+      const pending = resolvers.get(oldOrganizationId) ?? [];
+      pending[pending.length - 1]?.(Response.json({ ok: true, data: { reservations: makeReservations(oldOrganizationId, "Old workspace hold") } }));
+    });
+    expect(await screen.findByText(/Old workspace hold/)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Release" }));
+    const oldRequestsBeforeRefresh = resolvers.get(oldOrganizationId)?.length ?? 0;
+    await waitFor(() => expect(resolvers.get(oldOrganizationId)?.length).toBeGreaterThan(oldRequestsBeforeRefresh));
+    const lateOldRequestIndex = (resolvers.get(oldOrganizationId)?.length ?? 1) - 1;
+    rerender(<InventoryPage actorId={actorId} organizationId={newOrganizationId} />);
+    expect(screen.queryByText(/Old workspace hold/)).toBeNull();
+    await waitFor(() => expect(resolvers.get(newOrganizationId)?.length).toBeGreaterThanOrEqual(1));
+    expect(screen.getByText("Loading reservations…")).not.toBeNull();
+
+    await act(async () => {
+      resolvers.get(oldOrganizationId)?.[lateOldRequestIndex]?.(Response.json({ ok: true, data: { reservations: makeReservations(oldOrganizationId, "Late old workspace hold") } }));
+    });
+    expect(screen.queryByText(/Old workspace hold|Late old workspace hold/)).toBeNull();
+
+    await act(async () => {
+      const pending = resolvers.get(newOrganizationId) ?? [];
+      pending[pending.length - 1]?.(Response.json({ ok: true, data: { reservations: makeReservations(newOrganizationId, "Current workspace hold") } }));
+    });
+    expect(await screen.findByText(/Current workspace hold/)).not.toBeNull();
+    expect(screen.queryByText(/Old workspace hold|Late old workspace hold/)).toBeNull();
   });
 
   it("keeps the newest inventory refresh when separate actions finish out of order", async () => {
