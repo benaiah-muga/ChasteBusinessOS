@@ -65,7 +65,7 @@ func (s *Service) enqueueLink(ctx context.Context, tx pgx.Tx, job linkDelivery) 
 	return nil
 }
 
-func (s *Service) claimEmail(ctx context.Context) (emailOutboxJob, bool, error) {
+func (s *Service) claimEmail(ctx context.Context, recipient string) (emailOutboxJob, bool, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return emailOutboxJob{}, false, err
@@ -77,6 +77,7 @@ func (s *Service) claimEmail(ctx context.Context) (emailOutboxJob, bool, error) 
 			SELECT id FROM auth_email_outbox
 			WHERE expires_at > now() AND available_at <= now()
 			  AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+			  AND ($3 = '' OR recipient = $3)
 			ORDER BY available_at, created_at
 			FOR UPDATE SKIP LOCKED LIMIT 1
 		)
@@ -84,7 +85,7 @@ func (s *Service) claimEmail(ctx context.Context) (emailOutboxJob, bool, error) 
 		SET lease_owner = $1, lease_expires_at = now() + $2::interval, attempts = attempts + 1
 		FROM candidate c WHERE o.id = c.id
 		RETURNING o.id, o.kind, o.recipient, o.link, o.token_identifier, o.expires_at, o.attempts`,
-		s.workerID, mailOutboxLease.String()).Scan(&job.ID, &job.Kind, &job.Recipient, &job.Link, &job.TokenIdentifier, &job.ExpiresAt, &job.Attempts)
+		s.workerID, mailOutboxLease.String(), recipient).Scan(&job.ID, &job.Kind, &job.Recipient, &job.Link, &job.TokenIdentifier, &job.ExpiresAt, &job.Attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err := tx.Commit(ctx); err != nil {
 			return emailOutboxJob{}, false, err
@@ -105,10 +106,14 @@ func (s *Service) claimEmail(ctx context.Context) (emailOutboxJob, bool, error) 
 // crash. Delivery errors are deliberately not logged because providers may
 // include sensitive message contents in their error strings.
 func (s *Service) ProcessEmailOutboxOnce(ctx context.Context) (bool, error) {
+	return s.processEmailOutboxOnce(ctx, "")
+}
+
+func (s *Service) processEmailOutboxOnce(ctx context.Context, recipient string) (bool, error) {
 	if err := s.pruneEmailOutbox(ctx); err != nil {
 		return false, err
 	}
-	job, found, err := s.claimEmail(ctx)
+	job, found, err := s.claimEmail(ctx, recipient)
 	if err != nil || !found {
 		return found, err
 	}

@@ -55,7 +55,7 @@ func TestAuthFlowIsCompatibleWithRuntimeBetterAuthSchema(t *testing.T) {
 	if !created || user.EmailVerified {
 		t.Fatalf("signup = created %t, verified %t", created, user.EmailVerified)
 	}
-	if worked, err := service.ProcessEmailOutboxOnce(ctx); err != nil || !worked {
+	if worked, err := service.processEmailOutboxOnce(ctx, email); err != nil || !worked {
 		t.Fatalf("verification outbox processing worked=%t err=%v", worked, err)
 	}
 	select {
@@ -84,7 +84,7 @@ func TestAuthFlowIsCompatibleWithRuntimeBetterAuthSchema(t *testing.T) {
 	if _, err := service.SignIn(ctx, email, "correct horse battery staple"); !errors.Is(err, ErrEmailNotVerified) {
 		t.Fatalf("unverified sign-in error = %v, want ErrEmailNotVerified", err)
 	}
-	if worked, err := service.ProcessEmailOutboxOnce(ctx); err != nil || !worked {
+	if worked, err := service.processEmailOutboxOnce(ctx, email); err != nil || !worked {
 		t.Fatalf("sign-in verification outbox processing worked=%t err=%v", worked, err)
 	}
 	verificationToken, err := service.signVerificationToken(email)
@@ -145,7 +145,7 @@ func TestAuthFlowIsCompatibleWithRuntimeBetterAuthSchema(t *testing.T) {
 	if err != nil || failureMessage != recoveryMessage {
 		t.Fatalf("failed delivery response=%q err=%v", failureMessage, err)
 	}
-	if worked, err := failingService.ProcessEmailOutboxOnce(ctx); err != nil || !worked {
+	if worked, err := failingService.processEmailOutboxOnce(ctx, email); err != nil || !worked {
 		t.Fatalf("failed recovery attempt worked=%t err=%v", worked, err)
 	}
 	if strings.Contains(failedDeliveryLogs.String(), "reset-password/") || strings.Contains(failedDeliveryLogs.String(), "token=") {
@@ -171,7 +171,7 @@ func TestAuthFlowIsCompatibleWithRuntimeBetterAuthSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if worked, err := reclaimService.ProcessEmailOutboxOnce(ctx); err != nil || !worked {
+	if worked, err := reclaimService.processEmailOutboxOnce(ctx, email); err != nil || !worked {
 		t.Fatalf("reclaimed recovery attempt worked=%t err=%v", worked, err)
 	}
 	var reclaimedRows int
@@ -206,7 +206,7 @@ func TestAuthFlowIsCompatibleWithRuntimeBetterAuthSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if worked, err := service.ProcessEmailOutboxOnce(ctx); err != nil || !worked {
+	if worked, err := service.processEmailOutboxOnce(ctx, email); err != nil || !worked {
 		t.Fatalf("second recovery outbox processing worked=%t err=%v", worked, err)
 	}
 	var expiredDeliveredLink string
@@ -250,7 +250,7 @@ func TestAuthFlowIsCompatibleWithRuntimeBetterAuthSchema(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE auth_verification SET expires_at = now() - interval '1 second' WHERE identifier = $1`, expiredMailIdentifier); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessEmailOutboxOnce(ctx); err != nil {
+	if _, err := service.processEmailOutboxOnce(ctx, email); err != nil {
 		t.Fatalf("process expired auth mail outbox: %v", err)
 	}
 	var expiredMailRows int
