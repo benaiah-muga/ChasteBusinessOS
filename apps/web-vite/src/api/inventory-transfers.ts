@@ -12,6 +12,7 @@ const confirmTransferOutput = z.object({
   status: z.enum(["partial", "confirmed"]),
   confirmedNowThousandths: z.number().int().nonnegative().safe(),
 }).strict();
+const cancelTransferOutput = z.object({ cancelled: z.literal(true) }).strict();
 const pendingEnvelope = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
@@ -57,7 +58,8 @@ type InventoryTransferAction =
     lines: Array<{ sku: string; quantityThousandths: number }>;
     note?: string;
   }
-  | { action: "confirmTransfer"; transferId: string; lines?: PartialTransferLine[] };
+  | { action: "confirmTransfer"; transferId: string; lines?: PartialTransferLine[] }
+  | { action: "cancelTransfer"; transferId: string };
 
 export interface InventoryTransferRetryScope {
   actorId: string | null;
@@ -193,6 +195,10 @@ export async function confirmInventoryTransfer(
   }, "Could not confirm this stock transfer.", retryScope);
 }
 
+export async function cancelInventoryTransfer(transferId: string, retryScope: InventoryTransferRetryScope): Promise<InventoryTransferActionResult> {
+  return submit({ action: "cancelTransfer", transferId }, "Could not cancel this stock transfer draft.", retryScope);
+}
+
 export function supportsPartialConfirmation(transfer: InventoryTransferWithLineIds): boolean {
   return transfer.lines
     .filter((line) => line.confirmedThousandths < line.quantityThousandths)
@@ -209,7 +215,9 @@ async function submit(payload: InventoryTransferAction, fallback: string, retryS
   const request = {
     url: "/api/capabilities/execute",
     body: {
-      capabilityId: action === "createTransfer" ? "inventory.createTransfer" : "inventory.confirmTransfer",
+      capabilityId: action === "createTransfer"
+        ? "inventory.createTransfer"
+        : action === "confirmTransfer" ? "inventory.confirmTransfer" : "inventory.cancelTransfer",
       input,
       intentId: attempt.intentId,
     },
@@ -251,7 +259,9 @@ async function submit(payload: InventoryTransferAction, fallback: string, retryS
   const output = envelope.success
     ? action === "createTransfer"
       ? createTransferOutput.safeParse(envelope.data.data)
-      : confirmTransferOutput.safeParse(envelope.data.data)
+      : action === "confirmTransfer"
+        ? confirmTransferOutput.safeParse(envelope.data.data)
+        : cancelTransferOutput.safeParse(envelope.data.data)
     : null;
   if (!output?.success) {
     throw new InventoryTransferApiError(response.status, "The inventory service returned an unexpected transfer response.");

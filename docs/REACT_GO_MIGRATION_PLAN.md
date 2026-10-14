@@ -4394,3 +4394,14 @@ new owners and the manifest shows zero legacy runtime paths.
      `Migration Browser Proof` listing. Both capability requests returned
      HTTP 200, no legacy marketplace request occurred, and the browser error
      log was empty.
+
+409. (Implemented and verified: focused tests, independent review, and
+     authenticated browser proof) Vite Inventory now exposes Go's
+     `inventory.cancelTransfer` for pending drafts with no moved stock. The UI
+     requires confirmation, scopes its exact retry to the actor and
+     organization, and clears stale confirmation and response state when that
+     scope changes. The focused API and panel tests pass 26 cases, including a
+     deferred scope-switch check. Authenticated browser proof drafted one unit
+     of a synthetic transfer, cancelled it, and confirmed it disappeared from
+     refreshed history. Both capability requests returned HTTP 200 and the
+     browser error log was empty.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { confirmInventoryTransfer, createInventoryTransfer } from "./inventory-transfers";
+import { cancelInventoryTransfer, confirmInventoryTransfer, createInventoryTransfer } from "./inventory-transfers";
 
 const transferId = "40000000-0000-4000-8000-000000000004";
 const lineId = "50000000-0000-4000-8000-000000000005";
@@ -41,6 +41,25 @@ describe("inventory transfer API client", () => {
     expect(requests[1]?.body.input).toEqual({ transferId, lines: [{ lineId, quantityThousandths: 1000 }] });
     expect(requests[0]?.body.intentId).not.toBe(requests[1]?.body.intentId);
     expect(requests.map((request) => request.headers["X-Organization-ID"])).toEqual([retryScope.organizationId, retryScope.organizationId]);
+  });
+
+  it("cancels a transfer draft through the governed Go capability and validates its result", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ ok: true, data: { cancelled: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(cancelInventoryTransfer(transferId, retryScope)).resolves.toEqual({ kind: "completed" });
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      capabilityId: "inventory.cancelTransfer",
+      input: { transferId },
+      intentId: expect.any(String),
+    });
+
+    const badResponse = vi.fn().mockResolvedValueOnce(jsonResponse({ ok: true, data: { cancelled: true, transferId } }));
+    vi.stubGlobal("fetch", badResponse);
+    await expect(cancelInventoryTransfer(transferId, { ...retryScope, organizationId: "org-2" }))
+      .rejects.toThrow("unexpected transfer response");
   });
 
   it("fails closed when the Go endpoint is unavailable without trying a legacy route", async () => {

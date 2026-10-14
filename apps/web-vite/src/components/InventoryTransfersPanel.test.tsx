@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { confirmInventoryTransfer, createInventoryTransfer, hasUnroutedInventoryTransferAttempt, InventoryTransferApiError } from "../api/inventory-transfers";
 import type { InventoryItem, InventoryLocation, InventoryTransfer } from "../api/inventory";
@@ -79,6 +79,26 @@ describe("inventory transfer API", () => {
     await expect(confirmInventoryTransfer("transfer-1", retryScope))
       .rejects.toThrow("Check transfer history before retrying");
   });
+
+  it("requires explicit confirmation before cancelling a pending transfer draft", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { cancelled: true } }));
+    const onChanged = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={retryScope} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Cancel draft" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
+    expect(screen.getByText("Cancel draft #7? No stock has moved yet.")).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Keep draft" }));
+    expect(screen.queryByText("Cancel draft #7? No stock has moved yet.")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm cancel draft #7" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Transfer draft #7 cancelled.");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "inventory.cancelTransfer", input: { transferId: transfer.id } });
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+  });
 });
 
 describe("Vite inventory transfers panel", () => {
@@ -112,6 +132,36 @@ describe("Vite inventory transfers panel", () => {
     expect((await screen.findByRole("status")).textContent).toContain("requires approval");
     expect(screen.getByRole("status").textContent).toContain("owner approval required");
     expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("invalidates cancellation confirmation and suppresses old-scope completion effects", async () => {
+    const nextScope = { actorId: "actor-2", organizationId: "org-2" };
+    let resolveRequest!: (response: Response) => void;
+    const pendingRequest = new Promise<Response>((resolve) => { resolveRequest = resolve; });
+    const fetchMock = vi.fn(() => pendingRequest);
+    const onChanged = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const panel = render(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={retryScope} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Cancel draft" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
+    expect(screen.getByRole("group", { name: "Confirm cancellation of transfer 7" })).toBeTruthy();
+    panel.rerender(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={nextScope} />);
+    panel.rerender(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={retryScope} />);
+    expect(screen.queryByRole("group", { name: "Confirm cancellation of transfer 7" })).toBeNull();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Cancel draft" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm cancel draft #7" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    panel.rerender(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={nextScope} />);
+    await act(async () => {
+      resolveRequest(jsonResponse({ ok: true, data: { cancelled: true } }));
+      await pendingRequest;
+    });
+
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(screen.queryByText("Transfer draft #7 cancelled.")).toBeNull();
   });
 
   it("requires history review before resolving an ambiguous pre-route marker", async () => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { InventoryItem, InventoryLocation, InventoryTransfer } from "../api/inventory";
 import {
+  cancelInventoryTransfer,
   confirmInventoryTransfer,
   createInventoryTransfer,
   hasUnroutedInventoryTransferAttempt,
@@ -49,6 +50,7 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
   const [quantity, setQuantity] = useState("");
   const [note, setNote] = useState("");
   const [partialAmounts, setPartialAmounts] = useState<Record<string, string>>({});
+  const [cancellingTransfer, setCancellingTransfer] = useState<{ id: string; scopeIdentity: string; generation: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [routeLessAttempt, setRouteLessAttempt] = useState(false);
   const [routeLessAttemptScope, setRouteLessAttemptScope] = useState<string | null>(null);
@@ -63,6 +65,10 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
     transferScopeIdentityRef.current = transferScopeIdentity;
     transferScopeGeneration.current += 1;
   }
+  useEffect(() => {
+    setCancellingTransfer(null);
+    setBusy(false);
+  }, [transferScopeIdentity]);
   const [guardedTransferIds, setGuardedTransferIds] = useState<ReadonlySet<string>>(() => new Set());
   const activeItems = useMemo(() => items.filter((item) => item.kind !== "service"), [items]);
   const transferScopeReady = routeLessAttemptScope === transferScopeIdentity;
@@ -109,31 +115,37 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
     action: () => Promise<{ kind: "completed" } | { kind: "pending"; reason: string }>,
     success: string,
     onCompleted?: () => void,
+    scopeGeneration?: number,
   ) {
+    const isCurrentScope = () => scopeGeneration === undefined || transferScopeGeneration.current === scopeGeneration;
     setBusy(true);
     setNotice(null);
     try {
       const result = await action();
+      if (!isCurrentScope()) return false;
       if (result.kind === "pending") {
         setNotice({ kind: "pending", message: `This transfer requires approval. ${result.reason}` });
         return false;
       }
       onCompleted?.();
       setNotice({ kind: "success", message: success });
+      if (!isCurrentScope()) return true;
       try {
         await onChanged();
       } catch {
-        setNotice({ kind: "error", message: `${success} The transfer completed, but inventory could not refresh. Reload the page to see the latest status.` });
+        if (isCurrentScope()) setNotice({ kind: "error", message: `${success} The transfer completed, but inventory could not refresh. Reload the page to see the latest status.` });
       }
       return true;
     } catch (error) {
-      setNotice({
-        kind: "error",
-        message: error instanceof InventoryTransferApiError ? error.message : "The transfer could not be completed. Try again.",
-      });
+      if (isCurrentScope()) {
+        setNotice({
+          kind: "error",
+          message: error instanceof InventoryTransferApiError ? error.message : "The transfer could not be completed. Try again.",
+        });
+      }
       return false;
     } finally {
-      setBusy(false);
+      if (isCurrentScope()) setBusy(false);
     }
   }
 
@@ -156,6 +168,22 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
 
   async function confirmRemaining(transfer: InventoryTransfer) {
     await runAction(() => confirmInventoryTransfer(transfer.id, retryScope), `Transfer #${transfer.number} confirmed.`);
+  }
+
+  async function cancelDraft(transfer: InventoryTransfer) {
+    const scopeGeneration = transferScopeGeneration.current;
+    if (cancellingTransfer?.id !== transfer.id || cancellingTransfer.scopeIdentity !== transferScopeIdentity || cancellingTransfer.generation !== scopeGeneration) {
+      setCancellingTransfer(null);
+      setNotice({ kind: "error", message: "The active workspace changed. Review the current transfer history before cancelling a draft." });
+      return;
+    }
+    const completed = await runAction(
+      () => cancelInventoryTransfer(transfer.id, retryScope),
+      `Transfer draft #${transfer.number} cancelled.`,
+      () => setCancellingTransfer((current) => current?.generation === scopeGeneration ? null : current),
+      scopeGeneration,
+    );
+    if (!completed && scopeGeneration === transferScopeGeneration.current) setCancellingTransfer(null);
   }
 
   async function confirmPartial(transfer: InventoryTransferWithLineIds) {
@@ -296,6 +324,23 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
                     <button type="button" disabled={busy || !transferScopeReady || showRouteLessAttempt || confirmationGuarded} title={confirmationGuarded ? "Wait for refreshed transfer progress before confirming again" : "Confirm the remaining quantity and move stock"} onClick={() => void confirmRemaining(transfer)}>
                       Confirm remaining
                     </button>
+                  </div>
+                )}
+                {transfer.status === "pending" && (
+                  <div>
+                    {cancellingTransfer?.id === transfer.id && cancellingTransfer.scopeIdentity === transferScopeIdentity && cancellingTransfer.generation === transferScopeGeneration.current ? (
+                      <div role="group" aria-label={`Confirm cancellation of transfer ${transfer.number}`}>
+                        <p>Cancel draft #{transfer.number}? No stock has moved yet.</p>
+                        <button type="button" disabled={busy || !transferScopeReady || showRouteLessAttempt} onClick={() => void cancelDraft(transfer)}>
+                          Confirm cancel draft #{transfer.number}
+                        </button>
+                        <button type="button" disabled={busy} onClick={() => setCancellingTransfer(null)}>Keep draft</button>
+                      </div>
+                    ) : (
+                      <button type="button" disabled={busy || !transferScopeReady || showRouteLessAttempt} onClick={() => setCancellingTransfer({ id: transfer.id, scopeIdentity: transferScopeIdentity, generation: transferScopeGeneration.current })}>
+                        Cancel draft
+                      </button>
+                    )}
                   </div>
                 )}
               </li>
