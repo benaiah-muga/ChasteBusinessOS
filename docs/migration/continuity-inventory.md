@@ -55,13 +55,13 @@ production requests and writes. No production traffic has moved to Go.
   methods ([`route.ts#L10-L22`](../../apps/web/src/app/api/org/route.ts#L10-L22),
   [`route.ts#L27-L35`](../../apps/web/src/app/api/org/route.ts#L27-L35),
   [`org-route.test.ts#L1-L175`](../../apps/web/src/server/org-route.test.ts#L1-L175)).
-- The signed Go bridge now supports policy reads, ledger reads, and an opt-in
-  organization membership switch. The switch assertion binds the verified
-  user and requested org; Go rechecks membership in an org-scoped transaction
-  under the runtime role before returning the existing active-org cookie. The
-  public route stays legacy-owned unless `GO_ORG_SWITCH=1`; the auth catch-all
-  remains Next-owned, and Go does not yet validate browser sessions or own
-  sign-in, verification, recovery, or session refresh
+- Go owns the Vite `/api/auth/*` namespace and directly validates browser
+  sessions, signs in and up, verifies email, handles recovery, refreshes
+  sessions, and signs out. The Vite API proxy defaults auth traffic to Go and
+  fails closed on unsupported paths. Better Auth endpoint compatibility for
+  integrations beyond the current Vite flows remains open. Go's organization
+  route validates membership in an org-scoped transaction under the runtime
+  role before setting the existing active-org cookie.
   ([`route.ts#L29-L109`](../../apps/web/src/app/api/org/route.ts#L29-L109),
   [`go-bridge.ts#L52-L73`](../../apps/web/src/server/go-bridge.ts#L52-L73),
   [`org_switch.go#L32-L85`](../../apps/api/internal/httpapi/org_switch.go#L32-L85),
@@ -358,8 +358,10 @@ response or cookie does not match the expected contract
 The Vite org switcher uses a Zod-validated client for the Go `/api/org` handler
 and returns to `/` after a successful response. The Settings persona editor
 reads with exact `PUT /api/org` and saves with exact `PATCH /api/org`; Go
-resolves the same session, requires `iam.admin` for writes, and enforces the
-legacy 8,000 UTF-16-code-unit string limit. Preserve membership denial and
+resolves the same session, requires `iam.admin` for writes, enforces the
+legacy 8,000 UTF-16-code-unit string limit, and checks same-origin Origin on
+cookie-authenticated POST and PATCH writes using configured trusted proxy
+CIDRs. Preserve membership denial and
 cookie flags; the client never reads or writes the active-org cookie
 ([`ActiveOrganization.tsx#L1-L112`](../../apps/web-vite/src/components/ActiveOrganization.tsx#L1-L112),
 [`organizations.ts#L1-L71`](../../apps/web-vite/src/api/organizations.ts#L1-L71),
@@ -367,32 +369,35 @@ cookie flags; the client never reads or writes the active-org cookie
 Vite always proxies exact GET, POST, PUT, and PATCH `/api/org` requests to Go.
 The Go handler mounts by default; `GO_ORG_ROUTE=0` unmounts it and causes these
 requests to fail closed. The proxy preserves the session cookie, Origin, body,
-and response cookies. The manifest records exact GET and POST ownership as Go
-with verified parity. PUT and PATCH are Go-owned with parity pending under a
-narrow `/api/org` persona policy exception. Focused Go handler, unit, and
-runtime DB tests cover persona authorization and Go's UTF-16 length boundary;
-proxy tests cover forwarding and rejection of suffix paths and unsupported
-methods. The live legacy differential did not complete: the legacy server was
-initially unavailable, then returned
-401 for the seeded session. Authenticated browser proof for persona read and
-save also remains pending. Existing browser proof
-verified a 200 same-org POST and active-org cookie change, plus a 403 for a
-forged nonmember target. DELETE and suffix paths remain on their existing owner.
+and response cookies. The manifest records exact GET, POST, PUT, and PATCH ownership as Go with
+verified Vite/Go contract evidence under the narrow `/api/org` persona policy
+exception.
+Focused Go handler, unit, and runtime DB tests cover persona authorization
+and Go's UTF-16 length boundary; proxy tests cover forwarding and rejection
+of suffix paths and unsupported methods. Authenticated browser proof saved
+the owner persona through PATCH with HTTP 200 and confirmed it persisted after
+reload. No byte-for-byte Next response comparison is claimed. Existing browser
+proof verified a 200 same-org POST and active-org cookie change, plus a 403
+for a forged nonmember target. DELETE and suffix paths remain on their existing owner.
 The Vite selector has been removed; `GO_ORG_ROUTE=0` disables the Go handler
 without restoring legacy routing.
 
 Vite Settings sends exact GET and POST `/api/routines` collection calls to Go
-by default. Set `CHASTE_GO_ROUTINES_ROUTE=0` to route Vite through the legacy
-app; set `GO_ROUTINES_ROUTE=0` as well to unmount the Go handler. The
-collection handler resolves the signed session and dispatches mutations
+by default. `CHASTE_GO_ROUTINES_ROUTE=0` bypasses specialized route selection,
+but the Vite API catch-all still sends the request to Go. Set
+`GO_ROUTINES_ROUTE=0` to unmount the Go handler, which then returns a Go 404.
+The collection handler resolves the signed session and dispatches mutations
 through the governed capability executor. Vite uses its deterministic parser
 for pre-submit feedback because the Go path does not use the legacy model
 refinement fallback. Go remains authoritative and validates every submitted
-schedule. Runtime-role HTTP coverage verifies active organization scoping for
-list, create, and readback. The manifest records
-these exact methods with parity pending until live legacy differential and
-authenticated browser proof complete. Webhook token delivery and worker
-execution retain their existing owners and lifecycle.
+schedule. The list projection includes webhook URLs for stored tokens even on
+disabled routines and schedule-triggered routines, matching legacy behavior;
+the webhook endpoint still refuses disabled or non-webhook routines.
+Runtime-role HTTP coverage verifies active organization scoping for list,
+create, and readback. Authenticated browser proof on 2026-10-14 loaded and
+created a routine through Go with successful list refresh. The manifest records the exact methods as verified against the Vite/Go target
+contract; no byte-for-byte Next response comparison is claimed. Webhook token
+delivery and worker execution retain their existing owners and lifecycle.
 
 Vite Settings sends exact `GET` and `POST /api/memory` requests to Go by
 default. Go resolves the signed Better Auth session and active organization.
@@ -407,8 +412,10 @@ permission, organization, approval, and audit checks. Vite proxies only these
 exact methods and path; other methods and suffix paths retain their existing
 owner. Unit, runtime-role HTTP, and Settings client tests cover kind filtering,
 empty and one-character source search, pre-filter totals, permission-derived
-controls, org isolation, and deletion envelopes. Route parity remains pending
-until authenticated browser and live legacy differential proofs complete.
+controls, org isolation, and deletion envelopes. Authenticated browser proof
+on 2026-10-14 loaded and removed a synthetic organization memory entry through
+Go. The manifest records these methods as verified against the Vite/Go target
+contract; no byte-for-byte Next response comparison is claimed.
 
 The Vite Inventory defaults panel sends exact `GET` and `POST
 /api/module-settings` requests to Go by default. Both methods resolve the
@@ -423,8 +430,9 @@ settings schema, matching the existing route. Supported saves pass through the
 Go `iam.setModuleConfig` capability executor, which enforces `iam.admin` and
 keeps approval and audit handling server-side. Runtime-role HTTP proof covers
 member reads, missing defaults, tenant isolation, denied writes, and an
-authorized audited write. The route manifest remains parity pending until the
-authenticated browser and live legacy differential proofs complete
+authorized audited write. Authenticated browser proof on 2026-10-14 loaded and
+saved Inventory defaults through Go. The route manifest records these methods as verified against the Vite/Go target
+contract; no byte-for-byte Next response comparison is claimed
 ([`route.ts#L1-L76`](../../apps/web/src/app/api/module-settings/route.ts#L1-L76),
 [`module-settings.ts#L1-L26`](../../apps/web/src/server/module-settings.ts#L1-L26),
 [`iam_org_settings.go#L123-L169`](../../apps/api/internal/capability/iam_org_settings.go#L123-L169),
@@ -440,8 +448,9 @@ approval envelopes. Go validates and dispatches writes through
 `iam.setOrgPolicy`, so the capability executor remains authoritative for
 permissions, approval, and audit. Explicit `moneyThresholdMinor: null` is
 rejected, matching the legacy Zod route; the Go parser now has a regression
-test for this difference. The route manifest remains parity pending until
-authenticated browser and live legacy differential proofs complete
+test for this difference. Authenticated browser proof on 2026-10-14 loaded and
+saved the existing policy through Go. The route manifest records these methods as verified against the Vite/Go target
+contract; no byte-for-byte Next response comparison is claimed
 ([`route.ts#L108-L158`](../../apps/web/src/app/api/policy/route.ts#L108-L158),
 [`policy.go#L15-L55`](../../apps/api/internal/policy/policy.go#L15-L55),
 [`iam_org_settings.go#L173-L213`](../../apps/api/internal/capability/iam_org_settings.go#L173-L213),

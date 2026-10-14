@@ -47,6 +47,12 @@ The full v1 changelog is preserved at the bottom of this file.
   organization's in-progress register state after an organization switch.
 - Go routine webhooks now accept only enabled webhook routines, and the app
   database role has schema usage limited to invoking the enqueue function.
+- Go routine listings preserve the legacy webhook URL projection for routines
+  with stored tokens, including disabled routines; webhook execution still
+  refuses disabled routines.
+- Go organization switching and persona writes now require a same-origin
+  Origin header, with trusted proxy CIDRs honored before the cookie or persona
+  mutation proceeds.
 - Marketplace signature, ownership, listing-state, and stale-listing refusals
   now return actionable client errors. Vite preserves the same exact actor,
   organization, and action intent through uncertain retries and clears it only

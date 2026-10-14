@@ -47,16 +47,17 @@ func routinesSessionRequest(method, path, body string) *http.Request {
 
 func TestRoutinesSessionHandlerListsCapabilityRowsWithWebhookURLs(t *testing.T) {
 	const routineID = "44444444-4444-4444-8444-444444444444"
+	const scheduleRoutineID = "66666666-6666-4666-8666-666666666666"
 	resolver := &fakeDirectSessionResolver{resolved: routinesTestIdentity()}
-	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"routines":[{"id":"` + routineID + `","name":"Morning","scheduleLabel":"Daily at 08:00","triggerType":"webhook","enabled":true,"nextRunAt":null,"lastRunAt":null,"lastStatus":null,"lastError":null}]}`)}}
-	tokens := fakeRoutinesWebhookTokenReader{tokens: map[string]string{routineID: "opaque-token"}}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"routines":[{"id":"` + routineID + `","name":"Morning","scheduleLabel":"Daily at 08:00","triggerType":"webhook","enabled":true,"nextRunAt":null,"lastRunAt":null,"lastStatus":null,"lastError":null},{"id":"` + scheduleRoutineID + `","name":"Scheduled","scheduleLabel":"Hourly","triggerType":"schedule","enabled":true,"nextRunAt":null,"lastRunAt":null,"lastStatus":null,"lastError":null}]}`)}}
+	tokens := fakeRoutinesWebhookTokenReader{tokens: map[string]string{routineID: "opaque-token", scheduleRoutineID: "stored-schedule-token"}}
 	handler := &RoutinesSessionHandler{resolver: resolver, executor: executor, tokenReader: tokens, logger: routinesTestLogger()}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, routinesSessionRequest(http.MethodGet, "/api/routines", ""))
 	if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != "routines.list" || string(executor.input) != `{}` {
 		t.Fatalf("status=%d calls=%d capability=%q input=%s body=%s", response.Code, executor.calls, executor.capID, executor.input, response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"webhookUrl":"https://app.example.test/api/routines/webhook/opaque-token"`) || strings.Contains(response.Body.String(), `"webhookToken"`) {
+	if !strings.Contains(response.Body.String(), `"webhookUrl":"https://app.example.test/api/routines/webhook/opaque-token"`) || !strings.Contains(response.Body.String(), `"webhookUrl":"https://app.example.test/api/routines/webhook/stored-schedule-token"`) || strings.Contains(response.Body.String(), `"webhookToken"`) {
 		t.Fatalf("unexpected webhook exposure or URL origin: %s", response.Body.String())
 	}
 	if executor.claims.Subject != routinesTestIdentity().UserID || executor.claims.OrganizationID != *routinesTestIdentity().OrgID || executor.claims.AuthSessionID != routinesTestIdentity().AuthSessionID {

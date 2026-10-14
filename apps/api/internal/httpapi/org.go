@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"unicode/utf16"
@@ -58,14 +59,19 @@ const maxSoulBodyBytes = 64 * 1024
 // trusting an assertion minted elsewhere, which is what lets it eventually own
 // the route outright.
 type OrgHandler struct {
-	repo    OrgRepository
-	session SessionResolver
-	logger  *slog.Logger
-	secret  string
+	repo              OrgRepository
+	session           SessionResolver
+	logger            *slog.Logger
+	secret            string
+	trustedProxyCIDRs []*net.IPNet
 }
 
-func NewOrgHandler(repo OrgRepository, resolver SessionResolver, secret string, logger *slog.Logger) *OrgHandler {
-	return &OrgHandler{repo: repo, session: resolver, secret: secret, logger: logger}
+func NewOrgHandler(repo OrgRepository, resolver SessionResolver, secret string, logger *slog.Logger, trustedProxyCIDRs ...[]*net.IPNet) *OrgHandler {
+	var trusted []*net.IPNet
+	if len(trustedProxyCIDRs) > 0 {
+		trusted = trustedProxyCIDRs[0]
+	}
+	return &OrgHandler{repo: repo, session: resolver, secret: secret, logger: logger, trustedProxyCIDRs: trusted}
 }
 
 // orgActor is the resolved caller plus the cookies needed for the switch.
@@ -149,6 +155,10 @@ func (h *OrgHandler) get(w http.ResponseWriter, r *http.Request, actor *orgActor
 // Membership is re-checked here rather than trusted from the cookie, so a
 // tampered cookie cannot select a tenant the caller does not belong to.
 func (h *OrgHandler) post(w http.ResponseWriter, r *http.Request, actor *orgActor) {
+	if !sameOriginCapabilityRequest(r, h.trustedProxyCIDRs) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "same-origin request required"})
+		return
+	}
 	if !actor.resolved.EmailVerified {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "email verification required"})
 		return
@@ -183,6 +193,10 @@ func (h *OrgHandler) post(w http.ResponseWriter, r *http.Request, actor *orgActo
 // patch replaces the organization's agent persona. This text steers every agent
 // turn for the whole organization, so it is admin-gated.
 func (h *OrgHandler) patch(w http.ResponseWriter, r *http.Request, actor *orgActor) {
+	if !sameOriginCapabilityRequest(r, h.trustedProxyCIDRs) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "same-origin request required"})
+		return
+	}
 	if actor.resolved.OrgID == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return

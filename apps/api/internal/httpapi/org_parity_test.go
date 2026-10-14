@@ -381,6 +381,7 @@ func TestGoOrgRouteWorksThroughRuntimeRLS(t *testing.T) {
 	}
 	patchRequest := httptest.NewRequest(http.MethodPatch, "/api/org", bytes.NewReader(patchBody))
 	patchRequest.Header.Set("Content-Type", "application/json")
+	patchRequest.Header.Set("Origin", "http://example.com")
 	patchRequest.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: fixture.cookie})
 	patchRequest.AddCookie(&http.Cookie{Name: session.ActiveOrgCookieName, Value: fixture.orgA})
 	patchResponse := httptest.NewRecorder()
@@ -411,6 +412,7 @@ func legacyOrg(t *testing.T, origin, method, body, cookie, activeOrg string) (in
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Origin", req.URL.Scheme+"://"+req.URL.Host)
 	if cookie != "" {
 		req.AddCookie(&http.Cookie{Name: "better-auth.session_token", Value: cookie})
 	}
@@ -437,6 +439,7 @@ func goOrg(t *testing.T, origin, method, body, cookie, activeOrg string) (int, s
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Origin", req.URL.Scheme+"://"+req.URL.Host)
 	if cookie != "" {
 		req.AddCookie(&http.Cookie{Name: "better-auth.session_token", Value: cookie})
 	}

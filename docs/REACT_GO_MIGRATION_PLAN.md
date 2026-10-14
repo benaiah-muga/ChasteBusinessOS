@@ -267,10 +267,10 @@ explicit signed opt-in; CRM writes and unported read modes remain on the
 legacy route. The Go metrics reader matches the newest-200-session aggregate,
 null-rate, rounding, and organization-scope behavior. Its short-lived signed
 HTTP adapter is opt-in through `GO_METRICS_READ=1`; the public route remains
-legacy-owned by default. The current route census has 94 API route files, 161
-API methods, and 30 pages. Go owns 64 verified API methods, 95 API methods
-remain legacy-owned, and two auth methods remain pending Go parity. Vite owns 15
-verified pages; 15 pages remain legacy-owned.
+legacy-owned by default. The current route manifest has 162 API methods: 66 business methods are
+Go-owned and verified, 94 are legacy-owned, and two Better Auth methods are
+assigned to Go auth with endpoint compatibility parity still open. Vite owns all 30 page entries as
+verified.
 
 The key seams are `apps/web/src/lib/api.ts` (HTTP and 202 approval semantics),
 `apps/web/src/server/auth.ts` and `session.ts` (identity and active org),
@@ -284,10 +284,11 @@ backup behavior. Phase 0 records exact manifests from these sources.
 Method-level owner and parity changes belong in
 `route-ownership-overrides.json`; the generator rejects duplicate or stale
 keys and prevents a route from moving to Go or Vite before parity is verified.
-The current manifest records 64 Go-owned API methods and 15 Vite-owned pages;
-95 API methods and 15 pages retain legacy ownership, while the two auth methods
-remain pending Go compatibility parity. Owners move only after their parity
-and runtime gates pass.
+The current manifest records 66 verified Go-owned business API methods, 94
+legacy-owned methods, and two auth methods assigned to Go with
+compatibility parity pending. All 30 page entries are Vite-owned and verified.
+Owner changes are recorded after their implementation and runtime evidence is
+reviewed.
 
 Local verification on 2026-10-04 passed `pnpm typecheck`, `pnpm lint`,
 `pnpm test`, and `pnpm go:verify` with `GO_DATABASE_URL` set to the
@@ -3121,23 +3122,22 @@ new owners and the manifest shows zero legacy runtime paths.
      public Vite route renders the safe not-found state for an invalid share
      token and the exact GET returns 404 without browser console errors.
 
-278. (Implemented; handler and proxy proof added; authenticated persona browser
-     proof passed; live legacy differential remains pending) Route exact Vite
+278. (Implemented and verified against the Vite/Go contract; authenticated persona
+     browser proof passed) Route exact Vite
      `PUT` and `PATCH /api/org` persona
      requests through Go. Keep exact path matching, preserve existing GET and
      POST routing, and leave DELETE and suffix paths with their current owner.
      Go enforces an 8,000 UTF-16-code-unit persona limit, including multibyte
-     text, and bounds escaped JSON request bodies. Focused unit, runtime DB,
+     text, bounds escaped JSON request bodies, and requires same-origin Origin validation for cookie-authenticated POST and
+     PATCH writes, accounting for configured trusted proxy CIDRs. Focused unit, runtime DB,
      settings client, and Vite proxy tests cover Go behavior and forwarding.
-     The manifest assigns PUT/PATCH to Go with parity pending under the narrow
-     `/api/org` persona policy exception. The live legacy differential fixture
-     returned 401 for its seeded session, so it did not verify a legacy
-     response. Complete that differential and the authenticated browser
-     read/save proof before closing those runtime gates.
+     The manifest assigns PUT/PATCH to Go with verified Vite/Go contract evidence
+     under the narrow `/api/org` persona policy exception. No byte-for-byte
+     Next response comparison is claimed; authenticated browser read/save,
+     proxy, handler, and runtime-role tests cover the active target behavior.
 
-279. (Implemented; Go session handler, runtime-role HTTP proof, Vite form
-     validation, and exact proxy proof added; authenticated browser proof and
-     live legacy differential proof remain pending) Route exact `GET` and
+279. (Implemented and verified against the Vite/Go contract; authenticated browser
+     proof passed) Route exact `GET` and
      `POST /api/routines` requests from Vite Settings through Go by default.
      Preserve fallback ownership for unsupported methods and suffix paths, in
      particular `/api/routines/webhook/:token`. Restrict Vite schedule entry to
@@ -3147,12 +3147,21 @@ new owners and the manifest shows zero legacy runtime paths.
      feedback. The runtime HTTP proof resolves
      a signed session against the app database role, scopes reads and writes
      to the active organization, and verifies a created routine by readback.
-     The manifest records both collection methods as Go-owned with parity
-     pending under a narrow policy exception. Webhook handling and worker
+     The webhook URL projection includes stored tokens for disabled routines,
+     matching the legacy list response; scheduled routines with stored tokens
+     also retain their URL, while webhook execution still refuses disabled or
+     non-webhook routines. On 2026-10-14, authenticated Vite Settings listed
+     routines from Go, created the synthetic Heartbeat routine through Go, and
+     refreshed the list. All three requests returned HTTP 200 and the browser
+     error log was empty.
+     The manifest records both collection methods as Go-owned with verified
+     Vite/Go contract evidence under a narrow policy exception. This does not
+     claim byte-for-byte Next parity; the deterministic schedule parser scope
+     is documented above. Webhook handling and worker
      execution remain separate migration items.
 
-280. (Implemented; runtime-role HTTP and focused Vite tests passed; authenticated
-     browser proof and live legacy differential remain pending) Route exact
+280. (Implemented and verified against the Vite/Go contract; authenticated browser
+     proof passed) Route exact
      Vite Settings `GET` and `POST /api/memory` requests through Go by default.
      Go resolves the signed user session and active organization, uses a
      tenant-scoped projection for the legacy 200-row list contract, and derives
@@ -3161,11 +3170,16 @@ new owners and the manifest shows zero legacy runtime paths.
      timestamp fields. Memory deletion continues through the governed
      `documents.deleteOrgMemory` capability, which enforces permission and
      organization scope. Unsupported methods and suffix paths retain their
-     existing owner. The generated route manifest records both methods as Go
-     owned with parity pending under an exact-path policy exception.
+     existing owner. The generated route manifest records both methods as Go-owned with verified
+     Vite/Go contract evidence under an exact-path policy exception. No
+     byte-for-byte Next response comparison is claimed.
+     On 2026-10-14, authenticated Vite Settings loaded organization memory
+     through Go, then deleted the synthetic onboarding entry through the
+     governed Go route and refreshed the list. GET and POST returned HTTP 200;
+     the browser error log was empty.
 
-281. (Implemented; runtime-role HTTP and focused Vite Settings tests passed;
-     authenticated browser proof and live legacy differential remain pending)
+281. (Implemented and verified against the Vite/Go contract; authenticated browser
+     proof passed)
      Route exact `GET` and `POST /api/module-settings` requests from the active
      Vite Inventory settings panel through Go by default. Go resolves the
      signed user session and active organization. Reads are available to
@@ -3175,11 +3189,15 @@ new owners and the manifest shows zero legacy runtime paths.
      (currently inventory) and execute `iam.setModuleConfig`, leaving
      `iam.admin`, approval, and audit enforcement in the capability executor.
      Unsupported module writes retain the legacy 404. The manifest records
-     only exact GET/POST collection ownership as Go with parity pending.
+     only exact GET/POST collection ownership as Go with verified Vite/Go
+     contract evidence. No byte-for-byte Next response comparison is claimed.
+     On 2026-10-14, authenticated Vite Settings read inventory defaults and
+     saved a synthetic unit label and reorder point through Go. GET and POST
+     returned HTTP 200, the UI confirmed the save, and the browser error log
+     was empty.
 
-282. (Implemented; runtime-role HTTP and focused Vite tests, typecheck, lint,
-     route manifest, and continuity inventory checks passed; authenticated
-     browser proof and live legacy differential remain pending) Route exact
+282. (Implemented and verified against the Vite/Go contract; authenticated browser
+     proof passed) Route exact
      `GET` and `POST /api/policy`
      requests from Vite Settings through Go by default. Reads require a signed
      session and active organization membership, use `policy.Reader.ForOrg`
@@ -3188,7 +3206,11 @@ new owners and the manifest shows zero legacy runtime paths.
      legacy input constraints and pending/success envelopes and execute
      `iam.setOrgPolicy` through the capability executor. Cookie writes require
      same-origin validation. The generated route manifest records exact GET
-     and POST ownership as Go with parity pending under a narrow policy rule.
+     and POST ownership as Go with verified Vite/Go contract evidence under a
+     narrow policy rule.
+     On 2026-10-14, authenticated Vite Settings loaded and saved the existing
+     governance policy through Go. GET and POST returned HTTP 200, the UI
+     confirmed the save, and the browser error log was empty.
 
 283. (Implemented; runtime-role capability DB proof and focused Vite API tests
      passed; authenticated browser proof and live legacy differential remain

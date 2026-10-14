@@ -38,9 +38,7 @@ func (r pgRoutinesWebhookTokenReader) ForOrganization(ctx context.Context, orgID
 			SELECT id::text, webhook_token
 			FROM routines
 			WHERE org_id=$1::uuid
-			  AND webhook_token IS NOT NULL
-			  AND enabled = true
-			  AND trigger_type = 'webhook'`, orgID)
+			  AND webhook_token IS NOT NULL`, orgID)
 		if err != nil {
 			return nil, err
 		}

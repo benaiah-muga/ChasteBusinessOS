@@ -191,16 +191,28 @@ func TestPgRoutinesWebhookTokenReaderScopesTokensByOrganization(t *testing.T) {
 		VALUES ($1::uuid, 'Disabled webhook routine', 'Routine fixture prompt', '{"kind":"interval","everyMinutes":60}'::jsonb, false, 'webhook', $2)`, orgID, disabledToken); err != nil {
 		t.Fatalf("insert disabled routine: %v", err)
 	}
+	const scheduleToken = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO routines (org_id, name, prompt, schedule, enabled, trigger_type, webhook_token)
+		VALUES ($1::uuid, 'Scheduled routine with stored token', 'Routine fixture prompt', '{"kind":"interval","everyMinutes":60}'::jsonb, true, 'schedule', $2)`, orgID, scheduleToken); err != nil {
+		t.Fatalf("insert scheduled routine with stored token: %v", err)
+	}
 
 	tokens, err := (pgRoutinesWebhookTokenReader{pool: runtime}).ForOrganization(ctx, orgID)
 	if err != nil {
 		t.Fatalf("read scoped webhook tokens: %v", err)
 	}
-	if len(tokens) != 1 {
-		t.Fatalf("scoped token count = %d, want 1: %#v", len(tokens), tokens)
+	if len(tokens) != 3 {
+		t.Fatalf("scoped token count = %d, want all three local stored tokens: %#v", len(tokens), tokens)
 	}
 	if tokensValue := tokensValueForToken(tokens, localToken); tokensValue == "" {
 		t.Fatalf("local token not returned: %#v", tokens)
+	}
+	if tokensValue := tokensValueForToken(tokens, disabledToken); tokensValue == "" {
+		t.Fatalf("disabled local token not returned for legacy list parity: %#v", tokens)
+	}
+	if tokensValue := tokensValueForToken(tokens, scheduleToken); tokensValue == "" {
+		t.Fatalf("scheduled local token not returned for legacy list parity: %#v", tokens)
 	}
 	if tokensValue := tokensValueForToken(tokens, foreignToken); tokensValue != "" {
 		t.Fatalf("foreign token leaked into organization result: %#v", tokens)
@@ -218,13 +230,17 @@ func TestPgRoutinesWebhookTokenReaderScopesTokensByOrganization(t *testing.T) {
 	if err != nil || !queued {
 		t.Fatalf("enqueue local webhook: queued=%t err=%v", queued, err)
 	}
-	queued, err = (pgRoutinesWebhookEnqueuer{pool: runtime}).Enqueue(ctx, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	queued, err = (pgRoutinesWebhookEnqueuer{pool: runtime}).Enqueue(ctx, "dddddddd-dddd-4ddd-8ddd-dddddddddddd")
 	if err != nil || queued {
 		t.Fatalf("unknown webhook token was accepted: queued=%t err=%v", queued, err)
 	}
 	queued, err = (pgRoutinesWebhookEnqueuer{pool: runtime}).Enqueue(ctx, disabledToken)
 	if err != nil || queued {
 		t.Fatalf("disabled webhook token was accepted: queued=%t err=%v", queued, err)
+	}
+	queued, err = (pgRoutinesWebhookEnqueuer{pool: runtime}).Enqueue(ctx, scheduleToken)
+	if err != nil || queued {
+		t.Fatalf("schedule routine token was accepted for webhook enqueue: queued=%t err=%v", queued, err)
 	}
 	var enqueuedJobs int
 	if err := owner.QueryRow(ctx, `

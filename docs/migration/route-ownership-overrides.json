@@ -165,14 +165,14 @@
       "path": "/api/memory",
       "method": "GET",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/memory",
       "method": "POST",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -186,14 +186,14 @@
       "path": "/api/module-settings",
       "method": "GET",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/module-settings",
       "method": "POST",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -256,7 +256,7 @@
       "path": "/api/org",
       "method": "PATCH",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -270,21 +270,21 @@
       "path": "/api/org",
       "method": "PUT",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/policy",
       "method": "GET",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/policy",
       "method": "POST",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -319,14 +319,14 @@
       "path": "/api/routines",
       "method": "GET",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/routines",
       "method": "POST",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",

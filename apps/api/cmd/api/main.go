@@ -230,7 +230,7 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		orgRoute = httpapi.NewOrgHandler(httpapi.NewPgOrgRepository(pool), resolver, os.Getenv("BETTER_AUTH_SECRET"), logger)
+		orgRoute = httpapi.NewOrgHandler(httpapi.NewPgOrgRepository(pool), resolver, os.Getenv("BETTER_AUTH_SECRET"), logger, trustedProxyCIDRs)
 		logger.Info("Go organization route mounted", "path", "/api/org")
 	}
 	var aiConfigRoute http.Handler

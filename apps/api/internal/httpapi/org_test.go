@@ -74,6 +74,10 @@ func verifiedActor(orgID string, permissions ...string) *session.ResolvedUser {
 }
 
 func orgRequest(t *testing.T, handler http.Handler, method, body string, cookies map[string]string) *httptest.ResponseRecorder {
+	return orgRequestWithOrigin(t, handler, method, body, cookies, "http://example.com")
+}
+
+func orgRequestWithOrigin(t *testing.T, handler http.Handler, method, body string, cookies map[string]string, origin string) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader *strings.Reader
 	if body == "" {
@@ -82,6 +86,7 @@ func orgRequest(t *testing.T, handler http.Handler, method, body string, cookies
 		reader = strings.NewReader(body)
 	}
 	req := httptest.NewRequest(method, "/api/org", reader)
+	req.Header.Set("Origin", origin)
 	req.Header.Set("Content-Type", "application/json")
 	for name, value := range cookies {
 		req.AddCookie(&http.Cookie{Name: name, Value: value})
@@ -307,6 +312,29 @@ func TestOrgPostRefusesWithoutASession(t *testing.T) {
 	}
 }
 
+func TestOrgPostRequiresSameOrigin(t *testing.T) {
+	orgID := "aaaaaaaa-0000-4000-8000-000000000001"
+	for _, tc := range []struct {
+		name   string
+		origin string
+	}{
+		{name: "missing"},
+		{name: "cross origin", origin: "https://attacker.example"},
+		{name: "ambiguous", origin: "http://example.com, https://attacker.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &stubOrgRepo{members: map[string]bool{orgID: true}}
+			handler := newOrgTestHandler(t, repo, func() (*session.ResolvedUser, error) {
+				return verifiedActor(orgID), nil
+			})
+			response := orgRequestWithOrigin(t, handler, http.MethodPost, `{"orgId":"`+orgID+`"}`, nil, tc.origin)
+			if response.Code != http.StatusForbidden || len(response.Result().Cookies()) != 0 {
+				t.Fatalf("status=%d cookies=%v, want same-origin refusal before switching", response.Code, response.Result().Cookies())
+			}
+		})
+	}
+}
+
 func TestOrgPatchRequiresAdmin(t *testing.T) {
 	orgID := "aaaaaaaa-0000-4000-8000-000000000001"
 	repo := &stubOrgRepo{}
@@ -333,6 +361,29 @@ func TestOrgPatchRequiresAdmin(t *testing.T) {
 	}
 	if repo.soul != "be helpful" {
 		t.Fatalf("stored soul = %q", repo.soul)
+	}
+}
+
+func TestOrgPatchRequiresSameOrigin(t *testing.T) {
+	orgID := "aaaaaaaa-0000-4000-8000-000000000001"
+	for _, tc := range []struct {
+		name   string
+		origin string
+	}{
+		{name: "missing"},
+		{name: "cross origin", origin: "https://attacker.example"},
+		{name: "ambiguous", origin: "http://example.com, https://attacker.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &stubOrgRepo{}
+			handler := newOrgTestHandler(t, repo, func() (*session.ResolvedUser, error) {
+				return verifiedActor(orgID, "iam.admin"), nil
+			})
+			response := orgRequestWithOrigin(t, handler, http.MethodPatch, `{"agentSoul":"be helpful"}`, nil, tc.origin)
+			if response.Code != http.StatusForbidden || repo.setCalls != 0 {
+				t.Fatalf("status=%d writes=%d, want same-origin refusal before the write", response.Code, repo.setCalls)
+			}
+		})
 	}
 }
 
