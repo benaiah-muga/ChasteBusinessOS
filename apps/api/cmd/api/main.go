@@ -93,6 +93,10 @@ func goDocumentsEditorWorkspaceEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goDocumentsAssistRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goMessagingPresenceRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -242,6 +246,15 @@ func run(logger *slog.Logger) error {
 		}
 		documentsEditorWorkspaceRoute = httpapi.NewDocumentsEditorWorkspaceHandler(pool, resolver, logger, trustedProxyCIDRs)
 		logger.Info("Go authored document workspace route mounted", "path", "/api/docs/{id}/workspace")
+	}
+	var documentsAssistRoute http.Handler
+	if goDocumentsAssistRouteEnabledFromEnv(os.Getenv("GO_DOCUMENTS_ASSIST_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		documentsAssistRoute = httpapi.NewDocumentsAssistSessionHandler(pool, resolver, logger, trustedProxyCIDRs)
+		logger.Info("Go document assistant route mounted", "path", "/api/docs/assist")
 	}
 	var messagingPresenceRoute http.Handler
 	var messagingAgentRoute http.Handler
@@ -843,6 +856,7 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoCRMFollowUpDraftRoute(apiHandler, crmFollowUpDraftRoute)
 	apiHandler = httpapi.MountGoAIConfigRoute(apiHandler, aiConfigRoute)
 	apiHandler = httpapi.MountGoDocumentsEditorWorkspaceRoute(apiHandler, documentsEditorWorkspaceRoute)
+	apiHandler = httpapi.MountGoDocumentsAssistRoute(apiHandler, documentsAssistRoute)
 	apiHandler = httpapi.MountGoDocumentContentDownloadRoute(apiHandler, documentContentDownloadRoute)
 	apiHandler = httpapi.MountGoMessagingPresenceRoute(apiHandler, messagingPresenceRoute)
 	apiHandler = httpapi.MountGoMessagingAgentRoute(apiHandler, messagingAgentRoute)

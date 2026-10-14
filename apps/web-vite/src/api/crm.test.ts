@@ -1204,15 +1204,15 @@ describe("CRM API client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("writes saved views through the Go capability and validates its typed snapshot", async () => {
-    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", true);
+  it("writes saved views through Go even when the retired selector is false", async () => {
+    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", false);
     const viewId = dealId;
     const prior = { id: viewId, name: "Prior", filters: savedViewFilters, isShared: false, isPinned: true, createdByUserId: customerId };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { viewId, previous: prior } }));
     vi.stubGlobal("fetch", fetchMock);
     const input = { id: viewId, name: "Active customers", filters: savedViewFilters, isShared: true, isPinned: false };
 
-    await expect(submitCrmSavedViewWrite(input, undefined, true, crmRetryScope)).resolves.toEqual({ kind: "completed", data: { viewId, previous: prior } });
+    await expect(submitCrmSavedViewWrite(input, undefined, crmRetryScope)).resolves.toEqual({ kind: "completed", data: { viewId, previous: prior } });
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       capabilityId: "crm.saveCustomerView",
@@ -1222,8 +1222,8 @@ describe("CRM API client", () => {
     await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toBeNull();
   });
 
-  it("retries an uncertain saved-view write with its exact intent and blocks legacy fallback", async () => {
-    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", true);
+  it("retries an uncertain saved-view write with its exact intent and never uses legacy", async () => {
+    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", false);
     let attemptCount = 0;
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       attemptCount += 1;
@@ -1234,11 +1234,10 @@ describe("CRM API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const input = { name: "Active customers", filters: savedViewFilters, isShared: true, isPinned: false };
 
-    await expect(submitCrmSavedViewWrite(input, undefined, true, crmRetryScope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    await expect(submitCrmSavedViewWrite(input, undefined, crmRetryScope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
     await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toMatchObject({ action: "saveCustomerView", ...input });
-    await expect(submitCrmSavedViewWrite(input, undefined, false, crmRetryScope)).rejects.toThrow(/Re-enable Go saved-view writes/);
-    await expect(submitCrmSavedViewWrite(input, undefined, true, crmRetryScope)).resolves.toMatchObject({ kind: "pending" });
-    await expect(submitCrmSavedViewWrite(input, undefined, true, crmRetryScope)).resolves.toMatchObject({ kind: "completed" });
+    await expect(submitCrmSavedViewWrite(input, undefined, crmRetryScope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitCrmSavedViewWrite(input, undefined, crmRetryScope)).resolves.toMatchObject({ kind: "completed" });
 
     const goCalls = fetchMock.mock.calls;
     expect(goCalls).toHaveLength(3);
@@ -1247,11 +1246,124 @@ describe("CRM API client", () => {
     await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toBeNull();
   });
 
-  it("does not fall back from a missing selected Go saved-view route", async () => {
+  it("does not fall back to the legacy saved-view route when Go returns 404", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("not found", { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(submitCrmSavedViewWrite({ name: "Active", filters: savedViewFilters, isShared: true, isPinned: false }, undefined, true, crmRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(submitCrmSavedViewWrite({ name: "Active", filters: savedViewFilters, isShared: true, isPinned: false }, undefined, crmRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute"]);
     await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toMatchObject({ name: "Active" });
+  });
+
+  it("serializes concurrent saved-view reservations by retry key", async () => {
+    let releaseFirst!: () => void;
+    let firstRequested!: () => void;
+    let secondRequested!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstRequest = new Promise<void>((resolve) => { firstRequested = resolve; });
+    const secondRequest = new Promise<void>((resolve) => { secondRequested = resolve; });
+    const tails = new Map<string, Promise<void>>();
+    const lockNames: string[] = [];
+    let requests = 0;
+    const locks = {
+      request: async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+        lockNames.push(name);
+        const requestIndex = requests++;
+        if (requestIndex === 0) firstRequested();
+        if (requestIndex === 1) secondRequested();
+        const previous = tails.get(name) ?? Promise.resolve();
+        let release = (): void => {};
+        const current = new Promise<void>((resolve) => { release = resolve; });
+        tails.set(name, current);
+        await previous;
+        try {
+          if (requestIndex === 0) await gate;
+          return await callback();
+        } finally {
+          release();
+          if (tails.get(name) === current) tails.delete(name);
+        }
+      },
+    };
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, "locks", { configurable: true, value: locks });
+    vi.stubGlobal("navigator", testNavigator);
+    const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true, error: "Owner approval required" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const firstAction = { name: "Active customers", filters: savedViewFilters, isShared: true, isPinned: false };
+    const secondAction = { ...firstAction, name: "Inactive customers" };
+
+    const first = submitCrmSavedViewWrite(firstAction, undefined, crmRetryScope);
+    await firstRequest;
+    const second = submitCrmSavedViewWrite(secondAction, undefined, crmRetryScope);
+    await secondRequest;
+    expect(fetchMock).not.toHaveBeenCalled();
+    releaseFirst();
+
+    await expect(first).resolves.toMatchObject({ kind: "pending" });
+    await expect(second).rejects.toThrow(/previous CRM result is unresolved/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lockNames).toHaveLength(2);
+    expect(lockNames[0]).toBe(lockNames[1]);
+    await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toMatchObject(firstAction);
+  });
+
+  it("does not let a delayed saved-view response clear a newer intent marker", async () => {
+    let resolveFirst!: (response: Response) => void;
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+    const fetchMock = vi.fn(() => {
+      requestStarted();
+      return new Promise<Response>((resolve) => { resolveFirst = resolve; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { name: "Active customers", filters: savedViewFilters, isShared: true, isPinned: false };
+    const delayed = submitCrmSavedViewWrite(action, undefined, crmRetryScope);
+    await started;
+    const storageKey = window.localStorage.key(0);
+    expect(storageKey).not.toBeNull();
+    const original = JSON.parse(window.localStorage.getItem(storageKey!) ?? "null") as { intentId: string; fingerprint: string; action: unknown };
+    const newerIntentId = crypto.randomUUID();
+    window.localStorage.setItem(storageKey!, JSON.stringify({ ...original, intentId: newerIntentId }));
+
+    resolveFirst(Response.json({ ok: true, data: { viewId: dealId, previous: null } }));
+    await expect(delayed).resolves.toMatchObject({ kind: "completed" });
+    const remaining = JSON.parse(window.localStorage.getItem(storageKey!) ?? "null") as { intentId: string; fingerprint: string; action: unknown };
+    expect(remaining).toEqual({ ...original, intentId: newerIntentId });
+    await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toMatchObject(action);
+  });
+
+  it("compares saved-view retry fingerprints before clearing a marker", async () => {
+    let resolveFirst!: (response: Response) => void;
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+    const fetchMock = vi.fn(() => {
+      requestStarted();
+      return new Promise<Response>((resolve) => { resolveFirst = resolve; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { name: "Active customers", filters: savedViewFilters, isShared: true, isPinned: false };
+    const delayed = submitCrmSavedViewWrite(action, undefined, crmRetryScope);
+    await started;
+    const storageKey = window.localStorage.key(0);
+    expect(storageKey).not.toBeNull();
+    const original = JSON.parse(window.localStorage.getItem(storageKey!) ?? "null") as { intentId: string; fingerprint: string; action: unknown };
+    const newerFingerprint = "f".repeat(64);
+    window.localStorage.setItem(storageKey!, JSON.stringify({ ...original, fingerprint: newerFingerprint }));
+
+    resolveFirst(Response.json({ ok: true, data: { viewId: dealId, previous: null } }));
+    await expect(delayed).resolves.toMatchObject({ kind: "completed" });
+    const remaining = JSON.parse(window.localStorage.getItem(storageKey!) ?? "null") as { intentId: string; fingerprint: string; action: unknown };
+    expect(remaining).toEqual({ ...original, fingerprint: newerFingerprint });
+  });
+
+  it("fails closed when browser-wide CRM attempt locks are unavailable", async () => {
+    vi.stubGlobal("navigator", {} as Navigator);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmSavedViewWrite({ name: "Active", filters: savedViewFilters, isShared: true, isPinned: false }, undefined, crmRetryScope))
+      .rejects.toThrow(/cannot safely coordinate CRM changes across tabs/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
   });
 });

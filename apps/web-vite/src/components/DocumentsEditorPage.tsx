@@ -19,6 +19,7 @@ import {
   sanitizeDocumentHtml,
   updateDocumentMetadata,
   type AuthoredDocument,
+  type DocumentsAssistTextRequest,
   type PageSettings,
   type PresenceUser,
   type VersionRow,
@@ -447,7 +448,7 @@ function AssistPanel({ handle, documentId }: { handle: SurfaceHandle | null; doc
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
 
-  async function run(body: Record<string, unknown>, label: string) {
+  async function run(body: DocumentsAssistTextRequest, label: string) {
     setBusy(true);
     setError(null);
     try {
@@ -460,7 +461,7 @@ function AssistPanel({ handle, documentId }: { handle: SurfaceHandle | null; doc
     }
   }
 
-  function rewrite(action: string) {
+  function rewrite(action: "improve" | "grammar" | "tone" | "shorten" | "expand" | "translate") {
     const facts = selectionFacts(handle?.element ?? null);
     if (!facts.text.trim()) {
       setError("Select some text first, then pick an action.");
@@ -753,7 +754,7 @@ export function DocumentsEditorPage({ documentId, actorId = null, organizationId
     if (!resolvedId) return;
     const next = title.trim() || "Untitled document";
     try {
-      const outcome = await updateDocumentMetadata(resolvedId, { title: next });
+      const outcome = await updateDocumentMetadata(resolvedId, { title: next }, { actorId, organizationId });
       setNotice(outcome.kind === "pending"
         ? { tone: "pending", text: "Rename proposed: the workmate's change waits for approval." }
         : { tone: "success", text: `Saved as "${next}".` });
@@ -772,7 +773,7 @@ export function DocumentsEditorPage({ documentId, actorId = null, organizationId
         html: contentHtmlRef.current,
         pageSettings,
         ...(publishNote.trim() ? { note: publishNote.trim() } : {}),
-      });
+      }, { actorId, organizationId });
       if (outcome.kind === "pending") {
         setNotice({ tone: "pending", text: "Publish proposed: the workmate's version waits for approval." });
       } else {
@@ -794,7 +795,7 @@ export function DocumentsEditorPage({ documentId, actorId = null, organizationId
     if (!resolvedId) return;
     setBusy(true);
     try {
-      const outcome = await restoreDocumentVersion(resolvedId, version);
+      const outcome = await restoreDocumentVersion(resolvedId, version, { actorId, organizationId });
       if (outcome.kind === "pending") {
         setNotice({ tone: "pending", text: `Restoring version ${version} was proposed and waits for approval.` });
         return;

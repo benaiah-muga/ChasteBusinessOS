@@ -88,7 +88,16 @@ afterEach(() => {
 const templateScope = { actorId: "actor-1", organizationId: "org-1" };
 
 function stubWebLocks() {
-  vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+  const queues = new Map<string, Promise<void>>();
+  vi.stubGlobal("navigator", { ...navigator, locks: { request: async (name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => {
+    const previous = queues.get(name) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    queues.set(name, previous.then(() => current));
+    await previous;
+    try { return await callback(); }
+    finally { release(); }
+  } } });
 }
 
 describe("editor route matching", () => {
@@ -359,21 +368,24 @@ describe("draft workspace ticks", () => {
 
 describe("governed writes", () => {
   it("publishes a version and reads the history back", async () => {
-    const { calls } = recorder((call) => (call.url === "/api/docs/doc-1"
-      ? Response.json({ version: 3 })
-      : Response.json({ document: authoredDocument, versions: [...versionRows, { version: 3, note: "Terms", createdBy: "ada", createdAt: "2026-09-29T08:00:00.000Z" }] })));
+    stubWebLocks();
+    const { calls } = recorder(() => Response.json({ ok: true, data: { version: 3 } }));
 
-    const outcome = await publishDocumentVersion("doc-1", {
+    const outcome = await publishDocumentVersion(goAuthoredDocument.id, {
       title: "Service quote",
       content: authoredDocument.content,
       html: "<p>Hello</p>",
       pageSettings: DEFAULT_PAGE_SETTINGS,
       note: "Terms",
-    });
+    }, templateScope);
 
     expect(outcome).toEqual({ kind: "completed", data: { version: 3 } });
     const sent = bodyOf(calls[0]!);
-    expect(sent).toMatchObject({ action: "publish", title: "Service quote", html: "<p>Hello</p>", note: "Terms" });
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(sent).toMatchObject({
+      capabilityId: "documents.saveDocVersion",
+      input: { documentId: goAuthoredDocument.id, title: "Service quote", html: "<p>Hello</p>", note: "Terms" },
+    });
     expect(typeof sent.intentId).toBe("string");
   });
 
@@ -383,55 +395,96 @@ describe("governed writes", () => {
       ? Response.json({ ok: false, pendingApproval: true, reason: "Template approval required", approvalId: "6f1b2c3d-0000-4000-8000-000000000003" }, { status: 202 })
       : Response.json({ pendingApproval: true, hint: "This change waits for approval in the Approvals inbox." }, { status: 202 }));
 
-    const published = await publishDocumentVersion("doc-1", {
+    const published = await publishDocumentVersion(goAuthoredDocument.id, {
       title: "Service quote",
       content: authoredDocument.content,
       html: "<p>Hello</p>",
       pageSettings: DEFAULT_PAGE_SETTINGS,
-    });
-    expect(published).toEqual({ kind: "pending", hint: "This change waits for approval in the Approvals inbox." });
+    }, templateScope);
+    expect(published).toEqual({ kind: "pending", hint: "Template approval required" });
 
-    const restored = await restoreDocumentVersion("doc-1", 1);
+    const restored = await restoreDocumentVersion(goAuthoredDocument.id, 1, templateScope);
     expect(restored.kind).toBe("pending");
-    const renamed = await updateDocumentMetadata("doc-1", { title: "Renamed" });
+    const renamed = await updateDocumentMetadata(goAuthoredDocument.id, { title: "Renamed" }, templateScope);
     expect(renamed.kind).toBe("pending");
     const templated = await createDocumentTemplate("Quote", authoredDocument.content, templateScope);
     expect(templated).toEqual({ kind: "pending", hint: "Template approval required" });
-    expect(window.localStorage.length).toBe(1);
+    expect(window.localStorage.length).toBe(4);
 
-    expect(calls.slice(0, 3).map((call) => bodyOf(call).action)).toEqual(["publish", "restore", "updateMetadata"]);
+    expect(calls.slice(0, 3).map((call) => bodyOf(call).capabilityId)).toEqual([
+      "documents.saveDocVersion", "documents.restoreDocVersion", "documents.updateDocMetadata",
+    ]);
+    expect(calls.slice(0, 3).every((call) => call.url === "/api/capabilities/execute")).toBe(true);
     expect(bodyOf(calls[3]!).capabilityId).toBe("documents.createTemplate");
     const intentId = bodyOf(calls[3]!).intentId;
 
     const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: [] } }));
     await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).resolves.toMatchObject({ kind: "completed" });
     expect(bodyOf(retryCalls[0]!).intentId).toBe(intentId);
-    expect(window.localStorage.length).toBe(0);
+    expect(window.localStorage.length).toBe(3);
   });
 
   it("restores, renames and stores templates with their own intent identities", async () => {
     stubWebLocks();
     const { calls } = recorder((_call) => {
       const sent = bodyOf(calls[calls.length - 1]!);
-      const action = sent.action;
-      if (action === "restore") return Response.json({ version: 4 });
+      if (sent.capabilityId === "documents.restoreDocVersion") return Response.json({ ok: true, data: { version: 4 } });
       if (sent.capabilityId === "documents.createTemplate") return Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: ["customer.name"] } });
-      return Response.json({ documentId: "doc-1", previous: { title: "Old", folder: null, linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: null } });
+      return Response.json({ ok: true, data: { documentId: goAuthoredDocument.id, previous: { title: "Old", folder: null, linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: null } } });
     });
 
-    await expect(restoreDocumentVersion("doc-1", 2)).resolves.toEqual({ kind: "completed", data: { version: 4 } });
+    await expect(restoreDocumentVersion(goAuthoredDocument.id, 2, templateScope)).resolves.toEqual({ kind: "completed", data: { version: 4 } });
     await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).resolves.toEqual({
       kind: "completed",
       data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: ["customer.name"] },
     });
-    await expect(updateDocumentMetadata("doc-1", { title: "Renamed" })).resolves.toMatchObject({ kind: "completed", data: { documentId: "doc-1", previous: { title: "Old" } } });
+    await expect(updateDocumentMetadata(goAuthoredDocument.id, { title: "Renamed" }, templateScope)).resolves.toMatchObject({ kind: "completed", data: { documentId: goAuthoredDocument.id, previous: { title: "Old" } } });
 
-    expect(calls[0]?.url).toBe("/api/docs/doc-1");
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[0]!)).toMatchObject({ capabilityId: "documents.restoreDocVersion", input: { documentId: goAuthoredDocument.id, sourceVersion: 2 } });
     expect(calls[1]?.url).toBe("/api/capabilities/execute");
     expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.createTemplate", input: { name: "Quote" } });
-    expect(bodyOf(calls[2]!)).toMatchObject({ action: "updateMetadata", title: "Renamed" });
+    expect(bodyOf(calls[2]!)).toMatchObject({ capabilityId: "documents.updateDocMetadata", input: { documentId: goAuthoredDocument.id, title: "Renamed" } });
     const identities = calls.map((call) => bodyOf(call).intentId);
     expect(new Set(identities).size).toBe(3);
+  });
+
+  it.each([
+    ["publish", (title: string) => publishDocumentVersion(goAuthoredDocument.id, { title, content: authoredDocument.content, html: "<p>Hello</p>", pageSettings: DEFAULT_PAGE_SETTINGS }, templateScope), "Service quote"],
+    ["restore", (version: number) => restoreDocumentVersion(goAuthoredDocument.id, version, templateScope), 2],
+    ["metadata", (title: string) => updateDocumentMetadata(goAuthoredDocument.id, { title }, templateScope), "Renamed"],
+  ])("reuses the exact %s intent after uncertainty and rejects changed input", async (_name, action, originalInput) => {
+    stubWebLocks();
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(action(originalInput as never)).rejects.toMatchObject({ status: 0 });
+    const intentId = bodyOf(calls[0]!).intentId;
+    const changedInput = typeof originalInput === "string" ? `${originalInput} changed` : (originalInput as number) + 1;
+    await expect(action(changedInput as never)).rejects.toThrow("Retry those exact details");
+    expect(calls).toHaveLength(1);
+
+    const { calls: retryCalls } = recorder((call) => {
+      const capabilityId = bodyOf(call).capabilityId;
+      return capabilityId === "documents.updateDocMetadata"
+        ? Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } })
+        : Response.json({ ok: true, data: { version: 3 } });
+    });
+    await action(originalInput as never);
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(intentId);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("serializes concurrent retries and preserves the same intent after an uncertain request", async () => {
+    stubWebLocks();
+    const { calls } = recorder((_call) => calls.length === 1
+      ? Promise.reject(new Error("connection lost")) as unknown as Response
+      : Response.json({ ok: true, data: { version: 4 } }));
+    const first = restoreDocumentVersion(goAuthoredDocument.id, 2, templateScope);
+    const second = restoreDocumentVersion(goAuthoredDocument.id, 2, templateScope);
+    await expect(first).rejects.toMatchObject({ status: 0 });
+    await expect(second).resolves.toEqual({ kind: "completed", data: { version: 4 } });
+    expect(calls).toHaveLength(2);
+    expect(bodyOf(calls[0]!).intentId).toBe(bodyOf(calls[1]!).intentId);
+    expect(window.localStorage.length).toBe(0);
   });
 
   it("reuses a scoped template intent after network uncertainty and blocks changed details", async () => {
@@ -460,8 +513,10 @@ describe("governed writes", () => {
   });
 
   it("turns a refused governed write into a readable error", async () => {
-    recorder(() => Response.json({ error: "document not found" }, { status: 422 }));
-    await expect(restoreDocumentVersion("doc-1", 2)).rejects.toEqual(expect.objectContaining({ name: "DocumentsEditorApiError", status: 422 }));
+    const { calls } = recorder(() => Response.json({ error: "document not found" }, { status: 422 }));
+    stubWebLocks();
+    await expect(restoreDocumentVersion(goAuthoredDocument.id, 2, templateScope)).rejects.toEqual(expect.objectContaining({ name: "DocumentsEditorApiError", status: 422 }));
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
   });
 });
 
@@ -471,14 +526,25 @@ describe("writing assist", () => {
     await expect(requestAssist({ kind: "selection", action: "shorten", text: "Long copy", language: "English" })).resolves.toEqual({ ok: true, text: "Tighter copy." });
     expect(calls[0]?.url).toBe("/api/docs/assist");
     expect(bodyOf(calls[0]!)).toMatchObject({ kind: "selection", action: "shorten" });
+    expect(bodyOf(calls[0]!)).not.toHaveProperty("intentId");
+    expect(calls[0]?.init.credentials).toBe("same-origin");
+  });
+
+  it("returns template prefill values from the Go assist response", async () => {
+    const { calls } = recorder(() => Response.json({ ok: true, values: { "customer.name": "Ada" } }));
+    await expect(requestAssist({ kind: "prefill", templateId: "6f1b2c3d-0000-4000-8000-000000000004" })).resolves.toEqual({ ok: true, values: { "customer.name": "Ada" } });
+    expect(calls[0]?.url).toBe("/api/docs/assist");
+    expect(bodyOf(calls[0]!)).toEqual({ kind: "prefill", templateId: "6f1b2c3d-0000-4000-8000-000000000004" });
   });
 
   it("rejects an empty or unreadable assist answer", async () => {
     recorder(() => Response.json({ ok: true, text: "  " }));
     await expect(requestAssist({ kind: "chat", documentId: "doc-1", question: "Why?" })).rejects.toThrow("The writing assistant could not help with that, try again.");
 
-    recorder(() => Response.json({ error: "the model returned nothing, try again" }, { status: 502 }));
+    const { calls } = recorder(() => Response.json({ error: "the model returned nothing, try again" }, { status: 502 }));
     await expect(requestAssist({ kind: "chat", documentId: "doc-1", question: "Why?" })).rejects.toThrow("the model returned nothing, try again");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/docs/assist");
   });
 });
 

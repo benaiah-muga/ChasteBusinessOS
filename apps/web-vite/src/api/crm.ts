@@ -558,11 +558,11 @@ export async function submitCrmTaskMutation(
         throw new CrmApiError(response.status, "The CRM service returned an unexpected task result.", true);
       }
       persistCrmTaskResult(scope.scopeHash, target, fingerprint, parsed.data);
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
       return { kind: "completed", data: parsed.data };
     } catch (error) {
       if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
-        await clearCrmTaskAttempt(attempt.storageKey);
+        await clearCrmTaskAttempt(attempt);
       }
       throw error;
     }
@@ -778,11 +778,11 @@ export async function submitCrmLeadConversion(
       ("customerId" in parsedInput.data && parsed.data.customerId !== parsedInput.data.customerId)) {
       throw new CrmApiError(response.status, "The CRM service returned an unexpected lead conversion result.", true);
     }
-    await clearCrmTaskAttempt(attempt.storageKey);
+    await clearCrmTaskAttempt(attempt);
     return { kind: "completed", data: parsed.data };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
     }
     throw error;
   }
@@ -821,11 +821,11 @@ export async function submitCrmCustomerCreate(
     if (outcome.kind === "pending") return outcome;
     const parsed = CrmCustomerCreateOutputSchema.safeParse(outcome.data);
     if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected customer result.", true);
-    await clearCrmTaskAttempt(attempt.storageKey);
+    await clearCrmTaskAttempt(attempt);
     return { kind: "completed", data: parsed.data };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
     }
     throw error;
   }
@@ -858,11 +858,11 @@ export async function submitCrmCustomerDeactivate(
     if (outcome.kind === "pending") return outcome;
     const parsed = z.object({ deactivated: z.literal(true) }).strict().safeParse(outcome.data);
     if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected deactivation result.", true);
-    await clearCrmTaskAttempt(attempt.storageKey);
+    await clearCrmTaskAttempt(attempt);
     return { kind: "completed", data: parsed.data };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
     }
     throw error;
   }
@@ -978,11 +978,11 @@ export async function submitCrmCustomerMerge(
     }
     const completedMerge = { ...parsedOutput.data, mergeIntentId: attempt.intentId };
     await persistCrmCustomerMergeUndo(scope, completedMerge);
-    await clearCrmTaskAttempt(attempt.storageKey);
+    await clearCrmTaskAttempt(attempt);
     return { kind: "completed", data: completedMerge };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
     }
     throw error;
   }
@@ -1035,11 +1035,11 @@ export async function submitCrmCustomerMergeUndo(
       throw new CrmApiError(response.status, "The CRM service returned an unexpected merge undo result.", true);
     }
     await clearCrmCustomerMergeUndo(scope);
-    await clearCrmTaskAttempt(attempt.storageKey);
+    await clearCrmTaskAttempt(attempt);
     return { kind: "completed", data: parsedOutput.data };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
     }
     throw error;
   }
@@ -1101,11 +1101,11 @@ export async function submitCrmCustomerProfileUpdate(
     if (!parsed.success || parsed.data.updatedCount !== input.customerIds.length || parsed.data.previous.length !== input.customerIds.length) {
       throw new CrmApiError(response.status, "The CRM service returned an unexpected profile update result.", true);
     }
-    await clearCrmTaskAttempt(attempt.storageKey);
+    await clearCrmTaskAttempt(attempt);
     return { kind: "completed", data: parsed.data };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
     }
     throw error;
   }
@@ -1156,7 +1156,6 @@ export async function readPendingCrmSavedViewWrite(scope: CrmTaskRetryScope): Pr
 export async function submitCrmSavedViewWrite(
   input: Omit<CrmSavedViewWriteMutation, "action">,
   signal?: AbortSignal,
-  useGoOverride?: boolean,
   retryScope?: CrmTaskRetryScope,
 ): Promise<CrmActionOutcome<z.infer<typeof CrmSavedViewWriteOutputSchema>>> {
   const action = { action: "saveCustomerView" as const, ...input };
@@ -1164,14 +1163,6 @@ export async function submitCrmSavedViewWrite(
     throw new CrmApiError(0, "Review the saved-view name and filters before saving.");
   }
   const scope = await crmTaskScope(retryScope);
-  let storageKey: string | null;
-  try { storageKey = window.localStorage.getItem(`${CRM_SAVED_VIEW_WRITE_INTENT_PREFIX}${scope.scopeHash}:save`) === null ? null : `${CRM_SAVED_VIEW_WRITE_INTENT_PREFIX}${scope.scopeHash}:save`; }
-  catch { throw new CrmApiError(0, "Enable browser storage to check for an unresolved saved-view change."); }
-  const useGo = useGoOverride ?? (typeof __GO_CRM_VIEW_WRITES__ !== "undefined" && __GO_CRM_VIEW_WRITES__);
-  if (!useGo) {
-    if (storageKey) throw new CrmApiError(0, "A Go saved-view change is unresolved. Re-enable Go saved-view writes and retry its exact details before using legacy writes.", true);
-    return submitCrmAction("/api/crm/views", action, signal);
-  }
   const attempt = await crmTaskAttempt(action, scope, "save", CRM_SAVED_VIEW_WRITE_INTENT_PREFIX);
   try {
     const { response, body } = await request("/api/capabilities/execute", {
@@ -1185,36 +1176,38 @@ export async function submitCrmSavedViewWrite(
     if (!parsed.success || (action.id && parsed.data.viewId !== action.id)) {
       throw new CrmApiError(response.status, "The CRM service returned an unexpected saved-view result.", true);
     }
-    await clearCrmTaskAttempt(attempt.storageKey);
+    await clearCrmTaskAttempt(attempt);
     return { kind: "completed", data: parsed.data };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
     }
     throw error;
   }
 }
 
-async function crmTaskAttempt(action: CrmRetryMutation, scope: { scopeHash: string }, target: string, prefix = CRM_TASK_INTENT_PREFIX): Promise<{ storageKey: string; intentId: string }> {
+async function crmTaskAttempt(action: CrmRetryMutation, scope: { scopeHash: string }, target: string, prefix = CRM_TASK_INTENT_PREFIX): Promise<{ storageKey: string; intentId: string; fingerprint: string }> {
   const storageKey = `${prefix}${scope.scopeHash}:${target}`;
   const fingerprint = await crmTaskFingerprint(action);
-  let raw: string | null;
-  try { raw = window.localStorage.getItem(storageKey); }
-  catch { throw new CrmApiError(0, "Enable browser storage before changing CRM data so an uncertain result can be retried safely."); }
-  if (raw !== null) {
-    const stored = parseCrmTaskAttempt(raw);
-    if (stored.fingerprint !== fingerprint) throw new CrmApiError(0, "A previous CRM result is unresolved. Retry its exact action details before starting another action.");
-    return { storageKey, intentId: stored.intentId };
-  }
-  const attempt = { fingerprint, intentId: crypto.randomUUID(), action };
-  const serialized = JSON.stringify(attempt);
-  try {
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("CRM task retry did not persist");
-  } catch {
-    throw new CrmApiError(0, "Enable browser storage before changing CRM data so an uncertain result can be retried safely.");
-  }
-  return { storageKey, intentId: attempt.intentId };
+  return withCrmTaskAttemptLock(storageKey, async () => {
+    let raw: string | null;
+    try { raw = window.localStorage.getItem(storageKey); }
+    catch { throw new CrmApiError(0, "Enable browser storage before changing CRM data so an uncertain result can be retried safely."); }
+    if (raw !== null) {
+      const stored = parseCrmTaskAttempt(raw);
+      if (stored.fingerprint !== fingerprint) throw new CrmApiError(0, "A previous CRM result is unresolved. Retry its exact action details before starting another action.");
+      return { storageKey, intentId: stored.intentId, fingerprint };
+    }
+    const attempt = { fingerprint, intentId: crypto.randomUUID(), action };
+    const serialized = JSON.stringify(attempt);
+    try {
+      window.localStorage.setItem(storageKey, serialized);
+      if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("CRM task retry did not persist");
+    } catch {
+      throw new CrmApiError(0, "Enable browser storage before changing CRM data so an uncertain result can be retried safely.");
+    }
+    return { storageKey, intentId: attempt.intentId, fingerprint };
+  });
 }
 
 async function crmTaskFingerprint(action: CrmRetryMutation): Promise<string> {
@@ -1243,9 +1236,32 @@ function parseCrmTaskAttempt(raw: string): z.infer<typeof CrmTaskAttemptSchema> 
   return { ...parsed.data, action: parsed.data.action };
 }
 
-async function clearCrmTaskAttempt(storageKey: string): Promise<void> {
-  try { window.localStorage.removeItem(storageKey); }
-  catch { throw new CrmApiError(0, "The task was saved, but its retry marker could not be cleared. Reload CRM before submitting another task.", true); }
+async function withCrmTaskAttemptLock<T>(storageKey: string, operation: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new CrmApiError(0, "This browser cannot safely coordinate CRM changes across tabs. Enable Web Locks before submitting the change.");
+  }
+  try {
+    return await lockManager.request(`chaste:crm:task-attempt-lock:${storageKey}`, { mode: "exclusive" }, operation);
+  } catch (error) {
+    if (error instanceof CrmApiError) throw error;
+    throw new CrmApiError(0, "The browser could not safely coordinate this CRM change across tabs. Close other CRM tabs and try again.", true);
+  }
+}
+
+async function clearCrmTaskAttempt(attempt: { storageKey: string; intentId: string; fingerprint: string }): Promise<void> {
+  try {
+    await withCrmTaskAttemptLock(attempt.storageKey, async () => {
+      const raw = window.localStorage.getItem(attempt.storageKey);
+      if (raw === null) return;
+      const stored = parseCrmTaskAttempt(raw);
+      if (stored.intentId === attempt.intentId && stored.fingerprint === attempt.fingerprint) {
+        window.localStorage.removeItem(attempt.storageKey);
+      }
+    });
+  } catch {
+    throw new CrmApiError(0, "The CRM change was saved, but its retry marker could not be safely cleared. Reload CRM before submitting another change.", true);
+  }
 }
 
 async function crmDealStageAttempt(input: z.infer<typeof CrmDealStageMoveInputSchema>, scope: { actorId: string; organizationId: string }): Promise<{ storageKey: string; intentId: string }> {
@@ -1509,11 +1525,11 @@ export async function importCrmCustomers(
       createdIds: parsed.data.createdIds,
     };
     await persistCrmCustomerImportUndo(scope, result, parsed.data.importIntentId);
-    await clearCrmTaskAttempt(attempt.storageKey);
+    await clearCrmTaskAttempt(attempt);
     return { kind: "completed", data: result };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
     }
     throw error;
   }
@@ -1572,11 +1588,11 @@ export async function undoCrmImport(
       throw new CrmApiError(response.status, "The CRM service returned an unexpected import undo result.", true);
     }
     await clearCrmCustomerImportUndo(scope, importIntentId);
-    await clearCrmTaskAttempt(attempt.storageKey);
+    await clearCrmTaskAttempt(attempt);
     return { kind: "completed", data: { undone: parsed.data.deactivated, remaining: parsedIds.data.length - parsed.data.deactivated } };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearCrmTaskAttempt(attempt.storageKey);
+      await clearCrmTaskAttempt(attempt);
     }
     throw error;
   }

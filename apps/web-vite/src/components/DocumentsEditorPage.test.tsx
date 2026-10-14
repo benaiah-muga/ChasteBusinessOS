@@ -65,10 +65,12 @@ function editorFetch(override?: (call: RecordedCall) => Response | null) {
     if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.createTemplate") {
       return Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: ["customer.name"] } });
     }
-    if (call.body?.action === "updateMetadata") {
-      return Response.json({ documentId: DOCUMENT_ID, previous: { title: "Service quote", folder: "Sales", linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: "Deal: Ada" } });
+    if (call.body?.capabilityId === "documents.saveDocVersion" || call.body?.capabilityId === "documents.restoreDocVersion") {
+      return Response.json({ ok: true, data: { version: 3 } });
     }
-    if (call.url === `/api/docs/${DOCUMENT_ID}`) return Response.json({ version: 3 });
+    if (call.body?.capabilityId === "documents.updateDocMetadata") {
+      return Response.json({ ok: true, data: { documentId: DOCUMENT_ID, previous: { title: "Service quote", folder: "Sales", linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: "Deal: Ada" } } });
+    }
     if (call.url === "/api/docs/assist") return Response.json({ ok: true, text: "Tighter copy." });
     return Response.json({ error: "unexpected" }, { status: 500 });
   });
@@ -157,7 +159,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
 
     // Opening the document parks the loaded content as a draft, as it always did.
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
@@ -207,7 +209,7 @@ describe("authored document editor", () => {
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     typeIntoSurface("<p>Conflicting edit</p>");
@@ -230,8 +232,8 @@ describe("authored document editor", () => {
 
   it("publishes through the governed route, keeps a pending approval visible, and refreshes history", async () => {
     const { calls } = editorFetch((call) => {
-      if (call.url === `/api/docs/${DOCUMENT_ID}` && call.method === "POST" && call.body?.action === "publish") {
-        return Response.json({ pendingApproval: true, hint: "This change waits for approval in the Approvals inbox." }, { status: 202 });
+      if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.saveDocVersion") {
+        return Response.json({ ok: false, pendingApproval: true, reason: "This change waits for approval in the Approvals inbox." }, { status: 202 });
       }
       return null;
     });
@@ -244,14 +246,17 @@ describe("authored document editor", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Publish" }));
 
     expect(await screen.findByText("Publish proposed: the workmate's version waits for approval.", undefined, BOOT)).not.toBeNull();
-    const publish = calls.find((call) => call.body?.action === "publish");
+    const publish = calls.find((call) => call.body?.capabilityId === "documents.saveDocVersion");
     expect(publish?.body).toMatchObject({
-      action: "publish",
-      title: "Service quote",
-      html: "<p>Hello</p>",
-      note: "Added payment terms",
-      pageSettings: { size: "A4", orientation: "portrait", margin: "normal" },
-      content: authoredDocument.content,
+      capabilityId: "documents.saveDocVersion",
+      input: {
+        documentId: DOCUMENT_ID,
+        title: "Service quote",
+        html: "<p>Hello</p>",
+        note: "Added payment terms",
+        pageSettings: { size: "A4", orientation: "portrait", margin: "normal" },
+        content: authoredDocument.content,
+      },
     });
     expect(publish?.body?.intentId).toEqual(expect.any(String));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -265,14 +270,17 @@ describe("authored document editor", () => {
 
   it("renames through the governed metadata route and shows the new title", async () => {
     const { calls } = editorFetch();
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
     const input = await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.change(input, { target: { value: "Service quote 2026" } });
     fireEvent.blur(input);
 
     expect(await screen.findByText('Saved as "Service quote 2026".', undefined, BOOT)).not.toBeNull();
-    expect(calls.find((call) => call.body?.action === "updateMetadata")?.body).toMatchObject({ title: "Service quote 2026" });
+    expect(calls.find((call) => call.body?.capabilityId === "documents.updateDocMetadata")?.body).toMatchObject({
+      capabilityId: "documents.updateDocMetadata",
+      input: { documentId: DOCUMENT_ID, title: "Service quote 2026" },
+    });
   }, TIMEOUT);
 
   it("lists versions, compares two of them side by side and restores one into the editor", async () => {
@@ -284,13 +292,13 @@ describe("authored document editor", () => {
       if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.listDocVersions" && published) {
         return Response.json({ ok: true, data: { versions: [...versionRows, { version: 3, note: "Restored", createdBy: null, createdAt: "2026-09-29T08:00:00.000Z" }] } });
       }
-      if (call.url === `/api/docs/${DOCUMENT_ID}` && call.method === "POST" && call.body?.action === "restore") {
+      if (call.url === "/api/capabilities/execute" && call.body?.capabilityId === "documents.restoreDocVersion") {
         published = true;
-        return Response.json({ version: 3 });
+        return Response.json({ ok: true, data: { version: 3 } });
       }
       return null;
     });
-    render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
+    render(<DocumentsEditorPage documentId={DOCUMENT_ID} actorId="actor-1" organizationId="org-1" />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
     fireEvent.click(screen.getByRole("button", { name: /Versions/ }));
@@ -311,8 +319,9 @@ describe("authored document editor", () => {
 
     expect(await screen.findByText("Restored from version 2 as version 3.", undefined, BOOT)).not.toBeNull();
     await waitFor(() => expect(surface().innerHTML).toBe("<p>Restored body</p>"));
-    expect(calls.filter((call) => call.body?.action === "restore")).toHaveLength(1);
-    expect(calls.filter((call) => call.body?.action === "restore")[0]?.body).toMatchObject({ sourceVersion: 2 });
+    const restore = calls.find((call) => call.body?.capabilityId === "documents.restoreDocVersion");
+    expect(restore).toBeDefined();
+    expect(restore?.body).toMatchObject({ capabilityId: "documents.restoreDocVersion", input: { documentId: DOCUMENT_ID, sourceVersion: 2 } });
   }, TIMEOUT);
 
   it("loads editor detail and version history from Go and sends workspace ticks through the selected route", async () => {

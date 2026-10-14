@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Go now owns `/api/docs/assist` for writing suggestions, continuations, template
+  prefill, and document questions. It resolves the user session directly and
+  loads document, template, and profile facts within the active organization.
+- Vite CRM saved-view writes now always use the Go capability executor with
+  exact retry recovery. A missing Go route fails closed instead of sending the
+  write to the legacy CRM API. Browser tabs serialize retry-marker updates, and
+  delayed responses can clear only the intent and fingerprint they reserved.
 - Vite governed capability execution now proxies directly to Go regardless of
   legacy slice selector flags, so a missing migration flag cannot send a
   governed request back to the temporary app.
@@ -56,6 +63,12 @@ The full v1 changelog is preserved at the bottom of this file.
   currency-specific price precision and reject unsupported fractional units.
 - Vite Documents library and preview reads now always use Go's authenticated
   `documents.listIngestedDocuments` capability, without a legacy API fallback.
+- Vite authored-document publishing, restore, metadata updates, writing assist,
+  and editor workspace collaboration now use Go capabilities or authenticated
+  Go session routes, without legacy API fallback.
+  Publish, restore, and metadata retries retain their scoped Go intent through
+  uncertain responses, and malformed workspace paths remain in Go's route
+  namespace.
 - Vite CRM task creation, completion, and detail updates now use Go capabilities
   with organization-bound, retry-safe requests across tabs and workspace
   changes.

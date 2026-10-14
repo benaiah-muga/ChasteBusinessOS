@@ -474,7 +474,6 @@ describe("Vite CRM page", () => {
   });
 
   it("recovers an uncertain saved-view write after remount and retries the same Go intent", async () => {
-    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", true);
     let viewAttempts = 0;
     const writeBodies: Array<{ capabilityId: string; input: unknown; intentId: string }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -511,7 +510,6 @@ describe("Vite CRM page", () => {
   });
 
   it("releases only the stale saved-view busy state after the active organization changes", async () => {
-    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", true);
     let finishFirst!: (response: Response) => void;
     const firstResponse = new Promise<Response>((resolve) => { finishFirst = resolve; });
     let writes = 0;

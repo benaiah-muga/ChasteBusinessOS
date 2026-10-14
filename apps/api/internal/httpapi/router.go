@@ -229,6 +229,19 @@ func MountGoDocumentsEditorWorkspaceRoute(base, route http.Handler) http.Handler
 	return mux
 }
 
+// MountGoDocumentsAssistRoute owns authenticated document-writing assistance.
+func MountGoDocumentsAssistRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/docs/assist", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoMessagingPresenceRoute owns the exact Vite conversation presence path.
 func MountGoMessagingPresenceRoute(base, route http.Handler) http.Handler {
 	if route == nil {

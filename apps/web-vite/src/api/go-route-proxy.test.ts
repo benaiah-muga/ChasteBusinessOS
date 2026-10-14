@@ -25,7 +25,6 @@ import {
   goCrmCustomerImportFromEnv,
   goCrmCustomerMergeFromEnv,
   goCrmCustomerProfileUpdateFromEnv,
-  goCrmViewWritesFromEnv,
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
   goPurchasingReturnCloseFromEnv,
@@ -35,7 +34,6 @@ import {
   goDocumentsIngestedReadsFromEnv,
   goDocumentsVersionReadsFromEnv,
   goDocumentsEditorReadsFromEnv,
-  goDocumentsEditorWorkspaceFromEnv,
   goMessagingConversationListFromEnv,
   goMessagingConversationCreateFromEnv,
   goMessagingConversationUpdateFromEnv,
@@ -207,14 +205,6 @@ describe("CRM customer profile update Go selector", () => {
   });
 });
 
-describe("CRM saved-view writes Go selector", () => {
-  it("requires both the saved-view selector and session capability route", () => {
-    expect(goCrmViewWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_VIEW_WRITES: "1" })).toBe(true);
-    expect(goCrmViewWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goCrmViewWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_VIEW_WRITES: "1" })).toBe(false);
-  });
-});
-
 describe("HR expenses Go selector", () => {
   it("requires the paired session capability route and explicit expenses selector", () => {
     expect(goHrExpensesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_EXPENSES: "1" })).toBe(true);
@@ -376,29 +366,34 @@ describe("authored document editor Go selector", () => {
   });
 });
 
-describe("authored document editor workspace Go selector", () => {
-  it("requires both the workspace selector and session capability route", () => {
-    expect(goDocumentsEditorWorkspaceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "1" })).toBe(true);
-    expect(goDocumentsEditorWorkspaceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
-    expect(goDocumentsEditorWorkspaceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "0" })).toBe(false);
-    expect(goDocumentsEditorWorkspaceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "1" })).toBe(false);
+describe("authored document assist Go route", () => {
+  it("keeps assist requests and malformed assist paths inside Go", () => {
+    const flags = goRouteProxyFlagsFromEnv({});
+    expect(isGoRouteRequest(flags, "POST", "/api/docs/assist")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/docs/assist?mode=chat")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/docs/assist")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/docs/assist/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/docs/assistant")).toBe(true);
   });
+});
 
-  it("selects only exact document UUID workspace POST and DELETE requests", () => {
+describe("authored document editor workspace Go route", () => {
+  it("always routes workspace POST and DELETE requests so Go can validate document IDs", () => {
     const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
-    const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "1" });
+    const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "0" });
     const path = `/api/docs/${documentId}/workspace`;
     expect(isGoRouteRequest(enabled, "POST", path)).toBe(true);
     expect(isGoRouteRequest(enabled, "DELETE", path)).toBe(true);
     for (const [method, url] of [
-      ["GET", path], ["PUT", path], ["POST", `${path}/`], ["POST", `${path}?draft=1`],
-      ["POST", "/api/docs/not-a-uuid/workspace"], ["POST", `/api/docs/${documentId}/versions`],
+      ["GET", path], ["PUT", path], ["POST", `/api/docs/${documentId}/versions`],
     ]) {
       expect(isGoRouteRequest(enabled, method, url)).toBe(false);
     }
-    const rollback = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "0" });
-    expect(isGoRouteRequest(rollback, "POST", path)).toBe(false);
-    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "DELETE", path)).toBe(false);
+    expect(isGoRouteRequest(enabled, "POST", `${path}?draft=1`)).toBe(true);
+    expect(isGoRouteRequest(enabled, "POST", `${path}/`)).toBe(true);
+    expect(isGoRouteRequest(enabled, "DELETE", `${path}/unexpected/segment`)).toBe(true);
+    expect(isGoRouteRequest(enabled, "POST", `/api/docs/invalid/path/${documentId}/workspace/`)).toBe(true);
+    expect(isGoRouteRequest(enabled, "POST", "/api/docs/not-a-uuid/workspace")).toBe(true);
   });
 });
 
@@ -1133,10 +1128,7 @@ describe("Vite Go route proxy selection", () => {
     const vite = await createViteServer({
       configFile: false,
       appType: "custom",
-      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({
-        CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1",
-        CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE: "1",
-      }), goOrigin)],
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({}), goOrigin)],
       server: {
         host: "127.0.0.1",
         port: 0,
@@ -1175,7 +1167,7 @@ describe("Vite Go route proxy selection", () => {
       headers: { cookie, "content-type": "application/json" },
       body: tick,
     });
-    expect(await unsupported.json()).toMatchObject({ target: "legacy", method: "POST", url: "/api/docs/not-a-uuid/workspace" });
+    expect(await unsupported.json()).toMatchObject({ target: "go", method: "POST", url: "/api/docs/not-a-uuid/workspace" });
 
     const unsupportedMethod = await fetch(`http://127.0.0.1:${address.port}${path}`, { headers: { cookie } });
     expect(await unsupportedMethod.json()).toMatchObject({ target: "legacy", method: "GET", url: path });

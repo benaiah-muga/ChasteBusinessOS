@@ -2,10 +2,10 @@ import { z } from "zod";
 
 /**
  * Client for the authored-document editor surface: the one document read,
- * the draft workspace (autosave, presence, soft lock), governed writes
- * (publish, restore, rename), Go capability writes (save as template), and
- * read-shaped AI assist calls. Editor detail and authored-version reads use
- * the signed Go capability route; workspace and collaboration keep their routes.
+ * the draft workspace (autosave, presence, soft lock), Go capability writes
+ * (publish, restore, rename, save as template), and read-shaped AI assist
+ * calls. Editor detail and authored-version reads use Go capabilities;
+ * workspace presence and writing assist use Go session-authenticated routes.
  *
  * Document content crosses this boundary in two forms: the ProseMirror JSON
  * tree the editor works in, and the HTML that tree renders to. Every HTML
@@ -132,6 +132,7 @@ const TemplateRetryMarkerSchema = z.object({
   intentId: z.string().uuid(),
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
 }).strict();
+const DocumentWriteRetryMarkerSchema = TemplateRetryMarkerSchema;
 const MetadataPreviousSchema = z.object({
   title: z.string(),
   folder: z.string().nullable(),
@@ -155,7 +156,16 @@ const GoPendingApprovalSchema = z.object({
 }).strict();
 const PendingApprovalSchema = z.union([LegacyPendingApprovalSchema, GoPendingApprovalSchema]);
 const AssistTextSchema = z.object({ ok: z.literal(true).optional(), text: z.string() }).strict();
+const AssistPrefillSchema = z.object({ ok: z.literal(true), values: z.record(z.string(), z.string()) }).strict();
 export type AssistText = z.infer<typeof AssistTextSchema>;
+export type AssistPrefill = z.infer<typeof AssistPrefillSchema>;
+export type DocumentsAssistTextRequest =
+  | { kind: "selection"; action: "improve" | "grammar" | "tone" | "shorten" | "expand" | "translate"; text: string; language?: string }
+  | { kind: "continue"; before: string; after?: string }
+  | { kind: "chat"; documentId: string; question: string };
+export type DocumentsAssistPrefillRequest = { kind: "prefill"; templateId: string };
+export type DocumentsAssistRequest = DocumentsAssistTextRequest | DocumentsAssistPrefillRequest;
+export type DocumentsAssistResult = AssistText | AssistPrefill;
 
 export type GovernedOutcome<T> = { kind: "completed"; data: T } | { kind: "pending"; hint: string };
 
@@ -204,14 +214,14 @@ function messageFor(status: number, body: unknown): string {
   return "The document request failed.";
 }
 
-async function request(url: string, init: RequestInit, signal?: AbortSignal): Promise<WireResponse> {
+async function request(url: string, init: RequestInit, signal?: AbortSignal, timeoutMs?: number): Promise<WireResponse> {
   let response: Response;
   try {
     response = await fetch(url, {
       ...init,
       credentials: "same-origin",
       headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
-      signal: requestSignal(signal, init.method === "POST" ? 20_000 : 15_000),
+      signal: requestSignal(signal, timeoutMs ?? (init.method === "POST" ? 20_000 : 15_000)),
     });
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -242,19 +252,6 @@ async function post(url: string, body: Record<string, unknown>, signal?: AbortSi
     return { status, body: parsed.data };
   }
   return { status, body: raw };
-}
-
-function governed<T>(url: string, body: Record<string, unknown>, schema: z.ZodType<T>, signal?: AbortSignal): Promise<GovernedOutcome<T>> {
-  return post(url, body, signal).then(({ status, body: raw }) => {
-    if (status === 202) {
-      const pending = raw as z.infer<typeof PendingApprovalSchema>;
-      return { kind: "pending", hint: pendingApprovalHint(pending) };
-    }
-    if (status < 200 || status >= 300) throw new DocumentsEditorApiError(status, messageFor(status, raw));
-    const parsed = schema.safeParse(raw);
-    if (!parsed.success) throw new DocumentsEditorApiError(status, "The document service returned an unexpected action response.");
-    return { kind: "completed", data: parsed.data };
-  });
 }
 
 function pendingApprovalHint(pending: z.infer<typeof PendingApprovalSchema>): string {
@@ -345,25 +342,31 @@ export function releaseEditorWorkspace(id: string): void {
 export function publishDocumentVersion(
   id: string,
   body: { title: string; content: Record<string, unknown>; html: string; pageSettings: PageSettings; note?: string },
+  scope: DocumentsEditorRetryScope,
   signal?: AbortSignal,
 ): Promise<GovernedOutcome<z.infer<typeof PublishedVersionSchema>>> {
-  return governed(documentPath(id), { action: "publish", ...body }, PublishedVersionSchema, signal);
+  validateDocumentVersionInput(id);
+  return governedDocumentWrite("documents.saveDocVersion", { documentId: id, ...body }, PublishedVersionSchema, scope, signal);
 }
 
 export function restoreDocumentVersion(
   id: string,
   sourceVersion: number,
+  scope: DocumentsEditorRetryScope,
   signal?: AbortSignal,
 ): Promise<GovernedOutcome<z.infer<typeof PublishedVersionSchema>>> {
-  return governed(documentPath(id), { action: "restore", sourceVersion }, PublishedVersionSchema, signal);
+  validateDocumentVersionInput(id, sourceVersion);
+  return governedDocumentWrite("documents.restoreDocVersion", { documentId: id, sourceVersion }, PublishedVersionSchema, scope, signal);
 }
 
 export function updateDocumentMetadata(
   id: string,
   body: { title?: string; folder?: string | null },
+  scope: DocumentsEditorRetryScope,
   signal?: AbortSignal,
 ): Promise<GovernedOutcome<z.infer<typeof MetadataUpdatedSchema>>> {
-  return governed(documentPath(id), { action: "updateMetadata", ...body }, MetadataUpdatedSchema, signal);
+  validateDocumentVersionInput(id);
+  return governedDocumentWrite("documents.updateDocMetadata", { documentId: id, ...body }, MetadataUpdatedSchema, scope, signal);
 }
 
 export function createDocumentTemplate(
@@ -383,10 +386,89 @@ export function createAuthoredDocumentDraft(
 
 const templateRetryPrefix = "chaste:documents-template:v1:";
 const authoredDocumentRetryPrefix = "chaste:authored-document-create:v1:";
+const documentWriteRetryPrefix = "chaste:documents-editor-write:v1:";
 
 async function digest(value: string): Promise<string> {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function governedDocumentWrite<T>(
+  capabilityId: string,
+  input: Record<string, unknown>,
+  schema: z.ZodType<T>,
+  retryScope: DocumentsEditorRetryScope,
+  signal?: AbortSignal,
+): Promise<GovernedOutcome<T>> {
+  const { actorId, organizationId } = templateRetryScope(retryScope);
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!locks) throw new DocumentsEditorApiError(0, "Document edit retry protection is unavailable in this browser.");
+  const scopeHash = await digest(`${actorId}:${organizationId}`);
+  const storageKey = `${documentWriteRetryPrefix}${scopeHash}:${capabilityId}:${String(input.documentId)}`;
+  try {
+    return await locks.request(storageKey, { mode: "exclusive" }, async () => {
+      const fingerprint = await digest(JSON.stringify({ capabilityId, input }));
+      let marker: z.infer<typeof DocumentWriteRetryMarkerSchema> | null;
+      try { marker = parseDocumentWriteRetryMarker(window.localStorage.getItem(storageKey)); }
+      catch (error) {
+        if (error instanceof DocumentsEditorApiError) throw error;
+        throw new DocumentsEditorApiError(0, "Document edit retry protection could not be read. Enable browser storage before continuing.");
+      }
+      if (marker && marker.fingerprint !== fingerprint) {
+        throw new DocumentsEditorApiError(0, "A previous document edit is unresolved. Retry those exact details before changing the document again.");
+      }
+      marker ??= { version: 1, intentId: crypto.randomUUID(), fingerprint };
+      const serialized = JSON.stringify(marker);
+      try {
+        window.localStorage.setItem(storageKey, serialized);
+        if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("document edit retry marker did not persist");
+      } catch {
+        throw new DocumentsEditorApiError(0, "Document edit retry protection could not be saved. Enable browser storage before continuing.");
+      }
+
+      const clearIfCurrent = (): void => {
+        try {
+          const current = parseDocumentWriteRetryMarker(window.localStorage.getItem(storageKey));
+          if (current?.intentId === marker.intentId && current.fingerprint === marker.fingerprint) window.localStorage.removeItem(storageKey);
+        } catch {
+          throw new DocumentsEditorApiError(0, "The document service confirmed the result, but retry protection could not be cleared. Retry the exact action to confirm it safely.");
+        }
+      };
+
+      const { status, body } = await request("/api/capabilities/execute", {
+        method: "POST",
+        cache: "no-store",
+        body: JSON.stringify({ capabilityId, input, intentId: marker.intentId }),
+      }, signal);
+      if (status === 202) {
+        const pending = GoPendingApprovalSchema.safeParse(body);
+        if (!pending.success) throw new DocumentsEditorApiError(status, "The Go documents service returned an unexpected approval response.");
+        return { kind: "pending", hint: pendingApprovalHint(pending.data) };
+      }
+      if (status < 200 || status >= 300) {
+        if (status >= 400 && status < 500 && ![404, 408, 425, 429].includes(status)) clearIfCurrent();
+        throw new DocumentsEditorApiError(status, messageFor(status, body));
+      }
+      const envelope = CapabilitySuccessSchema.safeParse(body);
+      const parsed = envelope.success ? schema.safeParse(envelope.data.data) : null;
+      if (!parsed?.success) throw new DocumentsEditorApiError(status, "The Go documents service returned an unexpected action response.");
+      clearIfCurrent();
+      return { kind: "completed", data: parsed.data };
+    });
+  } catch (error) {
+    if (error instanceof DocumentsEditorApiError) throw error;
+    throw new DocumentsEditorApiError(0, "The browser could not safely coordinate this document edit across tabs. Retry the exact action after closing other Documents tabs.");
+  }
+}
+
+function parseDocumentWriteRetryMarker(raw: string | null): z.infer<typeof DocumentWriteRetryMarkerSchema> | null {
+  if (raw === null) return null;
+  let value: unknown;
+  try { value = JSON.parse(raw); }
+  catch { throw new DocumentsEditorApiError(0, "A saved document edit retry marker is invalid. Verify the document before trying again."); }
+  const parsed = DocumentWriteRetryMarkerSchema.safeParse(value);
+  if (!parsed.success) throw new DocumentsEditorApiError(0, "A saved document edit retry marker is invalid. Verify the document before trying again.");
+  return parsed.data;
 }
 
 function templateRetryScope(scope: DocumentsEditorRetryScope): { actorId: string; organizationId: string } {
@@ -523,9 +605,17 @@ async function createAuthoredDocumentDraftInGo(
   });
 }
 
-export async function requestAssist(body: Record<string, unknown>, signal?: AbortSignal): Promise<AssistText> {
-  const { status, body: raw } = await post("/api/docs/assist", body, signal);
+export function requestAssist(body: DocumentsAssistTextRequest, signal?: AbortSignal): Promise<AssistText>;
+export function requestAssist(body: DocumentsAssistPrefillRequest, signal?: AbortSignal): Promise<AssistPrefill>;
+export async function requestAssist(body: DocumentsAssistRequest, signal?: AbortSignal): Promise<DocumentsAssistResult> {
+  const { status, body: raw } = await request("/api/docs/assist", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify(body),
+  }, signal, 65_000);
   if (status < 200 || status >= 300) throw new DocumentsEditorApiError(status, messageFor(status, raw));
+  const prefill = AssistPrefillSchema.safeParse(raw);
+  if (prefill.success) return prefill.data;
   const parsed = AssistTextSchema.safeParse(raw);
   if (!parsed.success || !parsed.data.text.trim()) throw new DocumentsEditorApiError(status, "The writing assistant could not help with that, try again.");
   return parsed.data;

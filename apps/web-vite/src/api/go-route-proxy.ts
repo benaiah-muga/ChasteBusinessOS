@@ -43,7 +43,6 @@ export type GoRouteProxyFlags = {
   posShiftSummary: boolean;
   onboarding: boolean;
   messageAttachmentDownloads: boolean;
-  documentsEditorWorkspace: boolean;
   messagingPresence: boolean;
   approvalsRead: boolean;
   approvalsDecision: boolean;
@@ -118,10 +117,6 @@ export function goCrmCustomerProfileUpdateFromEnv(env: Record<string, string | u
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE === "1";
 }
 
-export function goCrmViewWritesFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_VIEW_WRITES === "1";
-}
-
 export function goPurchasingCreateOrderFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_CREATE_ORDER === "1";
 }
@@ -170,10 +165,6 @@ export function goDocumentsEditorReadsFromEnv(env: Record<string, string | undef
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" &&
     env.CHASTE_GO_DOCUMENTS_EDITOR_READS === "1" &&
     env.CHASTE_GO_DOCUMENTS_VERSION_READS === "1";
-}
-
-export function goDocumentsEditorWorkspaceFromEnv(env: Record<string, string | undefined>): boolean {
-  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_DOCUMENTS_EDITOR_WORKSPACE === "1";
 }
 
 export function goMessagingConversationListFromEnv(env: Record<string, string | undefined>): boolean {
@@ -353,7 +344,6 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
     onboarding: env.CHASTE_GO_ONBOARDING_ROUTE === "1",
     messageAttachmentDownloads: goMessagingAttachmentDownloadsFromEnv(env),
-    documentsEditorWorkspace: goDocumentsEditorWorkspaceFromEnv(env),
     messagingPresence: goMessagingPresenceFromEnv(env),
     approvalsRead: env.CHASTE_GO_APPROVALS_READ_ROUTE !== "0",
     approvalsDecision: env.CHASTE_GO_APPROVALS_DECISION_ROUTE !== "0",
@@ -370,7 +360,8 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   const attachmentID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
   if (method === "GET" && new RegExp(`^/api/go/documents/${attachmentID}/content(?:\\?.*)?$`, "i").test(path)) return true;
-  if (flags.documentsEditorWorkspace && ["POST", "DELETE"].includes(method ?? "") && new RegExp(`^/api/docs/${attachmentID}/workspace$`, "i").test(path)) return true;
+  if (/^\/api\/docs\/assist(?:[^?]*)(?:\?.*)?$/.test(path)) return true;
+  if (["POST", "DELETE"].includes(method ?? "") && /^\/api\/docs\/[^?]*\/workspace(?:[^?]*)(?:\?.*)?$/.test(path)) return true;
   if (flags.messagingPresence && ["GET", "POST"].includes(method ?? "") && new RegExp(`^/api/conversations/${attachmentID}/presence(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.messagingPresence && method === "POST" && new RegExp(`^/api/conversations/${attachmentID}/agent-reply$`, "i").test(path)) return true;
   if (flags.messageAttachmentDownloads && method === "GET" && new RegExp(`^/api/message-attachments/${attachmentID}(?:\\?.*)?$`, "i").test(path)) return true;
