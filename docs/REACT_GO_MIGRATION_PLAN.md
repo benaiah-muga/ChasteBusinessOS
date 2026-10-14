@@ -4613,3 +4613,10 @@ new owners and the manifest shows zero legacy runtime paths.
      label tracks Undo and Redo across repeated changes. Focused tests pass 96
      cases with typecheck and lint passing. Authenticated browser proof verified
      the Go writes and repeated undo/redo behavior with no browser errors.
+
+428. (Runtime verified) Vite CRM's customer profile shortcut opens the Go-backed
+     follow-up form with the customer and generated title while clearing an
+     unrelated task draft's due date, assignee, and note. The focused UI test
+     verifies every field. Authenticated browser proof exercised the shortcut
+     against Go reads and confirmed all three unrelated fields were cleared;
+     capability writes returned 200 and the browser reported no errors.

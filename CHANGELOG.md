@@ -29,6 +29,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Support can file an internal request, bug, or capability-gap ticket through Go's `support.createTicket` capability with actor/org-scoped exact retry recovery.
 - Vite Sales can decline sent quotes through Go after explicit confirmation, with exact retry recovery and stale actor/workspace result suppression.
 - Vite Manufacturing can undo and redo BOM changes through Go using exact snapshot checks, with the recovery action tracking repeated undo and redo operations.
+- Vite CRM starts a customer follow-up with a clean task draft, retaining only its customer and generated title.
 - Vite Inventory reads open reservations through Go and labels the most-recent-100 cap, while hiding prior actor or workspace data immediately.
 - Vite Support lists the 20 newest filed internal tickets through Go's `support.listTickets` capability with permission and actor/workspace scoped result handling.
 - Vite Analytics answers revenue, collections, and pipeline questions through Go's authenticated `analytics.askYourBusiness` capability, showing cited organization data and suggestions without executing them.

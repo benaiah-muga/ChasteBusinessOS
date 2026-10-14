@@ -1708,6 +1708,41 @@ describe("Vite CRM page", () => {
     expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")?.[1]?.body))).toMatchObject({ capabilityId: "crm.moveDealStage", input: { dealId, stage: "qualified" }, intentId: expect.any(String) });
   });
 
+  it("starts a customer follow-up without carrying unrelated task draft details", async () => {
+    const memberId = "cf23657c-bf2f-4495-9034-e47c8747fa03";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [] });
+      if (path === "/api/team") return Response.json({ members: [{ userId: memberId, name: "Alex", email: "alex@northwind.test" }] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Tasks/ }));
+    fireEvent.change(screen.getByLabelText("Task"), { target: { value: "Old unrelated task" } });
+    fireEvent.change(screen.getByLabelText("Due"), { target: { value: "2026-12-24" } });
+    fireEvent.change(screen.getByLabelText("Assignee"), { target: { value: memberId } });
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Old unrelated note" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    const profile = await screen.findByRole("dialog", { name: "Northwind" });
+    fireEvent.click(within(profile).getByRole("button", { name: "Create follow-up" }));
+
+    expect(screen.queryByRole("dialog", { name: "Northwind" })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Follow-up tasks" })).not.toBeNull();
+    expect((screen.getByLabelText("Task") as HTMLInputElement).value).toBe("Follow up with Northwind");
+    expect((screen.getByLabelText("Due") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Assignee") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("Note") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Customer") as HTMLSelectElement).value).toBe(customerId);
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST" && JSON.parse(String(init.body)).capabilityId === "crm.createTask")).toBe(false);
+  });
+
   it("generates an editable AI follow-up draft and displays its source records", async () => {
     const taskId = "44444444-4444-4444-8444-444444444444";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
