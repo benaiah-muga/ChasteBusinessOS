@@ -78,22 +78,47 @@ func (h *InventoryReadSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sku"})
 			return
 		}
-		history, status, message := h.executeRead(r, resolved, "inventory.itemHistory", map[string]any{"sku": values[0], "limit": 100})
+		beforeCreatedAtValues, hasBeforeCreatedAt := r.URL.Query()["beforeCreatedAt"]
+		beforeIDValues, hasBeforeID := r.URL.Query()["beforeId"]
+		if hasBeforeCreatedAt != hasBeforeID || (hasBeforeCreatedAt && (len(beforeCreatedAtValues) != 1 || len(beforeIDValues) != 1)) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "history cursor must include one timestamp and one movement ID"})
+			return
+		}
+		input := map[string]any{"sku": values[0], "limit": 101}
+		if hasBeforeCreatedAt {
+			createdAt, err := time.Parse(time.RFC3339Nano, beforeCreatedAtValues[0])
+			if err != nil || !isUUID(beforeIDValues[0]) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid history cursor"})
+				return
+			}
+			input["beforeCreatedAt"] = createdAt
+			input["beforeId"] = beforeIDValues[0]
+		}
+		history, status, message := h.executeRead(r, resolved, "inventory.itemHistory", input)
 		if status != http.StatusOK {
 			writeJSON(w, status, map[string]string{"error": message})
 			return
 		}
 		var output struct {
-			Movements json.RawMessage `json:"movements"`
+			Movements []json.RawMessage `json:"movements"`
 		}
-		if json.Unmarshal(history, &output) != nil || len(output.Movements) == 0 || !json.Valid(output.Movements) {
+		if json.Unmarshal(history, &output) != nil || output.Movements == nil {
 			if h.logger != nil {
 				h.logger.Error("Go inventory history returned invalid data")
 			}
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]json.RawMessage{"movements": output.Movements})
+		hasMore := len(output.Movements) > 100
+		if hasMore {
+			output.Movements = output.Movements[:100]
+		}
+		movements, err := json.Marshal(output.Movements)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"movements": json.RawMessage(movements), "hasMore": hasMore})
 		return
 	}
 

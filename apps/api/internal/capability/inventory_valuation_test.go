@@ -236,6 +236,12 @@ func TestInventoryValuationParsersMirrorZodContracts(t *testing.T) {
 			outputJS: `{"movements":[{"id":"` + uuid + `","quantityDelta":-2000,"reason":"sale","note":null,"refType":null,"unitCostMinor":null,"lotCode":null,"locationCode":null,"actorType":"system","createdAt":"2026-09-01T10:00:00.000Z"}]}`,
 		},
 		{
+			name:     "itemHistoryCursor",
+			parse:    func(raw json.RawMessage) (any, error) { return ParseInventoryItemHistoryInput(raw) },
+			raw:      `{"sku":"VAL-A","limit":100,"beforeCreatedAt":"2026-10-14T10:11:12.123456Z","beforeId":"` + uuid + `"}`,
+			wantJSON: `{"sku":"VAL-A","limit":100,"beforeCreatedAt":"2026-10-14T10:11:12.123456Z","beforeId":"` + uuid + `"}`,
+		},
+		{
 			name:     "itemHistoryDefaultLimit",
 			parse:    func(raw json.RawMessage) (any, error) { return ParseInventoryItemHistoryInput(raw) },
 			raw:      `{"sku":"VAL-A"}`,
@@ -325,6 +331,11 @@ func TestInventoryValuationParsersMirrorZodContracts(t *testing.T) {
 		`{"sku":"VAL-A","limit":1.5}`,
 		`{"sku":"VAL-A","limit":"5"}`,
 		`{"sku":"VAL-A","limit":null}`,
+		`{"sku":"VAL-A","beforeCreatedAt":"2026-10-14T10:11:12Z"}`,
+		`{"sku":"VAL-A","beforeId":"` + uuid + `"}`,
+		`{"sku":"VAL-A","beforeCreatedAt":"not-a-time","beforeId":"` + uuid + `"}`,
+		`{"sku":"VAL-A","beforeCreatedAt":"2026-10-14T10:11:12Z","beforeId":"not-a-uuid"}`,
+		`{"sku":"VAL-A","beforeCreatedAt":null,"beforeId":"` + uuid + `"}`,
 	} {
 		if _, err := ParseInventoryItemHistoryInput(json.RawMessage(raw)); err == nil {
 			t.Errorf("ParseInventoryItemHistoryInput accepted %s", raw)
@@ -714,7 +725,7 @@ func TestInventoryValuationItemHistoryAndLotsRead(t *testing.T) {
 	newest := history.Movements[0]
 	if newest.QuantityDelta != 7000 || newest.Reason != "production" || newest.LotCode == nil || *newest.LotCode != "LOT-2" ||
 		newest.LocationCode != nil || newest.UnitCostMinor != nil || newest.Note != nil || newest.RefType != nil ||
-		newest.ActorType != "system" || newest.CreatedAt != "2026-09-04T12:00:00.000Z" {
+		newest.ActorType != "system" || newest.CreatedAt != "2026-09-04T12:00:00Z" {
 		t.Fatalf("newest movement = %+v, want the production leg on LOT-2", newest)
 	}
 	older := history.Movements[1]
@@ -730,7 +741,7 @@ func TestInventoryValuationItemHistoryAndLotsRead(t *testing.T) {
 	if !isUUID(movementID) {
 		t.Fatalf("movement id = %s, want a UUID", movementID)
 	}
-	wantNewest := fmt.Sprintf(`{"id":%q,"quantityDelta":7000,"reason":"production","note":null,"refType":null,"unitCostMinor":null,"lotCode":"LOT-2","locationCode":null,"actorType":"system","createdAt":"2026-09-04T12:00:00.000Z"}`, movementID)
+	wantNewest := fmt.Sprintf(`{"id":%q,"quantityDelta":7000,"reason":"production","note":null,"refType":null,"unitCostMinor":null,"lotCode":"LOT-2","locationCode":null,"actorType":"system","createdAt":"2026-09-04T12:00:00Z"}`, movementID)
 	if string(encoded) != wantNewest {
 		t.Fatalf("movement JSON = %s, want %s", encoded, wantNewest)
 	}

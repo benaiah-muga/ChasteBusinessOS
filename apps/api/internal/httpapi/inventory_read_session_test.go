@@ -19,12 +19,14 @@ type inventoryReadTestExecutor struct {
 	results map[string]capability.Result
 	ids     []string
 	claims  []authbridge.CapabilityClaims
+	inputs  []json.RawMessage
 	err     error
 }
 
-func (e *inventoryReadTestExecutor) Execute(_ context.Context, claims authbridge.CapabilityClaims, capabilityID string, _ json.RawMessage) (capability.Result, error) {
+func (e *inventoryReadTestExecutor) Execute(_ context.Context, claims authbridge.CapabilityClaims, capabilityID string, input json.RawMessage) (capability.Result, error) {
 	e.ids = append(e.ids, capabilityID)
 	e.claims = append(e.claims, claims)
+	e.inputs = append(e.inputs, append(json.RawMessage(nil), input...))
 	if e.err != nil {
 		return capability.Result{}, e.err
 	}
@@ -113,6 +115,40 @@ func TestInventoryReadSessionHandlerMapsSkuHistoryAndValidatesQuery(t *testing.T
 			t.Fatalf("status=%d calls=%v body=%s", response.Code, executor.ids, response.Body.String())
 		}
 	})
+	t.Run("history cursor and cap forward through the capability", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: inventoryReadTestIdentity()}
+		executor := inventoryReadFixtureExecutor()
+		movements := make([]map[string]any, 101)
+		for index := range movements {
+			movements[index] = map[string]any{"id": "movement", "quantityDelta": 1, "reason": "adjustment", "note": nil, "refType": nil, "unitCostMinor": nil, "lotCode": nil, "locationCode": nil, "actorType": "human", "createdAt": "2026-10-05T00:00:00.000Z"}
+		}
+		raw, err := json.Marshal(map[string]any{"movements": movements})
+		if err != nil {
+			t.Fatal(err)
+		}
+		executor.outputs["inventory.itemHistory"] = raw
+		response := httptest.NewRecorder()
+		movementID := "44444444-4444-4444-8444-444444444444"
+		NewInventoryReadSessionHandler(resolver, executor, nil).ServeHTTP(response, inventoryReadRequest("/api/inventory?sku=MUG-1&beforeCreatedAt=2026-10-05T00%3A00%3A00Z&beforeId="+movementID))
+		var body struct {
+			Movements []json.RawMessage `json:"movements"`
+			HasMore   bool              `json:"hasMore"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		var input struct {
+			Limit           int64  `json:"limit"`
+			BeforeCreatedAt string `json:"beforeCreatedAt"`
+			BeforeID        string `json:"beforeId"`
+		}
+		if len(executor.inputs) != 1 || json.Unmarshal(executor.inputs[0], &input) != nil || input.BeforeCreatedAt != "2026-10-05T00:00:00Z" || input.BeforeID != movementID || input.Limit != 101 {
+			t.Fatalf("history capability input=%s, want cursor and probe limit 101", executor.inputs[0])
+		}
+		if response.Code != http.StatusOK || len(body.Movements) != 100 || !body.HasMore {
+			t.Fatalf("status=%d count=%d hasMore=%t body=%s", response.Code, len(body.Movements), body.HasMore, response.Body.String())
+		}
+	})
 	t.Run("native bearer session resolves the requested organization", func(t *testing.T) {
 		resolver := &fakeDirectSessionResolver{resolved: inventoryReadTestIdentity()}
 		executor := inventoryReadFixtureExecutor()
@@ -131,6 +167,23 @@ func TestInventoryReadSessionHandlerMapsSkuHistoryAndValidatesQuery(t *testing.T
 		NewInventoryReadSessionHandler(resolver, executor, nil).ServeHTTP(response, inventoryReadRequest("/api/inventory?sku=A&sku=B"))
 		if response.Code != http.StatusBadRequest || len(executor.ids) != 0 {
 			t.Fatalf("status=%d calls=%v body=%s", response.Code, executor.ids, response.Body.String())
+		}
+	})
+	t.Run("invalid history cursor rejected before execution", func(t *testing.T) {
+		for _, path := range []string{
+			"/api/inventory?sku=A&beforeCreatedAt=2026-10-05T00%3A00%3A00Z",
+			"/api/inventory?sku=A&beforeId=44444444-4444-4444-8444-444444444444",
+			"/api/inventory?sku=A&beforeCreatedAt=nope&beforeId=44444444-4444-4444-8444-444444444444",
+			"/api/inventory?sku=A&beforeCreatedAt=2026-10-05T00%3A00%3A00Z&beforeId=nope",
+			"/api/inventory?sku=A&beforeCreatedAt=2026-10-05T00%3A00%3A00Z&beforeId=44444444-4444-4444-8444-444444444444&beforeId=55555555-5555-4555-8555-555555555555",
+		} {
+			resolver := &fakeDirectSessionResolver{resolved: inventoryReadTestIdentity()}
+			executor := inventoryReadFixtureExecutor()
+			response := httptest.NewRecorder()
+			NewInventoryReadSessionHandler(resolver, executor, nil).ServeHTTP(response, inventoryReadRequest(path))
+			if response.Code != http.StatusBadRequest || len(executor.ids) != 0 {
+				t.Errorf("path=%s status=%d calls=%v body=%s", path, response.Code, executor.ids, response.Body.String())
+			}
 		}
 	})
 	t.Run("invalid sku rejected before execution", func(t *testing.T) {

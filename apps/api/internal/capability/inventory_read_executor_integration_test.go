@@ -2,6 +2,7 @@ package capability
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -62,7 +63,7 @@ func TestInventoryHistoryAndLotsGovernedExecutorPreservesTenantScope(t *testing.
 	foreignLot := seedInventoryValuationLot(t, fx, fx.otherOrgID, foreignItemID, "LOT-HISTORY-FOREIGN", base)
 	locationID := seedInventoryStockLocation(t, fx, fx.orgID, "WH-HISTORY-EXEC", "History warehouse")
 	seedInventoryValuationMovement(t, fx, fx.orgID, localItemID, 5000, "purchase", inventoryValuationIntPointer(1250), &localLot, &locationID, "system", base.Add(time.Hour))
-	seedInventoryValuationNotedMovement(t, fx, fx.orgID, localItemID, -1250, "sale", "counter sale", "pos_sale", "human", base.Add(2*time.Hour), &localLot, &locationID)
+	saleMovementID := seedInventoryValuationNotedMovement(t, fx, fx.orgID, localItemID, -1250, "sale", "counter sale", "pos_sale", "human", base.Add(2*time.Hour), &localLot, &locationID)
 	seedInventoryValuationMovement(t, fx, fx.otherOrgID, foreignItemID, 9000, "purchase", inventoryValuationIntPointer(700), &foreignLot, nil, "system", base.Add(3*time.Hour))
 
 	input := json.RawMessage(`{"sku":"SKU-HISTORY-EXEC","limit":1}`)
@@ -99,8 +100,31 @@ func TestInventoryHistoryAndLotsGovernedExecutorPreservesTenantScope(t *testing.
 	if newest.QuantityDelta != -1250 || newest.Reason != "sale" || newest.Note == nil || *newest.Note != "counter sale" ||
 		newest.RefType == nil || *newest.RefType != "pos_sale" || newest.LotCode == nil || *newest.LotCode != "LOT-HISTORY-LOCAL" ||
 		newest.LocationCode == nil || *newest.LocationCode != "WH-HISTORY-EXEC" || newest.ActorType != "human" ||
-		newest.CreatedAt != "2026-09-20T10:00:00.000Z" {
+		newest.CreatedAt != "2026-09-20T10:00:00Z" {
 		t.Fatalf("itemHistory movement=%+v, want latest local sale with its note, lot, location, actor and timestamp", newest)
+	}
+
+	newerSameTimeMovementID := "ffffffff-ffff-4fff-8fff-ffffffffffff"
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO stock_movements (id, org_id, item_id, quantity_delta, reason, actor_type, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 700, 'purchase', 'system', $4)`, newerSameTimeMovementID, fx.orgID, localItemID, base.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	olderInput := json.RawMessage(fmt.Sprintf(`{"sku":"SKU-HISTORY-EXEC","limit":1,"beforeCreatedAt":%q,"beforeId":%q}`, newest.CreatedAt, saleMovementID))
+	olderResult, err := fx.executor.Execute(
+		fx.ctx,
+		waveModuleClaims(fx, inventoryItemHistoryCapabilityID, "inventory.read", olderInput, "human", "", "inventory-history-executor-next-page"),
+		inventoryItemHistoryCapabilityID,
+		olderInput,
+	)
+	if err != nil || !olderResult.OK {
+		t.Fatalf("older itemHistory page result=%+v err=%v", olderResult, err)
+	}
+	if err := json.Unmarshal(olderResult.Data, &history); err != nil {
+		t.Fatalf("decode older itemHistory output %s: %v", olderResult.Data, err)
+	}
+	if len(history.Movements) != 1 || history.Movements[0].Reason != "purchase" || history.Movements[0].QuantityDelta != 5000 {
+		t.Fatalf("older itemHistory page=%+v, want the previous local purchase movement", history.Movements)
 	}
 
 	lotsInput := json.RawMessage(`{}`)
@@ -120,9 +144,9 @@ func TestInventoryHistoryAndLotsGovernedExecutorPreservesTenantScope(t *testing.
 	if len(lots.Lots) != 1 || lots.Lots[0].LotCode != "LOT-HISTORY-LOCAL" || lots.Lots[0].SKU != "SKU-HISTORY-EXEC" || lots.Lots[0].BalanceThousandths != 3750 {
 		t.Fatalf("listLots returned %+v, want only the local 3750-thousandth lot", lots.Lots)
 	}
-	for _, capabilityID := range []string{inventoryItemHistoryCapabilityID, inventoryListLotsCapabilityID} {
-		if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2 AND actor_type='human'`, fx.orgID, capabilityID); got != 1 {
-			t.Fatalf("%s human execution audit events=%d, want one", capabilityID, got)
+	for capabilityID, want := range map[string]int{inventoryItemHistoryCapabilityID: 2, inventoryListLotsCapabilityID: 1} {
+		if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2 AND actor_type='human'`, fx.orgID, capabilityID); got != want {
+			t.Fatalf("%s human execution audit events=%d, want %d", capabilityID, got, want)
 		}
 	}
 }

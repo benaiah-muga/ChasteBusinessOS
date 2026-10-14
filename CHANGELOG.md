@@ -34,6 +34,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite People can edit an employee's department and job title through Go's `hr.updateEmployeeStructure` capability, with exact actor/org-scoped retries for pending or uncertain results.
 - Vite Documents shows stored coding suggestions on each ingested document, loaded and strictly validated from Go.
 - Vite Accounting compares a selected budget scenario with posted actuals and open purchase commitments by month through Go.
+- Vite Inventory can page through stock movement history beyond the latest 100 entries using the authenticated Go reader.
 
 ### Fixed
 

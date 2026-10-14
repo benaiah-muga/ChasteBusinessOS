@@ -82,8 +82,10 @@ type InventoryStockReportOutput struct {
 }
 
 type InventoryItemHistoryInput struct {
-	SKU   string `json:"sku"`
-	Limit int64  `json:"limit"`
+	SKU             string     `json:"sku"`
+	Limit           int64      `json:"limit"`
+	BeforeCreatedAt *time.Time `json:"beforeCreatedAt,omitempty"`
+	BeforeID        *string    `json:"beforeId,omitempty"`
 }
 
 type InventoryItemHistoryMovement struct {
@@ -217,7 +219,30 @@ func ParseInventoryItemHistoryInput(raw json.RawMessage) (InventoryItemHistoryIn
 		}
 		limit = value
 	}
-	return InventoryItemHistoryInput{SKU: sku, Limit: limit}, nil
+	beforeRaw, hasBeforeCreatedAt := fields["beforeCreatedAt"]
+	beforeIDRaw, hasBeforeID := fields["beforeId"]
+	if hasBeforeCreatedAt != hasBeforeID {
+		return InventoryItemHistoryInput{}, errors.New("beforeCreatedAt and beforeId must be provided together")
+	}
+	var beforeCreatedAt *time.Time
+	var beforeID *string
+	if hasBeforeCreatedAt {
+		var value string
+		if err := json.Unmarshal(beforeRaw, &value); err != nil || value == "" {
+			return InventoryItemHistoryInput{}, errors.New("beforeCreatedAt must be a valid timestamp")
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return InventoryItemHistoryInput{}, errors.New("beforeCreatedAt must be a valid timestamp")
+		}
+		id, err := requiredCRMDealString(map[string]json.RawMessage{"beforeId": beforeIDRaw}, "beforeId", 0, 0)
+		if err != nil || !projectUUIDPattern.MatchString(id) {
+			return InventoryItemHistoryInput{}, errors.New("beforeId must be a valid UUID")
+		}
+		beforeCreatedAt = &parsed
+		beforeID = &id
+	}
+	return InventoryItemHistoryInput{SKU: sku, Limit: limit, BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID}, nil
 }
 
 func ParseInventoryListLotsInput(raw json.RawMessage) (InventoryListLotsInput, error) {
@@ -705,8 +730,9 @@ func inventoryItemHistory(ctx context.Context, tx pgx.Tx, orgID string, input In
 		LEFT JOIN lots ON sm.lot_id = lots.id
 		LEFT JOIN stock_locations ON sm.location_id = stock_locations.id
 		WHERE sm.org_id = $1::uuid AND sm.item_id = $2::uuid
-		ORDER BY sm.created_at DESC
-		LIMIT $3`, orgID, itemID, input.Limit)
+		  AND ($3::timestamptz IS NULL OR (sm.created_at, sm.id) < ($3::timestamptz, $4::uuid))
+		ORDER BY sm.created_at DESC, sm.id DESC
+		LIMIT $5`, orgID, itemID, input.BeforeCreatedAt, input.BeforeID, input.Limit)
 	if err != nil {
 		return InventoryItemHistoryOutput{}, err
 	}
@@ -720,7 +746,7 @@ func inventoryItemHistory(ctx context.Context, tx pgx.Tx, orgID string, input In
 			&movement.ActorType, &createdAt); err != nil {
 			return InventoryItemHistoryOutput{}, err
 		}
-		movement.CreatedAt = createdAt.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+		movement.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		movements = append(movements, movement)
 	}
 	if err := rows.Err(); err != nil {

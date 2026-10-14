@@ -4514,3 +4514,18 @@ new owners and the manifest shows zero legacy runtime paths.
      synthetic budget through Go in the Migration Verification Workspace, then
      showed October plan, actual, and commitment values on Vite after reload.
      Capability reads returned HTTP 200 and browser page-error output was empty.
+
+418. (Runtime verified) Vite Inventory can load stock
+     movement history in pages of 100 through the authenticated Go inventory
+     reader. Go applies an exclusive `(createdAt, id)` cursor over descending
+     ledger order, probes one extra row to report whether older movements exist,
+     and keeps each page organization-scoped through `inventory.itemHistory`.
+     Vite validates the `hasMore` response and appends older entries without
+     dropping the latest page. A Go integration test inserts a higher-ID
+     movement with the same timestamp between page reads and confirms the older
+     page is unchanged. Focused Go
+     handler/capability and Vite API/page tests cover cursor validation and
+     appended history. Authenticated browser proof loaded 100 rows, then 105
+     after loading older movements; both Go cursor reads returned HTTP 200 and
+     the browser reported no page errors. The local verification stock quantity
+     was restored through Go after the proof.

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchInventoryHistory, InventoryHistoryApiError } from "./inventory-history";
 
 const movement = {
-  id: "movement-1",
+  id: "44444444-4444-4444-8444-444444444444",
   quantityDelta: -1250,
   reason: "adjustment",
   note: "Damaged during handling",
@@ -18,10 +18,10 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("fetchInventoryHistory", () => {
   it("loads history through the existing SKU query contract and validates movements", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ movements: [movement] }), { status: 200 }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ movements: [movement], hasMore: false }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchInventoryHistory("SKU-1", undefined, "org-history-test")).resolves.toEqual({ kind: "loaded", movements: [movement] });
+    await expect(fetchInventoryHistory("SKU-1", undefined, "org-history-test")).resolves.toEqual({ kind: "loaded", movements: [movement], hasMore: false });
     expect(fetchMock).toHaveBeenCalledWith("/api/inventory?sku=SKU-1", expect.objectContaining({
       method: "GET",
       credentials: "same-origin",
@@ -35,7 +35,7 @@ describe("fetchInventoryHistory", () => {
   });
 
   it("rejects malformed history rows", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ movements: [{ ...movement, quantityDelta: "-1250" }] }), { status: 200 })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ movements: [{ ...movement, quantityDelta: "-1250" }], hasMore: false }), { status: 200 })));
     await expect(fetchInventoryHistory("SKU-1")).rejects.toMatchObject({
       name: "InventoryHistoryApiError",
       status: 200,
@@ -45,8 +45,8 @@ describe("fetchInventoryHistory", () => {
 
   it("rejects an unexpected history envelope or extra movement fields", async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ movements: [movement], extra: true }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ movements: [{ ...movement, extra: true }] }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ movements: [movement], hasMore: false, extra: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ movements: [{ ...movement, extra: true }], hasMore: false }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchInventoryHistory("SKU-1")).rejects.toMatchObject({
@@ -60,6 +60,18 @@ describe("fetchInventoryHistory", () => {
       message: expect.stringContaining("unexpected format"),
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("requests older movements with a validated keyset cursor", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ movements: [movement], hasMore: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const cursor = { createdAt: movement.createdAt, id: movement.id };
+    await expect(fetchInventoryHistory("SKU 1", undefined, "org-history-test", cursor)).resolves.toEqual({ kind: "loaded", movements: [movement], hasMore: true });
+    expect(fetchMock).toHaveBeenCalledWith("/api/inventory?sku=SKU+1&beforeCreatedAt=2026-09-30T10%3A15%3A00.000Z&beforeId=44444444-4444-4444-8444-444444444444", expect.objectContaining({
+      headers: { accept: "application/json", "X-Organization-ID": "org-history-test" },
+    }));
+    await expect(fetchInventoryHistory("SKU-1", undefined, undefined, { createdAt: "invalid", id: movement.id })).rejects.toMatchObject({ status: 400 });
+    await expect(fetchInventoryHistory("SKU-1", undefined, undefined, { createdAt: movement.createdAt, id: "not-a-uuid" })).rejects.toMatchObject({ status: 400 });
   });
 
   it("surfaces API errors, session expiry, and network failures", async () => {

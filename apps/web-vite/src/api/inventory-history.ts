@@ -13,7 +13,7 @@ const MovementSchema = z.object({
   createdAt: z.string().refine((value) => Number.isFinite(Date.parse(value)), "Expected a valid timestamp"),
 }).strict();
 
-const HistoryResponseSchema = z.object({ movements: z.array(MovementSchema) }).strict();
+const HistoryResponseSchema = z.object({ movements: z.array(MovementSchema), hasMore: z.boolean() }).strict();
 const PendingResponseSchema = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
@@ -26,7 +26,7 @@ const ErrorResponseSchema = z.union([
 
 export type InventoryMovement = z.infer<typeof MovementSchema>;
 export type InventoryHistoryResult =
-  | { kind: "loaded"; movements: InventoryMovement[] }
+  | { kind: "loaded"; movements: InventoryMovement[]; hasMore: boolean }
   | { kind: "pending"; reason: string };
 
 export class InventoryHistoryApiError extends Error {
@@ -45,10 +45,19 @@ export async function fetchInventoryHistory(
   sku: string,
   signal?: AbortSignal,
   organizationId?: string,
+  before?: { createdAt: string; id: string },
 ): Promise<InventoryHistoryResult> {
+  if (before && (!Number.isFinite(Date.parse(before.createdAt)) || !z.string().uuid().safeParse(before.id).success)) {
+    throw new InventoryHistoryApiError(400, "The requested history cursor is invalid.");
+  }
   let response: Response;
   try {
-    response = await fetch(`/api/inventory?sku=${encodeURIComponent(sku)}`, {
+    const query = new URLSearchParams({ sku });
+    if (before) {
+      query.set("beforeCreatedAt", before.createdAt);
+      query.set("beforeId", before.id);
+    }
+    response = await fetch(`/api/inventory?${query.toString()}`, {
       method: "GET",
       credentials: "same-origin",
       cache: "no-store",
@@ -90,5 +99,5 @@ export async function fetchInventoryHistory(
   if (!parsed.success) {
     throw new InventoryHistoryApiError(response.status, "The inventory service returned stock history in an unexpected format.");
   }
-  return { kind: "loaded", movements: parsed.data.movements };
+  return { kind: "loaded", movements: parsed.data.movements, hasMore: parsed.data.hasMore };
 }
