@@ -34,7 +34,7 @@ const PayrollRunSchema = z.object({
   id: z.string().min(1),
   year: z.number().int().safe(),
   month: z.number().int().min(1).max(12),
-  status: z.string(),
+  status: z.enum(["draft", "executed", "voided", "reversed"]),
   totalGrossMinor: z.number().int().safe(),
   totalTaxMinor: z.number().int().safe(),
   totalNetMinor: z.number().int().safe(),
@@ -100,12 +100,13 @@ export type HrAction =
   | { action: "createPayrollRun"; year: number; month: number }
   | { action: "executePayrollRun"; runId: string; expectedTotalNetMinor: number }
   | { action: "voidPayrollRun"; runId: string }
+  | { action: "reversePayrollPosting"; runId: string; reason: string }
   | { action: "decideLeave"; requestId: string; approve: boolean }
   | { action: "cancelLeave"; requestId: string }
   | { action: "clockIn" | "clockOut"; employeeId: string };
 
 export type HrActionResult = { kind: "success" | "pending"; data: Record<string, unknown> };
-export type HrPayrollAction = Extract<HrAction, { action: "createPayrollRun" }>;
+export type HrPayrollAction = Extract<HrAction, { action: "createPayrollRun" | "executePayrollRun" | "voidPayrollRun" | "reversePayrollPosting" }>;
 export type HrHiringAction = Extract<HrAction, { action: "createOpening" | "addApplicant" | "moveApplicant" }>;
 export type HrEmployeeHireAction = Extract<HrAction, { action: "hireEmployee" }>;
 export type HrLeaveAction =
@@ -147,9 +148,18 @@ const GoTimeOutputSchemas = {
   log: z.object({ entryId: z.string().uuid(), status: z.literal("submitted") }).strict(),
   decide: z.object({ entryId: z.string().uuid(), status: z.enum(["approved", "rejected"]) }).strict(),
 } as const;
-const GoHrPayrollActionSchema = z.object({ action: z.literal("createPayrollRun"), year: z.number().int().min(2020).max(2100), month: z.number().int().min(1).max(12) }).strict();
+const GoHrPayrollCreateSchema = z.object({ action: z.literal("createPayrollRun"), year: z.number().int().min(2020).max(2100), month: z.number().int().min(1).max(12) }).strict();
+const GoHrPayrollExecuteSchema = z.object({ action: z.literal("executePayrollRun"), runId: z.string().uuid(), expectedTotalNetMinor: z.number().int().safe().nonnegative() }).strict();
+const GoHrPayrollVoidSchema = z.object({ action: z.literal("voidPayrollRun"), runId: z.string().uuid() }).strict();
+const GoHrPayrollReverseSchema = z.object({ action: z.literal("reversePayrollPosting"), runId: z.string().uuid(), reason: z.string().min(3).max(500) }).strict();
+const GoHrPayrollActionSchema = z.discriminatedUnion("action", [GoHrPayrollCreateSchema, GoHrPayrollExecuteSchema, GoHrPayrollVoidSchema, GoHrPayrollReverseSchema]);
 const GoHrPayrollAttemptSchema = z.object({ intentId: z.string().uuid(), fingerprint: z.string().length(64), action: GoHrPayrollActionSchema }).strict();
-const GoHrPayrollOutputSchema = z.object({ runId: z.string().uuid(), headcount: z.number().int().safe().positive(), totalGrossMinor: z.number().int().safe().nonnegative(), totalTaxMinor: z.number().int().safe().nonnegative(), totalNetMinor: z.number().int().safe().nonnegative() }).strict();
+const GoHrPayrollOutputSchemas = {
+  createPayrollRun: z.object({ runId: z.string().uuid(), headcount: z.number().int().safe().positive(), totalGrossMinor: z.number().int().safe().nonnegative(), totalTaxMinor: z.number().int().safe().nonnegative(), totalNetMinor: z.number().int().safe().nonnegative() }).strict(),
+  executePayrollRun: z.object({ entryId: z.string().uuid(), totalGrossMinor: z.number().int().safe().nonnegative(), totalNetMinor: z.number().int().safe().nonnegative() }).strict(),
+  voidPayrollRun: z.object({ voided: z.literal(true) }).strict(),
+  reversePayrollPosting: z.object({ reversalEntryId: z.string().uuid(), reversedNetMinor: z.number().int().safe().nonnegative() }).strict(),
+} as const;
 const GoHrCreateOpeningActionSchema = z.object({ action: z.literal("createOpening"), title: z.string().min(1).max(120), department: z.string().min(1).max(100).optional(), note: z.string().min(1).max(500).optional() }).strict();
 const GoHrAddApplicantActionSchema = z.object({ action: z.literal("addApplicant"), openingId: z.string().uuid(), name: z.string().min(1).max(120), email: z.string().email().optional(), note: z.string().min(1).max(500).optional() }).strict();
 const GoHrMoveApplicantActionSchema = z.object({ action: z.literal("moveApplicant"), applicantId: z.string().uuid(), stage: z.enum(["applied", "screening", "interview", "offer", "rejected"]) }).strict();
@@ -261,7 +271,7 @@ export async function readPendingHrPayrollAction(scope: HrRetryScope): Promise<H
   const scoped = await hrPayrollScope(scope);
   let raw: string | null;
   try { raw = window.localStorage.getItem(`${GO_HR_PAYROLL_ATTEMPT_PREFIX}${scoped.scopeHash}`); }
-  catch { throw new HrApiError(0, "Enable browser storage to check for an unresolved payroll draft."); }
+  catch { throw new HrApiError(0, "Enable browser storage to check for an unresolved payroll action."); }
   if (raw === null) return null;
   return parseGoHrPayrollAttempt(raw).action;
 }
@@ -273,31 +283,37 @@ export async function submitHrPayrollAction(
 ): Promise<HrActionResult> {
   const scoped = await hrPayrollScope(scope);
   const attempt = await goHrPayrollAttempt(action, scoped.scopeHash);
+  const capabilityByAction = {
+    createPayrollRun: { capabilityId: "hr.createPayrollRun", input: action.action === "createPayrollRun" ? { year: action.year, month: action.month } : {} },
+    executePayrollRun: { capabilityId: "hr.executePayrollRun", input: action.action === "executePayrollRun" ? { runId: action.runId, expectedTotalNetMinor: action.expectedTotalNetMinor } : {} },
+    voidPayrollRun: { capabilityId: "hr.voidPayrollRun", input: action.action === "voidPayrollRun" ? { runId: action.runId } : {} },
+    reversePayrollPosting: { capabilityId: "hr.reversePayrollPosting", input: action.action === "reversePayrollPosting" ? { runId: action.runId, reason: action.reason } : {} },
+  }[action.action];
   try {
     const response = await request("/api/capabilities/execute", {
       method: "POST",
-      body: JSON.stringify({ capabilityId: "hr.createPayrollRun", input: { year: action.year, month: action.month }, intentId: attempt.intentId }),
+      body: JSON.stringify({ ...capabilityByAction, intentId: attempt.intentId }),
     }, signal, scoped.organizationId);
     const body = await readJson(response);
     if (response.status === 202) {
       const pending = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() }).safeParse(body);
       if (!pending.success) throw new HrApiError(response.status, "The payroll service returned an unexpected approval response.", true);
-      return { kind: "pending", data: { reason: pending.data.reason ?? pending.data.error ?? "This payroll draft is waiting for approval." } };
+      return { kind: "pending", data: { reason: pending.data.reason ?? pending.data.error ?? "This payroll action is waiting for approval." } };
     }
     if (!response.ok) {
       const mayHaveReachedServer = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
-      const apiFailure = parseError(response.status, body, "The Go payroll service could not create this draft.");
+      const apiFailure = parseError(response.status, body, "The Go payroll service could not complete this action.");
       const failure = new HrApiError(response.status, apiFailure.message, mayHaveReachedServer);
-      if (!mayHaveReachedServer) await clearGoHrPayrollAttempt(attempt.storageKey, attempt.intentId);
+      if (!mayHaveReachedServer) await clearGoHrPayrollAttempt(attempt.storageKey, attempt.intentId, attempt.fingerprint);
       throw failure;
     }
-    const parsed = z.object({ ok: z.literal(true), data: GoHrPayrollOutputSchema }).strict().safeParse(body);
-    if (response.status !== 200 || !parsed.success) throw new HrApiError(response.status, "The Go payroll service returned an unexpected draft response.", true);
-    await clearGoHrPayrollAttempt(attempt.storageKey, attempt.intentId);
+    const parsed = z.object({ ok: z.literal(true), data: GoHrPayrollOutputSchemas[action.action] }).strict().safeParse(body);
+    if (response.status !== 200 || !parsed.success) throw new HrApiError(response.status, "The Go payroll service returned an unexpected action response.", true);
+    await clearGoHrPayrollAttempt(attempt.storageKey, attempt.intentId, attempt.fingerprint);
     return { kind: "success", data: parsed.data.data };
   } catch (error) {
     if (error instanceof HrApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearGoHrPayrollAttempt(attempt.storageKey, attempt.intentId);
+      await clearGoHrPayrollAttempt(attempt.storageKey, attempt.intentId, attempt.fingerprint);
     }
     throw error;
   }
@@ -588,7 +604,7 @@ async function hrPayrollScope(scope: HrRetryScope): Promise<{ actorId: string; o
   const actorId = normalizeRetryActorId(scope.actorId);
   const organizationId = scope.organizationId?.trim() ?? "";
   if (!actorId || !z.string().uuid().safeParse(organizationId).success) {
-    throw new HrApiError(0, "Payroll drafts need your account and organization details before they can be submitted.");
+    throw new HrApiError(0, "Payroll actions need your account and organization details before they can be submitted.");
   }
   try {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
@@ -598,19 +614,19 @@ async function hrPayrollScope(scope: HrRetryScope): Promise<{ actorId: string; o
   }
 }
 
-async function goHrPayrollAttempt(action: HrPayrollAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
+async function goHrPayrollAttempt(action: HrPayrollAction, scopeHash: string): Promise<{ storageKey: string; intentId: string; fingerprint: string }> {
   const storageKey = `${GO_HR_PAYROLL_ATTEMPT_PREFIX}${scopeHash}`;
   const parsedAction = GoHrPayrollActionSchema.safeParse(action);
-  if (!parsedAction.success) throw new HrApiError(400, "The payroll draft does not match the Go service contract.");
+  if (!parsedAction.success) throw new HrApiError(400, "The payroll action does not match the Go service contract.");
   const fingerprint = await goHrPayrollFingerprint(parsedAction.data);
   return withHrPayrollReservationLock(storageKey, async () => {
     let raw: string | null;
     try { raw = window.localStorage.getItem(storageKey); }
-    catch { throw new HrApiError(0, "Enable browser storage before creating payroll so uncertain drafts can be retried safely."); }
+    catch { throw new HrApiError(0, "Enable browser storage before changing payroll so uncertain actions can be retried safely."); }
     if (raw !== null) {
       const stored = parseGoHrPayrollAttempt(raw);
-      if (stored.fingerprint !== fingerprint) throw new HrApiError(0, "A previous payroll draft is unresolved. Retry its exact period before starting another draft.", true);
-      return { storageKey, intentId: stored.intentId };
+      if (stored.fingerprint !== fingerprint) throw new HrApiError(0, "A previous payroll action is unresolved. Retry its exact details before starting another action.", true);
+      return { storageKey, intentId: stored.intentId, fingerprint: stored.fingerprint };
     }
     const attempt = { fingerprint, intentId: crypto.randomUUID(), action: parsedAction.data };
     const serialized = JSON.stringify(attempt);
@@ -618,22 +634,22 @@ async function goHrPayrollAttempt(action: HrPayrollAction, scopeHash: string): P
       window.localStorage.setItem(storageKey, serialized);
       if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("payroll retry did not persist");
     } catch {
-      throw new HrApiError(0, "Enable browser storage before creating payroll so uncertain drafts can be retried safely.");
+      throw new HrApiError(0, "Enable browser storage before changing payroll so uncertain actions can be retried safely.");
     }
-    return { storageKey, intentId: attempt.intentId };
+    return { storageKey, intentId: attempt.intentId, fingerprint: attempt.fingerprint };
   });
 }
 
 async function withHrPayrollReservationLock<T>(storageKey: string, reserve: () => Promise<T>): Promise<T> {
   const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
   if (!lockManager) {
-    throw new HrApiError(0, "This browser cannot safely reserve a payroll draft. Open it in a browser with Web Locks enabled before submitting the change.");
+    throw new HrApiError(0, "This browser cannot safely reserve a payroll action. Open it in a browser with Web Locks enabled before submitting the change.");
   }
   try {
     return await lockManager.request(`chaste:hr-payroll-write-marker-lock:${storageKey}`, { mode: "exclusive" }, reserve);
   } catch (error) {
     if (error instanceof HrApiError) throw error;
-    throw new HrApiError(0, "The browser could not safely coordinate this payroll draft across tabs. Close other People tabs and try again.", true);
+    throw new HrApiError(0, "The browser could not safely coordinate this payroll action across tabs. Close other People tabs and try again.", true);
   }
 }
 
@@ -649,20 +665,21 @@ async function goHrPayrollFingerprint(action: HrPayrollAction): Promise<string> 
 function parseGoHrPayrollAttempt(raw: string): z.infer<typeof GoHrPayrollAttemptSchema> {
   let decoded: unknown;
   try { decoded = JSON.parse(raw); }
-  catch { throw new HrApiError(0, "An unresolved payroll draft marker is malformed. Contact an administrator before retrying.", true); }
+  catch { throw new HrApiError(0, "An unresolved payroll action marker is malformed. Contact an administrator before retrying.", true); }
   const parsed = GoHrPayrollAttemptSchema.safeParse(decoded);
-  if (!parsed.success) throw new HrApiError(0, "An unresolved payroll draft marker is malformed. Contact an administrator before retrying.", true);
+  if (!parsed.success) throw new HrApiError(0, "An unresolved payroll action marker is malformed. Contact an administrator before retrying.", true);
   return parsed.data;
 }
 
-async function clearGoHrPayrollAttempt(storageKey: string, intentId: string): Promise<void> {
+async function clearGoHrPayrollAttempt(storageKey: string, intentId: string, fingerprint: string): Promise<void> {
   await withHrPayrollReservationLock(storageKey, async () => {
     try {
       const raw = window.localStorage.getItem(storageKey);
       if (raw === null) return;
-      if (parseGoHrPayrollAttempt(raw).intentId === intentId) window.localStorage.removeItem(storageKey);
+      const current = parseGoHrPayrollAttempt(raw);
+      if (current.intentId === intentId && current.fingerprint === fingerprint) window.localStorage.removeItem(storageKey);
     } catch {
-      throw new HrApiError(0, "The payroll draft completed, but its retry marker could not be cleared. Reload before another draft.", true);
+      throw new HrApiError(0, "The payroll action completed, but its retry marker could not be cleared. Reload before another payroll action.", true);
     }
   });
 }

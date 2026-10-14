@@ -231,6 +231,14 @@ func TestGoWave5PayrollApplicantsGovernedExecutorPath(t *testing.T) {
 	if err := json.Unmarshal(recreated.Data, &secondRun); err != nil {
 		t.Fatal(err)
 	}
+	duplicateInput := json.RawMessage(`{"year":2026,"month":9}`)
+	duplicate, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, hrCreatePayrollRunCapabilityID, "hr.write", duplicateInput, "human", "", "wave5-payroll-create-duplicate"), hrCreatePayrollRunCapabilityID, duplicateInput)
+	if err != nil || duplicate.OK || duplicate.Error != "a payroll run for 2026-09 already exists" {
+		t.Fatalf("duplicate createPayrollRun result=%+v err=%v, want a definite domain rejection", duplicate, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM payroll_runs WHERE org_id=$1::uuid AND year=2026 AND month=9`, fx.orgID); got != 1 {
+		t.Fatalf("September payroll runs=%d, want one after duplicate rejection", got)
+	}
 	if secondRun.TotalNetMinor <= 0 {
 		t.Fatalf("createPayrollRun output=%+v, want a positive net total to execute", secondRun)
 	}

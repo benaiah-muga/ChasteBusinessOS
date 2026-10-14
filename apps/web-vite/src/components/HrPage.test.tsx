@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HrPage } from "./HrPage";
 
@@ -451,16 +451,103 @@ describe("Vite People page", () => {
     expect(await screen.findByRole("heading", { name: "Prepare a payroll run" })).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Payroll period"), { target: { value: "2026-09" } });
     fireEvent.click(screen.getByRole("button", { name: "Create draft run" }));
-    expect(await screen.findByRole("button", { name: "Retry exact payroll draft" })).not.toBeNull();
+    expect(await screen.findByRole("button", { name: "Retry exact payroll action" })).not.toBeNull();
     expect((screen.getByRole("button", { name: "Create draft run" }) as HTMLButtonElement).disabled).toBe(true);
     first.unmount();
 
     render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Retry exact payroll draft" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact payroll action" }));
     expect(await screen.findByText("Payroll draft completed.")).not.toBeNull();
     expect(intentIds).toHaveLength(2);
     expect(intentIds[1]).toBe(intentIds[0]);
     expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/capabilities/execute" && init?.method === "POST")).toBe(true);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
+  });
+
+  it("requires confirmation and routes execute, void, and reverse actions to Go", async () => {
+    window.history.replaceState(null, "", "/hr?tab=payroll");
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const runs = [
+      { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", year: 2026, month: 9, status: "draft", totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000, headcount: 4 },
+      { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", year: 2026, month: 10, status: "draft", totalGrossMinor: 300_000, totalTaxMinor: 30_000, totalNetMinor: 270_000, headcount: 3 },
+      { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", year: 2026, month: 8, status: "executed", totalGrossMinor: 200_000, totalTaxMinor: 20_000, totalNetMinor: 180_000, headcount: 2 },
+      { id: "ffffffff-ffff-4fff-8fff-ffffffffffff", year: 2026, month: 7, status: "voided", totalGrossMinor: 100_000, totalTaxMinor: 10_000, totalNetMinor: 90_000, headcount: 1 },
+      { id: "99999999-9999-4999-8999-999999999999", year: 2026, month: 6, status: "reversed", totalGrossMinor: 150_000, totalTaxMinor: 15_000, totalNetMinor: 135_000, headcount: 1 },
+    ];
+    const currentReport = { ...report, runs };
+    const writes: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: currentReport });
+        if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [] } });
+        if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [] } });
+        writes.push({ capabilityId: body.capabilityId, input: body.input });
+        if (body.capabilityId === "hr.executePayrollRun") {
+          runs[0] = { ...runs[0]!, status: "executed" };
+          return Response.json({ ok: true, data: { entryId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", totalGrossMinor: 400_000, totalNetMinor: 360_000 } });
+        }
+        if (body.capabilityId === "hr.voidPayrollRun") {
+          runs[1] = { ...runs[1]!, status: "voided" };
+          return Response.json({ ok: true, data: { voided: true } });
+        }
+        if (body.capabilityId === "hr.reversePayrollPosting") {
+          runs[2] = { ...runs[2]!, status: "reversed" };
+          return Response.json({ ok: true, data: { reversalEntryId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", reversedNetMinor: 180_000 } });
+        }
+      }
+      throw new Error(`Unexpected payroll route: ${path}`);
+    });
+    stubFetchWithGoTimeReads(fetchMock);
+
+    render(<HrPage baseCurrency="UGX" actorId="22222222-2222-4222-8222-222222222222" organizationId="33333333-3333-4333-8333-333333333333" />);
+    expect(await screen.findByRole("heading", { name: "Payroll runs" })).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("Payroll period"), { target: { value: "2026-10" } });
+    expect((screen.getByRole("button", { name: "Create draft run" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("A payroll run already exists for this period.")).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("Payroll period"), { target: { value: "2026-11" } });
+    expect((screen.getByRole("button", { name: "Create draft run" }) as HTMLButtonElement).disabled).toBe(false);
+    const initialRows = screen.getAllByRole("row");
+    expect(within(initialRows[4]!).queryByRole("button")).toBeNull();
+    expect(within(initialRows[5]!).queryByRole("button")).toBeNull();
+    expect(within(initialRows[4]!).getByText("No actions")).not.toBeNull();
+    expect(within(initialRows[5]!).getByText("No actions")).not.toBeNull();
+
+    fireEvent.click(within(initialRows[1]!).getByRole("button", { name: "Execute" }));
+    expect(screen.getByRole("dialog", { name: "Execute payroll run" })).not.toBeNull();
+    expect(within(screen.getByRole("dialog")).getByText(/UGX.*360,000|360,000.*UGX/)).not.toBeNull();
+    expect(writes).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm execution" }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+
+    fireEvent.click(within(screen.getAllByRole("row")[2]!).getByRole("button", { name: "Void" }));
+    expect(screen.getByRole("dialog", { name: "Void payroll draft" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm void" }));
+    await waitFor(() => expect(writes).toHaveLength(2));
+
+    fireEvent.click(within(screen.getAllByRole("row")[3]!).getByRole("button", { name: "Reverse posting" }));
+    expect(screen.getByRole("dialog", { name: "Reverse payroll posting" })).not.toBeNull();
+    expect((screen.getByRole("button", { name: "Confirm reversal" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Reason" }), { target: { value: "Corrected payroll calculation" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm reversal" }));
+    await waitFor(() => expect(writes).toHaveLength(3));
+    const finalRows = screen.getAllByRole("row");
+    expect(within(finalRows[1]!).getByText("executed")).not.toBeNull();
+    expect(within(finalRows[2]!).getByText("voided")).not.toBeNull();
+    expect(within(finalRows[3]!).getByText("reversed")).not.toBeNull();
+    expect(within(finalRows[4]!).queryByRole("button")).toBeNull();
+    expect(within(finalRows[5]!).queryByRole("button")).toBeNull();
+
+    expect(writes).toEqual([
+      { capabilityId: "hr.executePayrollRun", input: { runId: runs[0]!.id, expectedTotalNetMinor: 360_000 } },
+      { capabilityId: "hr.voidPayrollRun", input: { runId: runs[1]!.id } },
+      { capabilityId: "hr.reversePayrollPosting", input: { runId: runs[2]!.id, reason: "Corrected payroll calculation" } },
+    ]);
     expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
   });
 
@@ -638,6 +725,7 @@ describe("Vite People page", () => {
     { currency: "BHD", amount: "1.234", amountMinor: 1234, limit: "2.500", limitMinor: 2500 },
   ])("converts expense and policy amounts using $currency minor units", async ({ currency, amount, amountMinor, limit, limitMinor }) => {
     window.history.replaceState(null, "", "/hr?tab=expenses");
+    stubHrWriteLocks();
     const baseFetch = hrFetch();
     const writes: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -701,6 +789,7 @@ describe("Vite People page", () => {
 
   it("displays and pays each claim in its stored currency", async () => {
     window.history.replaceState(null, "", "/hr?tab=expenses");
+    stubHrWriteLocks();
     const baseFetch = hrFetch();
     const paymentRequests: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -751,6 +840,7 @@ describe("Vite People page", () => {
 
   it("routes Vite expenses to Go and recovers the exact pending claim action", async () => {
     window.history.replaceState(null, "", "/hr?tab=expenses");
+    stubHrWriteLocks();
     let pendingFirstSubmit = true;
     const readCapabilities: string[] = [];
     const requests: Array<{ capabilityId: string; intentId: string; input: Record<string, unknown> }> = [];

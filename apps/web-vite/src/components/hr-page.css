@@ -235,6 +235,13 @@
 .hr-expense-rejected { background: #f8ecea; color: #8c3021; }
 .hr-visually-hidden { clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
 .hr-expenses .hr-notice a { color: inherit; font-weight: 700; margin-left: 0.25rem; text-decoration: underline; text-underline-offset: 2px; }
+.hr-confirm-backdrop { align-items: center; background: rgb(16 28 20 / 48%); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 20; }
+.hr-confirm-dialog { max-width: 34rem; width: 100%; }
+.hr-confirm-dialog h2 { margin: 0.2rem 0 0.8rem; }
+.hr-confirm-dialog p { line-height: 1.55; }
+.hr-confirm-dialog label { color: #455148; display: grid; font-size: 0.82rem; font-weight: 650; gap: 0.4rem; }
+.hr-confirm-dialog textarea { border: 1px solid var(--hr-line); border-radius: 8px; font: inherit; min-height: 6rem; padding: 0.65rem; resize: vertical; }
+.hr-confirm-dialog .hr-actions { justify-content: flex-end; margin-top: 1.2rem; }
 
 @media (max-width: 850px) {
   .hr-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -2029,7 +2029,9 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_HR_EXPENSES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`
      selectors in local setups; set the HR selector to `0` for explicit legacy
      rollback. Vite scopes durable exact-action retries by authenticated actor
-     and organization, exposes retries for pending approvals after reload, and
+     and organization, serializes retry marker reservations across tabs, only
+     clears the matching intent and fingerprint, exposes retries for pending
+     approvals after reload, and
      blocks legacy writes while a Go attempt remains unresolved. A Go 404 never
      falls back to `/api/expenses`. Preserve the existing claim and policy UI.
      Focused API, proxy selector, and HrPage tests pass; existing DB-backed Go
@@ -4255,6 +4257,13 @@ new owners and the manifest shows zero legacy runtime paths.
      12 units available at the configured sale price. No legacy inventory write
      or browser error was observed. This completes item 157.
 
+402. (Implemented and API verified) Vite Expenses reserves actor- and
+     organization-scoped retry markers under Web Locks, refuses a competing
+     action while an unresolved marker exists, and clears a marker only when
+     both its intent ID and action fingerprint still match. Focused API tests
+     cover cross-tab reservation, delayed duplicate completion, and unavailable
+     browser locks. Authenticated browser proof remains open.
+
 401. (Runtime verified) Authenticated Vite POS completed a cash sale for a
      synthetic stocked item, returned the full sale to cash, and loaded the
      shift summary. Go capability requests for sale and return each returned
@@ -4262,3 +4271,26 @@ new owners and the manifest shows zero legacy runtime paths.
      reloaded summary showed one sale, UGX 2,500 cash takings, and UGX 2,500
      cash refunds. No legacy `POST /api/pos` write or browser error was
      observed. This completes the current Go runtime proof for item 153.
+
+403. (Runtime verified) Vite Payroll runs report, draft
+     creation, execution, voiding, and reversal through Go's `hr.report`,
+     `hr.createPayrollRun`, `hr.executePayrollRun`, `hr.voidPayrollRun`, and
+     `hr.reversePayrollPosting` capabilities. Execution, void, and reversal
+     require explicit confirmation; reversals require a reason. Exact pending
+     attempts are scoped by actor and organization, protected by Web Locks,
+     and cleared only when both intent ID and fingerprint still match. Draft
+     creation is disabled when the selected period already has a run.
+     Focused API and component tests cover capability contracts, validated
+     outputs, pending recovery, confirmation gates, duplicate-period blocking,
+     and no legacy write path. Authenticated `agent-browser` verification in
+     the Migration Verification Workspace created one synthetic UGX 1,000
+     employee, executed and reversed the October run with a reason, and voided
+     a September draft. After reload, October showed `reversed` and September
+     showed `voided`; the Accounting journal showed the payroll posting and its
+     linked reversal. Lifecycle write capabilities returned HTTP 200 and no
+     `/api/hr` write was observed. An accidental duplicate-period submission
+     before the new guard returned HTTP 500 without creating another run; the
+     UI now disables the existing October period and shows why. Go now maps
+     duplicate and invalid lifecycle rejections to definite HTTP 422 results,
+     with integration coverage confirming a duplicate cannot create another
+     run. No browser runtime errors were observed.

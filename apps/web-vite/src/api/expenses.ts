@@ -151,17 +151,17 @@ export async function submitExpenseAction(
     if (!response.ok) {
       const mayHaveReachedServer = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
       const apiError = new ExpensesApiError(response.status, errorMessage(response.status, body), mayHaveReachedServer);
-      if (!mayHaveReachedServer && response.status < 500) await clearExpenseAttempt(attempt.storageKey);
+      if (!mayHaveReachedServer && response.status < 500) await clearExpenseAttempt(attempt);
       throw apiError;
     }
     const schema = ActionSchemas[action.action];
     const parsed = z.object({ ok: z.literal(true), data: schema }).strict().safeParse(body);
     if (response.status !== 200 || !parsed.success) throw new ExpensesApiError(response.status, "The expenses service returned an unexpected action response.", true);
-    await clearExpenseAttempt(attempt.storageKey);
+    await clearExpenseAttempt(attempt);
     return { kind: "completed", data: parsed.data.data };
   } catch (error) {
     if (error instanceof ExpensesApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
-      await clearExpenseAttempt(attempt.storageKey);
+      await clearExpenseAttempt(attempt);
     }
     throw error;
   }
@@ -181,26 +181,44 @@ async function expenseScope(scope?: ExpenseRetryScope): Promise<{ actorId: strin
   }
 }
 
-async function expenseAttempt(action: ExpenseAction, scope: { scopeHash: string }): Promise<{ storageKey: string; intentId: string }> {
+type ExpenseAttempt = z.infer<typeof AttemptSchema> & { storageKey: string };
+
+async function expenseAttempt(action: ExpenseAction, scope: { scopeHash: string }): Promise<ExpenseAttempt> {
   const storageKey = `${EXPENSE_ATTEMPT_PREFIX}${scope.scopeHash}`;
   const fingerprint = await expenseFingerprint(action);
-  let raw: string | null;
-  try { raw = window.localStorage.getItem(storageKey); }
-  catch { throw new ExpensesApiError(0, "Enable browser storage before changing expenses so an uncertain result can be retried safely."); }
-  if (raw !== null) {
-    const stored = parseAttempt(raw);
-    if (stored.fingerprint !== fingerprint) throw new ExpensesApiError(0, "A previous expense action is unresolved. Retry its exact details before starting another action.", true);
-    return { storageKey, intentId: stored.intentId };
+  return withExpenseAttemptLock(storageKey, async () => {
+    let raw: string | null;
+    try { raw = window.localStorage.getItem(storageKey); }
+    catch { throw new ExpensesApiError(0, "Enable browser storage before changing expenses so an uncertain result can be retried safely."); }
+    if (raw !== null) {
+      const stored = parseAttempt(raw);
+      if (stored.fingerprint !== fingerprint) throw new ExpensesApiError(0, "A previous expense action is unresolved. Retry its exact details before starting another action.", true);
+      return { ...stored, storageKey };
+    }
+    const attempt = { fingerprint, intentId: crypto.randomUUID(), action };
+    const serialized = JSON.stringify(attempt);
+    try {
+      window.localStorage.setItem(storageKey, serialized);
+      const saved = window.localStorage.getItem(storageKey);
+      if (saved !== serialized) throw new Error("expense retry did not persist");
+      return { ...parseAttempt(saved), storageKey };
+    } catch {
+      throw new ExpensesApiError(0, "Enable browser storage before changing expenses so an uncertain result can be retried safely.");
+    }
+  });
+}
+
+async function withExpenseAttemptLock<T>(storageKey: string, operation: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!lockManager) {
+    throw new ExpensesApiError(0, "This browser cannot safely reserve an expense action. Open it in a browser with Web Locks enabled before changing expenses.");
   }
-  const attempt = { fingerprint, intentId: crypto.randomUUID(), action };
-  const serialized = JSON.stringify(attempt);
   try {
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("expense retry did not persist");
-  } catch {
-    throw new ExpensesApiError(0, "Enable browser storage before changing expenses so an uncertain result can be retried safely.");
+    return await lockManager.request(`chaste:expenses-write-marker-lock:${storageKey}`, { mode: "exclusive" }, operation);
+  } catch (error) {
+    if (error instanceof ExpensesApiError) throw error;
+    throw new ExpensesApiError(0, "The browser could not safely coordinate this expense action across tabs. Close other Expenses tabs and try again.", true);
   }
-  return { storageKey, intentId: attempt.intentId };
 }
 
 async function expenseFingerprint(action: ExpenseAction): Promise<string> {
@@ -229,9 +247,19 @@ function parseAttempt(raw: string): z.infer<typeof AttemptSchema> {
   return parsed.data;
 }
 
-async function clearExpenseAttempt(storageKey: string): Promise<void> {
-  try { window.localStorage.removeItem(storageKey); }
-  catch { throw new ExpensesApiError(0, "The expense action completed, but its retry marker could not be cleared. Reload the page before another action.", true); }
+async function clearExpenseAttempt(attempt: ExpenseAttempt): Promise<void> {
+  await withExpenseAttemptLock(attempt.storageKey, async () => {
+    try {
+      const raw = window.localStorage.getItem(attempt.storageKey);
+      if (raw === null) return;
+      const current = parseAttempt(raw);
+      if (current.intentId === attempt.intentId && current.fingerprint === attempt.fingerprint) {
+        window.localStorage.removeItem(attempt.storageKey);
+      }
+    } catch {
+      throw new ExpensesApiError(0, "The expense action completed, but its retry marker could not be cleared. Reload the page before another action.", true);
+    }
+  });
 }
 
 function capabilityRequest(action: ExpenseAction): { capabilityId: string; input: Record<string, unknown> } {

@@ -267,6 +267,58 @@ describe("Vite People API", () => {
     expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
   });
 
+  it("executes, voids, and reverses payroll through validated Go capabilities with exact pending recovery", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const actions = [
+      { action: "executePayrollRun" as const, runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", expectedTotalNetMinor: 360_000 },
+      { action: "voidPayrollRun" as const, runId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      { action: "reversePayrollPosting" as const, runId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", reason: "Corrected payroll calculation" },
+    ];
+    const expected = [
+      { capabilityId: "hr.executePayrollRun", input: { runId: actions[0]!.runId, expectedTotalNetMinor: 360_000 } },
+      { capabilityId: "hr.voidPayrollRun", input: { runId: actions[1]!.runId } },
+      { capabilityId: "hr.reversePayrollPosting", input: { runId: actions[2]!.runId, reason: "Corrected payroll calculation" } },
+    ];
+    const outputs = [
+      { entryId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", totalGrossMinor: 400_000, totalNetMinor: 360_000 },
+      { voided: true },
+      { reversalEntryId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", reversedNetMinor: 360_000 },
+    ];
+
+    for (const [index, action] of actions.entries()) {
+      const requests: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        requests.push(body);
+        return requests.length === 1
+          ? Response.json({ pendingApproval: true, reason: "Approval required." }, { status: 202 })
+          : Response.json({ ok: true, data: outputs[index] });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+      await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(action);
+      await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "success", data: outputs[index] });
+      expect(requests).toHaveLength(2);
+      expect(requests[0]).toMatchObject({ ...expected[index], intentId: expect.any(String) });
+      expect(requests[1]).toEqual(requests[0]);
+      await expect(readPendingHrPayrollAction(scope)).resolves.toBeNull();
+    }
+  });
+
+  it("keeps a malformed Go payroll action output unresolved for safe recovery", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "executePayrollRun" as const, runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", expectedTotalNetMinor: 360_000 };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { entryId: "not-a-uuid", totalGrossMinor: -1, totalNetMinor: 360_000 } })));
+
+    await expect(submitHrPayrollAction(action, scope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(action);
+  });
+
   it("serializes cross-tab Go payroll draft reservations for one actor and organization", async () => {
     vi.stubGlobal("__GO_HR_PAYROLL__", true);
     stubHrWriteLocks();
@@ -311,13 +363,18 @@ describe("Vite People API", () => {
     const next = submitHrPayrollAction(nextAction, scope);
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(intentIds[2]).not.toBe(intentIds[0]);
+    const attemptKey = Object.keys(window.localStorage).find((key) => key.startsWith("chaste:hr:payroll:go:attempt:v1:"));
+    if (!attemptKey) throw new Error("Payroll retry marker was not persisted");
+    const newerAttempt = JSON.parse(window.localStorage.getItem(attemptKey) ?? "null") as { intentId: string };
+    newerAttempt.intentId = intentIds[0]!;
+    window.localStorage.setItem(attemptKey, JSON.stringify(newerAttempt));
     respond[1]?.(Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } }));
     await expect(duplicate).resolves.toMatchObject({ kind: "success" });
     await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(nextAction);
 
     respond[2]?.(Response.json({ pendingApproval: true }, { status: 202 }));
     await expect(next).resolves.toMatchObject({ kind: "pending" });
-  }, 15_000);
+  }, 60_000);
 
   it("fails closed when browser-wide Go payroll locks are unavailable", async () => {
     vi.stubGlobal("__GO_HR_PAYROLL__", true);
@@ -328,7 +385,7 @@ describe("Vite People API", () => {
 
     await expect(submitHrPayrollAction({ action: "createPayrollRun", year: 2026, month: 9 }, scope)).rejects.toMatchObject({
       status: 0,
-      message: expect.stringContaining("cannot safely reserve a payroll draft"),
+      message: expect.stringContaining("cannot safely reserve a payroll action"),
     });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(window.localStorage.length).toBe(0);

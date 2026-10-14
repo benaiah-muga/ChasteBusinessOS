@@ -2925,24 +2925,36 @@ func (e *Executor) executeWithFinalizer(
 		case HRCreatePayrollRunInput:
 			output, err := hrCreatePayrollRun(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
+				if errors.Is(err, ErrHRPayrollActionRejected) {
+					return Result{OK: false, Error: err.Error()}, nil
+				}
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
 		case HRExecutePayrollRunInput:
 			output, err := hrExecutePayrollRun(ctx, tx, claims, parsed, now)
 			if err != nil {
+				if errors.Is(err, ErrHRPayrollActionRejected) {
+					return Result{OK: false, Error: err.Error()}, nil
+				}
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
 		case HRVoidPayrollRunInput:
 			output, err := hrVoidPayrollRun(ctx, tx, claims.OrganizationID, parsed, now)
 			if err != nil {
+				if errors.Is(err, ErrHRPayrollActionRejected) {
+					return Result{OK: false, Error: err.Error()}, nil
+				}
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
 		case HRReversePayrollPostingInput:
 			output, err := hrReversePayrollPosting(ctx, tx, claims, parsed, now)
 			if err != nil {
+				if errors.Is(err, ErrHRPayrollActionRejected) {
+					return Result{OK: false, Error: err.Error()}, nil
+				}
 				return Result{}, err
 			}
 			data, err = marshalJS(output)

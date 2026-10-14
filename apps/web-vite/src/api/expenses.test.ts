@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExpensesApiError, fetchExpenses, readPendingExpenseAction, submitExpenseAction, type ExpenseAction } from "./expenses";
 
 const claim = {
@@ -11,13 +11,94 @@ const claim = {
 };
 const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
 
+function stubExpenseWriteLocks() {
+  const tails = new Map<string, Promise<void>>();
+  const request = vi.fn(async <T,>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+    const previous = tails.get(name) ?? Promise.resolve();
+    let release = (): void => {};
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    tails.set(name, current);
+    await previous;
+    try { return await callback(); }
+    finally {
+      release();
+      if (tails.get(name) === current) tails.delete(name);
+    }
+  });
+  const testNavigator = Object.create(navigator) as Navigator;
+  Object.defineProperty(testNavigator, "locks", { configurable: true, value: { request } });
+  vi.stubGlobal("navigator", testNavigator);
+  return request;
+}
+
 afterEach(() => {
   window.localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
+beforeEach(() => { stubExpenseWriteLocks(); });
+
 describe("Expenses API", () => {
+  it("serializes different expense action reservations across tabs", async () => {
+    const action = { action: "setPolicy" as const, category: "travel", limitMinor: 25000 };
+    const competingAction = { action: "setPolicy" as const, category: "meals", limitMinor: 10000 };
+    let resolveFirst!: (response: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolveFirst = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitExpenseAction(action, undefined, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await expect(submitExpenseAction(competingAction, undefined, scope)).rejects.toMatchObject({
+      status: 0,
+      requestMayHaveReachedServer: true,
+      message: expect.stringContaining("previous expense action is unresolved"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    resolveFirst(Response.json({ ok: true, data: { set: true, category: "travel", limitMinor: 25000 } }));
+    await expect(first).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it("keeps a newer action marker when a delayed duplicate response completes", async () => {
+    const firstAction = { action: "setPolicy" as const, category: "travel", limitMinor: 25000 };
+    const nextAction = { action: "setPolicy" as const, category: "meals", limitMinor: 10000 };
+    const respond: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => new Promise<Response>((resolve) => { respond.push(resolve); }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitExpenseAction(firstAction, undefined, scope);
+    const duplicate = submitExpenseAction(firstAction, undefined, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const intentIds = fetchMock.mock.calls.map(([, init]) => (JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+    expect(intentIds[1]).toBe(intentIds[0]);
+
+    respond[0]?.(Response.json({ ok: true, data: { set: true, category: "travel", limitMinor: 25000 } }));
+    await expect(first).resolves.toMatchObject({ kind: "completed" });
+    const next = submitExpenseAction(nextAction, undefined, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const nextIntentId = (JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as { intentId: string }).intentId;
+    expect(nextIntentId).not.toBe(intentIds[0]);
+
+    respond[1]?.(Response.json({ ok: true, data: { set: true, category: "travel", limitMinor: 25000 } }));
+    await expect(duplicate).resolves.toMatchObject({ kind: "completed" });
+    await expect(readPendingExpenseAction(scope)).resolves.toEqual(nextAction);
+    respond[2]?.(Response.json({ error: "approval required", pendingApproval: true }, { status: 202 }));
+    await expect(next).resolves.toMatchObject({ kind: "pending" });
+  }, 60_000);
+
+  it("fails closed before dispatch when browser-wide expense locks are unavailable", async () => {
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, "locks", { configurable: true, value: undefined });
+    vi.stubGlobal("navigator", testNavigator);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitExpenseAction({ action: "setPolicy", category: "travel", limitMinor: 25000 }, undefined, scope))
+      .rejects.toThrow("Web Locks enabled");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
+  });
+
   it("loads validated claims and policy limits through Go capabilities", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: true, data: { claims: [claim] } }))

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrTime, HrApiError, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeHireAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrTime, HrApiError, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeHireAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPayrollRun, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
 import "./hr-page.css";
 
 type TabId = "overview" | "people" | "hiring" | "leave" | "time" | "payroll" | "expenses";
@@ -150,9 +150,9 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
     void readPendingHrPayrollAction({ actorId, organizationId }).then((action) => {
       if (!active || !isCurrentScope()) return;
       setPayrollRecoveryAction(action);
-      if (action) setNotice({ tone: "pending", text: "A payroll draft is unresolved. Retry the exact period to recover its result before creating another draft." });
+      if (action) setNotice({ tone: "pending", text: "A payroll action is unresolved. Retry its exact details to recover the result before starting another action." });
     }).catch((error) => {
-      if (active && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved payroll draft." });
+      if (active && isCurrentScope()) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved payroll action." });
     });
     return () => { active = false; };
   }, [tab, actorId, organizationId, isCurrentScope]);
@@ -302,10 +302,14 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
       if (!isCurrentScope()) return;
       if (result.kind === "pending") {
         setPayrollRecoveryAction(action);
-        setNotice({ tone: "pending", text: "Payroll draft is waiting for approval or result recovery. Retry the exact period when ready." });
+        setNotice({ tone: "pending", text: "Payroll action is waiting for approval or result recovery. Retry the exact action when ready." });
       } else {
         setPayrollRecoveryAction(null);
-        setNotice({ tone: "success", text: "Payroll draft completed." });
+        const completedText = action.action === "createPayrollRun" ? "Payroll draft completed."
+          : action.action === "executePayrollRun" ? "Payroll run executed and posted."
+            : action.action === "voidPayrollRun" ? "Payroll draft voided."
+              : "Payroll posting reversed.";
+        setNotice({ tone: "success", text: completedText });
         await refreshAll();
       }
     } catch (error) {
@@ -315,7 +319,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
       catch { pendingAction = action; }
       if (!isCurrentScope()) return;
       setPayrollRecoveryAction(pendingAction);
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Payroll draft failed." });
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Payroll action failed." });
     } finally {
       if (isCurrentScope()) setBusy(false);
     }
@@ -358,7 +362,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
     if (tab !== "payroll") return null;
     return <>
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-      {payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll draft</button></div>}
+      {payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll action</button></div>}
     </>;
   }
 
@@ -475,7 +479,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
       {tab === "leave" && leaveRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runLeaveAction(leaveRecoveryAction, "Leave action")}>Retry exact leave action</button></div>}
       {tab === "hiring" && hiringRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runHiringAction(hiringRecoveryAction, "Hiring action", true)}>Retry exact Hiring action</button></div>}
       {tab === "people" && employeeHireRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runEmployeeHireAction(employeeHireRecoveryAction, true)}>Retry exact employee hire</button></div>}
-      {tab === "payroll" && payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll draft</button></div>}
+      {tab === "payroll" && payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll action</button></div>}
       {timeRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void submitTimeAction(timeRecoveryAction, "Time action", undefined, true)}>Retry exact time action</button></div>}
       <section id="hr-tab-panel" className="hr-content" role="tabpanel" aria-labelledby={`hr-tab-${tab}`}>
         {tab === "overview" && <Overview report={data} timeRows={timeRows} currency={currency} onTabChange={changeTab} />}
@@ -502,7 +506,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
           if (!timeEntry.employeeId || !timeEntry.workDate || !Number.isFinite(hours) || hours <= 0 || !Number.isSafeInteger(minutes)) return;
           void submitTimeAction({ action: "log", employeeId: timeEntry.employeeId, workDate: timeEntry.workDate, minutes, note: timeEntry.note.trim() || undefined }, "Time entry", () => setTimeEntry({ ...timeEntry, hours: "", note: "" }));
         }} onDecision={(entryId, decision) => void submitTimeAction({ action: "decide", entryId, decision }, "Time entry review")} />}
-        {tab === "payroll" && <Payroll runs={data.runs} employees={activeEmployees} currency={currency} period={payrollPeriod} setPeriod={setPayrollPeriod} busy={busy || Boolean(payrollRecoveryAction)} onCreate={() => {
+        {tab === "payroll" && <Payroll runs={data.runs} employees={activeEmployees} currency={currency} period={payrollPeriod} setPeriod={setPayrollPeriod} busy={busy || Boolean(payrollRecoveryAction)} onAction={(action) => void runPayrollAction(action)} onCreate={() => {
           const [year, month] = payrollPeriod.split("-").map(Number);
           if (!year || !month) return;
           void runPayrollAction({ action: "createPayrollRun", year, month });
@@ -714,7 +718,7 @@ function Overview({ report, timeRows, currency, onTabChange }: { report: HrRepor
       </section>
       <section className="hr-card">
         <div className="hr-section-heading"><div><p className="hr-eyebrow">Payroll</p><h2>Latest run</h2></div><button className="hr-text-button" type="button" onClick={() => onTabChange("payroll")}>View payroll</button></div>
-        {report.runs[0] ? <div className="hr-payroll-highlight"><div><span>{new Date(Date.UTC(report.runs[0].year, report.runs[0].month - 1, 15)).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" })}</span><span className={`hr-pill ${report.runs[0].status === "posted" ? "is-active" : "is-muted"}`}>{report.runs[0].status}</span></div><strong>{currency ? formatMoney(report.runs[0].totalNetMinor, currency) : "Loading currency"}</strong><small>{report.runs[0].headcount} employees · net pay</small></div> : <p className="hr-muted">No payroll runs have been recorded yet.</p>}
+        {report.runs[0] ? <div className="hr-payroll-highlight"><div><span>{new Date(Date.UTC(report.runs[0].year, report.runs[0].month - 1, 15)).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" })}</span><span className={`hr-pill ${report.runs[0].status === "executed" ? "is-active" : "is-muted"}`}>{report.runs[0].status}</span></div><strong>{currency ? formatMoney(report.runs[0].totalNetMinor, currency) : "Loading currency"}</strong><small>{report.runs[0].headcount} employees · net pay</small></div> : <p className="hr-muted">No payroll runs have been recorded yet.</p>}
       </section>
     </div>
   </>;
@@ -785,13 +789,30 @@ function Time({ employees, rows, pending, range, setRange, form, setForm, busy, 
   </>;
 }
 
-function Payroll({ runs, employees, currency, period, setPeriod, busy, onCreate }: { runs: HrReport["runs"]; employees: HrEmployee[]; currency: string | null; period: string; setPeriod: (value: string) => void; busy: boolean; onCreate: () => void }) {
+function Payroll({ runs, employees, currency, period, setPeriod, busy, onCreate, onAction }: { runs: HrReport["runs"]; employees: HrEmployee[]; currency: string | null; period: string; setPeriod: (value: string) => void; busy: boolean; onCreate: () => void; onAction: (action: HrPayrollAction) => void }) {
+  const [confirmation, setConfirmation] = useState<{ action: "executePayrollRun" | "voidPayrollRun" | "reversePayrollPosting"; run: HrPayrollRun } | null>(null);
+  const [reverseReason, setReverseReason] = useState("");
+  const periodAlreadyExists = runs.some((run) => `${run.year}-${String(run.month).padStart(2, "0")}` === period);
+  const confirmationTitle = confirmation?.action === "executePayrollRun" ? "Execute payroll run"
+    : confirmation?.action === "voidPayrollRun" ? "Void payroll draft" : "Reverse payroll posting";
+  const confirm = () => {
+    if (!confirmation) return;
+    const { action, run } = confirmation;
+    if (action === "executePayrollRun") onAction({ action, runId: run.id, expectedTotalNetMinor: run.totalNetMinor });
+    if (action === "voidPayrollRun") onAction({ action, runId: run.id });
+    if (action === "reversePayrollPosting") onAction({ action, runId: run.id, reason: reverseReason.trim() });
+    setConfirmation(null);
+    setReverseReason("");
+  };
   return <>
     <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Payroll</p><h2>Prepare a payroll run</h2></div><span className="hr-count">{employees.length} active people</span></div>
-      <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); onCreate(); }}><label>Payroll period<input required type="month" value={period} onChange={(event) => setPeriod(event.currentTarget.value)} /></label><button className="hr-primary-button" disabled={busy || !period}>Create draft run</button></form>
+      <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); if (!periodAlreadyExists && employees.length > 0) onCreate(); }}><label>Payroll period<input required type="month" value={period} onChange={(event) => setPeriod(event.currentTarget.value)} /></label><button className="hr-primary-button" disabled={busy || !period || employees.length === 0 || periodAlreadyExists}>Create draft run</button></form>
+      {employees.length === 0 && <p className="hr-muted">Add an active employee before creating a payroll run.</p>}
+      {periodAlreadyExists && <p className="hr-muted" role="status">A payroll run already exists for this period.</p>}
     </section>
     <section className="hr-card hr-table-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">History</p><h2>Payroll runs</h2></div></div>
-      {runs.length === 0 ? <p className="hr-muted">No payroll runs have been recorded.</p> : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Period</th><th scope="col">Employees</th><th scope="col">Gross</th><th scope="col">Tax</th><th scope="col">Net</th><th scope="col">Status</th></tr></thead><tbody>{runs.map((run) => <tr key={run.id}><th scope="row">{new Date(Date.UTC(run.year, run.month - 1, 15)).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" })}</th><td>{run.headcount}</td><td>{currency ? formatMoney(run.totalGrossMinor, currency) : "Loading currency"}</td><td>{currency ? formatMoney(run.totalTaxMinor, currency) : "Loading currency"}</td><td>{currency ? formatMoney(run.totalNetMinor, currency) : "Loading currency"}</td><td><span className={`hr-pill ${run.status === "posted" ? "is-active" : "is-muted"}`}>{run.status}</span></td></tr>)}</tbody></table></div>}
+      {runs.length === 0 ? <p className="hr-muted">No payroll runs have been recorded.</p> : <div className="hr-table-scroll"><table><thead><tr><th scope="col">Period</th><th scope="col">Employees</th><th scope="col">Gross</th><th scope="col">Tax</th><th scope="col">Net</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>{runs.map((run) => <tr key={run.id}><th scope="row">{new Date(Date.UTC(run.year, run.month - 1, 15)).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" })}</th><td>{run.headcount}</td><td>{currency ? formatMoney(run.totalGrossMinor, currency) : "Loading currency"}</td><td>{currency ? formatMoney(run.totalTaxMinor, currency) : "Loading currency"}</td><td>{currency ? formatMoney(run.totalNetMinor, currency) : "Loading currency"}</td><td><span className={`hr-pill ${run.status === "executed" ? "is-active" : "is-muted"}`}>{run.status}</span></td><td><div className="hr-row-actions">{run.status === "draft" && <><button type="button" disabled={busy} onClick={() => setConfirmation({ action: "executePayrollRun", run })}>Execute</button><button type="button" disabled={busy} onClick={() => setConfirmation({ action: "voidPayrollRun", run })}>Void</button></>}{run.status === "executed" && <button type="button" disabled={busy} onClick={() => setConfirmation({ action: "reversePayrollPosting", run })}>Reverse posting</button>}{!(["draft", "executed"].includes(run.status)) && <span className="hr-muted">No actions</span>}</div></td></tr>)}</tbody></table></div>}
     </section>
+    {confirmation && <div className="hr-confirm-backdrop"><section className="hr-card hr-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-payroll-confirm-title"><p className="hr-eyebrow">Confirm payroll change</p><h2 id="hr-payroll-confirm-title">{confirmationTitle}</h2>{confirmation.action === "executePayrollRun" && <p>This will post payroll with net pay of <strong>{currency ? formatMoney(confirmation.run.totalNetMinor, currency) : confirmation.run.totalNetMinor}</strong>. Confirm only after reviewing this run.</p>}{confirmation.action === "voidPayrollRun" && <p>This permanently voids this draft payroll run. It cannot be executed afterward.</p>}{confirmation.action === "reversePayrollPosting" && <><p>This creates a reversal entry for the executed payroll posting.</p><label>Reason<textarea required minLength={3} maxLength={500} value={reverseReason} onChange={(event) => setReverseReason(event.currentTarget.value)} /></label></>}<div className="hr-actions"><button type="button" onClick={() => { setConfirmation(null); setReverseReason(""); }}>Cancel</button><button type="button" className="hr-primary-button" disabled={busy || (confirmation.action === "reversePayrollPosting" && reverseReason.trim().length < 3)} onClick={confirm}>Confirm {confirmation.action === "executePayrollRun" ? "execution" : confirmation.action === "voidPayrollRun" ? "void" : "reversal"}</button></div></section></div>}
   </>;
 }

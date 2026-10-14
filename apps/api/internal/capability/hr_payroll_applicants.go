@@ -32,6 +32,19 @@ const (
 	hrPayrollWithholdingAccountCode = "2200"
 )
 
+var ErrHRPayrollActionRejected = errors.New("HR payroll action rejected")
+
+type hrPayrollActionRejection struct{ message string }
+
+func (rejection hrPayrollActionRejection) Error() string { return rejection.message }
+func (rejection hrPayrollActionRejection) Is(target error) bool {
+	return target == ErrHRPayrollActionRejected
+}
+
+func rejectHRPayrollAction(format string, args ...any) error {
+	return hrPayrollActionRejection{message: fmt.Sprintf(format, args...)}
+}
+
 type HRCreatePayrollRunInput struct {
 	Year  int64 `json:"year"`
 	Month int64 `json:"month"`
@@ -384,7 +397,7 @@ func hrCreatePayrollRun(ctx context.Context, tx pgx.Tx, orgID string, input HRCr
 		return HRCreatePayrollRunOutput{}, err
 	}
 	if duplicateID != "" {
-		return HRCreatePayrollRunOutput{}, fmt.Errorf("a payroll run for %d-%02d already exists", input.Year, input.Month)
+		return HRCreatePayrollRunOutput{}, rejectHRPayrollAction("a payroll run for %d-%02d already exists", input.Year, input.Month)
 	}
 
 	monthStart := time.Date(int(input.Year), time.Month(input.Month), 1, 0, 0, 0, 0, time.UTC)
@@ -418,7 +431,7 @@ func hrCreatePayrollRun(ctx context.Context, tx pgx.Tx, orgID string, input HRCr
 	}
 	staffRows.Close()
 	if len(staff) == 0 {
-		return HRCreatePayrollRunOutput{}, errors.New("no active employees to pay")
+		return HRCreatePayrollRunOutput{}, rejectHRPayrollAction("no active employees to pay")
 	}
 
 	lines := make([]hrPayrollPayslipLine, 0, len(staff))
@@ -467,9 +480,13 @@ func hrCreatePayrollRun(ctx context.Context, tx pgx.Tx, orgID string, input HRCr
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO payroll_runs (org_id, year, month, total_gross_minor, total_tax_minor, total_net_minor, headcount)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (org_id, year, month) DO NOTHING
 		RETURNING id::text`,
 		orgID, input.Year, input.Month,
 		summary.totalGrossMinor, summary.totalTaxMinor, summary.totalNetMinor, summary.headcount).Scan(&runID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return HRCreatePayrollRunOutput{}, rejectHRPayrollAction("a payroll run for %d-%02d already exists", input.Year, input.Month)
+		}
 		return HRCreatePayrollRunOutput{}, err
 	}
 	for index, payslip := range payslips {
@@ -503,16 +520,16 @@ func hrExecutePayrollRun(ctx context.Context, tx pgx.Tx, claims authbridge.Capab
 		WHERE id = $1::uuid AND org_id = $2::uuid
 		LIMIT 1`, input.RunID, orgID).Scan(&runID, &year, &month, &status, &totalGrossMinor, &totalTaxMinor, &totalNetMinor, &headcount)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return HRExecutePayrollRunOutput{}, fmt.Errorf("no payroll run %s", input.RunID)
+		return HRExecutePayrollRunOutput{}, rejectHRPayrollAction("no payroll run %s", input.RunID)
 	}
 	if err != nil {
 		return HRExecutePayrollRunOutput{}, err
 	}
 	if status != "draft" {
-		return HRExecutePayrollRunOutput{}, fmt.Errorf("run is %s, not draft", status)
+		return HRExecutePayrollRunOutput{}, rejectHRPayrollAction("run is %s, not draft", status)
 	}
 	if input.ExpectedTotalNetMinor != totalNetMinor {
-		return HRExecutePayrollRunOutput{}, fmt.Errorf("total mismatch: draft says %d, caller expected %d", totalNetMinor, input.ExpectedTotalNetMinor)
+		return HRExecutePayrollRunOutput{}, rejectHRPayrollAction("total mismatch: draft says %d, caller expected %d", totalNetMinor, input.ExpectedTotalNetMinor)
 	}
 
 	var currency string
@@ -570,15 +587,15 @@ func hrVoidPayrollRun(ctx context.Context, tx pgx.Tx, orgID string, input HRVoid
 		WHERE id = $1::uuid AND org_id = $2::uuid
 		LIMIT 1`, input.RunID, orgID).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return HRVoidPayrollRunOutput{}, errors.New("no draft payroll run with that id")
+		return HRVoidPayrollRunOutput{}, rejectHRPayrollAction("no draft payroll run with that id")
 	}
 	if err != nil {
 		return HRVoidPayrollRunOutput{}, err
 	}
 	if status == "executed" {
-		return HRVoidPayrollRunOutput{}, errors.New("executed payroll runs are undone with hr.reversePayrollPosting, which reverses the posting and repairs the run lifecycle")
+		return HRVoidPayrollRunOutput{}, rejectHRPayrollAction("executed payroll runs are undone with hr.reversePayrollPosting, which reverses the posting and repairs the run lifecycle")
 	}
-	return HRVoidPayrollRunOutput{}, fmt.Errorf("no draft payroll run with that id (run is %s)", status)
+	return HRVoidPayrollRunOutput{}, rejectHRPayrollAction("no draft payroll run with that id (run is %s)", status)
 }
 
 func hrReversePayrollPosting(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input HRReversePayrollPostingInput, now time.Time) (HRReversePayrollPostingOutput, error) {
@@ -592,16 +609,16 @@ func hrReversePayrollPosting(ctx context.Context, tx pgx.Tx, claims authbridge.C
 		WHERE id = $1::uuid AND org_id = $2::uuid
 		LIMIT 1`, input.RunID, orgID).Scan(&runID, &year, &month, &status, &entryID, &totalNetMinor)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return HRReversePayrollPostingOutput{}, fmt.Errorf("no payroll run %s", input.RunID)
+		return HRReversePayrollPostingOutput{}, rejectHRPayrollAction("no payroll run %s", input.RunID)
 	}
 	if err != nil {
 		return HRReversePayrollPostingOutput{}, err
 	}
 	if status != "executed" {
-		return HRReversePayrollPostingOutput{}, fmt.Errorf("run is %s; only executed runs can be reversed", status)
+		return HRReversePayrollPostingOutput{}, rejectHRPayrollAction("run is %s; only executed runs can be reversed", status)
 	}
 	if entryID == nil {
-		return HRReversePayrollPostingOutput{}, errors.New("run has no posting to reverse")
+		return HRReversePayrollPostingOutput{}, rejectHRPayrollAction("run has no posting to reverse")
 	}
 
 	var alreadyReversed bool
@@ -612,7 +629,7 @@ func hrReversePayrollPosting(ctx context.Context, tx pgx.Tx, claims authbridge.C
 		return HRReversePayrollPostingOutput{}, err
 	}
 	if alreadyReversed {
-		return HRReversePayrollPostingOutput{}, errors.New("payroll run has already been reversed")
+		return HRReversePayrollPostingOutput{}, rejectHRPayrollAction("payroll run has already been reversed")
 	}
 
 	var originalCurrency string
