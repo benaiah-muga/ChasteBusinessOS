@@ -460,6 +460,8 @@ describe("Vite People page", () => {
     const writeCalls: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
     let openingCreated = false;
     let openingClosed = false;
+    let openingDepartment: string | null = null;
+    let openingNote: string | null = null;
     let applicantAdded = false;
     let applicantStage = "applied";
     let applicantHired = false;
@@ -475,7 +477,7 @@ describe("Vite People page", () => {
         if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: {
           ...report,
           employees: applicantHired ? [...report.employees, { ...employee, id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Mira Patel", email: "mira@example.com", title: "Field Technician", department: null, monthlySalaryMinor: 125_000 }] : report.employees,
-          openings: openingCreated ? [{ id: openingId, title: "Field Technician", department: null, note: null, status: openingClosed ? "closed" : "open", createdAt: "2026-10-01T10:00:00.000Z" }] : [],
+          openings: openingCreated ? [{ id: openingId, title: "Field Technician", department: openingDepartment, note: openingNote, status: openingClosed ? "closed" : "open", createdAt: "2026-10-01T10:00:00.000Z" }] : [],
           applicants: applicantAdded ? [{ id: applicantId, openingId, name: "Mira Patel", stage: applicantHired ? "hired" : applicantStage, note: null }] : [],
         } });
         intents.push(body.intentId);
@@ -484,6 +486,8 @@ describe("Vite People page", () => {
           createCount += 1;
           if (createCount === 1) return Response.json({ pendingApproval: true, reason: "Hiring approval required." }, { status: 202 });
           openingCreated = true;
+          openingDepartment = String(body.input.department);
+          openingNote = String(body.input.note);
           return Response.json({ ok: true, data: { openingId } });
         }
         if (body.capabilityId === "hr.addApplicant") {
@@ -513,15 +517,22 @@ describe("Vite People page", () => {
     const first = render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
     expect(await screen.findByRole("heading", { name: "Open roles" })).not.toBeNull();
     fireEvent.change(screen.getByPlaceholderText("For example, Operations associate"), { target: { value: "Field Technician" } });
+    fireEvent.change(screen.getByLabelText("Department"), { target: { value: "Field Operations" } });
+    fireEvent.change(screen.getByLabelText("Role notes"), { target: { value: "On-call rotation required" } });
     fireEvent.click(screen.getByRole("button", { name: "Create opening" }));
     expect(await screen.findByRole("button", { name: "Retry exact Hiring action" })).not.toBeNull();
     expect((screen.getByPlaceholderText("For example, Operations associate") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Department") as HTMLInputElement).disabled).toBe(true);
     first.unmount();
 
     const openingRecovery = render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
     fireEvent.click(await screen.findByRole("button", { name: "Retry exact Hiring action" }));
     expect(await screen.findByText("Opening creation completed.")).not.toBeNull();
     expect((screen.getByPlaceholderText("For example, Operations associate") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Department") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Role notes") as HTMLInputElement).value).toBe("");
+    expect(await screen.findByText("Field Operations")).not.toBeNull();
+    expect(await screen.findByText("On-call rotation required")).not.toBeNull();
     expect((screen.getByRole("button", { name: "Create opening" }) as HTMLButtonElement).disabled).toBe(true);
     await screen.findByRole("button", { name: "Add applicant" });
     fireEvent.change(screen.getByLabelText("Candidate name"), { target: { value: "Mira Patel" } });
@@ -560,8 +571,8 @@ describe("Vite People page", () => {
     expect(intents[1]).toBe(intents[0]);
     expect(intents[3]).toBe(intents[2]);
     expect(writeCalls).toEqual([
-      { capabilityId: "hr.createOpening", input: { title: "Field Technician" } },
-      { capabilityId: "hr.createOpening", input: { title: "Field Technician" } },
+      { capabilityId: "hr.createOpening", input: { title: "Field Technician", department: "Field Operations", note: "On-call rotation required" } },
+      { capabilityId: "hr.createOpening", input: { title: "Field Technician", department: "Field Operations", note: "On-call rotation required" } },
       { capabilityId: "hr.addApplicant", input: { openingId, name: "Mira Patel", email: "mira@example.com" } },
       { capabilityId: "hr.addApplicant", input: { openingId, name: "Mira Patel", email: "mira@example.com" } },
       { capabilityId: "hr.moveApplicant", input: { applicantId, stage: "interview" } },

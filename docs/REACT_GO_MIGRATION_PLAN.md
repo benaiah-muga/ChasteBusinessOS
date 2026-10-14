@@ -4620,3 +4620,11 @@ new owners and the manifest shows zero legacy runtime paths.
      verifies every field. Authenticated browser proof exercised the shortcut
      against Go reads and confirmed all three unrelated fields were cleared;
      capability writes returned 200 and the browser reported no errors.
+
+429. (Runtime verified) Vite Hiring opening creation captures optional
+     department and role notes through Go's existing `hr.createOpening`
+     capability, preserves both values through exact pending-approval retry,
+     and displays them from the refreshed Go report. Focused HR tests pass 71
+     cases, with typecheck and lint passing. Authenticated browser proof created
+     an opening, reloaded the page, and confirmed both details persisted; the
+     browser reported no errors.

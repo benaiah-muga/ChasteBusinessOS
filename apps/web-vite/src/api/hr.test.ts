@@ -471,13 +471,13 @@ describe("Vite People API", () => {
   it("keeps an exact Hiring action on Go after pending approval and Go 404", async () => {
     vi.stubGlobal("__GO_HR_HIRING__", true);
     stubHrWriteLocks();
-    const action = { action: "createOpening" as const, title: "Field Technician" };
+    const action = { action: "createOpening" as const, title: "Field Technician", department: "Field Operations", note: "On-call rotation required" };
     const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
     const intentIds: string[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { capabilityId?: string; input?: Record<string, unknown>; intentId: string };
       intentIds.push(body.intentId);
-      expect(body).toMatchObject({ capabilityId: "hr.createOpening", input: { title: action.title }, intentId: expect.any(String) });
+      expect(body).toMatchObject({ capabilityId: "hr.createOpening", input: { title: action.title, department: action.department, note: action.note }, intentId: expect.any(String) });
       if (intentIds.length === 1) return Response.json({ pendingApproval: true, reason: "Hiring approval required." }, { status: 202 });
       if (intentIds.length === 2) return Response.json({ error: "capability not found" }, { status: 404 });
       return Response.json({ ok: true, data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
@@ -584,8 +584,8 @@ describe("Vite People API", () => {
     vi.stubGlobal("__GO_HR_HIRING__", true);
     stubHrWriteLocks();
     const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
-    const action = { action: "createOpening" as const, title: "Field Technician" };
-    const alternateAction = { action: "createOpening" as const, title: "Finance Analyst" };
+    const action = { action: "createOpening" as const, title: "Field Technician", department: "Field Operations", note: "On-call rotation required" };
+    const alternateAction = { action: "createOpening" as const, title: "Finance Analyst", department: "Finance", note: "Quarterly close owner" };
     const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -604,8 +604,8 @@ describe("Vite People API", () => {
     vi.stubGlobal("__GO_HR_HIRING__", true);
     stubHrWriteLocks();
     const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
-    const action = { action: "createOpening" as const, title: "Field Technician" };
-    const nextAction = { action: "createOpening" as const, title: "Finance Analyst" };
+    const action = { action: "createOpening" as const, title: "Field Technician", department: "Field Operations", note: "On-call rotation required" };
+    const nextAction = { action: "createOpening" as const, title: "Finance Analyst", department: "Finance", note: "Quarterly close owner" };
     const respond: Array<(response: Response) => void> = [];
     const intentIds: string[] = [];
     const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
