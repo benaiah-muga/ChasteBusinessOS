@@ -511,6 +511,29 @@ func MountGoSalesOrdersRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoSalesCustomersRoute sends only the Sales customer picker GET to Go.
+func MountGoSalesCustomersRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/sales/customers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			route.ServeHTTP(w, r)
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoBusinessRoutes mounts the supplied API handlers. Unprovided handlers
 // continue to fall through to the existing API owner.
 func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute http.Handler, analyticsReportRoute ...http.Handler) http.Handler {

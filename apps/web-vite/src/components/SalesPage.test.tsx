@@ -35,8 +35,8 @@ const orders = [
 const switchboard = { catalog: [{ id: "sales" }], enabledModules: ["sales"] };
 const customers = {
   customers: [
-    { id: "20000000-0000-4000-8000-000000000001", name: "Acme Foods", purchaseCount: 0, lifetimeSpendMinor: 0 },
-    { id: "20000000-0000-4000-8000-000000000002", name: "Benaiah Market", purchaseCount: 0, lifetimeSpendMinor: 0 },
+    { id: "20000000-0000-4000-8000-000000000001", name: "Acme Foods" },
+    { id: "20000000-0000-4000-8000-000000000002", name: "Benaiah Market" },
   ],
 };
 const confirmAttemptKey = (actorId: string, organizationId: string, orderId: string) =>
@@ -46,7 +46,7 @@ function salesFetch() {
   return goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
     void init;
     if (input === "/api/modules") return Response.json(switchboard);
-    if (input === "/api/pos/customers") return Response.json(customers);
+    if (input === "/api/sales/customers") return Response.json(customers);
     return Response.json({ orders });
   });
 }
@@ -63,9 +63,9 @@ function goAwareFetch(fetcher: (input: RequestInfo | URL, init?: RequestInit) =>
       if (capabilityId === "crm.listTasks") return Response.json({ ok: true, data: { tasks: [] } });
       if (capabilityId === "crm.listCustomerViews") return Response.json({ ok: true, data: { views: [] } });
       if (capabilityId === "sales.listOrders") {
-        const legacyFixture = await fetcher("/api/sales", { method: "GET", credentials: "same-origin" });
-        if (!legacyFixture.ok) return legacyFixture;
-        return Response.json({ ok: true, data: await legacyFixture.json() }, { status: legacyFixture.status });
+        const fixture = await fetcher("test-fixture:sales-orders", { method: "GET", credentials: "same-origin" });
+        if (!fixture.ok) return fixture;
+        return Response.json({ ok: true, data: await fixture.json() }, { status: fixture.status });
       }
     }
     return fetcher(input, init);
@@ -123,7 +123,7 @@ describe("Vite sales page", () => {
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
+      if (input === "/api/sales/customers") return Response.json(customers);
       if (input === "/api/capabilities/execute") {
         const body = JSON.parse(String(init?.body)) as { capabilityId: string };
         if (body.capabilityId === "sales.listOrders") return Response.json({ ok: true, data: { orders } });
@@ -132,7 +132,7 @@ describe("Vite sales page", () => {
       return Response.json({ error: "unexpected route" }, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     expect(await screen.findByRole("cell", { name: "Draft" })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Create sales order" }));
@@ -155,7 +155,7 @@ describe("Vite sales page", () => {
   it("shows sales order status, totals, backorder context, searchable rows, and status filters", async () => {
     const fetchMock = salesFetch();
     vi.stubGlobal("fetch", fetchMock);
-    render(<SalesPage baseCurrency="USD" />);
+    render(<SalesPage baseCurrency="USD" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     expect(await screen.findByRole("heading", { name: "Sales orders" })).not.toBeNull();
     expect(screen.getByText("#41")).not.toBeNull();
@@ -165,9 +165,15 @@ describe("Vite sales page", () => {
     expect(screen.getByRole("cell", { name: "Delivered" })).not.toBeNull();
     expect(screen.getByRole("cell", { name: "Draft" })).not.toBeNull();
     expect(screen.getByText("$1,299.00")).not.toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.any(Object));
-    expect(fetchMock).toHaveBeenCalledWith("/api/sales", expect.any(Object));
-    expect(fetchMock).toHaveBeenCalledWith("/api/pos/customers", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({
+      headers: expect.objectContaining({ "X-Organization-ID": "40000000-0000-4000-8000-000000000004" }),
+    }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      headers: expect.objectContaining({ "X-Organization-ID": "40000000-0000-4000-8000-000000000004" }),
+    }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/sales/customers", expect.objectContaining({
+      headers: expect.objectContaining({ "X-Organization-ID": "40000000-0000-4000-8000-000000000004" }),
+    }));
 
     fireEvent.click(screen.getByRole("button", { name: "Confirmed" }));
     expect(screen.getByRole("button", { name: "Confirmed" }).getAttribute("aria-pressed")).toBe("true");
@@ -186,13 +192,13 @@ describe("Vite sales page", () => {
     let attempt = 0;
     vi.stubGlobal("fetch", goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
+      if (input === "/api/sales/customers") return Response.json(customers);
       attempt += 1;
       return attempt === 1
         ? Response.json({ error: "unavailable" }, { status: 503 })
         : Response.json({ orders: [] });
     }));
-    render(<SalesPage />);
+    render(<SalesPage organizationId="40000000-0000-4000-8000-000000000004" />);
 
     expect(await screen.findByRole("heading", { name: "Could not load sales orders" })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -204,14 +210,14 @@ describe("Vite sales page", () => {
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { confirmed: true, backordered: true, reservedThousandths: 0 } });
       return Response.json({ error: "unexpected route" }, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
-    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Allow backorder" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
@@ -222,6 +228,7 @@ describe("Vite sales page", () => {
     expect(within(screen.getByRole("row", { name: /#43/ })).getByRole("cell", { name: "Confirmed" })).not.toBeNull();
     const request = salesWriteCalls(fetchMock)[0];
     expect(request?.[1]).toMatchObject({ method: "POST", credentials: "same-origin" });
+    expect(new Headers(request?.[1]?.headers).get("X-Organization-ID")).toBe("40000000-0000-4000-8000-000000000004");
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
       capabilityId: "sales.confirmOrder",
       input: { orderId: orders[2]!.id, allowBackorder: true },
@@ -231,7 +238,7 @@ describe("Vite sales page", () => {
 
   it("blocks confirmation until the scoped retry-marker scan finishes", async () => {
     const actorId = "actor-1";
-    const organizationId = "org-1";
+    const organizationId = "40000000-0000-4000-8000-000000000004";
     let releaseMarkerScan: (() => void) | undefined;
     let markerScanStarted = false;
     let blockScopeDigest = true;
@@ -247,8 +254,8 @@ describe("Vite sales page", () => {
     });
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { confirmed: true, backordered: false, reservedThousandths: 0 } });
       return Response.json({ error: `unexpected route ${String(input)} ${String(init?.method)}` }, { status: 404 });
     });
@@ -275,7 +282,7 @@ describe("Vite sales page", () => {
       id: "10000000-0000-4000-8000-000000000099",
       number: 99,
     };
-    let activeOrganization = "org-1";
+    let activeOrganization = "40000000-0000-4000-8000-000000000004";
     let releaseOrgA: ((response: Response) => void) | undefined;
     let releaseOrgB: ((response: Response) => void) | undefined;
     const orgAResponse = new Promise<Response>((resolve) => { releaseOrgA = resolve; });
@@ -283,8 +290,8 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders: activeOrganization === "org-1" ? orders : [orgBOrder] });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders: activeOrganization === "40000000-0000-4000-8000-000000000004" ? orders : [orgBOrder] });
       if (input === "/api/capabilities/execute") {
         writes += 1;
         return writes === 1 ? orgAResponse : orgBResponse;
@@ -293,14 +300,14 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
-    const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    const view = render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
     await waitFor(() => expect(writes).toBe(1));
 
-    activeOrganization = "org-2";
-    view.rerender(<SalesPage actorId="actor-1" organizationId="org-2" />);
+    activeOrganization = "40000000-0000-4000-8000-000000000005";
+    view.rerender(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000005" />);
     await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #99" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm #99" }));
     await waitFor(() => expect(writes).toBe(2));
@@ -327,8 +334,8 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       if (input === "/api/capabilities/execute") {
         writes += 1;
         return writes === 1
@@ -339,7 +346,7 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
-    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
@@ -374,8 +381,8 @@ describe("Vite sales page", () => {
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       writes += 1;
       return writes === 1
         ? Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 })
@@ -383,7 +390,7 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
-    const props = { actorId: "actor-1", organizationId: "org-1" };
+    const props = { actorId: "actor-1", organizationId: "40000000-0000-4000-8000-000000000004" };
     const firstMount = render(<SalesPage {...props} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
@@ -418,7 +425,7 @@ describe("Vite sales page", () => {
     const scopeDigestGate = new Promise<void>((resolve) => { releaseScopeDigest = resolve; });
     const originalDigest = crypto.subtle.digest.bind(crypto.subtle);
     vi.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, data) => {
-      if (new TextDecoder().decode(data) === JSON.stringify({ actorId: "actor-1", organizationId: "org-2" })) {
+      if (new TextDecoder().decode(data) === JSON.stringify({ actorId: "actor-1", organizationId: "40000000-0000-4000-8000-000000000005" })) {
         scopeDigestStarted = true;
         await scopeDigestGate;
       }
@@ -426,15 +433,15 @@ describe("Vite sales page", () => {
     });
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } });
       void init;
       return Response.json({ error: "unexpected route" }, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
-    const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    const view = render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
@@ -443,7 +450,7 @@ describe("Vite sales page", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "12.50" } });
 
-    view.rerender(<SalesPage actorId="actor-1" organizationId="org-2" />);
+    view.rerender(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000005" />);
     await waitFor(() => expect(scopeDigestStarted).toBe(true));
     fireEvent.click(screen.getByRole("button", { name: "Create sales order" }));
     expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("");
@@ -468,18 +475,84 @@ describe("Vite sales page", () => {
     });
   });
 
-  it("drops a stale order action target and reloads rows when organization scope changes", async () => {
-    let activeOrganization = "org-1";
+  it("hides prior organization orders and customer options immediately while the new scope loads", async () => {
+    const organizationA = "40000000-0000-4000-8000-000000000004";
+    const organizationB = "40000000-0000-4000-8000-000000000005";
+    let organizationBCustomerRequestStarted = false;
+    const pendingOrganizationBCustomers = new Promise<Response>(() => {});
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/sales/customers") {
+        const requestedOrganization = new Headers(init?.headers).get("X-Organization-ID");
+        if (requestedOrganization === organizationB) {
+          organizationBCustomerRequestStarted = true;
+          return pendingOrganizationBCustomers;
+        }
+        return Response.json(customers);
+      }
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<SalesPage actorId="actor-1" organizationId={organizationA} />);
+
+    expect(await screen.findByRole("row", { name: /#41/ })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create sales order" }));
+    expect(await screen.findByRole("option", { name: "Acme Foods" })).not.toBeNull();
+
+    view.rerender(<SalesPage actorId="actor-1" organizationId={organizationB} />);
+
+    expect(screen.queryByRole("row", { name: /#41/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Acme Foods" })).toBeNull();
+    expect(screen.getByText("Loading sales orders…")).not.toBeNull();
+    await waitFor(() => expect(organizationBCustomerRequestStarted).toBe(true));
+  });
+
+  it("hides prior actor orders and customer options immediately when the actor changes within one organization", async () => {
+    const organizationId = "40000000-0000-4000-8000-000000000004";
+    let customerReads = 0;
+    let nextActorCustomerRequestStarted = false;
+    const pendingNextActorCustomers = new Promise<Response>(() => {});
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders: activeOrganization === "org-1" ? orders : [] });
+      if (input === "/api/sales/customers") {
+        customerReads += 1;
+        if (customerReads === 2) {
+          nextActorCustomerRequestStarted = true;
+          return pendingNextActorCustomers;
+        }
+        return Response.json(customers);
+      }
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<SalesPage actorId="actor-1" organizationId={organizationId} />);
+
+    expect(await screen.findByRole("row", { name: /#41/ })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create sales order" }));
+    expect(await screen.findByRole("option", { name: "Acme Foods" })).not.toBeNull();
+
+    view.rerender(<SalesPage actorId="actor-2" organizationId={organizationId} />);
+
+    expect(screen.queryByRole("row", { name: /#41/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Acme Foods" })).toBeNull();
+    expect(screen.getByText("Loading sales orders…")).not.toBeNull();
+    await waitFor(() => expect(nextActorCustomerRequestStarted).toBe(true));
+  });
+
+  it("drops a stale order action target and reloads rows when organization scope changes", async () => {
+    let activeOrganization = "40000000-0000-4000-8000-000000000004";
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders: activeOrganization === "40000000-0000-4000-8000-000000000004" ? orders : [] });
       if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { status: "cancelled", releasedThousandths: 1000 } });
       return Response.json({ error: "unexpected route" }, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
-    const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    const view = render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     const row = await screen.findByRole("row", { name: /#41/ });
     const cancel = within(row).getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
@@ -487,8 +560,8 @@ describe("Vite sales page", () => {
     fireEvent.click(cancel);
     expect(screen.getByRole("dialog").textContent).toContain("Order #41");
 
-    activeOrganization = "org-2";
-    view.rerender(<SalesPage actorId="actor-1" organizationId="org-2" />);
+    activeOrganization = "40000000-0000-4000-8000-000000000005";
+    view.rerender(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000005" />);
 
     expect(await screen.findByText("No sales orders yet")).not.toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -502,8 +575,8 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       if (input === "/api/capabilities/execute") {
         writes += 1;
         if (writes === 1) return Response.json({ ok: false, pendingApproval: true, reason: "Org B approval required" }, { status: 202 });
@@ -520,9 +593,9 @@ describe("Vite sales page", () => {
       note: "Org B note",
       lines: [{ description: "Org B pending draft", quantity: 1000, unitPriceMinor: 2000, taxMinor: 0 }],
     };
-    await expect(submitSalesOrderWrite(orgBAction, { actorId: "actor-1", organizationId: "org-2" })).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitSalesOrderWrite(orgBAction, { actorId: "actor-1", organizationId: "40000000-0000-4000-8000-000000000005" })).resolves.toMatchObject({ kind: "pending" });
 
-    const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    const view = render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
     fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
@@ -532,7 +605,7 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
     await waitFor(() => expect(writes).toBe(2));
 
-    view.rerender(<SalesPage actorId="actor-1" organizationId="org-2" />);
+    view.rerender(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000005" />);
     expect(await screen.findByDisplayValue("Org B pending draft")).not.toBeNull();
     expect((screen.getByLabelText("Description") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false);
@@ -553,7 +626,7 @@ describe("Vite sales page", () => {
 
   it("keeps create recovery locked when the scoped retry marker is corrupt", async () => {
     const actorId = "actor-1";
-    const organizationId = "org-1";
+    const organizationId = "40000000-0000-4000-8000-000000000004";
     const scopeDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
     const digestHex = Array.from(new Uint8Array(scopeDigest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     localStorage.setItem(`chaste:sales-order-write-attempt:${digestHex}`, "{");
@@ -572,7 +645,7 @@ describe("Vite sales page", () => {
 
   it("requires history review before clearing a route-less action and sends no write", async () => {
     const actorId = "actor-1";
-    const organizationId = "org-1";
+    const organizationId = "40000000-0000-4000-8000-000000000004";
     const action = { action: "deliver" as const, orderId: orders[0]!.id };
     const digest = async (value: string) => {
       const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -609,8 +682,8 @@ describe("Vite sales page", () => {
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       writes += 1;
       if (writes === 1) return Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 });
       if (writes === 2) return Response.json({ error: "The order is invalid." }, { status: 422 });
@@ -618,7 +691,7 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
-    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
@@ -648,8 +721,8 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       if (input === "/api/capabilities/execute") {
         writes += 1;
         return writes === 1
@@ -660,7 +733,7 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
-    render(<SalesPage baseCurrency="USD" actorId="actor-1" organizationId="org-1" />);
+    render(<SalesPage baseCurrency="USD" actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     const orderRow = await screen.findByRole("row", { name: /#41/ });
     const deliverButton = within(orderRow).getByRole("button", { name: "Deliver #41" }) as HTMLButtonElement;
@@ -686,8 +759,8 @@ describe("Vite sales page", () => {
     let salesReads = 0;
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") {
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") {
         salesReads += 1;
         return salesReads === 1
           ? Response.json({ orders })
@@ -701,7 +774,7 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
-    render(<SalesPage baseCurrency="USD" actorId="actor-1" organizationId="org-1" />);
+    render(<SalesPage baseCurrency="USD" actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     const orderRow = await screen.findByRole("row", { name: /#41/ });
     fireEvent.click(within(orderRow).getByRole("button", { name: "Deliver #41" }));
@@ -719,8 +792,8 @@ describe("Vite sales page", () => {
     let writes = 0;
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       if (input === "/api/capabilities/execute") {
         writes += 1;
         return writes === 1
@@ -731,10 +804,12 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
-    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     const orderRow = await screen.findByRole("row", { name: /#41/ });
-    fireEvent.click(within(orderRow).getByRole("button", { name: "Cancel" }));
+    const cancelButton = within(orderRow).getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
+    await waitFor(() => expect(cancelButton.disabled).toBe(false));
+    fireEvent.click(cancelButton);
     expect(screen.getByRole("dialog").textContent).toContain("Order #41");
     fireEvent.click(screen.getByRole("button", { name: "Cancel order" }));
     expect(await screen.findByText("Cancellation approval required")).not.toBeNull();
@@ -755,8 +830,8 @@ describe("Vite sales page", () => {
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       capabilityAttempt += 1;
       return capabilityAttempt === 1
         ? Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 })
@@ -764,7 +839,7 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
-    const scopeProps = { actorId: "actor-1", organizationId: "org-1" };
+    const scopeProps = { actorId: "actor-1", organizationId: "40000000-0000-4000-8000-000000000004" };
     const firstMount = render(<SalesPage {...scopeProps} />);
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Allow backorder" }));
@@ -780,7 +855,7 @@ describe("Vite sales page", () => {
     const backorderInputFrom = (call: ReturnType<typeof capabilityCalls>[number]) =>
       (JSON.parse(String(call[1]?.body)) as { input: { allowBackorder?: boolean } }).input.allowBackorder;
     const originalIntent = intentFrom(capabilityCalls()[0]!);
-    const markerKey = confirmAttemptKey("actor-1", "org-1", orders[2]!.id);
+    const markerKey = confirmAttemptKey("actor-1", "40000000-0000-4000-8000-000000000004", orders[2]!.id);
     expect(JSON.parse(localStorage.getItem(markerKey) ?? "null")).toMatchObject({
       orderId: orders[2]!.id,
       intentId: originalIntent,
@@ -816,8 +891,8 @@ describe("Vite sales page", () => {
     let capabilityAttempt = 0;
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       void init;
       capabilityAttempt += 1;
       if (capabilityAttempt === 1) throw new TypeError("connection reset after request");
@@ -825,7 +900,7 @@ describe("Vite sales page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
-    const props = { actorId: "actor-1", organizationId: "org-1" };
+    const props = { actorId: "actor-1", organizationId: "40000000-0000-4000-8000-000000000004" };
     render(<><SalesPage {...props} /><SalesPage {...props} /></>);
 
     const confirmButtons = await screen.findAllByRole("button", { name: "Confirm #43" });
@@ -839,20 +914,20 @@ describe("Vite sales page", () => {
       (JSON.parse(String(call[1]?.body)) as { intentId: string }).intentId;
     expect(intentFrom(capabilityCalls[1]!)).toBe(intentFrom(capabilityCalls[0]!));
     expect(await screen.findByText("Order #43 confirmed.")).not.toBeNull();
-    expect(localStorage.getItem(confirmAttemptKey("actor-1", "org-1", orders[2]!.id))).toBeNull();
+    expect(localStorage.getItem(confirmAttemptKey("actor-1", "40000000-0000-4000-8000-000000000004", orders[2]!.id))).toBeNull();
   });
 
   it("fails closed when durable storage is unavailable", async () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage is blocked"); });
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       return Response.json({ error: "The sales service is unavailable. Check the order status before trying again." }, { status: 503 });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
-    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Allow backorder" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
@@ -868,28 +943,28 @@ describe("Vite sales page", () => {
     vi.stubGlobal("navigator", testNavigator);
     const fetchMock = goAwareFetch(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      if (input === "/api/pos/customers") return Response.json(customers);
-      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
       return Response.json({ ok: true, data: { confirmed: true, backordered: false, reservedThousandths: 0 } });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
-    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
 
     await waitFor(() => expect((screen.getByRole("button", { name: "Confirm #43" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Confirm #43" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain("Web Locks support");
     expect(salesWriteCalls(fetchMock).length > 0).toBe(false);
-    expect(localStorage.getItem(confirmAttemptKey("actor-1", "org-1", orders[2]!.id))).toBeNull();
+    expect(localStorage.getItem(confirmAttemptKey("actor-1", "40000000-0000-4000-8000-000000000004", orders[2]!.id))).toBeNull();
   });
 
   it("shows route-level Go permission failures as access denied", async () => {
     vi.stubGlobal("fetch", goAwareFetch(async (input: RequestInfo | URL) => input === "/api/modules"
       ? Response.json(switchboard)
-      : input === "/api/pos/customers" ? Response.json(customers)
+      : input === "/api/sales/customers" ? Response.json(customers)
       : Response.json({ error: "forbidden: missing sales.read" }, { status: 422 })));
-    render(<SalesPage />);
+    render(<SalesPage organizationId="40000000-0000-4000-8000-000000000004" />);
 
     expect(await screen.findByRole("heading", { name: "Access denied" })).not.toBeNull();
   });
@@ -897,18 +972,18 @@ describe("Vite sales page", () => {
   it("formats totals using three- and zero-decimal currency minor units", async () => {
     vi.stubGlobal("fetch", salesFetch());
     localStorage.setItem("chaste-prefs", JSON.stringify({ currency: "UGX" }));
-    const { rerender } = render(<SalesPage baseCurrency="USD" />);
+    const { rerender } = render(<SalesPage baseCurrency="USD" organizationId="40000000-0000-4000-8000-000000000004" />);
     expect(await screen.findByText((value) => value.includes("129,900"))).not.toBeNull();
 
     localStorage.clear();
-    rerender(<SalesPage baseCurrency="BHD" />);
+    rerender(<SalesPage baseCurrency="BHD" organizationId="40000000-0000-4000-8000-000000000004" />);
     expect(await screen.findByText((value) => value.includes("129.900"))).not.toBeNull();
   });
 
   it("does not fetch orders while the Sales module is disabled", async () => {
     const fetchMock = goAwareFetch(async () => Response.json({ catalog: [{ id: "sales" }], enabledModules: [] }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<SalesPage />);
+    render(<SalesPage organizationId="40000000-0000-4000-8000-000000000004" />);
 
     expect(await screen.findByRole("heading", { name: "Sales is turned off" })).not.toBeNull();
     expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/capabilities/execute"

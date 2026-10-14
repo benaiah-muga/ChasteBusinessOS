@@ -382,6 +382,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.scimWrite && method === "DELETE" && scimUserItemPath.test(path)) return true;
   if (method === "GET" && /^\/api\/portal\/invoice\/[^/?]+(?:\?.*)?$/.test(path)) return true;
   if (method === "GET" && /^\/api\/support\/customers(?:\?.*)?$/.test(path)) return true;
+  if (method === "GET" && /^\/api\/sales\/customers(?:\?.*)?$/.test(path)) return true;
   if (flags.salesOrders && method === "GET" && /^\/api\/sales(?:\?.*)?$/.test(path)) return true;
   if (method === "GET" && /^\/api\/sales\/[^/?]+(?:\?.*)?$/.test(path)) return true;
   if (flags.modulesRead && method === "GET" && /^\/api\/modules(?:\?.*)?$/.test(path)) return true;

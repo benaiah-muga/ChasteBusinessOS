@@ -48,8 +48,6 @@ declare const __GO_PURCHASING_VENDOR_SLICE__: boolean;
 declare const __GO_MARKETING_SEGMENT_SLICE__: boolean;
 declare const __GO_MARKETING_CAMPAIGN_WRITES__: boolean;
 declare const __GO_MARKETING_OVERVIEW_READS__: boolean;
-declare const __GO_SALES_ORDER_WRITES__: boolean;
-declare const __GO_SALES_ORDER_READS__: boolean;
 declare const __GO_MESSAGING_SEND_SLICE__: boolean;
 declare const __GO_MESSAGING_EDIT_SLICE__: boolean;
 declare const __GO_MESSAGING_DELETE_SLICE__: boolean;

@@ -1,16 +1,5 @@
 import { z } from "zod";
 
-const OrderSchema = z.object({
-  id: z.string().min(1),
-  number: z.number().int().nonnegative(),
-  customerId: z.string().min(1),
-  status: z.string().min(1),
-  backordered: z.boolean(),
-  totalMinor: z.number().int(),
-  createdAt: z.string().datetime({ offset: true }),
-});
-
-const SalesOrdersSchema = z.object({ orders: z.array(OrderSchema) });
 const GoSalesOrderSchema = z.object({
   id: z.string().uuid(),
   number: z.number().int().nonnegative().safe(),
@@ -21,6 +10,7 @@ const GoSalesOrderSchema = z.object({
   createdAt: z.string().datetime({ offset: true }),
 }).strict();
 const GoSalesOrdersSchema = z.object({ orders: z.array(GoSalesOrderSchema) }).strict();
+const GoSalesCustomersSchema = z.object({ customers: z.array(z.object({ id: z.string().uuid(), name: z.string().min(1) }).strict()) }).strict();
 const GoSalesOrdersEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
 const GoSalesOrdersPendingSchema = z.object({
   ok: z.literal(false),
@@ -97,7 +87,7 @@ export type SalesOrderWriteOutcome =
 type SalesOrderAttempt = { storageKey: string; fingerprint: string; intentId: string; route: "go" | "legacy" };
 
 function routeLessAttemptError(): SalesApiError {
-  return new SalesApiError(0, "A saved sales order retry marker predates route tracking, so its backend is unknown. Review Sales order history, then use the in-page recovery confirmation to clear that marker before submitting again.");
+  return new SalesApiError(0, "A saved sales order retry marker predates route tracking or belongs to a retired backend route. Review Sales order history, then use the in-page recovery confirmation to clear that marker before submitting again.");
 }
 
 function parseSalesOrderAttempt(value: string | null): StoredSalesOrderAttempt | null {
@@ -165,8 +155,8 @@ async function createSalesOrderAttempt(action: SalesOrderWrite, retryScope: Sale
       }
       if (stored.route === undefined) throw routeLessAttemptError();
       if (stored.route !== route) {
-        const original = stored.route === "go" ? "Go" : "legacy";
-        throw new SalesApiError(0, `A previous sales order result is unresolved on the ${original} route. Restore that route to retry the exact action, or check order history before clearing its saved retry marker.`);
+        if (stored.route === "legacy") throw routeLessAttemptError();
+        throw new SalesApiError(0, "A previous sales order result is unresolved on the Go route. Retry the exact action or check order history before clearing its saved retry marker.");
       }
     }
     if (stored && stored.fingerprint !== fingerprint) {
@@ -196,7 +186,8 @@ async function clearSalesOrderAttempt(attempt: SalesOrderAttempt): Promise<void>
   } catch { /* Keep the unresolved intent if storage or cross-tab coordination fails. */ }
 }
 
-export type SalesOrder = z.infer<typeof OrderSchema>;
+export type SalesOrder = z.infer<typeof GoSalesOrderSchema>;
+export type SalesCustomer = z.infer<typeof GoSalesCustomersSchema>["customers"][number];
 
 async function salesRetryStorageKey(retryScope: SalesRetryScope): Promise<{ scope: { actorId: string; organizationId: string }; storageKey: string } | null> {
   const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
@@ -224,7 +215,7 @@ export async function findRouteLessSalesOrderAction(retryScope: SalesRetryScope)
   const stored = readSalesOrderAttempt(scopedKey.storageKey);
   if (!stored) return null;
   await verifySalesOrderAttemptScope(scopedKey.scope, stored);
-  return stored.route === undefined ? { action: stored.action.action, intentId: stored.intentId, fingerprint: stored.fingerprint } : null;
+  return stored.route !== "go" ? { action: stored.action.action, intentId: stored.intentId, fingerprint: stored.fingerprint } : null;
 }
 
 export async function clearRouteLessSalesOrderAttempt(retryScope: SalesRetryScope, expected: RouteLessSalesOrderMarker): Promise<boolean> {
@@ -232,14 +223,14 @@ export async function clearRouteLessSalesOrderAttempt(retryScope: SalesRetryScop
   if (!scopedKey) return false;
   return withSalesOrderMarkerLock(scopedKey.storageKey, async () => {
     const stored = readSalesOrderAttempt(scopedKey.storageKey);
-    if (!stored || stored.route !== undefined
+    if (!stored || stored.route === "go"
       || stored.intentId !== expected.intentId
       || stored.fingerprint !== expected.fingerprint
       || stored.action.action !== expected.action) return false;
     await verifySalesOrderAttemptScope(scopedKey.scope, stored);
 
     const current = readSalesOrderAttempt(scopedKey.storageKey);
-    if (!current || current.route !== undefined
+    if (!current || current.route === "go"
       || current.intentId !== expected.intentId
       || current.fingerprint !== expected.fingerprint
       || current.action.action !== expected.action) return false;
@@ -260,7 +251,7 @@ export async function restorePendingSalesOrderCreate(retryScope: SalesRetryScope
   catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
   const stored = readSalesOrderAttempt(storageKey);
   if (!stored || stored.action.action !== "create") return null;
-  if (stored.route === undefined) throw routeLessAttemptError();
+  if (stored.route !== "go") throw routeLessAttemptError();
   let fingerprint: string;
   try { fingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action })); }
   catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
@@ -277,12 +268,53 @@ export class SalesApiError extends Error {
   }
 }
 
-export async function fetchSalesEnabled(signal?: AbortSignal): Promise<boolean> {
+function salesOrganizationId(organizationId: string | null | undefined): string {
+  const normalized = organizationId?.trim() ?? "";
+  if (!normalized) throw new SalesApiError(0, "Wait for the active organization to finish loading before loading sales data.");
+  return normalized;
+}
+
+export async function fetchSalesCustomers(organizationId: string | null | undefined, signal?: AbortSignal): Promise<SalesCustomer[]> {
+  const orgId = organizationId?.trim() ?? "";
+  if (!z.string().uuid().safeParse(orgId).success) {
+    throw new SalesApiError(0, "Wait for the active organization to finish loading before loading customers.");
+  }
+  let response: Response;
+  try {
+    response = await fetch("/api/sales/customers", {
+      credentials: "same-origin",
+      headers: { accept: "application/json", "X-Organization-ID": orgId },
+      cache: "no-store",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    throw new SalesApiError(0, timedOut
+      ? "Customer lookup took too long to load. Try again."
+      : "Could not reach the sales service. Check your connection and try again.");
+  }
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const parsed = ErrorSchema.safeParse(body);
+    if (response.status === 401) throw new SalesApiError(401, "Your session has ended. Sign in again to continue.");
+    if (response.status === 403) throw new SalesApiError(403, parsed.success ? parsed.data.error : "You do not have permission to view sales customers.");
+    throw new SalesApiError(response.status, response.status >= 500
+      ? "The sales service is unavailable. Try again."
+      : parsed.success ? parsed.data.error : "The customer lookup request could not be completed. Try again.");
+  }
+  const parsed = GoSalesCustomersSchema.safeParse(body);
+  if (!parsed.success) throw new SalesApiError(response.status, "The sales service returned customer data in an unexpected format.");
+  return parsed.data.customers;
+}
+
+export async function fetchSalesEnabled(organizationId: string | null | undefined, signal?: AbortSignal): Promise<boolean> {
+  const orgId = salesOrganizationId(organizationId);
   let response: Response;
   try {
     response = await fetch("/api/modules", {
       credentials: "same-origin",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "X-Organization-ID": orgId },
       cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
@@ -301,15 +333,15 @@ export async function fetchSalesEnabled(signal?: AbortSignal): Promise<boolean> 
   return parsed.data.enabledModules.includes("sales");
 }
 
-export async function fetchSalesOrders(signal?: AbortSignal): Promise<SalesOrder[]> {
-  const useGo = typeof __GO_SALES_ORDER_READS__ !== "undefined" && __GO_SALES_ORDER_READS__;
+export async function fetchSalesOrders(organizationId: string | null | undefined, signal?: AbortSignal): Promise<SalesOrder[]> {
+  const orgId = salesOrganizationId(organizationId);
   let response: Response;
   try {
-    response = await fetch(useGo ? "/api/capabilities/execute" : "/api/sales", {
-      method: useGo ? "POST" : "GET",
+    response = await fetch("/api/capabilities/execute", {
+      method: "POST",
       credentials: "same-origin",
-      headers: useGo ? { accept: "application/json", "content-type": "application/json" } : { accept: "application/json" },
-      ...(useGo ? { body: JSON.stringify({ capabilityId: "sales.listOrders", input: {}, intentId: crypto.randomUUID() }) } : {}),
+      headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": orgId },
+      body: JSON.stringify({ capabilityId: "sales.listOrders", input: {}, intentId: crypto.randomUUID() }),
       cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
@@ -325,7 +357,7 @@ export async function fetchSalesOrders(signal?: AbortSignal): Promise<SalesOrder
   if (!response.ok) {
     const parsed = ErrorSchema.safeParse(body);
     if (response.status === 401) throw new SalesApiError(401, "Your session has ended. Sign in again to continue.");
-    if (useGo && (response.status === 202 || GoSalesOrdersPendingSchema.safeParse(body).success)) {
+    if (response.status === 202 || GoSalesOrdersPendingSchema.safeParse(body).success) {
       throw new SalesApiError(response.status, "The sales service returned an unexpected pending response while loading orders.");
     }
     if (response.status === 403 || response.status === 422) {
@@ -336,24 +368,19 @@ export async function fetchSalesOrders(signal?: AbortSignal): Promise<SalesOrder
       : parsed.success ? parsed.data.error : "The sales request could not be completed. Try again.");
   }
 
-  if (useGo) {
-    const envelope = GoSalesOrdersEnvelopeSchema.safeParse(body);
-    if (!envelope.success) throw new SalesApiError(response.status, "The sales service returned an unexpected response while loading orders.");
-    const parsedGo = GoSalesOrdersSchema.safeParse(envelope.data.data);
-    if (!parsedGo.success) throw new SalesApiError(response.status, "The sales service returned data in an unexpected format.");
-    return parsedGo.data.orders;
-  }
-
-  const parsed = SalesOrdersSchema.safeParse(body);
-  if (!parsed.success) throw new SalesApiError(response.status, "The sales service returned data in an unexpected format.");
-  return parsed.data.orders;
+  const envelope = GoSalesOrdersEnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new SalesApiError(response.status, "The sales service returned an unexpected response while loading orders.");
+  const parsedGo = GoSalesOrdersSchema.safeParse(envelope.data.data);
+  if (!parsedGo.success) throw new SalesApiError(response.status, "The sales service returned data in an unexpected format.");
+  return parsedGo.data.orders;
 }
 
 export type ConfirmSalesOrderResult =
   | { kind: "confirmed"; backordered: boolean }
   | { kind: "pending"; reason: string };
 
-export async function confirmSalesOrder(orderId: string, intentId: string, allowBackorder = false): Promise<ConfirmSalesOrderResult> {
+export async function confirmSalesOrder(orderId: string, intentId: string, organizationId: string | null | undefined, allowBackorder = false): Promise<ConfirmSalesOrderResult> {
+  const orgId = salesOrganizationId(organizationId);
   const parsedOrderId = z.string().uuid().safeParse(orderId);
   const parsedIntentId = z.string().uuid().safeParse(intentId);
   if (!parsedOrderId.success || !parsedIntentId.success) {
@@ -365,7 +392,7 @@ export async function confirmSalesOrder(orderId: string, intentId: string, allow
     response = await fetch("/api/capabilities/execute", {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": orgId },
       cache: "no-store",
       body: JSON.stringify({
         capabilityId: "sales.confirmOrder",
@@ -399,8 +426,7 @@ export async function confirmSalesOrder(orderId: string, intentId: string, allow
     : error.success ? error.data.error : "The order confirmation could not be completed.");
 }
 
-function salesOrderWriteRequest(action: SalesOrderWrite, intentId: string, useGo: boolean): { url: string; body: Record<string, unknown> } {
-  if (!useGo) return { url: "/api/sales", body: { ...action, intentId } };
+function salesOrderWriteRequest(action: SalesOrderWrite, intentId: string): { url: string; body: Record<string, unknown> } {
   const capabilityId = action.action === "create" ? "sales.createOrder"
     : action.action === "deliver" ? "sales.deliverOrder" : "sales.cancelOrder";
   const { action: _action, ...input } = action;
@@ -414,16 +440,16 @@ export async function submitSalesOrderWrite(
 ): Promise<SalesOrderWriteOutcome> {
   const parsedAction = SalesOrderWriteSchema.safeParse(action);
   if (!parsedAction.success) throw new SalesApiError(0, "Check the sales order details and try again.");
-  const useGo = typeof __GO_SALES_ORDER_WRITES__ !== "undefined" && __GO_SALES_ORDER_WRITES__;
-  const attempt = await createSalesOrderAttempt(parsedAction.data, retryScope, useGo ? "go" : "legacy");
-  const route = salesOrderWriteRequest(parsedAction.data, attempt.intentId, useGo);
+  const orgId = salesOrganizationId(retryScope.organizationId);
+  const attempt = await createSalesOrderAttempt(parsedAction.data, retryScope, "go");
+  const route = salesOrderWriteRequest(parsedAction.data, attempt.intentId);
   let response: Response;
   let body: unknown;
   try {
     response = await fetch(route.url, {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": orgId },
       cache: "no-store",
       body: JSON.stringify(route.body),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
@@ -441,7 +467,7 @@ export async function submitSalesOrderWrite(
   if (!response.ok) {
     const error = ErrorSchema.safeParse(body);
     const failure = new SalesApiError(response.status, error.success ? error.data.error : "The sales order action could not be completed.");
-    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429 && !(useGo && response.status === 404)) {
+    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429 && response.status !== 404) {
       await clearSalesOrderAttempt(attempt);
     }
     throw failure;

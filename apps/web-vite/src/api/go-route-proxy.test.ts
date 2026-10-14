@@ -1791,6 +1791,8 @@ describe("Vite Go route proxy selection", () => {
     expect(defaults.salesOrders).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/sales")).toBe(true);
     expect(isGoRouteRequest(defaults, "GET", "/api/sales?status=draft")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales/customers")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales/customers?active=1")).toBe(true);
     expect(isGoRouteRequest(defaults, "POST", "/api/sales")).toBe(false);
     expect(isGoRouteRequest(defaults, "HEAD", "/api/sales")).toBe(false);
     expect(isGoRouteRequest(defaults, "GET", "/api/sales/")).toBe(false);
@@ -1798,6 +1800,7 @@ describe("Vite Go route proxy selection", () => {
 
     const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_SALES_ORDERS_ROUTE: "0" });
     expect(isGoRouteRequest(rolledBack, "GET", "/api/sales")).toBe(false);
+    expect(isGoRouteRequest(rolledBack, "GET", "/api/sales/customers")).toBe(true);
     expect(isGoRouteRequest(rolledBack, "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001")).toBe(true);
   });
 

@@ -281,6 +281,12 @@ func run(logger *slog.Logger) error {
 		salesOrdersRoute = httpapi.NewSalesOrdersSessionHandler(resolver, capabilityExecutor, logger)
 		logger.Info("Go sales order list route mounted", "path", "GET /api/sales")
 	}
+	resolver, resolverErr := getSessionResolver()
+	if resolverErr != nil {
+		return resolverErr
+	}
+	salesCustomersRoute := httpapi.NewSalesCustomersSessionHandler(pool, resolver, logger)
+	logger.Info("Go sales customer lookup route mounted", "path", "GET /api/sales/customers")
 	var messageAttachmentDownloadRoute http.Handler
 	if os.Getenv("GO_MESSAGE_ATTACHMENT_DOWNLOAD_ROUTE") == "1" {
 		resolver, resolverErr := getSessionResolver()
@@ -827,6 +833,7 @@ func run(logger *slog.Logger) error {
 		approvalDecider,
 	), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute)
 	apiHandler = httpapi.MountGoApprovalsReadRoute(apiHandler, approvalsReadRoute)
+	apiHandler = httpapi.MountGoSalesCustomersRoute(apiHandler, salesCustomersRoute)
 	apiHandler = httpapi.MountGoApprovalsDecisionRoute(apiHandler, approvalsDecisionRoute)
 	apiHandler = httpapi.MountGoMemoryRoute(apiHandler, memoryRoute)
 	apiHandler = httpapi.MountGoModuleSettingsRoute(apiHandler, moduleSettingsRoute)

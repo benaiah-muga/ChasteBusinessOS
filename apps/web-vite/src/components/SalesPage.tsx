@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { clearRouteLessSalesOrderAttempt, confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite, type RouteLessSalesOrderMarker, type SalesOrder } from "../api/sales";
-import { PosApiError } from "../api/pos";
-import { fetchPosCustomers, type PosCustomer } from "../api/pos-session";
+import { clearRouteLessSalesOrderAttempt, confirmSalesOrder, fetchSalesCustomers, fetchSalesEnabled, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite, type RouteLessSalesOrderMarker, type SalesCustomer, type SalesOrder } from "../api/sales";
 import { SalesQuoteWorkspace } from "./SalesQuoteWorkspace";
 import "./sales-page.css";
 
 type PageState =
   | { status: "loading" }
-  | { status: "disabled" }
-  | { status: "failed"; error: SalesApiError }
-  | { status: "ready"; orders: SalesOrder[]; customers: PosCustomer[] };
+  | { status: "disabled"; scopeIdentity: string | null }
+  | { status: "failed"; scopeIdentity: string | null; error: SalesApiError }
+  | { status: "ready"; scopeIdentity: string | null; orders: SalesOrder[]; customers: SalesCustomer[] };
 
 type CurrencyStyle = { symbol: string; minorUnits: number };
 type OrderFilter = "all" | "draft" | "confirmed" | "delivered" | "cancelled";
@@ -175,6 +173,9 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const createScopeIdentity = actorId?.trim() && organizationId?.trim()
     ? JSON.stringify([actorId.trim(), organizationId.trim()])
     : null;
+  const visibleState: PageState = state.status !== "loading" && state.scopeIdentity !== createScopeIdentity
+    ? { status: "loading" }
+    : state;
   currentCreateScope.current = createScopeIdentity;
   if (confirmationScope.current !== createScopeIdentity) {
     confirmationScope.current = createScopeIdentity;
@@ -186,27 +187,32 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
+    const requestedOrganizationId = organizationId?.trim() ?? "";
+    const requestedScopeIdentity = createScopeIdentity;
     try {
-      const enabled = await fetchSalesEnabled(signal);
+      if (!requestedOrganizationId) throw new SalesApiError(0, "Wait for the active organization to finish loading before loading sales data.");
+      const enabled = await fetchSalesEnabled(requestedOrganizationId, signal);
       if (signal?.aborted) return;
       if (!enabled) {
-        setState({ status: "disabled" });
+        setState({ status: "disabled", scopeIdentity: requestedScopeIdentity });
         return;
       }
-      const [orders, customers] = await Promise.all([fetchSalesOrders(signal), fetchPosCustomers(signal)]);
-      if (!signal?.aborted) setState({ status: "ready", orders, customers });
+      const [orders, customers] = await Promise.all([
+        fetchSalesOrders(requestedOrganizationId, signal),
+        fetchSalesCustomers(requestedOrganizationId, signal),
+      ]);
+      if (!signal?.aborted) setState({ status: "ready", scopeIdentity: requestedScopeIdentity, orders, customers });
     } catch (error) {
       if (signal?.aborted) return;
       setState({
         status: "failed",
+        scopeIdentity: requestedScopeIdentity,
         error: error instanceof SalesApiError
           ? error
-          : error instanceof PosApiError
-            ? new SalesApiError(error.status, error.message)
           : new SalesApiError(0, "Could not reach the sales service. Check your connection and try again."),
       });
     }
-  }, []);
+  }, [createScopeIdentity, organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -245,7 +251,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         setCreateAttemptPending(true);
         setSearch("");
         setFilter("all");
-        setActionNotice({ tone: "error", message: "A saved sales order retry marker has no known backend. Review sales order history before choosing whether to clear it." });
+        setActionNotice({ tone: "error", message: "A saved sales order retry marker has no usable backend route. Review sales order history before choosing whether to clear it." });
         return;
       }
       const action = await restorePendingSalesOrderCreate({ actorId, organizationId });
@@ -284,7 +290,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       const cleared = await clearRouteLessSalesOrderAttempt({ actorId, organizationId }, routeLessAttempt.marker);
       if (currentCreateScope.current !== submittedScope) return;
       if (!cleared) {
-        setActionNotice({ tone: "error", message: "The route-less sales marker changed before it could be cleared. Review sales order history again." });
+        setActionNotice({ tone: "error", message: "The ambiguous sales marker changed before it could be cleared. Review sales order history again." });
         return;
       }
       setRouteLessAttempt(null);
@@ -305,28 +311,28 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return;
-      if (state.status !== "ready" || state.orders.length === 0) return;
+      if (visibleState.status !== "ready" || visibleState.orders.length === 0) return;
       event.preventDefault();
       searchRef.current?.focus();
     }
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
-  }, [state]);
+  }, [visibleState]);
 
-  const customerNames = useMemo(() => state.status === "ready"
-    ? new Map(state.customers.map((customer) => [customer.id, customer.name]))
-    : new Map<string, string>(), [state]);
+  const customerNames = useMemo(() => visibleState.status === "ready"
+    ? new Map(visibleState.customers.map((customer) => [customer.id, customer.name]))
+    : new Map<string, string>(), [visibleState]);
 
   const filtered = useMemo(() => {
-    if (state.status !== "ready") return [];
+    if (visibleState.status !== "ready") return [];
     const query = search.trim().toLocaleLowerCase();
-    return state.orders.filter((order) => {
+    return visibleState.orders.filter((order) => {
       if (filter !== "all" && order.status !== filter) return false;
       if (!query) return true;
       return [`#${order.number}`, customerNames.get(order.customerId) ?? "Unknown customer", order.status]
         .some((value) => value.toLocaleLowerCase().includes(query));
     });
-  }, [customerNames, filter, search, state]);
+  }, [customerNames, filter, search, visibleState]);
 
   async function handleConfirm(order: SalesOrder) {
     if (!createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked) return;
@@ -352,7 +358,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         };
         if (!existing) persistConfirmAttempt(key, activeAttempt);
         try {
-          const outcome = await confirmSalesOrder(order.id, activeAttempt.intentId, activeAttempt.allowBackorder);
+          const outcome = await confirmSalesOrder(order.id, activeAttempt.intentId, organizationId, activeAttempt.allowBackorder);
           if (outcome.kind === "pending") persistConfirmAttempt(key, { ...activeAttempt, pending: true });
           else clearConfirmAttempt(key);
           return { result: outcome, attempt: activeAttempt };
@@ -400,7 +406,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
 
   async function refreshOrderList(expectedScope?: string): Promise<void> {
     try {
-      const orders = await fetchSalesOrders();
+      const orders = await fetchSalesOrders(organizationId);
       if (expectedScope !== undefined && currentCreateScope.current !== expectedScope) return;
       setState((current) => current.status === "ready" ? { ...current, orders } : current);
     } catch {
@@ -516,7 +522,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
           <p>Review and create orders, quotes, and customer relationships. Quote actions and CRM views run through authenticated Go capabilities.</p>
         </div>
         <div className="sales-header-actions">
-          {state.status === "ready" && <span className="sales-order-count">{state.orders.length} {state.orders.length === 1 ? "order" : "orders"}</span>}
+          {visibleState.status === "ready" && <span className="sales-order-count">{visibleState.orders.length} {visibleState.orders.length === 1 ? "order" : "orders"}</span>}
           <button className="sales-new-order" type="button" disabled={createAttemptPending} onClick={() => { setShowCreateForm((open) => !open); setCreateError(null); }} aria-expanded={showCreateForm}>
             {showCreateForm ? "Close order form" : "Create sales order"}
           </button>
@@ -527,25 +533,25 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
 
       {actionNotice && <p className={`sales-action-notice sales-action-notice-${actionNotice.tone}`} role={actionNotice.tone === "error" ? "alert" : "status"}>{actionNotice.message}</p>}
 
-      {routeLessAttemptCurrent && state.status === "ready" && (
+      {routeLessAttemptCurrent && visibleState.status === "ready" && (
         <section className="sales-write-card" aria-labelledby="sales-route-less-title" role="alert">
           <div className="sales-write-heading">
             <div><p className="sales-eyebrow">Manual review required</p><h2 id="sales-route-less-title">Resolve an older retry marker</h2></div>
-            <p>The saved {routeLessAttempt.marker.action} action has no recorded backend. Review the Sales order history below to decide whether it completed. Clearing this marker will not send a request or retry the action.</p>
+            <p>The saved {routeLessAttempt.marker.action} action has no usable backend route. Review the Sales order history below to decide whether it completed. Clearing this marker will not send a request or retry the action.</p>
           </div>
           <label>
-            <input type="checkbox" checked={routeLessReviewConfirmed} onChange={(event) => setRouteLessReviewConfirmed(event.currentTarget.checked)} disabled={routeLessRecoveryBusy || state.status !== "ready"} />
+            <input type="checkbox" checked={routeLessReviewConfirmed} onChange={(event) => setRouteLessReviewConfirmed(event.currentTarget.checked)} disabled={routeLessRecoveryBusy || visibleState.status !== "ready"} />
             I reviewed the Sales order history and understand this only clears the ambiguous retry marker.
           </label>
           <div className="sales-write-actions">
-            <button type="button" className="sales-write-primary" disabled={!routeLessReviewConfirmed || routeLessRecoveryBusy || state.status !== "ready"} onClick={() => void clearReviewedRouteLessAttempt()}>
+            <button type="button" className="sales-write-primary" disabled={!routeLessReviewConfirmed || routeLessRecoveryBusy || visibleState.status !== "ready"} onClick={() => void clearReviewedRouteLessAttempt()}>
               {routeLessRecoveryBusy ? "Clearing marker…" : "Clear reviewed retry marker"}
             </button>
           </div>
         </section>
       )}
 
-      {showCreateForm && state.status === "ready" && (
+      {showCreateForm && visibleState.status === "ready" && (
         <section className="sales-write-card" aria-labelledby="sales-create-title">
           <div className="sales-write-heading">
             <div><p className="sales-eyebrow">New draft</p><h2 id="sales-create-title">Create sales order</h2></div>
@@ -555,7 +561,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
             <label>Customer
               <select value={createForm.customerId} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, customerId: value })); setCreateError(null); }} disabled={writeBusy || createWriteLocked}>
                 <option value="">Choose a customer</option>
-                {state.customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
+                {visibleState.customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
               </select>
             </label>
             <label>Order note
@@ -583,7 +589,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         </section>
       )}
 
-      {state.status === "ready" && state.orders.length > 0 && (
+      {visibleState.status === "ready" && visibleState.orders.length > 0 && (
         <div className="sales-order-tools">
           <div className="sales-order-filters" role="group" aria-label="Filter orders by status">
             {ORDER_FILTERS.map((option) => (
@@ -611,42 +617,42 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         </div>
       )}
 
-      {state.status === "loading" && <p className="sales-loading" role="status">Loading sales orders…</p>}
-      {state.status === "disabled" && (
+      {visibleState.status === "loading" && <p className="sales-loading" role="status">Loading sales orders…</p>}
+      {visibleState.status === "disabled" && (
         <section className="sales-empty" role="status">
           <span aria-hidden="true">↗</span>
           <h2>Sales is turned off</h2>
           <p>Ask a workspace administrator to enable the Sales module before viewing orders.</p>
         </section>
       )}
-      {state.status === "failed" && (
+      {visibleState.status === "failed" && (
         <section className="sales-error" role="alert" aria-labelledby="sales-error-title">
           <div>
             <p className="sales-eyebrow">Sales unavailable</p>
-            <h2 id="sales-error-title">{state.error.status === 403 || state.error.message.startsWith("forbidden:") ? "Access denied" : "Could not load sales orders"}</h2>
-            <p>{state.error.message}</p>
+            <h2 id="sales-error-title">{visibleState.error.status === 403 || visibleState.error.message.startsWith("forbidden:") ? "Access denied" : "Could not load sales orders"}</h2>
+            <p>{visibleState.error.message}</p>
           </div>
           <div className="sales-error-actions">
-            {state.error.status === 401 && <a href="/login">Sign in again</a>}
+            {visibleState.error.status === 401 && <a href="/login">Sign in again</a>}
             <button type="button" onClick={() => void load()}>Try again</button>
           </div>
         </section>
       )}
-      {state.status === "ready" && state.orders.length === 0 && (
+      {visibleState.status === "ready" && visibleState.orders.length === 0 && (
         <section className="sales-empty" role="status">
           <span aria-hidden="true">↗</span>
           <h2>No sales orders yet</h2>
           <p>Create a draft order, then confirm it to check credit and reserve stock.</p>
         </section>
       )}
-      {state.status === "ready" && state.orders.length > 0 && filtered.length === 0 && (
+      {visibleState.status === "ready" && visibleState.orders.length > 0 && filtered.length === 0 && (
         <section className="sales-empty" role="status">
           <span aria-hidden="true">⌕</span>
           <h2>No orders match</h2>
           <p>Try another order number, customer, or status.</p>
         </section>
       )}
-      {state.status === "ready" && filtered.length > 0 && (
+      {visibleState.status === "ready" && filtered.length > 0 && (
         <section className="sales-table-card" aria-label="Sales orders">
           <div className="sales-table-scroll">
             <table className="sales-table">

@@ -33,6 +33,9 @@ The full v1 changelog is preserved at the bottom of this file.
   API fallback.
 - Vite Accounting bank account and transaction changes now use scoped Go
   capabilities with durable, exact-intent recovery across tabs.
+- Vite Sales orders and customer lookup now use organization-scoped Go APIs;
+  customer options require Sales read permission and stay isolated across actor
+  or workspace changes.
 - Vite purchasing vendor and bill creation, bill payment, and bill credits now
   use Go capabilities. Credits on foreign-currency bills fail closed until an
   exchange rate is available.
