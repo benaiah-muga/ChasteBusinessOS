@@ -2750,7 +2750,7 @@ new owners and the manifest shows zero legacy runtime paths.
      capability request returned HTTP 200 and the active conversation count
      returned to zero. No legacy leave request occurred, and the browser error
      log was empty. See proof 329.
-240. (Vite and Go tests verified; browser proof pending) Route add-member
+240. (Complete) Route add-member
      actions through the session-authenticated `messaging.addMember`
      capability when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the
      target user against the active organization in Go, retain exact pending
@@ -2758,7 +2758,8 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER=0` for rollback of new
      actions. The Messaging client and page suites passed, and Go's add-member
      receipt replay and concurrent-duplicate test passed with runtime
-     integration required. Authenticated browser proof remains pending.
+     integration required. Authenticated browser proof is recorded in
+     proof 387.
 241. (Complete) Route confirmed
      conversation deletion through the session-authenticated
      `messaging.deleteConversation` capability when
@@ -4142,3 +4143,12 @@ new owners and the manifest shows zero legacy runtime paths.
      message 01, and message 61 stayed rendered through a five-second poll
      interval; no latest-page read was issued. The browser error and console
      logs were empty. This completes items 229 and 230.
+
+387. (Runtime verified) On 2026-10-14, authenticated Vite invited a synthetic
+     teammate to the local proof workspace, verified the account through the
+     Go SMTP path, and accepted the invitation through Go with HTTP 200. In
+     the `Migration paging proof` channel, the Vite add-member picker found
+     `Migration Proof Teammate`; the `messaging.addMember` capability request
+     returned HTTP 200. The database contains one matching ledger event and
+     one conversation membership for that user. The browser error log was
+     empty. This completes item 240.
