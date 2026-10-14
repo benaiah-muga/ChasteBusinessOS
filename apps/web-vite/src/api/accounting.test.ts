@@ -961,7 +961,10 @@ describe("accounting API: Go Accounting period and FX writes", () => {
     const mock = stubFetch(() => Response.json({ ok: true, data: output }));
     const action = { action: "revalueForeignReceivables", year: 2026, month: 9 };
 
-    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({
+      kind: "completed",
+      fxRevaluation: output,
+    });
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
       headers: expect.objectContaining({ "X-Organization-ID": paymentRetryScope.organizationId }),

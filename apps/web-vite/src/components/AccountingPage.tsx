@@ -598,6 +598,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
         } else {
           outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
         }
+        if (isPeriodFxWrite && !actionScopeIsCurrent()) return false;
         if (goReversePayment && !actionScopeIsCurrent()) return false;
         if (isCloseYear) {
           setPendingCloseYear(outcome.kind === "pending" ? await readPendingAccountingCloseYear(paymentRetryScope) : null);
@@ -644,14 +645,27 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : null);
         }
         // A 202 is a queued approval, never a completed write: say so plainly.
+        const fxRevaluation = outcome.kind === "completed" ? outcome.fxRevaluation : undefined;
+        const fxAdjustment = fxRevaluation && state.status === "ready"
+          ? formatMoney(state.reports.baseCurrency, fxRevaluation.totalAdjustmentMinor)
+          : null;
+        const fxCurrencySummary = fxRevaluation
+          ? `${fxRevaluation.currencies.length} foreign ${fxRevaluation.currencies.length === 1 ? "currency" : "currencies"} revalued.`
+          : null;
         setNotice(
           outcome.kind === "pending"
             ? { tone: "pending", text: `${label} needs human approval. It is in the Approvals inbox.` }
-            : { tone: "success", text: `${label} done.` },
+            : fxRevaluation && fxAdjustment
+              ? {
+                  tone: "success",
+                  text: `${label} done. Net adjustment: ${fxAdjustment}. ${fxCurrencySummary}`,
+                }
+              : { tone: "success", text: `${label} done.` },
         );
         void load();
         return !((isCloseYear || isPeriodFxWrite || goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry || goBankReconciliationWrite || goPurchasingBillPayment) && outcome.kind === "pending");
       } catch (error) {
+        if (isPeriodFxWrite && !actionScopeIsCurrent()) return false;
         if (isCloseYear) {
           try { setPendingCloseYear(await readPendingAccountingCloseYear(paymentRetryScope)); }
           catch (pendingError) {
@@ -712,7 +726,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
         setBusy(false);
       }
     },
-    [load, actorId, organizationId],
+    [load, actorId, organizationId, state],
   );
 
   const filteredEntries = useMemo(
@@ -931,6 +945,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
 
           {tab === "reports" && (
             <ReportsSection
+              key={paymentRetryScopeKey}
               reports={state.reports}
               cash={state.cash}
               year={new Date().getUTCFullYear()}

@@ -39,6 +39,15 @@ remains unverified. The messaging trigger lock is process-local, so this path cu
 assumes one Go API instance. Add shared coordination before running multiple
 API replicas.
 
+Vite period-end FX revaluation reports the net adjustment in the organization's
+base currency and the number of foreign currencies changed after a completed
+Go result. The confirmation is discarded when the actor or organization
+changes, and a late result cannot update the new scope. The focused Accounting
+API and page suites pass 195 tests; an authenticated browser load of the Vite
+Accounting reports route had no console or request errors. The live workspace
+had no foreign receivables, so the completed-result text is covered by the
+page test rather than a persisted browser revaluation.
+
 The user did not supply a delivery date or speed target. Phase 0 measures the
 current system and locks targets. Until then, the working targets are at least
 2x faster median edit-to-ready time for a representative UI change, no more

@@ -603,7 +603,7 @@ export class AccountingApiError extends Error {
 
 /** Governed writes answer 202 while they wait in the Approvals inbox. */
 export type AccountingActionOutcome =
-  | { kind: "completed" }
+  | { kind: "completed"; fxRevaluation?: AccountingFxRevaluationResult }
   | { kind: "pending"; reason: string };
 
 export type AccountingRecordPaymentAction = z.infer<typeof RecordPaymentActionSchema>;
@@ -614,6 +614,7 @@ export type AccountingReverseEntryAction = z.infer<typeof ReverseEntryActionSche
 export type AccountingReversePaymentAction = z.infer<typeof ReversePaymentActionSchema>;
 export type AccountingBankReconciliationWriteAction = z.infer<typeof BankReconciliationWriteActionSchema>;
 export type AccountingPeriodFxWriteAction = z.infer<typeof PeriodFxWriteActionSchema>;
+export type AccountingFxRevaluationResult = z.infer<typeof RevalueForeignReceivablesOutputSchema>;
 
 export async function readPendingAccountingBankReconciliationWrite(scope: AccountingPaymentRetryScope): Promise<AccountingBankReconciliationWriteAction | null> {
   const { scopeHash } = await accountingPaymentScope(scope);
@@ -1080,6 +1081,9 @@ async function submitGoAccountingPeriodFxWrite(
     throw new AccountingApiError(response.status, "The Go Accounting service returned an unexpected period or FX action response.", true);
   }
   await clearAccountingPeriodFxWriteAttempt(attempt);
+  if (action.action === "revalueForeignReceivables") {
+    return { kind: "completed", fxRevaluation: output.data as AccountingFxRevaluationResult };
+  }
   return { kind: "completed" };
 }
 

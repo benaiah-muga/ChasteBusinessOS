@@ -126,7 +126,7 @@ interface StubOptions {
   taxCodes?: unknown;
   actionResponse?: Response | (() => Response);
   goPaymentResponse?: () => Response;
-  goPeriodFxWriteResponse?: () => Response;
+  goPeriodFxWriteResponse?: () => Response | Promise<Response>;
   goCreateInvoiceResponse?: () => Response;
   goCreditNoteResponse?: () => Response;
   goReverseEntryResponse?: () => Response;
@@ -1302,7 +1302,49 @@ describe("AccountingPage tabs", () => {
         intentId: expect.any(String),
       });
     });
+    const notice = await screen.findByRole("status");
+    expect(notice.textContent).toContain("Net adjustment:");
+    expect(notice.textContent).toContain("1 foreign currency revalued.");
     expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST")).toBe(false);
+  });
+
+  it("does not show a late FX revaluation result after switching organizations", async () => {
+    const ids = {
+      actorId: "55555555-5555-4555-8555-555555555555",
+      organizationId: "66666666-6666-4666-8666-666666666666",
+    };
+    let finishRequest: ((response: Response) => void) | undefined;
+    const delayedResponse = new Promise<Response>((resolve) => { finishRequest = resolve; });
+    const { calls } = stubAccounting({ goPeriodFxWriteResponse: () => delayedResponse });
+    const view = render(<AccountingPage {...ids} />);
+    await screen.findByRole("navigation", { name: "Accounting sections" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Reports/ }));
+    fireEvent.change(await screen.findByLabelText("Revaluation year"), { target: { value: "2026" } });
+    fireEvent.change(screen.getByLabelText("Revaluation month"), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Revalue foreign receivables" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Post FX revaluation" }));
+    await waitFor(() => expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.revalueForeignReceivables"))).toBe(true));
+
+    view.rerender(<AccountingPage actorId={ids.actorId} organizationId="77777777-7777-4777-8777-777777777777" />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Post FX revaluation" })).toBeNull();
+    const revalueButton = await screen.findByRole("button", { name: "Revalue foreign receivables" }) as HTMLButtonElement;
+    finishRequest?.(Response.json({ ok: true, data: {
+      revaluationId: "11111111-1111-4111-8111-111111111111",
+      entryId: "22222222-2222-4222-8222-222222222222",
+      totalAdjustmentMinor: -1250,
+      currencies: [{ currency: "EUR", foreignMinor: 10000, historicalBaseMinor: 11000, closeBaseMinor: 9750, adjustmentMinor: -1250, rateNum: 975, rateDen: 1000 }],
+      alreadyReviewed: false,
+    } }));
+
+    await waitFor(() => {
+      expect(revalueButton.disabled).toBe(false);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(screen.queryByText(/Net adjustment:/)).toBeNull();
+    expect(screen.queryByText(/foreign currency revalued/)).toBeNull();
+    expect(calls.filter((call) => call.url === "/api/capabilities/execute" && call.body?.includes("accounting.revalueForeignReceivables"))).toHaveLength(1);
   });
 
   it("restores an unresolved FX revaluation and retries the saved period with the same intent", async () => {
@@ -1353,7 +1395,10 @@ describe("AccountingPage tabs", () => {
     expect(JSON.parse(writes[1]!.body!).intentId).toBe(firstIntent);
     expect(JSON.parse(writes[1]!.body!)).toMatchObject({ input: { year: 2025, month: 8 } });
     expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST")).toBe(false);
-    expect(await screen.findByText("FX revaluation 2025-08 done.")).toBeTruthy();
+    const completedNotice = await screen.findByRole("status");
+    expect(completedNotice.textContent).toContain("FX revaluation 2025-08 done.");
+    expect(completedNotice.textContent).toContain("Net adjustment:");
+    expect(completedNotice.textContent).toContain("0 foreign currencies revalued.");
     await waitFor(() => expect(screen.queryByText(/This FX revaluation is unresolved/)).toBeNull());
     expect(screen.queryByRole("heading", { name: "Revalue foreign receivables for 2025-08" })).toBeNull();
     await expect(readPendingAccountingPeriodFxWrite(props)).resolves.toBeNull();

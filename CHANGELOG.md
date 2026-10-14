@@ -21,6 +21,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Inventory can reconcile stock value to the General Ledger and reverse recent valuation summaries through Go, with policy-dependent approval handling and exact retry recovery for uncertain actions. Posting remains available to `inventory.write` users when the separate Accounting history read is denied; reversing a prior summary requires `accounting.read`.
 - Go Messaging agents can query organization-scoped receivables aging through the governed `accounting.arAging` capability when the signed-in user has `accounting.read`.
 - Vite Accounting can post period-end foreign receivables revaluations through the approval-gated Go capability, with scoped retry recovery for pending or uncertain submissions.
+- Vite Accounting reports the net base-currency adjustment and number of foreign currencies after a completed Go revaluation.
 
 ### Fixed
 
@@ -29,6 +30,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Payroll blocks draft creation when a run already exists for the selected period, preventing a duplicate-period request from leaving an unresolved retry marker.
 - Go payroll domain rejections now return definite 422 capability results, so clients can clear retry markers for duplicate periods and invalid lifecycle transitions while internal failures remain retryable.
 - Vite POS session history no longer adds the opening float twice after a register closes; the Go closed-session total is shown as-is.
+- Vite Accounting clears an in-flight revaluation confirmation when the active actor or organization changes, preventing a stale dialog from posting under the new scope.
 
 ### Changed
 
