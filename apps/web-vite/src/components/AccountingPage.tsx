@@ -733,6 +733,16 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     [load, actorId, organizationId, state],
   );
 
+  const refreshBanking = useCallback(async (): Promise<AccountingBanking | null> => {
+    try {
+      const banking = await fetchAccountingBanking(organizationId);
+      setState((current) => current.status === "ready" ? { ...current, banking } : current);
+      return banking;
+    } catch {
+      return null;
+    }
+  }, [organizationId]);
+
   const filteredEntries = useMemo(
     () => (state.status === "ready" ? filterEntries(state.data.entries, search) : []),
     [state, search],
@@ -984,6 +994,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               banking={state.banking}
               busy={busy}
               pendingReconciliationWrite={pendingBankReconciliationWrite !== null}
+              refreshBanking={refreshBanking}
               onAction={runAction}
             />
           )}
@@ -2989,12 +3000,14 @@ function BankSection({
   banking,
   busy,
   pendingReconciliationWrite,
+  refreshBanking,
   onAction,
 }: {
   baseCurrency: string;
   banking: AccountingBanking | null;
   busy: boolean;
   pendingReconciliationWrite: boolean;
+  refreshBanking: () => Promise<AccountingBanking | null>;
   onAction: (
     path: "/api/accounting" | "/api/banking",
     payload: Record<string, unknown>,
@@ -3008,6 +3021,8 @@ function BankSection({
   const [newLast4, setNewLast4] = useState("");
   const [newCurrencyCode, setNewCurrencyCode] = useState(baseCurrency);
   const [matchPicks, setMatchPicks] = useState<Record<string, string>>({});
+  const [matchError, setMatchError] = useState<string | null>(null);
+  const [checkingMatch, setCheckingMatch] = useState(false);
   const accounts = banking?.accounts ?? [];
 
   useEffect(() => {
@@ -3015,6 +3030,25 @@ function BankSection({
     if (!accountId && only) setAccountId(only.id);
     else if (accountId && !accounts.some((account) => account.id === accountId)) setAccountId("");
   }, [accounts, accountId]);
+
+  useEffect(() => {
+    setMatchPicks((current) => {
+      const next = { ...current };
+      for (const transaction of banking?.unmatched ?? []) {
+        const picked = next[transaction.id];
+        if (!picked) continue;
+        const [kind, id] = picked.split(":", 2);
+        const amount = transaction.remainingMinor ?? transaction.amountMinor;
+        const valid = kind === "payment"
+          ? (banking?.payments ?? []).some((payment) => payment.id === id && payment.currencyCode === transaction.currencyCode && (payment.remainingMinor ?? payment.amountMinor) === amount)
+          : kind === "entry"
+            ? (banking?.entries ?? []).some((entry) => entry.id === id && entry.currencyCode === transaction.currencyCode && entry.remainingMinor === amount)
+            : false;
+        if (!valid) delete next[transaction.id];
+      }
+      return next;
+    });
+  }, [banking]);
 
   if (!banking) {
     return (
@@ -3206,38 +3240,78 @@ function BankSection({
                   {formatMoneyOrMinor(transaction.currencyCode, transaction.amountMinor)}
                 </span>
                 <select
-                  disabled={pendingReconciliationWrite}
-                  aria-label={`Match ${transaction.description} against payment`}
+                  disabled={pendingReconciliationWrite || checkingMatch}
+                  aria-label={`Match ${transaction.description} against payment or journal entry`}
                   value={matchPicks[transaction.id] ?? ""}
                   onChange={(event) =>
                     setMatchPicks((current) => ({ ...current, [transaction.id]: event.target.value }))
                   }
                 >
-                  <option value="">Match to payment</option>
-                  {banking.payments
-                    .filter((payment) => payment.currencyCode === transaction.currencyCode)
-                    .map((payment) => (
-                      <option key={payment.id} value={payment.id}>
-                        {payment.customerName} · #{payment.invoiceNumber ?? "?"} ·{" "}
-                        {formatMoneyOrMinor(payment.currencyCode ?? transaction.currencyCode, payment.amountMinor)}
-                      </option>
-                    ))}
+                  <option value="">Choose payment or journal entry</option>
+                  {banking.payments.some((payment) => payment.currencyCode === transaction.currencyCode) && (
+                    <optgroup label="Customer payments">
+                      {banking.payments
+                        .filter((payment) => payment.currencyCode === transaction.currencyCode && (payment.remainingMinor ?? payment.amountMinor) === (transaction.remainingMinor ?? transaction.amountMinor))
+                        .map((payment) => (
+                          <option key={payment.id} value={`payment:${payment.id}`}>
+                            {payment.customerName} · #{payment.invoiceNumber ?? "?"} ·{" "}
+                            {formatMoneyOrMinor(payment.currencyCode ?? transaction.currencyCode, payment.remainingMinor ?? payment.amountMinor)} remaining
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
+                  {(banking.entries ?? []).some((entry) => entry.currencyCode === transaction.currencyCode && entry.remainingMinor === (transaction.remainingMinor ?? transaction.amountMinor)) && (
+                    <optgroup label="Journal entries">
+                      {(banking.entries ?? [])
+                        .filter((entry) => entry.currencyCode === transaction.currencyCode && entry.remainingMinor === (transaction.remainingMinor ?? transaction.amountMinor))
+                        .map((entry) => (
+                          <option key={entry.id} value={`entry:${entry.id}`}>
+                            {entry.memo} · {formatMoneyOrMinor(entry.currencyCode, entry.remainingMinor)} remaining
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
                 </select>
                 <button
                   type="button"
                   className="accounting-button accounting-button-small"
-                  disabled={busy || pendingReconciliationWrite || !matchPicks[transaction.id]}
-                  onClick={() =>
-                    void onAction(
-                      "/api/banking",
-                      {
-                        action: "matchBankTransaction",
-                        transactionId: transaction.id,
-                        paymentId: matchPicks[transaction.id],
-                      },
-                      "Match",
-                    )
-                  }
+                  disabled={busy || pendingReconciliationWrite || checkingMatch || !matchPicks[transaction.id]}
+                  onClick={async () => {
+                    const [kind, id] = (matchPicks[transaction.id] ?? "").split(":", 2);
+                    if (!id || (kind !== "payment" && kind !== "entry")) return;
+                    setCheckingMatch(true);
+                    setMatchError(null);
+                    try {
+                      const fresh = await refreshBanking();
+                      const currentLine = fresh?.unmatched.find((row) => row.id === transaction.id);
+                      const currentAmount = currentLine?.remainingMinor ?? currentLine?.amountMinor;
+                      const paymentCandidate = kind === "payment"
+                        ? fresh?.payments.find((payment) => payment.id === id && payment.currencyCode === currentLine?.currencyCode && (payment.remainingMinor ?? payment.amountMinor) === currentAmount)
+                        : undefined;
+                      const entryCandidate = kind === "entry"
+                        ? fresh?.entries.find((entry) => entry.id === id && entry.currencyCode === currentLine?.currencyCode && entry.remainingMinor === currentAmount)
+                        : undefined;
+                      const currentCandidate = paymentCandidate ?? entryCandidate;
+                      if (!currentLine || !currentCandidate) {
+                        setMatchPicks((current) => ({ ...current, [transaction.id]: "" }));
+                        setMatchError("That statement line or candidate changed. Choose a current exact match and try again.");
+                        return;
+                      }
+                      await onAction(
+                        "/api/banking",
+                        {
+                          action: "matchBankTransaction",
+                          transactionId: transaction.id,
+                          ...(paymentCandidate
+                            ? { paymentId: id, amountMinor: paymentCandidate.remainingMinor ?? paymentCandidate.amountMinor }
+                            : { entryId: id }),
+                        },
+                        "Match",
+                      );
+                    } finally {
+                      setCheckingMatch(false);
+                    }
+                  }}
                 >
                   Match
                 </button>
@@ -3259,6 +3333,7 @@ function BankSection({
             ))}
           </ul>
         )}
+        {matchError && <p className="accounting-figure-value is-danger" role="alert">{matchError}</p>}
       </div>
 
       {(banking.matched?.length ?? 0) > 0 && (

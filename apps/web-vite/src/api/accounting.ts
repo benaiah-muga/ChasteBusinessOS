@@ -205,6 +205,7 @@ const BankTransactionSchema = z.object({
   currencyCode: currency,
   postedAt: timestamp,
   amountMinor: minor,
+  remainingMinor: minor.optional(),
   description: z.string(),
 }).strict();
 
@@ -214,7 +215,16 @@ const BankPaymentSchema = z.object({
   currencyCode: currency.optional(),
   customerName: z.string(),
   amountMinor: minor,
+  remainingMinor: minor.optional(),
   receivedAt: timestamp,
+}).strict();
+
+const BankEntrySchema = z.object({
+  id: z.string().min(1),
+  memo: z.string(),
+  currencyCode: currency,
+  postedAt: timestamp,
+  remainingMinor: minor,
 }).strict();
 
 const BankSummarySchema = z.object({
@@ -237,6 +247,7 @@ const BankingSchema = z.object({
   matched: z.array(BankTransactionSchema),
   excluded: z.array(BankTransactionSchema),
   payments: z.array(BankPaymentSchema),
+  entries: z.array(BankEntrySchema).default([]),
   summary: BankSummarySchema,
 }).strict();
 

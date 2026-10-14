@@ -662,7 +662,8 @@ describe("accounting API: capability reads", () => {
       unmatched: [{ id: "line-unmatched", bankAccountId: "go-account", currencyCode: "USD", postedAt: "2026-10-01T00:00:00.000Z", amountMinor: 100, description: "Incoming wire" }],
       matched: [{ id: "line-matched", bankAccountId: "go-account", currencyCode: "USD", postedAt: "2026-10-02T00:00:00.000Z", amountMinor: 200, description: "Matched receipt" }],
       excluded: [{ id: "line-excluded", bankAccountId: "go-account", currencyCode: "USD", postedAt: "2026-10-03T00:00:00.000Z", amountMinor: -50, description: "Bank fee" }],
-      payments: [{ id: "payment-1", invoiceNumber: 4, currencyCode: "USD", customerName: "Buyer", amountMinor: 100, receivedAt: "2026-10-01T00:00:00.000Z" }],
+      payments: [{ id: "payment-1", invoiceNumber: 4, currencyCode: "USD", customerName: "Buyer", amountMinor: 100, remainingMinor: 60, receivedAt: "2026-10-01T00:00:00.000Z" }],
+      entries: [{ id: "entry-1", memo: "Vendor payment", currencyCode: "USD", postedAt: "2026-09-30T00:00:00.000Z", remainingMinor: -500 }],
       summary: {
         accounts: [{ bankAccountId: "go-account", name: "Operating", currencyCode: "USD", last4: "1234", balanceMinor: 2_000, count: 3, moneyInMinor: 300, moneyOutMinor: 50 }],
         unmatchedCount: 1,

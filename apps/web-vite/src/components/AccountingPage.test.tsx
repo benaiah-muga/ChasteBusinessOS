@@ -121,6 +121,7 @@ interface StubOptions {
   reports?: unknown;
   reportsStatus?: number;
   banking?: unknown;
+  bankingReads?: unknown[];
   rejectCashBasis?: boolean;
   rejectBanking?: boolean;
   taxCodes?: unknown;
@@ -154,6 +155,7 @@ function stubAccounting(options: StubOptions = {}) {
     locks: { request: runWithTestLock },
   }));
   const calls: { url: string; method: string; body: string | null; headers?: HeadersInit }[] = [];
+  let bankingReadCount = 0;
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -169,9 +171,12 @@ function stubAccounting(options: StubOptions = {}) {
       const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
       if (capabilityId === "accounting.listBankingWorkspace") {
         if (options.rejectBanking) throw new TypeError("Network unavailable");
-        return options.banking === null
+        const workspace = options.bankingReads && bankingReadCount < options.bankingReads.length
+          ? options.bankingReads[bankingReadCount++]
+          : options.banking;
+        return workspace === null
           ? Response.json({ error: "no banking" }, { status: 500 })
-          : Response.json({ ok: true, data: options.banking ?? {
+          : Response.json({ ok: true, data: workspace ?? {
             accounts: [], unmatched: [], matched: [], excluded: [], payments: [],
             summary: { accounts: [], unmatchedCount: 0 },
           } });
@@ -1513,15 +1518,15 @@ describe("AccountingPage tabs", () => {
     await renderReady();
 
     fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
-    fireEvent.change(await screen.findByLabelText("Match Incoming transfer against payment"), {
-      target: { value: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+    fireEvent.change(await screen.findByLabelText("Match Incoming transfer against payment or journal entry"), {
+      target: { value: "payment:cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Match" }));
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Retry exact match" })).toBeTruthy();
     });
-    expect(screen.getByLabelText("Match Incoming transfer against payment")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Match Incoming transfer against payment or journal entry")).toHaveProperty("disabled", true);
     expect(calls.some((call) => call.url === "/api/banking" && call.method === "POST")).toBe(false);
     const initial = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.matchBankTransaction"'))!.body!) as Record<string, unknown>;
 
@@ -1536,6 +1541,114 @@ describe("AccountingPage tabs", () => {
     expect(writes[0]).toEqual(initial);
     expect(writes[1]).toEqual(initial);
     expect(writes[0]).toMatchObject({ capabilityId: "accounting.matchBankTransaction", input: { transactionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", paymentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } });
+  });
+
+  it("matches a statement line to a same-currency journal entry through Go", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    const { calls } = stubAccounting({
+      banking: {
+        accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: null, balanceMinor: 0 }],
+        unmatched: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: -12_500, remainingMinor: -10_000, description: "Supplier transfer" }],
+        matched: [],
+        excluded: [],
+        payments: [],
+        entries: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", memo: "Vendor payment run", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", remainingMinor: -10_000 }],
+        summary: { accounts: [], unmatchedCount: 1 },
+      },
+    });
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
+    fireEvent.change(await screen.findByLabelText("Match Supplier transfer against payment or journal entry"), {
+      target: { value: "entry:cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Match" }));
+
+    await waitFor(() => {
+      const write = calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.matchBankTransaction"'));
+      expect(JSON.parse(write!.body!)).toMatchObject({
+        capabilityId: "accounting.matchBankTransaction",
+        input: { transactionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", entryId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+      });
+    });
+  });
+
+  it("matches the positive remaining amount of a partially allocated payment", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    const { calls } = stubAccounting({
+      banking: {
+        accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: null, balanceMinor: 0 }],
+        unmatched: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 6_000, remainingMinor: 6_000, description: "Remaining buyer transfer" }],
+        matched: [],
+        excluded: [],
+        payments: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", invoiceNumber: 1042, currencyCode: "USD", customerName: "Partial buyer", amountMinor: 10_000, remainingMinor: 6_000, receivedAt: "2026-06-01T00:00:00.000Z" }],
+        entries: [],
+        summary: { accounts: [], unmatchedCount: 1 },
+      },
+    });
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
+    fireEvent.change(await screen.findByLabelText("Match Remaining buyer transfer against payment or journal entry"), {
+      target: { value: "payment:cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Match" }));
+
+    await waitFor(() => {
+      const write = calls.find((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.matchBankTransaction"'));
+      expect(JSON.parse(write!.body!)).toMatchObject({
+        capabilityId: "accounting.matchBankTransaction",
+        input: { transactionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", paymentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", amountMinor: 6_000 },
+      });
+    });
+  });
+
+  it("offers only candidates that exactly explain the current line remainder", async () => {
+    stubAccounting({
+      banking: {
+        accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: null, balanceMinor: 0 }],
+        unmatched: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 12_500, remainingMinor: 10_000, description: "Partial customer deposit" }],
+        matched: [],
+        excluded: [],
+        payments: [
+          { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", invoiceNumber: 10, currencyCode: "USD", customerName: "Exact buyer", amountMinor: 12_500, remainingMinor: 10_000, receivedAt: "2026-06-01T00:00:00.000Z" },
+          { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", invoiceNumber: 11, currencyCode: "USD", customerName: "Wrong amount buyer", amountMinor: 12_500, remainingMinor: 9_999, receivedAt: "2026-06-01T00:00:00.000Z" },
+        ],
+        entries: [
+          { id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", memo: "Exact cash entry", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", remainingMinor: 10_000 },
+          { id: "ffffffff-ffff-4fff-8fff-ffffffffffff", memo: "Wrong amount entry", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", remainingMinor: 9_999 },
+        ],
+        summary: { accounts: [], unmatchedCount: 1 },
+      },
+    });
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
+    const picker = await screen.findByLabelText("Match Partial customer deposit against payment or journal entry");
+    expect(within(picker).getByRole("option", { name: /Exact buyer/ })).toBeTruthy();
+    expect(within(picker).getByRole("option", { name: /Exact cash entry/ })).toBeTruthy();
+    expect(within(picker).queryByRole("option", { name: /Wrong amount/ })).toBeNull();
+  });
+
+  it("refreshes and rejects a journal-entry candidate that went stale before dispatch", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    const initial = {
+      accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: null, balanceMinor: 0 }],
+      unmatched: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: -10_000, description: "Supplier transfer" }],
+      matched: [],
+      excluded: [],
+      payments: [],
+      entries: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", memo: "Vendor payment run", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", remainingMinor: -10_000 }],
+      summary: { accounts: [], unmatchedCount: 1 },
+    };
+    const changed = { ...initial, entries: [{ ...initial.entries[0]!, remainingMinor: -9_000 }] };
+    const { calls } = stubAccounting({ bankingReads: [initial, changed] });
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
+    fireEvent.change(await screen.findByLabelText("Match Supplier transfer against payment or journal entry"), {
+      target: { value: "entry:cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Match" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("That statement line or candidate changed");
+    expect(calls.some((call) => call.body?.includes('"capabilityId":"accounting.matchBankTransaction"'))).toBe(false);
   });
 
   it("recovers an unresolved Go unmatch with the same intent after reload", async () => {

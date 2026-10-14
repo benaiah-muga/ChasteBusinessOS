@@ -4585,3 +4585,14 @@ new owners and the manifest shows zero legacy runtime paths.
      typecheck and lint passing. Authenticated browser proof aborted the first
      request, recovered after reload, refused a different workspace without a
      capability call, then replayed successfully in the original workspace.
+
+425. (Runtime verified) Vite Accounting now matches bank statement lines to
+     exact remaining payments or whole posted journal entries through Go. Go
+     projects org-scoped balances; Vite filters by signed amount and currency,
+     refreshes before dispatch, and rejects stale candidates. Partial payment
+     matching sends the exact remaining amount. Focused Banking Vite tests pass
+     201 cases, the Go workspace integration test and Vite typecheck/lint pass.
+     An authenticated browser proof paid a synthetic UGX 6,000 invoice, imported
+     a matching bank line, matched it to the journal entry, and confirmed the
+     line remained matched after reload. No console errors or failed requests
+     were recorded.
