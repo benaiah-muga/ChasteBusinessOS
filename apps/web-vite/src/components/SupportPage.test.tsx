@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SupportPage } from "./SupportPage";
 
 const conversationId = "3f1b0c6e-2f6a-4a0a-9c9e-6c1a2b3d4e5f";
+const organizationId = "66666666-6666-4666-8666-666666666666";
 const otherConversationId = "5c2d1e7b-1a2b-4c3d-8e9f-0a1b2c3d4e5f";
 const customerId = "b2b7d5f0-9a3a-4f38-8f47-1a2b3c4d5e6f";
 
@@ -80,15 +81,42 @@ function supportFetch(handlers: Handlers = {}) {
       calls.push({ path, payload });
       if (path === "/api/support/draft") return handlers.draft?.(String(payload.conversationId)) ?? Response.json({ draft: "Draft unavailable." });
       if (path === "/api/capabilities/execute") {
-        return handlers.execute?.(payload) ?? Response.json({ ok: true, data: {} });
+        if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
+        if (payload.capabilityId === "support.readConversation") {
+          const legacyThread = handlers.getThread ? await handlers.getThread().json() : thread;
+          const current = legacyThread as typeof thread;
+          return Response.json({ ok: true, data: { ...current, conversation: { ...current.conversation, customerEmail: null } } });
+        }
+        if (payload.capabilityId === "support.listLibrary") return Response.json({ ok: true, data: { canned: [], articles: [] } });
+        const defaultRead = () => {
+          if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
+          if (payload.capabilityId === "support.readConversation") return Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } });
+          return Response.json({ ok: true, data: { canned: [], articles: [] } });
+        };
+        if (handlers.execute) {
+          const response = handlers.execute(payload);
+          if (["support.listConversations", "support.readConversation", "support.listLibrary"].includes(String(payload.capabilityId))) {
+            const result = await response.clone().json().catch(() => null) as { data?: unknown } | null;
+            if (result?.data && typeof result.data === "object" && Object.keys(result.data).length === 0) return defaultRead();
+          }
+          return response;
+        }
+        if (["support.listConversations", "support.readConversation", "support.listLibrary"].includes(String(payload.capabilityId))) return defaultRead();
+        if (payload.capabilityId === "support.postMessage") return Response.json({ ok: true, data: { messageId: "m1", senderType: "staff" } });
+        if (payload.capabilityId === "support.resolveConversation") return Response.json({ ok: true, data: { status: "resolved" } });
+        if (payload.capabilityId === "support.escalateConversation") return Response.json({ ok: true, data: { status: "escalated" } });
+        if (payload.capabilityId === "support.updateTicket") return Response.json({ ok: true, data: { updated: true } });
+        if (payload.capabilityId === "support.reopenConversation") return Response.json({ ok: true, data: { status: "open" } });
+        if (payload.capabilityId === "support.startConversation") return Response.json({ ok: true, data: { conversationId } });
+        if (payload.capabilityId === "support.createCannedResponse") return Response.json({ ok: true, data: { cannedResponseId: "c1" } });
+        if (payload.capabilityId === "support.createKbArticle") return Response.json({ ok: true, data: { articleId: conversationId } });
+        return Response.json({ error: "unexpected capability" }, { status: 400 });
       }
       return handlers.post?.(payload) ?? Response.json({ ok: true, data: { updated: true } });
     }
     if (path === "/api/modules") return moduleSwitchboard();
     if (path === "/api/team") return handlers.team?.() ?? Response.json({ members: [] });
     if (path === "/api/support/customers") return Response.json({ customers: [] });
-    if (path === "/api/support") return Response.json({ conversations });
-    if (path.startsWith("/api/support?")) return handlers.getThread?.() ?? Response.json(thread);
     return new Response(null, { status: 404 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -111,13 +139,13 @@ afterEach(() => {
 const SLOW = 20_000;
 
 describe("Vite support page", () => {
-  it("summarises the inbox and opens the first conversation", async () => {
+  it("summarises the inbox and opens the first conversation from Go capabilities", async () => {
     const { fetchMock } = supportFetch();
-    render(<SupportPage />);
+    render(<SupportPage organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "Support" })).not.toBeNull();
     expect(await screen.findByText("Invoice question")).not.toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith("/api/support", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock.mock.calls.map(([path]) => String(path))).toContain("/api/capabilities/execute");
   }, SLOW);
 
   it("quick-creates a conversation customer through the Go CRM capability with organization-scoped retry", async () => {
@@ -152,7 +180,6 @@ describe("Vite support page", () => {
   }, SLOW);
 
   it("loads the inbox and selected thread from Go capabilities without legacy reads", async () => {
-    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
     const { fetchMock, calls } = supportFetch({
       execute: (payload) => payload.capabilityId === "support.listConversations"
         ? Response.json({ ok: true, data: { conversations } })
@@ -161,7 +188,7 @@ describe("Vite support page", () => {
           conversation: { ...thread.conversation, customerEmail: null },
         } }),
     });
-    render(<SupportPage />);
+    render(<SupportPage organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "Support" })).not.toBeNull();
     expect(await screen.findByText("Invoice question")).not.toBeNull();
@@ -181,14 +208,13 @@ describe("Vite support page", () => {
     });
   }, SLOW);
 
-  it("loads the library from Go when the dedicated selector is enabled", async () => {
-    vi.stubGlobal("__GO_SUPPORT_LIBRARY_READS__", true);
+  it("loads the library through the Go capability", async () => {
     const { fetchMock, calls } = supportFetch({
       execute: (payload) => Response.json({ ok: true, data: payload.capabilityId === "support.listLibrary"
         ? { canned: [], articles: [] }
         : {} }),
     });
-    render(<SupportPage />);
+    render(<SupportPage organizationId={organizationId} />);
 
     await screen.findByText("Latest activity");
     fireEvent.click(screen.getByRole("button", { name: "Library" }));
@@ -201,8 +227,6 @@ describe("Vite support page", () => {
     const actorId = "55555555-5555-4555-8555-555555555555";
     const organizationId = "66666666-6666-4666-8666-666666666666";
     const storageKey = `chaste.support.canned-response-intent.v1:${actorId}:${organizationId}`;
-    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
-    vi.stubGlobal("__GO_SUPPORT_LIBRARY_READS__", true);
     const first = supportFetch({
       execute: (payload) => payload.capabilityId === "support.listLibrary"
         ? Response.json({ ok: true, data: { canned: [], articles: [] } })
@@ -248,8 +272,6 @@ describe("Vite support page", () => {
     const actorId = "55555555-5555-4555-8555-555555555555";
     const organizationId = "66666666-6666-4666-8666-666666666666";
     const storageKey = `chaste.support.conversation-write-intent.v1:pending:${actorId}:${organizationId}`;
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
-    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
 
     const execute = (result: "uncertain" | "complete") => (payload: Record<string, unknown>) => {
       if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
@@ -299,33 +321,40 @@ describe("Vite support page", () => {
     expect(second.fetchMock.mock.calls.map(([path]) => String(path))).not.toContain("/api/support");
   }, SLOW);
 
-  it("keeps a saved action visible but disables retry while the Go selector is rolled back", async () => {
+  it("restores and retries an unresolved Go action without a legacy fallback", async () => {
     const actorId = "55555555-5555-4555-8555-555555555555";
     const organizationId = "66666666-6666-4666-8666-666666666666";
     const storageKey = `chaste.support.conversation-write-intent.v1:pending:${actorId}:${organizationId}`;
     const input = { conversationId, body: "Please check the invoice.", from: "staff" };
     const capabilityId = "support.postMessage";
+    const intentId = "77777777-7777-4777-8777-777777777777";
     window.localStorage.setItem(storageKey, JSON.stringify({
       version: 1,
-      intentId: "77777777-7777-4777-8777-777777777777",
+      intentId,
       capabilityId,
       input,
       fingerprint: JSON.stringify({ capabilityId, input }),
     }));
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", false);
-    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
-    supportFetch({
-      execute: (payload) => payload.capabilityId === "support.listConversations"
-        ? Response.json({ ok: true, data: { conversations } })
-        : Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } }),
+    const { calls } = supportFetch({
+      execute: (payload) => {
+        if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
+        if (payload.capabilityId === "support.readConversation") return Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } });
+        if (payload.capabilityId === "support.postMessage") return Response.json({ ok: true, data: { messageId: customerId, senderType: "staff" } });
+        return Response.json({ error: "unexpected capability" }, { status: 400 });
+      },
     });
     render(<SupportPage actorId={actorId} organizationId={organizationId} />);
 
     const retry = await screen.findByRole("button", { name: "Retry saved action" });
-    expect((retry as HTMLButtonElement).disabled).toBe(true);
-    expect((await screen.findByPlaceholderText("Log what the customer wrote, or write the staff reply…") as HTMLTextAreaElement).value)
-      .toBe(input.body);
-    expect(await screen.findByText(/Re-enable Go conversation writes/)).not.toBeNull();
+    expect((retry as HTMLButtonElement).disabled).toBe(false);
+    expect((await screen.findByPlaceholderText("Log what the customer wrote, or write the staff reply…") as HTMLTextAreaElement).value).toBe(input.body);
+    fireEvent.click(retry);
+    await waitFor(() => expect(window.localStorage.getItem(storageKey)).toBeNull());
+    expect(calls.find((call) => call.payload?.capabilityId === "support.postMessage")?.payload).toMatchObject({
+      capabilityId,
+      input,
+      intentId,
+    });
   }, SLOW);
 
   it("restores an unresolved escalation reason after the thread selection loads", async () => {
@@ -341,8 +370,6 @@ describe("Vite support page", () => {
       input,
       fingerprint: JSON.stringify({ capabilityId, input }),
     }));
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
-    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
     supportFetch({
       execute: (payload) => payload.capabilityId === "support.listConversations"
         ? Response.json({ ok: true, data: { conversations } })
@@ -369,9 +396,6 @@ describe("Vite support page", () => {
       input,
       fingerprint: JSON.stringify({ capabilityId, input }),
     }));
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", false);
-    vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", true);
-    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
     const { fetchMock, calls } = supportFetch({
       execute: (payload) => {
         if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
@@ -402,7 +426,6 @@ describe("Vite support page", () => {
     const actorId = "55555555-5555-4555-8555-555555555555";
     const organizationId = "66666666-6666-4666-8666-666666666666";
     const assigneeId = "77777777-7777-4777-8777-777777777777";
-    vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", true);
     const { calls } = supportFetch({
       getThread: () => Response.json({
         ...thread,
@@ -442,7 +465,7 @@ describe("Vite support page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SupportPage />);
+    render(<SupportPage organizationId={organizationId} />);
 
     expect(await screen.findByText(/Customer care is switched off/)).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -454,12 +477,12 @@ describe("Vite support page", () => {
         expect(requestedConversationId).toBe(conversationId);
         return Response.json({ draft: "Thanks for flagging this.", sessionId: "s1", steps: 4 });
       },
-      post: (payload) => {
-        if (payload.action === "send") return Response.json({ ok: true, data: { messageId: "m1", senderType: "agent" } });
+      execute: (payload) => {
+        if (payload.capabilityId === "support.postMessage") return Response.json({ ok: true, data: { messageId: customerId, senderType: "agent" } });
         return Response.json({ ok: true, data: { updated: true } });
       },
     });
-    render(<SupportPage />);
+    render(<SupportPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await openTab(/^Inbox/);
 
     fireEvent.click(await screen.findByRole("button", { name: "Draft reply" }));
@@ -468,20 +491,19 @@ describe("Vite support page", () => {
     expect((draftBox as HTMLTextAreaElement).value).toBe("Thanks for flagging this.");
     expect(calls.filter((call) => call.path === "/api/support/draft")).toHaveLength(1);
     expect(calls.find((call) => call.path === "/api/support/draft")?.payload).toEqual({ conversationId });
-    expect(calls.some((call) => call.payload!.action === "send")).toBe(false);
+    expect(calls.some((call) => call.payload!.capabilityId === "support.postMessage")).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Send to customer" }));
 
-    await waitFor(() => expect(calls.some((call) => call.payload!.action === "send")).toBe(true));
-    expect(calls.find((call) => call.payload!.action === "send")?.payload).toMatchObject({
-      conversationId,
-      body: "Thanks for flagging this.",
+    await waitFor(() => expect(calls.some((call) => call.payload!.capabilityId === "support.postMessage")).toBe(true));
+    expect(calls.find((call) => call.payload!.capabilityId === "support.postMessage")?.payload).toMatchObject({
+      capabilityId: "support.postMessage",
+      input: { conversationId, body: "Thanks for flagging this.", from: "staff" },
     });
     await waitFor(() => expect(screen.queryByLabelText("AI draft reply")).toBeNull());
   }, SLOW);
 
   it("surfaces an approval-pending write as pending, not as a failure or a save", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
     const { calls } = supportFetch({
       execute: (payload) => {
         if (payload.capabilityId === "support.resolveConversation") return Response.json({ ok: false, pendingApproval: true, reason: "Resolving needs human approval." }, { status: 202 });
@@ -499,9 +521,9 @@ describe("Vite support page", () => {
 
   it("requires a reason before escalating a conversation", async () => {
     const { calls } = supportFetch({
-      post: (payload) => (payload.action === "escalate" ? Response.json({ ok: true, data: { status: "escalated" } }) : Response.json({ ok: true, data: { updated: true } })),
+      execute: (payload) => payload.capabilityId === "support.escalateConversation" ? Response.json({ ok: true, data: { status: "escalated" } }) : Response.json({ ok: true, data: { updated: true } }),
     });
-    render(<SupportPage />);
+    render(<SupportPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await openTab(/^Inbox/);
 
     fireEvent.click(await screen.findByRole("button", { name: "Escalate" }));
@@ -509,38 +531,40 @@ describe("Vite support page", () => {
     const confirm = screen.getByRole("button", { name: "Confirm escalation" });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(confirm);
-    expect(calls.some((call) => call.payload!.action === "escalate")).toBe(false);
+    expect(calls.some((call) => call.payload!.capabilityId === "support.escalateConversation")).toBe(false);
 
     fireEvent.change(screen.getByLabelText("Why does this need a human owner?"), { target: { value: "Customer asked for a refund above policy" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm escalation" }));
 
-    await waitFor(() => expect(calls.some((call) => call.payload!.action === "escalate")).toBe(true));
-    expect(calls.find((call) => call.payload!.action === "escalate")?.payload).toMatchObject({
-      conversationId,
-      reason: "Customer asked for a refund above policy",
+    await waitFor(() => expect(calls.some((call) => call.payload!.capabilityId === "support.escalateConversation")).toBe(true));
+    expect(calls.find((call) => call.payload!.capabilityId === "support.escalateConversation")?.payload).toMatchObject({
+      capabilityId: "support.escalateConversation",
+      input: { conversationId, reason: "Customer asked for a refund above policy" },
     });
   }, SLOW);
 
   it("publishes a canned response with an intent identity and never without one", async () => {
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const organizationId = "66666666-6666-4666-8666-666666666666";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (init?.method === "POST") {
         const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
-        if (payload.action === "createCannedResponse") {
+        if (payload.capabilityId === "support.createCannedResponse") {
           expect(payload.intentId).toEqual(expect.any(String));
           return Response.json({ ok: true, data: { cannedResponseId: "c1" } });
         }
+        if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
+        if (payload.capabilityId === "support.readConversation") return Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } });
+        if (payload.capabilityId === "support.listLibrary") return Response.json({ ok: true, data: { canned: [], articles: [] } });
         return Response.json({ ok: true, data: { updated: true } });
       }
       if (path === "/api/modules") return moduleSwitchboard();
-      if (path === "/api/support?library=1") return Response.json({ canned: [], articles: [] });
-      if (path === "/api/support") return Response.json({ conversations });
-      if (path.startsWith("/api/support?")) return Response.json(thread);
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SupportPage />);
+    render(<SupportPage actorId={actorId} organizationId={organizationId} />);
     await screen.findByText("Latest activity");
     fireEvent.click(screen.getByRole("button", { name: "Library" }));
     await screen.findByText("Knowledge base");
@@ -551,7 +575,7 @@ describe("Vite support page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save response" }));
 
     await waitFor(() =>
-      expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/support?library=1")).toHaveLength(2),
+      expect(fetchMock.mock.calls.filter(([input, init]) => String(input) === "/api/capabilities/execute" && JSON.parse(String(init?.body)).capabilityId === "support.listLibrary")).toHaveLength(2),
     );
     expect((screen.getByLabelText("Canned shortcut") as HTMLInputElement).value).toBe("");
   }, SLOW);
@@ -560,16 +584,19 @@ describe("Vite support page", () => {
     const actorId = "55555555-5555-4555-8555-555555555555";
     const organizationId = "66666666-6666-4666-8666-666666666666";
     let createPayload: { capabilityId?: string; input?: Record<string, unknown> } | undefined;
-    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
-        createPayload = JSON.parse(String(init.body)) as { capabilityId?: string; input?: Record<string, unknown> };
-        return Response.json({ ok: true, data: { articleId: conversationId } });
+        const payload = JSON.parse(String(init.body)) as { capabilityId?: string; input?: Record<string, unknown> };
+        if (payload.capabilityId === "support.createKbArticle") {
+          createPayload = payload;
+          return Response.json({ ok: true, data: { articleId: conversationId } });
+        }
+        if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations: [] } });
+        if (payload.capabilityId === "support.listLibrary") return Response.json({ ok: true, data: { canned: [], articles: [] } });
+        return Response.json({ error: "unexpected capability" }, { status: 400 });
       }
       if (path === "/api/modules") return moduleSwitchboard();
-      if (path === "/api/support?library=1") return Response.json({ canned: [], articles: [] });
-      if (path === "/api/support") return Response.json({ conversations: [] });
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);

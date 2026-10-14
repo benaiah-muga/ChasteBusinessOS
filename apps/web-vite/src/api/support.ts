@@ -117,30 +117,6 @@ const GoSupportThreadConversationSchema = SupportConversationSchema.extend({
 }).strict();
 const GoCapabilityEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
 
-export function goSupportInboxReadsUseGo(): boolean {
-  return typeof __GO_SUPPORT_INBOX_READS__ !== "undefined" && __GO_SUPPORT_INBOX_READS__;
-}
-
-export function goSupportLibraryReadsUseGo(): boolean {
-  return typeof __GO_SUPPORT_LIBRARY_READS__ !== "undefined" && __GO_SUPPORT_LIBRARY_READS__;
-}
-
-export function goSupportCannedResponseWriteUseGo(): boolean {
-  return typeof __GO_SUPPORT_CANNED_RESPONSE_WRITE__ !== "undefined" && __GO_SUPPORT_CANNED_RESPONSE_WRITE__;
-}
-
-export function goSupportKbArticleWriteUseGo(): boolean {
-  return typeof __GO_SUPPORT_KB_ARTICLE_WRITE__ !== "undefined" && __GO_SUPPORT_KB_ARTICLE_WRITE__;
-}
-
-export function goSupportConversationWritesUseGo(): boolean {
-  return typeof __GO_SUPPORT_CONVERSATION_WRITES__ !== "undefined" && __GO_SUPPORT_CONVERSATION_WRITES__;
-}
-
-export function goSupportTicketWritesUseGo(): boolean {
-  return typeof __GO_SUPPORT_TICKET_WRITES__ !== "undefined" && __GO_SUPPORT_TICKET_WRITES__;
-}
-
 export type SupportCannedResponseRetryScope = { actorId: string | null; organizationId: string | null };
 export type SupportConversationWriteRetryScope = SupportCannedResponseRetryScope;
 
@@ -322,11 +298,15 @@ async function readGoSupportCapability<T>(
   capabilityId: "support.listConversations" | "support.readConversation" | "support.listLibrary" | "support.suggestCategory",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
+  organizationId: string | null | undefined,
   signal?: AbortSignal,
 ): Promise<T> {
+  const orgId = organizationId?.trim() ?? "";
+  if (!uuid.safeParse(orgId).success) throw new SupportApiError(0, "Wait for your organization to finish loading before reading customer care data.");
   const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
     cache: "no-store",
+    headers: { "X-Organization-ID": orgId },
     body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
   }, signal);
   if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
@@ -337,12 +317,8 @@ async function readGoSupportCapability<T>(
   return parsed.data;
 }
 
-export async function fetchSupportConversations(signal?: AbortSignal): Promise<SupportConversation[]> {
-  if (goSupportInboxReadsUseGo()) {
-    const parsed = await readGoSupportCapability("support.listConversations", { customerBoundOnly: true, limit: 100 }, ConversationListSchema, signal);
-    return parsed.conversations;
-  }
-  const parsed = await get("/api/support", ConversationListSchema, signal);
+export async function fetchSupportConversations(organizationId: string | null | undefined, signal?: AbortSignal): Promise<SupportConversation[]> {
+  const parsed = await readGoSupportCapability("support.listConversations", { customerBoundOnly: true, limit: 100 }, ConversationListSchema, organizationId, signal);
   return parsed.conversations;
 }
 
@@ -362,29 +338,22 @@ const GoSupportThreadSchema = z.object({
   messages: z.array(SupportMessageSchema),
 }).strict();
 
-const SupportThreadSchema = z.object({
-  conversation: SupportConversationSchema,
-  messages: z.array(SupportMessageSchema),
-}).strict();
-export type SupportThread = z.infer<typeof SupportThreadSchema>;
+export type SupportThread = { conversation: SupportConversation; messages: SupportMessage[] };
 
-export async function fetchSupportThread(conversationId: string, signal?: AbortSignal): Promise<SupportThread> {
+export async function fetchSupportThread(conversationId: string, organizationId: string | null | undefined, signal?: AbortSignal): Promise<SupportThread> {
   if (!uuid.safeParse(conversationId).success) throw new SupportApiError(0, "Choose a conversation to read its thread.");
-  if (goSupportInboxReadsUseGo()) {
-    const parsed = await readGoSupportCapability(
-      "support.readConversation",
-      { conversationId, limit: 200 },
-      GoSupportThreadSchema,
-      signal,
-    );
-    const { customerEmail: _customerEmail, customerId, ...conversation } = parsed.conversation;
-    return {
-      conversation: SupportConversationSchema.parse({ ...conversation, customerId: customerId ?? "" }),
-      messages: parsed.messages,
-    };
-  }
-  const query = new URLSearchParams({ id: conversationId });
-  return get(`/api/support?${query.toString()}`, SupportThreadSchema, signal);
+  const parsed = await readGoSupportCapability(
+    "support.readConversation",
+    { conversationId, limit: 200 },
+    GoSupportThreadSchema,
+    organizationId,
+    signal,
+  );
+  const { customerEmail: _customerEmail, customerId, ...conversation } = parsed.conversation;
+  return {
+    conversation: SupportConversationSchema.parse({ ...conversation, customerId: customerId ?? "" }),
+    messages: parsed.messages,
+  };
 }
 
 const SupportLibrarySchema = z.object({
@@ -393,11 +362,14 @@ const SupportLibrarySchema = z.object({
 }).strict();
 export type SupportLibrary = z.infer<typeof SupportLibrarySchema>;
 
-export async function fetchSupportLibrary(signal?: AbortSignal): Promise<SupportLibrary> {
-  if (goSupportLibraryReadsUseGo()) {
-    return readGoSupportCapability("support.listLibrary", {}, SupportLibrarySchema, signal);
-  }
-  return get("/api/support?library=1", SupportLibrarySchema, signal);
+export async function fetchSupportLibrary(organizationId: string | null | undefined, signal?: AbortSignal): Promise<SupportLibrary> {
+  return readGoSupportCapability("support.listLibrary", {}, SupportLibrarySchema, organizationId, signal);
+}
+
+function supportOrganizationHeader(organizationId: string | null | undefined): Record<string, string> {
+  const orgId = organizationId?.trim() ?? "";
+  if (!uuid.safeParse(orgId).success) throw new SupportApiError(0, "Wait for your organization to finish loading before changing customer care data.");
+  return { "X-Organization-ID": orgId };
 }
 
 const SupportChannelsSchema = z.object({
@@ -523,9 +495,7 @@ export type SupportActionOutcome<Output> =
   | { kind: "completed"; data: Output }
   | { kind: "pending"; reason: string };
 
-const SuccessEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
-// The gated-write envelope, in both shapes the legacy routes emit:
-// { ok: false, pendingApproval: true, reason } and { error, pendingApproval: true }.
+// The gated-write envelope can include a reason, error, or hint depending on the server response.
 // One of the three copy fields is required so a bare flag cannot masquerade as a gate.
 const PendingEnvelopeSchema = z
   .object({
@@ -549,15 +519,14 @@ function pendingOutcome(body: unknown, fallback: string): SupportActionOutcome<n
 }
 
 /**
- * `intentId` is passed only where the legacy page sent one (the library
- * writers and the quick customer create). Thread actions are submitted
- * without one so a retried message stays a distinct intent, matching the
- * oracle rather than silently reconciling two different replies.
+ * Conversation, ticket, canned-response, and article writes use the scoped
+ * Go helpers below. This entry point is reserved for stateless suggestions.
  */
 export async function submitSupportAction<Action extends SupportWriteAction>(
   action: Action,
   intentId?: string,
   signal?: AbortSignal,
+  organizationId?: string | null,
 ): Promise<SupportActionOutcome<SupportActionOutput<Action>>> {
   const parsedAction = SupportWriteActionSchema.safeParse(action);
   if (!parsedAction.success) throw new SupportApiError(0, "The support action contains invalid details.");
@@ -571,26 +540,13 @@ export async function submitSupportAction<Action extends SupportWriteAction>(
       "support.suggestCategory",
       { text: parsedAction.data.text },
       SupportActionOutputSchemas.suggestCategory,
+      organizationId,
       signal,
     );
     return { kind: "completed", data: output as SupportActionOutput<Action> };
   }
 
-  const { response, body } = await request(
-    "/api/support",
-    { method: "POST", body: JSON.stringify(intentId ? { ...parsedAction.data, intentId } : parsedAction.data) },
-    signal,
-  );
-  if (response.status === 202) return pendingOutcome(body, DEFAULT_PENDING_REASON);
-  // A route that flags the gate without the 202 status is still a gate, not a failure.
-  if (PendingEnvelopeSchema.safeParse(body).success) return pendingOutcome(body, DEFAULT_PENDING_REASON);
-  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
-
-  const envelope = SuccessEnvelopeSchema.safeParse(body);
-  if (!envelope.success) throw new SupportApiError(response.status, "The support service returned an unexpected action response.");
-  const output = SupportActionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
-  if (!output.success) throw new SupportApiError(response.status, "The support service returned an unexpected action result.");
-  return { kind: "completed", data: output.data as SupportActionOutput<Action> };
+  throw new SupportApiError(503, "This support change must use its organization-scoped Go capability.");
 }
 
 const GoSupportConversationInputSchema = z.discriminatedUnion("capabilityId", [
@@ -624,10 +580,6 @@ export type PendingSupportConversationWrite = {
   capabilityId: z.infer<typeof GoSupportConversationInputSchema>["capabilityId"];
   input: Record<string, unknown>;
 };
-
-export function supportPendingWriteUsesGo(pending: PendingSupportConversationWrite): boolean {
-  return pending.capabilityId === "support.updateTicket" ? goSupportTicketWritesUseGo() : goSupportConversationWritesUseGo();
-}
 
 function supportConversationRetryStorageKey(scope: SupportConversationWriteRetryScope): string {
   const actorId = normalizeRetryActorId(scope.actorId);
@@ -758,30 +710,6 @@ export async function submitSupportConversationAction<Action extends SupportWrit
   const capabilityId = capabilityForSupportAction(parsedAction.data);
   if (!capabilityId) return submitSupportAction(parsedAction.data, undefined, signal) as Promise<SupportActionOutcome<SupportActionOutput<Action>>>;
   const input = inputForSupportCapability(parsedAction.data);
-  const useGo = capabilityId === "support.updateTicket" ? goSupportTicketWritesUseGo() : goSupportConversationWritesUseGo();
-  if (!useGo) {
-    const selectorName = capabilityId === "support.updateTicket" ? "Go ticket writes" : "Go conversation writes";
-    try {
-      const actorId = normalizeRetryActorId(scope.actorId);
-      const organizationId = scope.organizationId?.trim() ?? "";
-      if (actorId && uuid.safeParse(organizationId).success) {
-        if (readSupportConversationRetryRecord(supportConversationRetryStorageKey(scope))) {
-          throw new SupportApiError(0, `A Go support action is unresolved. Restore ${selectorName} and retry those exact details before using the legacy route.`);
-        }
-      } else {
-        for (let index = 0; index < window.localStorage.length; index += 1) {
-          if (window.localStorage.key(index)?.startsWith(SUPPORT_CONVERSATION_RETRY_PREFIX)) {
-            throw new SupportApiError(0, `A Go support action is unresolved. Restore ${selectorName} and retry those exact details before using the legacy route.`);
-          }
-        }
-      }
-    } catch (error) {
-      if (error instanceof SupportApiError) throw error;
-      throw new SupportApiError(0, "A saved conversation retry record could not be checked. Restore Go conversation writes before continuing.");
-    }
-    return submitSupportAction(parsedAction.data, undefined, signal) as Promise<SupportActionOutcome<SupportActionOutput<Action>>>;
-  }
-
   const attempt = await createSupportConversationWriteAttempt(capabilityId, input, scope);
   let response: Response;
   let body: unknown;
@@ -789,6 +717,7 @@ export async function submitSupportConversationAction<Action extends SupportWrit
     ({ response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       cache: "no-store",
+      headers: supportOrganizationHeader(scope.organizationId),
       body: JSON.stringify({ capabilityId: attempt.record.capabilityId, input: attempt.record.input, intentId: attempt.record.intentId }),
     }, signal));
   } catch {
@@ -815,29 +744,6 @@ export async function submitSupportCannedResponse(
   if (!parsed.success) throw new SupportApiError(0, "The canned response contains invalid details.");
   const { action: _action, ...rawInput } = parsed.data;
   const input = CannedResponseWriteInputSchema.parse(rawInput);
-  const useGo = goSupportCannedResponseWriteUseGo();
-  if (!useGo) {
-    try {
-      const actorId = normalizeRetryActorId(scope.actorId);
-      const organizationId = scope.organizationId?.trim() ?? "";
-      if (actorId && uuid.safeParse(organizationId).success) {
-        if (readCannedResponseRetryRecord(cannedResponseRetryStorageKey(scope))) {
-          throw new SupportApiError(0, "A Go canned-response save is unresolved. Restore Go canned-response writes and retry those exact details before using the legacy route.");
-        }
-      } else {
-        for (let index = 0; index < window.localStorage.length; index += 1) {
-          if (window.localStorage.key(index)?.startsWith(CANNED_RESPONSE_RETRY_PREFIX)) {
-            throw new SupportApiError(0, "A Go canned-response save is unresolved. Restore Go canned-response writes and retry those exact details before using the legacy route.");
-          }
-        }
-      }
-    } catch (error) {
-      if (error instanceof SupportApiError) throw error;
-      throw new SupportApiError(0, "A saved canned-response retry record could not be checked. Restore Go canned-response writes before continuing.");
-    }
-    return submitSupportAction(parsed.data, crypto.randomUUID(), signal);
-  }
-
   const attempt = await createSupportCannedResponseAttempt(input, scope);
   let response: Response;
   let body: unknown;
@@ -845,6 +751,7 @@ export async function submitSupportCannedResponse(
     ({ response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       cache: "no-store",
+      headers: supportOrganizationHeader(scope.organizationId),
       body: JSON.stringify({ capabilityId: "support.createCannedResponse", input: attempt.record.input, intentId: attempt.record.intentId }),
     }, signal));
   } catch {
@@ -877,14 +784,6 @@ export async function submitSupportKbArticle(
   if (!parsed.success) throw new SupportApiError(0, "The knowledge article contains invalid details.");
   const { action: _action, ...rawInput } = parsed.data;
   const input = KbArticleWriteInputSchema.parse({ ...rawInput, isPublic: rawInput.isPublic ?? false });
-  const storageKey = kbArticleRetryStorageKey(scope);
-  if (!goSupportKbArticleWriteUseGo()) {
-    if (readKbArticleRetryRecord(storageKey)) {
-      throw new SupportApiError(0, "A Go article save is unresolved. Restore Go article writes and retry those exact details before changing anything.");
-    }
-    throw new SupportApiError(503, "Go article writes are unavailable. The legacy article route is disabled.");
-  }
-
   const attempt = await createKbArticleAttempt(input, scope);
   let response: Response;
   let body: unknown;
@@ -892,6 +791,7 @@ export async function submitSupportKbArticle(
     ({ response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       cache: "no-store",
+      headers: supportOrganizationHeader(scope.organizationId),
       body: JSON.stringify({ capabilityId: "support.createKbArticle", input: attempt.record.input, intentId: attempt.record.intentId }),
     }, signal));
   } catch {

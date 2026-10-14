@@ -8,11 +8,6 @@ import {
   fetchSupportEnabled,
   fetchSupportLibrary,
   fetchSupportThread,
-  goSupportInboxReadsUseGo,
-  goSupportLibraryReadsUseGo,
-  goSupportCannedResponseWriteUseGo,
-  goSupportKbArticleWriteUseGo,
-  goSupportConversationWritesUseGo,
   readPendingSupportCannedResponse,
   readPendingSupportKbArticle,
   readPendingSupportConversationWrite,
@@ -27,6 +22,7 @@ import {
 } from "./support";
 
 const conversationId = "3f1b0c6e-2f6a-4a0a-9c9e-6c1a2b3d4e5f";
+const organizationId = "66666666-6666-4666-8666-666666666666";
 const customerId = "b2b7d5f0-9a3a-4f38-8f47-1a2b3c4d5e6f";
 
 const conversationRow = {
@@ -107,8 +103,8 @@ describe("support module switchboard", () => {
       throw new TypeError("Failed to fetch");
     }));
 
-    await expect(fetchSupportConversations()).rejects.toBeInstanceOf(SupportApiError);
-    await expect(fetchSupportConversations()).rejects.toMatchObject({
+    await expect(fetchSupportConversations(organizationId)).rejects.toBeInstanceOf(SupportApiError);
+    await expect(fetchSupportConversations(organizationId)).rejects.toMatchObject({
       name: "SupportApiError",
       status: 0,
       message: expect.stringContaining("Could not reach the support service"),
@@ -116,23 +112,21 @@ describe("support module switchboard", () => {
   });
 
   it("rejects a conversation row carrying fields the contract does not declare", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ conversations: [{ ...conversationRow, unexpected: true }] })));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true, data: { conversations: [{ ...conversationRow, unexpected: true }] } })));
 
-    await expect(fetchSupportConversations()).rejects.toMatchObject({
+    await expect(fetchSupportConversations(organizationId)).rejects.toMatchObject({
       status: 200,
-      message: "The support service returned data in an unexpected format.",
+      message: "The Go support service returned data in an unexpected format.",
     });
   });
 });
 
 describe("support Go inbox reads", () => {
   it("loads the inbox through the strict Go capability contract", async () => {
-    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { conversations: [conversationRow] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(goSupportInboxReadsUseGo()).toBe(true);
-    await expect(fetchSupportConversations()).resolves.toEqual([conversationRow]);
+    await expect(fetchSupportConversations(organizationId)).resolves.toEqual([conversationRow]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
@@ -140,13 +134,13 @@ describe("support Go inbox reads", () => {
       credentials: "same-origin",
       body: expect.stringContaining('"capabilityId":"support.listConversations"'),
     }));
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe(organizationId);
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { input?: unknown; intentId?: string };
     expect(request.input).toEqual({ customerBoundOnly: true, limit: 100 });
     expect(request.intentId).toEqual(expect.any(String));
   });
 
   it("uses Go full-detail mode and projects its strict guest-customer shape", async () => {
-    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
     const goThread = {
       conversation: { ...threadResponse.conversation, customerId: null, customerEmail: "guest@example.test" },
       messages: [message],
@@ -154,7 +148,7 @@ describe("support Go inbox reads", () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: goThread }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await fetchSupportThread(conversationId);
+    const result = await fetchSupportThread(conversationId, organizationId);
 
     expect(result.conversation.customerId).toBe("");
     expect(result.conversation).not.toHaveProperty("customerEmail");
@@ -167,21 +161,26 @@ describe("support Go inbox reads", () => {
   });
 
   it("fails closed on Go read errors without retrying the legacy Support route", async () => {
-    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
     const fetchMock = vi.fn(async () => jsonResponse({ error: "support backend unavailable" }, 503));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchSupportConversations()).rejects.toMatchObject({ status: 503 });
+    await expect(fetchSupportConversations(organizationId)).rejects.toMatchObject({ status: 503 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
   });
 
+  it("fails closed before sending a Go read without a valid organization", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchSupportConversations(null)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed Go success data without retrying the legacy Support route", async () => {
-    vi.stubGlobal("__GO_SUPPORT_INBOX_READS__", true);
     const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { conversations: [{ ...conversationRow, unexpected: true }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchSupportConversations()).rejects.toMatchObject({
+    await expect(fetchSupportConversations(organizationId)).rejects.toMatchObject({
       status: 200,
       message: "The Go support service returned data in an unexpected format.",
     });
@@ -192,12 +191,10 @@ describe("support Go inbox reads", () => {
 
 describe("support Go library read", () => {
   it("loads canned responses and knowledge articles through the Go capability", async () => {
-    vi.stubGlobal("__GO_SUPPORT_LIBRARY_READS__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: supportLibrary }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(goSupportLibraryReadsUseGo()).toBe(true);
-    await expect(fetchSupportLibrary()).resolves.toEqual(supportLibrary);
+    await expect(fetchSupportLibrary(organizationId)).resolves.toEqual(supportLibrary);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
@@ -211,11 +208,10 @@ describe("support Go library read", () => {
   });
 
   it("rejects malformed Go library data without retrying the legacy read", async () => {
-    vi.stubGlobal("__GO_SUPPORT_LIBRARY_READS__", true);
     const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { ...supportLibrary, unexpected: true } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchSupportLibrary()).rejects.toMatchObject({
+    await expect(fetchSupportLibrary(organizationId)).rejects.toMatchObject({
       status: 200,
       message: "The Go support service returned data in an unexpected format.",
     });
@@ -225,15 +221,18 @@ describe("support Go library read", () => {
 });
 
 describe("support thread reads", () => {
-  it("reads a thread through the same-origin legacy endpoint", async () => {
+  it("reads a thread through the Go capability with guest-customer projection", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      expect(String(input)).toBe(`/api/support?id=${conversationId}`);
+      expect(String(input)).toBe("/api/capabilities/execute");
       expect(init?.credentials).toBe("same-origin");
-      return jsonResponse(threadResponse);
+      return jsonResponse({ ok: true, data: {
+        conversation: { ...threadResponse.conversation, customerEmail: null },
+        messages: threadResponse.messages,
+      } });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const thread = await fetchSupportThread(conversationId);
+    const thread = await fetchSupportThread(conversationId, organizationId);
 
     expect(thread.conversation.customerName).toBe("Ada Lovelace");
     expect(thread.messages).toHaveLength(1);
@@ -244,7 +243,7 @@ describe("support thread reads", () => {
     const fetchMock = vi.fn(async () => jsonResponse(threadResponse));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchSupportThread("not-a-uuid")).rejects.toMatchObject({ status: 0 });
+    await expect(fetchSupportThread("not-a-uuid", organizationId)).rejects.toMatchObject({ status: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -288,10 +287,11 @@ describe("governed support writes", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitSupportAction({ action: "suggestCategory", text: "The item arrived damaged" }))
+    await expect(submitSupportAction({ action: "suggestCategory", text: "The item arrived damaged" }, undefined, undefined, organizationId))
       .resolves.toEqual({ kind: "completed", data: { category: "billing", draft: true } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe(organizationId);
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       capabilityId: "support.suggestCategory",
       input: { text: "The item arrived damaged" },
@@ -314,7 +314,7 @@ describe("governed support writes", () => {
     const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { category: "billing", draft: false } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitSupportAction({ action: "suggestCategory", text: "The item arrived damaged" })).rejects.toMatchObject({
+    await expect(submitSupportAction({ action: "suggestCategory", text: "The item arrived damaged" }, undefined, undefined, organizationId)).rejects.toMatchObject({
       status: 200,
       message: "The Go support service returned data in an unexpected format.",
     });
@@ -322,56 +322,19 @@ describe("governed support writes", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
   });
 
-  it("surfaces an approval-pending answer as pending, never as a save", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      expect(init?.method).toBe("POST");
-      expect(JSON.parse(String(init?.body))).toMatchObject({ action: "resolve", conversationId });
-      return jsonResponse({ ok: false, pendingApproval: true, reason: "Resolving needs human approval." }, 202);
-    });
+  it("requires organization-scoped Go entry points for conversation and ticket writes", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const outcome = await submitSupportAction({ action: "resolve", conversationId });
-
-    expect(outcome).toEqual({ kind: "pending", reason: "Resolving needs human approval." });
-  });
-
-  it("reads the legacy error-plus-flag approval envelope as pending too", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "pending human approval", pendingApproval: true }, 202)));
-
-    await expect(submitSupportAction({ action: "resolve", conversationId })).resolves.toEqual({
-      kind: "pending",
-      reason: "pending human approval",
-    });
-  });
-
-  it("does not treat an incomplete approval response as a pending action", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ pendingApproval: true }, 202)));
-
     await expect(submitSupportAction({ action: "resolve", conversationId })).rejects.toMatchObject({
-      message: "The support service returned an unexpected approval response.",
+      status: 503,
+      message: "This support change must use its organization-scoped Go capability.",
     });
-  });
-
-  it("does not report success when the action result violates its contract", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true, data: {} })));
-
     await expect(submitSupportAction({ action: "message", conversationId, body: "hi", from: "staff" })).rejects.toMatchObject({
-      message: "The support service returned an unexpected action result.",
+      status: 503,
+      message: "This support change must use its organization-scoped Go capability.",
     });
-  });
-
-  it("stamps an intent identity only where one was supplied", async () => {
-    const bodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-      return jsonResponse({ ok: true, data: { updated: true } });
-    }));
-
-    await submitSupportAction({ action: "updateTicket", conversationId, priority: "high" });
-    await submitSupportAction({ action: "updateTicket", conversationId, priority: "high" }, "intent-for-the-ticket");
-
-    expect(bodies[0]).not.toHaveProperty("intentId");
-    expect(bodies[1]).toMatchObject({ intentId: "intent-for-the-ticket" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   const retryScope = {
@@ -440,11 +403,9 @@ describe("Go canned-response write", () => {
   const action = { action: "createCannedResponse" as const, shortcut: "/refund", title: "Refund policy", body: "We can help with eligible returns." };
 
   it("submits the existing Go capability contract with a persisted idempotency intent", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { cannedResponseId: conversationId } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(goSupportCannedResponseWriteUseGo()).toBe(true);
     await expect(submitSupportCannedResponse(action, scope)).resolves.toEqual({ kind: "completed", data: { cannedResponseId: conversationId } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", cache: "no-store" }));
@@ -456,7 +417,6 @@ describe("Go canned-response write", () => {
   });
 
   it("accepts an opaque Better Auth user ID while keeping organization IDs UUID scoped", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
     const opaqueScope = { ...scope, actorId: "user-auth0|opaque-id" };
     const fetchMock = vi.fn(async () => jsonResponse({ error: "temporarily unavailable" }, 503));
     vi.stubGlobal("fetch", fetchMock);
@@ -473,7 +433,6 @@ describe("Go canned-response write", () => {
     { actorId: null, label: "missing" },
     { actorId: "u".repeat(256), label: "oversized" },
   ])("fails closed for a $label actor ID", async ({ actorId }) => {
-    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -482,7 +441,6 @@ describe("Go canned-response write", () => {
   });
 
   it("keeps exact retry details after an uncertain result and blocks changed or rolled-back writes", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
     const fetchMock = vi.fn(async () => jsonResponse({ error: "temporarily unavailable" }, 503));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -492,14 +450,15 @@ describe("Go canned-response write", () => {
     const retryRecord = JSON.parse(window.localStorage.getItem("chaste.support.canned-response-intent.v1:55555555-5555-4555-8555-555555555555:66666666-6666-4666-8666-666666666666") ?? "{}") as { intentId?: unknown };
 
     await expect(submitSupportCannedResponse({ ...action, body: "Changed copy" }, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("exact saved details") });
-    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", false);
-    await expect(submitSupportCannedResponse(action, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("Restore Go canned-response writes") });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const retryFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { cannedResponseId: conversationId } }));
+    vi.stubGlobal("fetch", retryFetch);
+    await expect(submitSupportCannedResponse(action, scope)).resolves.toMatchObject({ kind: "completed" });
+    expect(new Headers(retryFetch.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe(scope.organizationId);
+    expect(retryFetch).toHaveBeenCalledTimes(1);
     expect(retryRecord.intentId).toEqual(expect.any(String));
   });
 
   it("retains a pending or malformed success response without trying the legacy route", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Needs approval." }, 202))
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: { unexpected: true } }));
@@ -516,7 +475,6 @@ describe("Go canned-response write", () => {
   });
 
   it("retains the same intent after a 422 executor conflict", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CANNED_RESPONSE_WRITE__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ error: "intent conflict" }, 422))
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: { cannedResponseId: conversationId } }));
@@ -539,12 +497,11 @@ describe("Go knowledge article write", () => {
   const action = { action: "createKbArticle" as const, title: "Returns", body: "Policy", isPublic: false };
 
   it("uses the Go capability with exact scoped intent and validates its UUID output", async () => {
-    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { articleId: conversationId } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(goSupportKbArticleWriteUseGo()).toBe(true);
     await expect(submitSupportKbArticle(action, scope)).resolves.toEqual({ kind: "completed", data: { articleId: conversationId } });
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe(scope.organizationId);
     const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", cache: "no-store" }));
     expect(payload).toMatchObject({ capabilityId: "support.createKbArticle", input: { title: "Returns", body: "Policy", isPublic: false } });
@@ -553,7 +510,6 @@ describe("Go knowledge article write", () => {
   });
 
   it("keeps exact details and intent after uncertain responses, pending approval, malformed success, and rollback", async () => {
-    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ error: "unexpected request" }, 500))
       .mockResolvedValueOnce(jsonResponse({ error: "temporarily unavailable" }, 503))
       .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Needs approval." }, 202))
@@ -564,9 +520,6 @@ describe("Go knowledge article write", () => {
     const pending = readPendingSupportKbArticle(scope);
     expect(pending).toEqual({ title: "Returns", body: "Policy", isPublic: false });
     await expect(submitSupportKbArticle({ ...action, body: "Changed" }, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("exact saved details") });
-    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", false);
-    await expect(submitSupportKbArticle(action, scope)).rejects.toMatchObject({ status: 0, message: expect.stringContaining("unresolved") });
-    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", true);
     await expect(submitSupportKbArticle(action, scope)).resolves.toMatchObject({ kind: "pending" });
     await expect(submitSupportKbArticle(action, scope)).rejects.toMatchObject({ status: 200, message: expect.stringContaining("unexpected article result") });
     const payloads = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string });
@@ -575,14 +528,6 @@ describe("Go knowledge article write", () => {
     expect(readPendingSupportKbArticle(scope)).toEqual(pending);
   });
 
-  it("never falls back to the legacy route when the Go selector is disabled", async () => {
-    vi.stubGlobal("__GO_SUPPORT_KB_ARTICLE_WRITE__", false);
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 500 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(submitSupportKbArticle(action, scope)).rejects.toMatchObject({ status: 503 });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 });
 
 describe("Go support conversation writes", () => {
@@ -593,12 +538,12 @@ describe("Go support conversation writes", () => {
   const storageKey = `chaste.support.conversation-write-intent.v1:pending:${scope.actorId}:${scope.organizationId}`;
 
   it("submits conversation creation with a durable intent and validates the strict Go output", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { conversationId } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(submitSupportConversationAction({ action: "create", customerId, subject: "Invoice question" }, scope))
       .resolves.toEqual({ kind: "completed", data: { conversationId } });
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe(scope.organizationId);
     const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
     expect(payload).toMatchObject({ capabilityId: "support.startConversation", input: { customerId, subject: "Invoice question" } });
     expect(payload.intentId).toEqual(expect.any(String));
@@ -607,7 +552,6 @@ describe("Go support conversation writes", () => {
   });
 
   it("accepts an opaque Better Auth user ID for conversation retry state", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
     const opaqueScope = { ...scope, actorId: "user-auth0|opaque-id" };
     const opaqueStorageKey = `chaste.support.conversation-write-intent.v1:pending:${encodeURIComponent(opaqueScope.actorId)}:${scope.organizationId}`;
     const fetchMock = vi.fn(async () => jsonResponse({ error: "temporarily unavailable" }, 503));
@@ -626,7 +570,6 @@ describe("Go support conversation writes", () => {
     { actorId: null, label: "missing" },
     { actorId: "u".repeat(256), label: "oversized" },
   ])("fails closed for a $label actor ID", async ({ actorId }) => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -635,7 +578,6 @@ describe("Go support conversation writes", () => {
   });
 
   it("reuses exact message payload and intent after uncertain response or reload", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ error: "unavailable" }, 503))
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: { messageId: customerId, senderType: "staff" } }));
@@ -664,7 +606,6 @@ describe("Go support conversation writes", () => {
   });
 
   it("preserves the supported customer-words attribution choice in the Go message input", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { messageId: customerId, senderType: "customer" } }));
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "message" as const, conversationId, body: "I called this morning.", from: "customer" as const };
@@ -684,7 +625,6 @@ describe("Go support conversation writes", () => {
     [{ action: "escalate", conversationId, reason: "Needs a policy decision" }, "support.escalateConversation", { conversationId, reason: "Needs a policy decision" }, { status: "escalated" }],
     [{ action: "reopen", conversationId }, "support.reopenConversation", { conversationId }, { status: "open" }],
   ] as const)("maps %s to the matching Go capability", async (action, expectedCapability, input, output) => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: output }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -693,8 +633,6 @@ describe("Go support conversation writes", () => {
   });
 
   it("routes ticket metadata through the independent Go ticket selector with exact input and intent", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", false);
-    vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { updated: true } }));
     vi.stubGlobal("fetch", fetchMock);
     const action = {
@@ -718,7 +656,6 @@ describe("Go support conversation writes", () => {
   });
 
   it("routes explicit ticket metadata clears through Go without dropping null fields", async () => {
-    vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { updated: true } }));
     vi.stubGlobal("fetch", fetchMock);
     const action = {
@@ -735,8 +672,7 @@ describe("Go support conversation writes", () => {
     expect(request.input).toEqual({ conversationId, priority: "normal", category: null, assigneeUserId: null, slaDueAt: null });
   });
 
-  it("keeps the exact Go ticket update for retry and blocks legacy after selector rollback", async () => {
-    vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", true);
+  it("keeps the exact Go ticket update and intent after an uncertain response", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ error: "temporarily unavailable" }, 503));
     vi.stubGlobal("fetch", fetchMock);
     const action = { action: "updateTicket" as const, conversationId, priority: "high" as const, category: null, assigneeUserId: null, slaDueAt: null };
@@ -747,19 +683,15 @@ describe("Go support conversation writes", () => {
     const firstIntent = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}").intentId;
     expect(supportWriteActionFromPending(pending!)).toEqual(action);
 
-    vi.stubGlobal("__GO_SUPPORT_TICKET_WRITES__", false);
-    const legacyFetch = vi.fn();
-    vi.stubGlobal("fetch", legacyFetch);
-    await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({
-      status: 0,
-      message: expect.stringContaining("Restore Go ticket writes"),
-    });
-    expect(legacyFetch).not.toHaveBeenCalled();
-    expect(JSON.parse(window.localStorage.getItem(storageKey) ?? "{}").intentId).toBe(firstIntent);
+    const retryFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { updated: true } }));
+    vi.stubGlobal("fetch", retryFetch);
+    await expect(submitSupportConversationAction(action, scope)).resolves.toMatchObject({ kind: "completed" });
+    expect(retryFetch).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(String(retryFetch.mock.calls[0]?.[1]?.body))).toMatchObject({ intentId: firstIntent });
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
   });
 
   it("keeps 202, 404, and malformed success outcomes unresolved without legacy fallback", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Needs approval." }, 202))
       .mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404))
@@ -778,21 +710,15 @@ describe("Go support conversation writes", () => {
     ]);
   });
 
-  it("blocks legacy rollback while a Go action remains unresolved", async () => {
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", true);
+  it("keeps retrying through Go while an action remains unresolved", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "unavailable" }, 503)));
     const action = { action: "reopen" as const, conversationId };
     await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({ status: 503 });
 
-    vi.stubGlobal("__GO_SUPPORT_CONVERSATION_WRITES__", false);
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { status: "open" } }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({
-      status: 0,
-      message: expect.stringContaining("Restore Go conversation writes"),
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(goSupportConversationWritesUseGo()).toBe(false);
+    await expect(submitSupportConversationAction(action, scope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
   });
 });
 

@@ -56,6 +56,10 @@ The full v1 changelog is preserved at the bottom of this file.
   a draft, with a per-user limit across conversations that also applies to
   missing-thread probes. The route accepts JSON request bodies only; sending the
   draft remains a separate human action.
+- Vite Support inbox and thread reads, library reads, and conversation, ticket,
+  canned-response, and knowledge-article writes now use Go capabilities directly.
+  Unscoped write entry points fail closed, while approval-pending and uncertain
+  writes retain their organization-scoped intent for exact retries.
 - Vite Messaging agent replies now bind their effect intent to the source
   message and serialize concurrent generation for that trigger. Replayed
   requests return the persisted reply text, and the Vite client allows enough

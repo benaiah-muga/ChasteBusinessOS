@@ -20,15 +20,12 @@ import {
   fetchSupportLibrary,
   fetchSupportTeamMembers,
   fetchSupportThread,
-  goSupportCannedResponseWriteUseGo,
   readPendingSupportConversationWrite,
   readPendingSupportCannedResponse,
   readPendingSupportKbArticle,
   supportWriteActionFromPending,
-  supportPendingWriteUsesGo,
   submitSupportCannedResponse,
   submitSupportKbArticle,
-  goSupportKbArticleWriteUseGo,
   submitSupportAction,
   submitSupportConversationAction,
   updateSupportChannels,
@@ -124,24 +121,24 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
         setState({ status: "disabled" });
         return;
       }
-      const conversations = await fetchSupportConversations(signal);
+      const conversations = await fetchSupportConversations(organizationId, signal);
       if (signal?.aborted) return;
       setState({ status: "ready", conversations });
       setActiveId((current) => current ?? conversations[0]?.id ?? null);
     } catch (error) {
       if (!signal?.aborted) setState({ status: "failed", message: friendlyError(error) });
     }
-  }, []);
+  }, [organizationId]);
 
   /** Post-mutation refresh: a failed read must not tear down a working desk. */
   const refresh = useCallback(async () => {
     try {
-      const conversations = await fetchSupportConversations();
+      const conversations = await fetchSupportConversations(organizationId);
       setState((current) => (current.status === "ready" ? { status: "ready", conversations } : current));
     } catch (error) {
       setNotice({ tone: "error", text: friendlyError(error) });
     }
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -192,9 +189,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       const pending = readPendingSupportConversationWrite(retryScope);
       if (pending) {
         restoreConversationAction(pending);
-        setNotice({ tone: "pending", text: supportPendingWriteUsesGo(pending)
-          ? "An unresolved Go support action was restored. Retry the exact saved action to recover its result."
-          : `A Go support action is unresolved. Re-enable ${pending.capabilityId === "support.updateTicket" ? "Go ticket writes" : "Go conversation writes"} to retry its exact saved details.` });
+        setNotice({ tone: "pending", text: "An unresolved Go support action was restored. Retry the exact saved action to recover its result." });
       }
     } catch (error) {
       setNotice({ tone: "error", text: friendlyError(error) });
@@ -225,7 +220,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
     }
     const controller = new AbortController();
     setThreadError(null);
-    void fetchSupportThread(activeId, controller.signal)
+    void fetchSupportThread(activeId, organizationId, controller.signal)
       .then((thread) => {
         if (controller.signal.aborted) return;
         setConversation(thread.conversation);
@@ -238,7 +233,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
         if (!controller.signal.aborted) setThreadError(friendlyError(reason));
       });
     return () => controller.abort();
-  }, [activeId, pendingGoAction]);
+  }, [activeId, organizationId, pendingGoAction]);
 
   useEffect(() => {
     if (pendingGoAction?.input.conversationId !== activeId) return;
@@ -285,14 +280,14 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
 
   const refreshThread = useCallback(async (id: string) => {
     try {
-      const thread = await fetchSupportThread(id);
+      const thread = await fetchSupportThread(id, organizationId);
       setConversation(thread.conversation);
       setMessages(thread.messages);
       setTicket(ticketFrom(thread.conversation));
     } catch (error) {
       setThreadError(friendlyError(error));
     }
-  }, []);
+  }, [organizationId]);
 
   /**
    * Every governed write funnels through here so an approval-pending answer
@@ -306,7 +301,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
         const capabilityId = ["create", "message", "send", "updateTicket", "escalate", "resolve", "reopen"].includes(action.action);
         const outcome = capabilityId
           ? await submitSupportConversationAction(action, retryScope)
-          : await submitSupportAction(action, intentId);
+          : await submitSupportAction(action, intentId, undefined, organizationId);
         if (outcome.kind === "pending") {
           if (capabilityId) {
             const pending = readPendingSupportConversationWrite(retryScope);
@@ -325,9 +320,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
           const pending = readPendingSupportConversationWrite(retryScope);
           if (pending) {
             restoreConversationAction(pending);
-            setNotice({ tone: "error", text: supportPendingWriteUsesGo(pending)
-              ? "A Go support action is unresolved. Its exact saved details were restored; retry them to recover the result."
-              : `A Go support action is unresolved. Re-enable ${pending.capabilityId === "support.updateTicket" ? "Go ticket writes" : "Go conversation writes"} to retry its exact saved details.` });
+            setNotice({ tone: "error", text: "A Go support action is unresolved. Its exact saved details were restored; retry them to recover the result." });
             return null;
           }
         } catch {
@@ -406,7 +399,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
     setBusy(true);
     setNotice(null);
     try {
-      const outcome = await submitSupportAction({ action: "suggestCategory", text });
+      const outcome = await submitSupportAction({ action: "suggestCategory", text }, undefined, undefined, organizationId);
       if (outcome.kind === "pending") {
         setNotice({ tone: "pending", text: outcome.reason });
         return;
@@ -497,7 +490,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
           {pendingGoAction && (
             <div className="support-notice support-notice-pending" role="status">
               <span>The saved Go action is still unresolved. Retry the exact saved details to recover it.</span>
-              <button type="button" disabled={busy || !supportPendingWriteUsesGo(pendingGoAction)} onClick={() => void run(supportWriteActionFromPending(pendingGoAction))}>Retry saved action</button>
+              <button type="button" disabled={busy} onClick={() => void run(supportWriteActionFromPending(pendingGoAction))}>Retry saved action</button>
             </div>
           )}
           <nav className="support-tabs" aria-label="Customer care sections">
@@ -925,9 +918,7 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
         setCannedForm(pending);
         onNotice({
           tone: "pending",
-          text: goSupportCannedResponseWriteUseGo()
-            ? "An unresolved Go canned-response save was restored. Save these exact details to retry it."
-            : "An unresolved Go canned-response save was restored. Re-enable Go canned-response writes and retry these exact details.",
+          text: "An unresolved Go canned-response save was restored. Save these exact details to retry it.",
         });
       }
     } catch (error) {
@@ -943,9 +934,7 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
         setArticleForm({ title: pending.title, body: pending.body, category: pending.category ?? "", isPublic: pending.isPublic });
         onNotice({
           tone: "pending",
-          text: goSupportKbArticleWriteUseGo()
-            ? "An unresolved Go article save was restored. Save these exact details to retry it."
-            : "An unresolved Go article save was restored. Re-enable Go article writes and retry these exact details.",
+          text: "An unresolved Go article save was restored. Save these exact details to retry it.",
         });
       }
     } catch (error) {
@@ -955,12 +944,12 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const result = await fetchSupportLibrary(signal);
+      const result = await fetchSupportLibrary(retryScope.organizationId, signal);
       if (!signal?.aborted) setLibrary(result);
     } catch (error) {
       if (!signal?.aborted) setLoadError(friendlyError(error));
     }
-  }, []);
+  }, [retryScope.organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -976,7 +965,7 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
         ? await submitSupportCannedResponse(action, retryScope)
         : action.action === "createKbArticle"
           ? await submitSupportKbArticle(action, retryScope)
-        : await submitSupportAction(action, crypto.randomUUID());
+        : await submitSupportAction(action, crypto.randomUUID(), undefined, organizationId);
       if (outcome.kind === "pending") {
         onNotice({ tone: "pending", text: outcome.reason });
         return;
