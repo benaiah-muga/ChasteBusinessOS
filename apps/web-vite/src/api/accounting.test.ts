@@ -1405,6 +1405,36 @@ describe("accounting API: Go journal reversals", () => {
     expect([action, alternateReversal]).toContainEqual(stored);
   });
 
+  it("does not let a delayed duplicate response clear a newer journal reversal marker", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
+    const newerAction = { ...action, entryId: "77777777-7777-4777-8777-777777777777" };
+    const deferred: Array<(response: Response) => void> = [];
+    const mock = stubFetch(() => new Promise((resolve) => deferred.push(resolve)));
+
+    const original = submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(1));
+    const duplicate = submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(2));
+    const originalIntent = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const duplicateIntent = JSON.parse(String(mock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(duplicateIntent.intentId).toBe(originalIntent.intentId);
+
+    deferred[0]!(Response.json({ error: "reversal rejected" }, { status: 422 }));
+    await expect(original).rejects.toMatchObject({ status: 422 });
+    await expect(readPendingAccountingReverseEntry(paymentRetryScope)).resolves.toBeNull();
+
+    const newer = submitAccountingAction("/api/accounting", newerAction, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(3));
+    const newerIntent = JSON.parse(String(mock.mock.calls[2]?.[1]?.body)) as { intentId: string };
+    expect(newerIntent.intentId).not.toBe(originalIntent.intentId);
+    deferred[2]!(Response.json({ pendingApproval: true, reason: "Review required" }, { status: 202 }));
+    await expect(newer).resolves.toMatchObject({ kind: "pending" });
+
+    deferred[1]!(Response.json({ ok: true, data: output }));
+    await duplicate;
+    await expect(readPendingAccountingReverseEntry(paymentRetryScope)).resolves.toEqual(newerAction);
+  });
+
   it("fails closed when browser-wide reversal locks are unavailable", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
     vi.stubGlobal("navigator", {} as Navigator);
@@ -1419,11 +1449,15 @@ describe("accounting API: Go journal reversals", () => {
   });
 
   it("routes only the manual reverse action to Go and validates the output", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
     const mock = stubFetch(() => Response.json({ ok: true, data: output }));
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
     const payload = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: expect.objectContaining({ "X-Organization-ID": paymentRetryScope.organizationId }),
+    }));
     expect(payload).toMatchObject({ capabilityId: "accounting.reverseEntry", input: { entryId: action.entryId }, intentId: expect.any(String) });
     expect((payload.input as Record<string, unknown>).action).toBeUndefined();
     expect(payload).not.toHaveProperty("actorId");
@@ -1451,8 +1485,20 @@ describe("accounting API: Go journal reversals", () => {
     const calls = mock.mock.calls;
     expect(JSON.parse(String(calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(calls[1]?.[1]?.body)).intentId);
     vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", false);
-    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(mock).toHaveBeenCalledTimes(2);
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(mock).toHaveBeenCalledTimes(3);
+    expect(mock.mock.calls[2]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(mock.mock.calls[2]?.[1]?.body)).intentId);
+    await expect(readPendingAccountingReverseEntry(paymentRetryScope)).resolves.toEqual(action);
+  });
+
+  it("validates the entry and organization before any Go request", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: output }));
+    await expect(submitAccountingAction("/api/accounting", { action: "reverse", entryId: "not-a-uuid" }, undefined, paymentRetryScope))
+      .rejects.toMatchObject({ status: 400 });
+    await expect(submitAccountingAction("/api/accounting", action))
+      .rejects.toMatchObject({ status: 0 });
+    expect(mock).not.toHaveBeenCalled();
   });
 
   it("surfaces Go domain eligibility rejections without legacy fallback", async () => {

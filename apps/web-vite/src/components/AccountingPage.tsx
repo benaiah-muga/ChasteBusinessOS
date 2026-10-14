@@ -14,7 +14,6 @@ import {
   fetchCustomerStatement,
   fetchPaymentReminders,
   goAccountingCreditNoteUseGo,
-  goAccountingReverseEntryUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
@@ -488,11 +487,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     void readPendingAccountingReverseEntry(paymentRetryScope).then((action) => {
       if (!active) return;
       setPendingReverseEntry(action);
-      if (action) setNotice({ tone: "pending", text: goAccountingReverseEntryUseGo()
-        ? "A journal reversal is unresolved. Retry the exact entry to recover its result."
-        : "A Go journal reversal is unresolved. Restore the Go reversal route and retry that exact entry before using the legacy route." });
+      if (action) setNotice({ tone: "pending", text: "A journal reversal is unresolved. Retry the exact entry to recover its result." });
     }).catch((error) => {
-      if (active && goAccountingReverseEntryUseGo()) {
+      if (active) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved journal reversal." });
       }
     });
@@ -582,7 +579,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const isCreditNote = path === "/api/accounting" && payload.action === "creditNote";
       const goCreditNote = isCreditNote && goAccountingCreditNoteUseGo();
       const isReverseEntry = path === "/api/accounting" && payload.action === "reverse";
-      const goReverseEntry = isReverseEntry && goAccountingReverseEntryUseGo();
+      const goReverseEntry = isReverseEntry;
       const goReversePayment = path === "/api/accounting" && payload.action === "reversePayment";
       const goBankReconciliationWrite = path === "/api/banking" && [
         "addBankAccount", "importBankFeed", "matchBankTransaction", "unmatchBankTransaction",
@@ -811,9 +808,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               {pendingReverseEntry && <button
                 type="button"
                 className="accounting-button accounting-button-small"
-                disabled={busy || !goAccountingReverseEntryUseGo()}
+                disabled={busy}
                 onClick={() => void runAction("/api/accounting", { ...pendingReverseEntry }, "Reversal")}
-              >{goAccountingReverseEntryUseGo() ? "Retry exact reversal" : "Enable Go reversal route to retry"}</button>}
+              >Retry exact reversal</button>}
               {pendingBankReconciliationWrite && <button
                 type="button"
                 className="accounting-button accounting-button-small"

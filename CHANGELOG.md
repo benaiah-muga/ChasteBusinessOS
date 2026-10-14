@@ -33,6 +33,9 @@ The full v1 changelog is preserved at the bottom of this file.
   API fallback.
 - Vite Accounting bank account and transaction changes now use scoped Go
   capabilities with durable, exact-intent recovery across tabs.
+- Vite manual journal reversals now always use the organization-scoped Go
+  capability and preserve the same intent for exact recovery, independent of
+  migration selector flags. Delayed responses clear only their own retry marker.
 - Vite Sales orders and customer lookup now use organization-scoped Go APIs;
   customer options require Sales read permission and stay isolated across actor
   or workspace changes.

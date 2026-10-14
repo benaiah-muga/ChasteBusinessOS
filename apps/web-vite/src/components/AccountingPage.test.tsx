@@ -152,12 +152,12 @@ function stubAccounting(options: StubOptions = {}) {
   vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, {
     locks: { request: runWithTestLock },
   }));
-  const calls: { url: string; method: string; body: string | null }[] = [];
+  const calls: { url: string; method: string; body: string | null; headers?: HeadersInit }[] = [];
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
     const body = typeof init?.body === "string" ? init.body : null;
-    calls.push({ url, method, body });
+    calls.push({ url, method, body, headers: init?.headers });
     if (url === "/api/modules") {
       return Response.json({
         catalog: [{ id: "accounting" }],
@@ -1075,7 +1075,7 @@ describe("AccountingPage governed writes", () => {
   });
 
   it("routes manual entry reversal to Go and restores the exact pending action after reload", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", true);
+    vi.stubGlobal("__GO_ACCOUNTING_REVERSE_ENTRY__", false);
     const ids = {
       actorId: "55555555-5555-4555-8555-555555555555",
       organizationId: "66666666-6666-4666-8666-666666666666",
@@ -1102,6 +1102,8 @@ describe("AccountingPage governed writes", () => {
     expect(await screen.findByRole("button", { name: "Retry exact reversal" })).not.toBeNull();
     expect((screen.getByRole("button", { name: "Post reversal" }) as HTMLButtonElement).disabled).toBe(true);
     expect(sent[0]).toMatchObject({ capabilityId: "accounting.reverseEntry", input: { entryId: invoiceEntry.id } });
+    const reversalRequest = calls.find((call) => call.body?.includes('"capabilityId":"accounting.reverseEntry"'));
+    expect(reversalRequest?.headers).toMatchObject({ "X-Organization-ID": ids.organizationId });
     expect(calls.some((call) => call.url === "/api/accounting" && call.method === "POST" && call.body?.includes('"action":"reverse"'))).toBe(false);
 
     first.unmount();
