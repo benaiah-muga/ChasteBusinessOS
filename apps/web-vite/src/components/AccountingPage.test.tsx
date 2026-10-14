@@ -269,6 +269,21 @@ function stubAccounting(options: StubOptions = {}) {
       if (capabilityId === "accounting.unmatchBankTransaction") {
         return options.goBankUnmatchResponse?.() ?? Response.json({ ok: true, data: { status: "unmatched", releasedMinor: 2500 } });
       }
+      if (capabilityId === "accounting.addBankAccount") {
+        return Response.json({ ok: true, data: { bankAccountId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" } });
+      }
+      if (capabilityId === "accounting.importBankFeed") {
+        return Response.json({ ok: true, data: { inserted: 1, skipped: 0 } });
+      }
+      if (capabilityId === "accounting.excludeBankTransaction") {
+        return Response.json({ ok: true, data: { status: "excluded" } });
+      }
+      if (capabilityId === "accounting.unexcludeBankTransaction") {
+        return Response.json({ ok: true, data: { status: "unmatched" } });
+      }
+      if (capabilityId === "accounting.deleteBankTransaction") {
+        return Response.json({ ok: true, data: { deleted: true } });
+      }
       if (capabilityId === "accounting.customerStatement") {
         return options.goCustomerStatementResponse?.() ?? Response.json({ ok: true, data: { currencies: [] } });
       }
@@ -1224,12 +1239,12 @@ describe("AccountingPage tabs", () => {
   it("parses a pasted feed before importing it", async () => {
     const { calls } = stubAccounting({
       banking: {
-        accounts: [{ id: "acct-1", name: "Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000 }],
+        accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000 }],
         unmatched: [],
         matched: [],
         excluded: [],
         payments: [],
-        summary: { accounts: [{ bankAccountId: "acct-1", name: "Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000, count: 2, moneyInMinor: 125_000, moneyOutMinor: 0 }], unmatchedCount: 0 },
+        summary: { accounts: [{ bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000, count: 2, moneyInMinor: 125_000, moneyOutMinor: 0 }], unmatchedCount: 0 },
       },
     });
     await renderReady();
@@ -1243,21 +1258,22 @@ describe("AccountingPage tabs", () => {
     expect(await screen.findByText("line 1: expected date,amount,description")).toBeTruthy();
     await waitFor(() => {
       const write = calls.find((call) => call.body?.includes("importBankFeed"));
-      expect(JSON.parse(write!.body!) as { rows: unknown[] }).toMatchObject({
-        rows: [{ postedAt: "2026-06-01", amountMinor: 125_000, description: "ACME wire" }],
+      expect(JSON.parse(write!.body!) as { capabilityId: string; input: { rows: unknown[] } }).toMatchObject({
+        capabilityId: "accounting.importBankFeed",
+        input: { rows: [{ postedAt: "2026-06-01", amountMinor: 125_000, description: "ACME wire" }] },
       });
     });
   });
 
-  it("renders the Go Banking workspace and keeps reconciliation writes on the existing route", async () => {
+  it("renders the Go Banking workspace and routes bank operations through capabilities", async () => {
     const { calls } = stubAccounting({
       banking: {
-        accounts: [{ id: "acct-1", name: "Go Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000 }],
-        unmatched: [{ id: "line-unmatched", bankAccountId: "acct-1", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 2_500, description: "Go unmatched wire" }],
-        matched: [{ id: "line-matched", bankAccountId: "acct-1", currencyCode: "USD", postedAt: "2026-06-02T00:00:00.000Z", amountMinor: 3_000, description: "Go matched receipt" }],
-        excluded: [{ id: "line-excluded", bankAccountId: "acct-1", currencyCode: "USD", postedAt: "2026-06-03T00:00:00.000Z", amountMinor: -500, description: "Go excluded fee" }],
+        accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Go Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000 }],
+        unmatched: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 2_500, description: "Go unmatched wire" }],
+        matched: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-02T00:00:00.000Z", amountMinor: 3_000, description: "Go matched receipt" }],
+        excluded: [{ id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-03T00:00:00.000Z", amountMinor: -500, description: "Go excluded fee" }],
         payments: [{ id: "payment-1", invoiceNumber: 1042, currencyCode: "USD", customerName: "Go Customer", amountMinor: 2_500, receivedAt: "2026-06-01T00:00:00.000Z" }],
-        summary: { accounts: [{ bankAccountId: "acct-1", name: "Go Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000, count: 3, moneyInMinor: 5_500, moneyOutMinor: 500 }], unmatchedCount: 1 },
+        summary: { accounts: [{ bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Go Operating", currencyCode: "USD", last4: "0042", balanceMinor: 125_000, count: 3, moneyInMinor: 5_500, moneyOutMinor: 500 }], unmatchedCount: 1 },
       },
     });
     await renderReady();
@@ -1274,7 +1290,7 @@ describe("AccountingPage tabs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Exclude" }));
     await waitFor(() => {
-      expect(calls.some((call) => call.url === "/api/banking" && call.method === "POST" && call.body?.includes('"action":"excludeBankTransaction"'))).toBe(true);
+      expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.excludeBankTransaction"'))).toBe(true);
     });
     expect(calls.some((call) => call.url === "/api/capabilities/execute" && call.body?.includes('"capabilityId":"accounting.listBankingWorkspace"'))).toBe(true);
     expect(calls.some((call) => call.url === "/api/banking" && call.method === "GET")).toBe(false);

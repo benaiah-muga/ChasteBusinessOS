@@ -474,7 +474,44 @@ const UnmatchBankTransactionActionSchema = z.object({
   action: z.literal("unmatchBankTransaction"),
   transactionId: z.string().uuid(),
 }).strict();
-const BankReconciliationWriteActionSchema = z.discriminatedUnion("action", [MatchBankTransactionActionSchema, UnmatchBankTransactionActionSchema]);
+const AddBankAccountActionSchema = z.object({
+  action: z.literal("addBankAccount"),
+  name: z.string().min(1),
+  currencyCode: z.string().length(3).optional(),
+  last4: z.string().regex(/^\d{4}$/).optional(),
+  balanceMinor: minor.optional(),
+}).strict();
+const ImportBankFeedActionSchema = z.object({
+  action: z.literal("importBankFeed"),
+  bankAccountId: z.string().uuid().optional(),
+  rows: z.array(z.object({
+    postedAt: day,
+    amountMinor: minor,
+    description: z.string().min(1),
+  }).strict()).min(1).max(500),
+}).strict();
+const TransactionId = z.string().uuid();
+const ExcludeBankTransactionActionSchema = z.object({
+  action: z.literal("excludeBankTransaction"),
+  transactionId: TransactionId,
+}).strict();
+const UnexcludeBankTransactionActionSchema = z.object({
+  action: z.literal("unexcludeBankTransaction"),
+  transactionId: TransactionId,
+}).strict();
+const DeleteBankTransactionActionSchema = z.object({
+  action: z.literal("deleteBankTransaction"),
+  transactionId: TransactionId,
+}).strict();
+const BankReconciliationWriteActionSchema = z.discriminatedUnion("action", [
+  AddBankAccountActionSchema,
+  ImportBankFeedActionSchema,
+  MatchBankTransactionActionSchema,
+  UnmatchBankTransactionActionSchema,
+  ExcludeBankTransactionActionSchema,
+  UnexcludeBankTransactionActionSchema,
+  DeleteBankTransactionActionSchema,
+]);
 const StoredBankReconciliationWriteSchema = z.object({
   action: BankReconciliationWriteActionSchema,
   intentId: z.string().uuid(),
@@ -489,6 +526,11 @@ const UnmatchBankTransactionOutputSchema = z.object({
   status: z.literal("unmatched"),
   releasedMinor: minor,
 }).strict();
+const AddBankAccountOutputSchema = z.object({ bankAccountId: z.string().uuid() }).strict();
+const ImportBankFeedOutputSchema = z.object({ inserted: z.number().int().nonnegative().safe(), skipped: z.number().int().nonnegative().safe() }).strict();
+const ExcludeBankTransactionOutputSchema = z.object({ status: z.literal("excluded") }).strict();
+const UnexcludeBankTransactionOutputSchema = z.object({ status: z.literal("unmatched") }).strict();
+const DeleteBankTransactionOutputSchema = z.object({ deleted: z.boolean() }).strict();
 const BANK_RECONCILIATION_WRITE_ATTEMPT_PREFIX = "chaste:accounting:bank-reconciliation:go:attempt:v1:";
 
 export type AccountingEntry = z.infer<typeof EntrySchema>;
@@ -534,10 +576,6 @@ export function goAccountingCreditNoteUseGo(): boolean {
 
 export function goAccountingReverseEntryUseGo(): boolean {
   return typeof __GO_ACCOUNTING_REVERSE_ENTRY__ !== "undefined" && __GO_ACCOUNTING_REVERSE_ENTRY__;
-}
-
-export function goAccountingBankReconciliationWritesUseGo(): boolean {
-  return typeof __GO_BANK_RECONCILIATION_WRITES__ !== "undefined" && __GO_BANK_RECONCILIATION_WRITES__;
 }
 
 export async function readPendingAccountingBankReconciliationWrite(scope: AccountingPaymentRetryScope): Promise<AccountingBankReconciliationWriteAction | null> {
@@ -903,14 +941,11 @@ export async function submitAccountingAction(
     const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
     return submitGoAccountingCloseYear(action.data, scoped, signal);
   }
-  if (path === "/api/banking" && (payload.action === "matchBankTransaction" || payload.action === "unmatchBankTransaction")) {
+  if (path === "/api/banking") {
     const action = BankReconciliationWriteActionSchema.safeParse(payload);
-    if (!action.success) throw new AccountingApiError(400, "Enter a valid bank reconciliation action before submitting.");
+    if (!action.success) throw new AccountingApiError(400, "Enter a valid bank action before submitting.");
     const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
-    if (goAccountingBankReconciliationWritesUseGo()) return submitGoBankReconciliationWrite(action.data, scoped, signal);
-    if (await readPendingAccountingBankReconciliationWrite(retryScope ?? { actorId: null, organizationId: null })) {
-      throw new AccountingApiError(0, "A Go bank reconciliation action is unresolved. Restore the Go route and retry that exact action before using the legacy route.", true);
-    }
+    return submitGoBankReconciliationWrite(action.data, scoped, signal);
   }
   if (path === "/api/accounting" && payload.action === "reverse") {
     const action = ReverseEntryActionSchema.safeParse(payload);
@@ -1003,41 +1038,55 @@ async function submitGoBankReconciliationWrite(
   signal?: AbortSignal,
 ): Promise<AccountingActionOutcome> {
   const attempt = await accountingBankReconciliationWriteAttempt(action, scope.scopeHash);
-  const capabilityId = action.action === "matchBankTransaction"
-    ? "accounting.matchBankTransaction"
-    : "accounting.unmatchBankTransaction";
+  const capabilityByAction: Record<AccountingBankReconciliationWriteAction["action"], string> = {
+    addBankAccount: "accounting.addBankAccount",
+    importBankFeed: "accounting.importBankFeed",
+    matchBankTransaction: "accounting.matchBankTransaction",
+    unmatchBankTransaction: "accounting.unmatchBankTransaction",
+    excludeBankTransaction: "accounting.excludeBankTransaction",
+    unexcludeBankTransaction: "accounting.unexcludeBankTransaction",
+    deleteBankTransaction: "accounting.deleteBankTransaction",
+  };
+  const capabilityId = capabilityByAction[action.action];
   const { action: _action, ...input } = action;
   let response: Response;
   let body: unknown;
   try {
     ({ response, body } = await getJson("/api/capabilities/execute", {
       method: "POST",
+      headers: { "X-Organization-ID": scope.organizationId },
       body: JSON.stringify({ capabilityId, input, intentId: attempt.intentId }),
     }, signal));
   } catch (error) {
     if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
-    throw new AccountingApiError(0, "The Go Banking service could not confirm this reconciliation action. Retry the same action to recover its result.", true);
+    throw new AccountingApiError(0, "The Go Banking service could not confirm this bank action. Retry the same action to recover its result.", true);
   }
   if (response.status === 202) {
     const parsed = PendingSchema.safeParse(body);
-    if (!parsed.success) throw new AccountingApiError(202, "The Go Banking service returned an invalid reconciliation approval response.", true);
-    return { kind: "pending", reason: parsed.data.reason ?? parsed.data.error ?? "This reconciliation action is waiting for approval." };
+    if (!parsed.success) throw new AccountingApiError(202, "The Go Banking service returned an invalid bank action approval response.", true);
+    return { kind: "pending", reason: parsed.data.reason ?? parsed.data.error ?? "This bank action is waiting for approval." };
   }
   if (!response.ok) {
     const uncertain = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
-    if (!uncertain) await clearAccountingBankReconciliationWriteAttempt(attempt.storageKey);
-    throw new AccountingApiError(response.status, errorMessage(response.status, body, "complete this bank reconciliation action"), uncertain);
+    if (!uncertain) await clearAccountingBankReconciliationWriteAttempt(attempt);
+    throw new AccountingApiError(response.status, errorMessage(response.status, body, "complete this bank action"), uncertain);
   }
   const envelope = EnvelopeSchema.safeParse(body);
-  const output = envelope.success
-    ? (action.action === "matchBankTransaction"
-      ? MatchBankTransactionOutputSchema.safeParse(envelope.data.data)
-      : UnmatchBankTransactionOutputSchema.safeParse(envelope.data.data))
-    : null;
+  const output = envelope.success ? (() => {
+    switch (action.action) {
+      case "addBankAccount": return AddBankAccountOutputSchema.safeParse(envelope.data.data);
+      case "importBankFeed": return ImportBankFeedOutputSchema.safeParse(envelope.data.data);
+      case "matchBankTransaction": return MatchBankTransactionOutputSchema.safeParse(envelope.data.data);
+      case "unmatchBankTransaction": return UnmatchBankTransactionOutputSchema.safeParse(envelope.data.data);
+      case "excludeBankTransaction": return ExcludeBankTransactionOutputSchema.safeParse(envelope.data.data);
+      case "unexcludeBankTransaction": return UnexcludeBankTransactionOutputSchema.safeParse(envelope.data.data);
+      case "deleteBankTransaction": return DeleteBankTransactionOutputSchema.safeParse(envelope.data.data);
+    }
+  })() : null;
   if (response.status !== 200 || !output?.success) {
-    throw new AccountingApiError(response.status, "The Go Banking service returned an unexpected reconciliation response.", true);
+    throw new AccountingApiError(response.status, "The Go Banking service returned an unexpected bank action response.", true);
   }
-  await clearAccountingBankReconciliationWriteAttempt(attempt.storageKey);
+  await clearAccountingBankReconciliationWriteAttempt(attempt);
   return { kind: "completed" };
 }
 
@@ -1423,13 +1472,13 @@ async function accountingReversePaymentAttempt(action: AccountingReversePaymentA
   );
 }
 
-async function accountingBankReconciliationWriteAttempt(action: AccountingBankReconciliationWriteAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
+async function accountingBankReconciliationWriteAttempt(action: AccountingBankReconciliationWriteAction, scopeHash: string): Promise<{ storageKey: string; intentId: string; fingerprint: string }> {
   const storageKey = `${BANK_RECONCILIATION_WRITE_ATTEMPT_PREFIX}${scopeHash}`;
   const fingerprint = await accountingPaymentFingerprint(action);
   return withAccountingReservationLock(
     storageKey,
-    "This browser cannot safely reserve a bank reconciliation action. Open Accounting in a browser with Web Locks enabled before changing a match.",
-    "The browser could not reserve this bank reconciliation action safely. Retry after closing other Accounting tabs.",
+    "This browser cannot safely reserve a bank action. Open Accounting in a browser with Web Locks enabled before changing bank data.",
+    "The browser could not reserve this bank action safely. Retry after closing other Accounting tabs.",
     async () => {
       let raw: string | null;
       try { raw = window.localStorage.getItem(storageKey); }
@@ -1437,17 +1486,17 @@ async function accountingBankReconciliationWriteAttempt(action: AccountingBankRe
       if (raw !== null) {
         const stored = parseStoredBankReconciliationWrite(raw);
         if (stored.fingerprint !== fingerprint) throw new AccountingApiError(0, "A previous bank reconciliation action is unresolved. Retry its exact details before changing another match.", true);
-        return { storageKey, intentId: stored.intentId };
+        return { storageKey, intentId: stored.intentId, fingerprint: stored.fingerprint };
       }
       const stored = { action, intentId: crypto.randomUUID(), fingerprint };
       const serialized = JSON.stringify(stored);
       try {
         window.localStorage.setItem(storageKey, serialized);
-        if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("bank reconciliation retry marker did not persist");
+        if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("bank action retry marker did not persist");
       } catch {
-        throw new AccountingApiError(0, "Enable browser storage before changing a bank reconciliation so it can be retried safely.");
+        throw new AccountingApiError(0, "Enable browser storage before changing bank data so the action can be retried safely.");
       }
-      return { storageKey, intentId: stored.intentId };
+      return { storageKey, intentId: stored.intentId, fingerprint: stored.fingerprint };
     },
   );
 }
@@ -1591,9 +1640,24 @@ async function clearAccountingReversePaymentAttempt(storageKey: string, intentId
   );
 }
 
-async function clearAccountingBankReconciliationWriteAttempt(storageKey: string): Promise<void> {
-  try { window.localStorage.removeItem(storageKey); }
-  catch { throw new AccountingApiError(0, "The reconciliation action completed, but its retry marker could not be cleared. Reload before changing another match.", true); }
+async function clearAccountingBankReconciliationWriteAttempt(attempt: { storageKey: string; intentId: string; fingerprint: string }): Promise<void> {
+  try {
+    await withAccountingReservationLock(
+      attempt.storageKey,
+      "This browser cannot safely verify a bank action retry marker. Open Accounting in a browser with Web Locks enabled before changing bank data.",
+      "The browser could not safely verify this bank action retry marker. Retry after closing other Accounting tabs.",
+      async () => {
+        const raw = window.localStorage.getItem(attempt.storageKey);
+        if (raw === null) return;
+        const current = parseStoredBankReconciliationWrite(raw);
+        if (current.intentId === attempt.intentId && current.fingerprint === attempt.fingerprint) {
+          window.localStorage.removeItem(attempt.storageKey);
+        }
+      },
+    );
+  } catch {
+    throw new AccountingApiError(0, "The bank action completed, but its retry marker could not be verified and cleared. Reload before changing bank data.", true);
+  }
 }
 
 async function clearAccountingCloseYearAttempt(storageKey: string): Promise<void> {

@@ -829,10 +829,12 @@ describe("accounting API: governed writes", () => {
   });
 
   it("reports a completed write only when a 200 envelope comes back", async () => {
-    stubFetch(() => Response.json({ ok: true, data: {} }));
-    await expect(submitAccountingAction("/api/banking", { action: "excludeBankTransaction", transactionId: "transaction-1" })).resolves.toEqual({
+    stubPaymentLocks();
+    const mock = stubFetch(() => Response.json({ ok: true, data: { status: "excluded" } }));
+    await expect(submitAccountingAction("/api/banking", { action: "excludeBankTransaction", transactionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }, undefined, paymentRetryScope)).resolves.toEqual({
       kind: "completed",
     });
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
   });
 
   it("rejects a 202 that is missing its Go year-end pending marker", async () => {
@@ -1426,29 +1428,49 @@ describe("accounting API: Go bank reconciliation writes", () => {
 
     await expect(submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope)).rejects.toMatchObject({
       status: 0,
-      message: expect.stringContaining("cannot safely reserve a bank reconciliation action"),
+      message: expect.stringContaining("cannot safely reserve a bank action"),
     });
     expect(mock).not.toHaveBeenCalled();
     expect(window.localStorage.length).toBe(0);
   });
 
-  it("routes match and unmatch through their Go capabilities and validates outputs", async () => {
-    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+  it("routes every supported bank write through its Go capability with organization scope", async () => {
+    const expected = new Map<string, unknown>([
+      ["accounting.addBankAccount", { bankAccountId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }],
+      ["accounting.importBankFeed", { inserted: 1, skipped: 0 }],
+      ["accounting.matchBankTransaction", { status: "matched", allocatedMinor: 5000, lineUnexplainedMinor: 0 }],
+      ["accounting.unmatchBankTransaction", { status: "unmatched", releasedMinor: 5000 }],
+      ["accounting.excludeBankTransaction", { status: "excluded" }],
+      ["accounting.unexcludeBankTransaction", { status: "unmatched" }],
+      ["accounting.deleteBankTransaction", { deleted: true }],
+    ]);
     const mock = stubFetch((_url, init) => {
       const capabilityId = JSON.parse(String(init?.body)).capabilityId;
-      return capabilityId === "accounting.matchBankTransaction"
-        ? Response.json({ ok: true, data: { status: "matched", allocatedMinor: 5000, lineUnexplainedMinor: 0 } })
-        : Response.json({ ok: true, data: { status: "unmatched", releasedMinor: 5000 } });
+      return Response.json({ ok: true, data: expected.get(capabilityId) });
     });
-    await expect(submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
-    await expect(submitAccountingAction("/api/banking", unmatchAction, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
-    const matchBody = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    const unmatchBody = JSON.parse(String(mock.mock.calls[1]?.[1]?.body)) as Record<string, unknown>;
-    expect(matchBody).toMatchObject({ capabilityId: "accounting.matchBankTransaction", input: { transactionId: matchAction.transactionId, paymentId: matchAction.paymentId }, intentId: expect.any(String) });
-    expect(unmatchBody).toMatchObject({ capabilityId: "accounting.unmatchBankTransaction", input: { transactionId: unmatchAction.transactionId }, intentId: expect.any(String) });
-    expect(matchBody).not.toHaveProperty("actorId");
-    expect(matchBody).not.toHaveProperty("organizationId");
-    expect((matchBody.input as Record<string, unknown>).action).toBeUndefined();
+    const actions = [
+      { action: "addBankAccount", name: "Operating", currencyCode: "USD", last4: "0042" },
+      { action: "importBankFeed", bankAccountId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", rows: [{ postedAt: "2026-06-01", amountMinor: 2500, description: "Receipt" }] },
+      matchAction,
+      unmatchAction,
+      { action: "excludeBankTransaction", transactionId: matchAction.transactionId },
+      { action: "unexcludeBankTransaction", transactionId: matchAction.transactionId },
+      { action: "deleteBankTransaction", transactionId: matchAction.transactionId },
+    ];
+    for (const action of actions) {
+      await expect(submitAccountingAction("/api/banking", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    }
+    const expectedIDs = [...expected.keys()];
+    for (const [index, capabilityId] of expectedIDs.entries()) {
+      const [url, init] = mock.mock.calls[index]!;
+      expect(url).toBe("/api/capabilities/execute");
+      expect(init?.headers).toMatchObject({ "X-Organization-ID": paymentRetryScope.organizationId });
+      const posted = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(posted).toMatchObject({ capabilityId, intentId: expect.any(String) });
+      expect(posted).not.toHaveProperty("actorId");
+      expect(posted).not.toHaveProperty("organizationId");
+      expect((posted.input as Record<string, unknown>).action).toBeUndefined();
+    }
     await expect(readPendingAccountingBankReconciliationWrite(paymentRetryScope)).resolves.toBeNull();
   });
 
@@ -1471,8 +1493,7 @@ describe("accounting API: Go bank reconciliation writes", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  it("retains one exact match intent through 202/404 and blocks both rollback operations", async () => {
-    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+  it("retains one exact bank intent through 202/404 and blocks a different action", async () => {
     const mock = stubFetch(() => mock.mock.calls.length === 1
       ? Response.json({ pendingApproval: true, reason: "Match approval required" }, { status: 202 })
       : Response.json({ error: "capability not found" }, { status: 404 }));
@@ -1481,10 +1502,37 @@ describe("accounting API: Go bank reconciliation writes", () => {
     await expect(readPendingAccountingBankReconciliationWrite(paymentRetryScope)).resolves.toEqual(matchAction);
     const calls = mock.mock.calls;
     expect(JSON.parse(String(calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(calls[1]?.[1]?.body)).intentId);
-    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", false);
-    await expect(submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
     await expect(submitAccountingAction("/api/banking", unmatchAction, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
     expect(mock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let a delayed duplicate response clear a newer bank action marker", async () => {
+    const action = { action: "excludeBankTransaction", transactionId: matchAction.transactionId };
+    const newerAction = { action: "unexcludeBankTransaction", transactionId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" };
+    const deferred: Array<(response: Response) => void> = [];
+    const mock = stubFetch(() => new Promise((resolve) => deferred.push(resolve)));
+    const success = () => Response.json({ ok: true, data: { status: "excluded" } });
+
+    const original = submitAccountingAction("/api/banking", action, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(1));
+    const duplicate = submitAccountingAction("/api/banking", action, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(2));
+    const originalIntent = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const duplicateIntent = JSON.parse(String(mock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(duplicateIntent.intentId).toBe(originalIntent.intentId);
+
+    deferred[1]!(success());
+    await duplicate;
+    const newer = submitAccountingAction("/api/banking", newerAction, undefined, paymentRetryScope);
+    await vi.waitFor(() => expect(deferred).toHaveLength(3));
+    const newerIntent = JSON.parse(String(mock.mock.calls[2]?.[1]?.body)) as { intentId: string };
+    expect(newerIntent.intentId).not.toBe(originalIntent.intentId);
+
+    deferred[2]!(Response.json({ pendingApproval: true, reason: "Review required" }, { status: 202 }));
+    await expect(newer).resolves.toMatchObject({ kind: "pending" });
+    deferred[0]!(success());
+    await original;
+    await expect(readPendingAccountingBankReconciliationWrite(paymentRetryScope)).resolves.toEqual(newerAction);
   });
 
   it("uses Go's authoritative allocation and matched-state rejection", async () => {
@@ -1495,11 +1543,11 @@ describe("accounting API: Go bank reconciliation writes", () => {
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
   });
 
-  it("leaves other Banking writes on their existing endpoint", async () => {
-    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
-    const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
-    await expect(submitAccountingAction("/api/banking", { action: "excludeBankTransaction", transactionId: matchAction.transactionId }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
-    expect(mock).toHaveBeenCalledWith("/api/banking", expect.objectContaining({ method: "POST" }));
+  it("fails closed without a captured organization before reserving or sending", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: { status: "excluded" } }));
+    await expect(submitAccountingAction("/api/banking", { action: "excludeBankTransaction", transactionId: matchAction.transactionId }, undefined, { ...paymentRetryScope, organizationId: null })).rejects.toMatchObject({ status: 0 });
+    expect(mock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
   });
 });
 

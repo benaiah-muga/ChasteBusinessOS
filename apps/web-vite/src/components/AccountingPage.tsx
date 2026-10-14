@@ -15,7 +15,6 @@ import {
   fetchPaymentReminders,
   goAccountingCreditNoteUseGo,
   goAccountingReverseEntryUseGo,
-  goAccountingBankReconciliationWritesUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
@@ -459,11 +458,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     void readPendingAccountingBankReconciliationWrite(paymentRetryScope).then((action) => {
       if (!active) return;
       setPendingBankReconciliationWrite(action);
-      if (action) setNotice({ tone: "pending", text: goAccountingBankReconciliationWritesUseGo()
-        ? "A bank reconciliation action is unresolved. Retry the exact action to recover its result."
-        : "A Go bank reconciliation action is unresolved. Restore the Go route and retry that exact action before using the legacy route." });
+      if (action) setNotice({ tone: "pending", text: "A bank action is unresolved. Retry the exact action to recover its result." });
     }).catch((error) => {
-      if (active && goAccountingBankReconciliationWritesUseGo()) {
+      if (active) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved bank reconciliation action." });
       }
     });
@@ -571,8 +568,10 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const isReverseEntry = path === "/api/accounting" && payload.action === "reverse";
       const goReverseEntry = isReverseEntry && goAccountingReverseEntryUseGo();
       const goReversePayment = path === "/api/accounting" && payload.action === "reversePayment";
-      const isBankReconciliationWrite = path === "/api/banking" && (payload.action === "matchBankTransaction" || payload.action === "unmatchBankTransaction");
-      const goBankReconciliationWrite = isBankReconciliationWrite && goAccountingBankReconciliationWritesUseGo();
+      const goBankReconciliationWrite = path === "/api/banking" && [
+        "addBankAccount", "importBankFeed", "matchBankTransaction", "unmatchBankTransaction",
+        "excludeBankTransaction", "unexcludeBankTransaction", "deleteBankTransaction",
+      ].includes(String(payload.action));
       const isPurchasingBillPayment = path === "/api/accounting" && payload.action === "payBill";
       const goPurchasingBillPayment = isPurchasingBillPayment;
       setBusy(true);
@@ -795,11 +794,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               {pendingBankReconciliationWrite && <button
                 type="button"
                 className="accounting-button accounting-button-small"
-                disabled={busy || !goAccountingBankReconciliationWritesUseGo()}
-                onClick={() => void runAction("/api/banking", { ...pendingBankReconciliationWrite }, pendingBankReconciliationWrite.action === "matchBankTransaction" ? "Match" : "Unmatch")}
-              >{goAccountingBankReconciliationWritesUseGo()
-                ? `Retry exact ${pendingBankReconciliationWrite.action === "matchBankTransaction" ? "match" : "unmatch"}`
-                : "Enable Go bank reconciliation route to retry"}</button>}
+                disabled={busy}
+                onClick={() => void runAction("/api/banking", { ...pendingBankReconciliationWrite }, bankActionLabel(pendingBankReconciliationWrite.action))}
+              >Retry exact {bankActionLabel(pendingBankReconciliationWrite.action).toLowerCase()}</button>}
               {pendingRecordPayment && <button
                 type="button"
                 className="accounting-button accounting-button-small"
@@ -2827,6 +2824,18 @@ function PeriodsSection({
 
 /* ------------------------------------------------------------------- bank -- */
 
+function bankActionLabel(action: AccountingBankReconciliationWriteAction["action"]): string {
+  switch (action) {
+    case "addBankAccount": return "Add account";
+    case "importBankFeed": return "Import bank feed";
+    case "matchBankTransaction": return "Match";
+    case "unmatchBankTransaction": return "Unmatch";
+    case "excludeBankTransaction": return "Exclude";
+    case "unexcludeBankTransaction": return "Restore";
+    case "deleteBankTransaction": return "Delete";
+  }
+}
+
 function BankSection({
   baseCurrency,
   banking,
@@ -2967,7 +2976,7 @@ function BankSection({
           </label>
           <button
             type="button"
-            disabled={busy || !newName.trim() || !hasCurrencyCode(newCurrencyCode.trim() || baseCurrency)}
+            disabled={busy || pendingReconciliationWrite || !newName.trim() || !hasCurrencyCode(newCurrencyCode.trim() || baseCurrency)}
             onClick={addAccount}
           >
             Add account
@@ -3021,7 +3030,7 @@ function BankSection({
           <button
             type="button"
             className="accounting-button-primary"
-            disabled={busy || !feed.trim() || !selectedAccount}
+            disabled={busy || pendingReconciliationWrite || !feed.trim() || !selectedAccount}
             onClick={importFeed}
           >
             Import lines
@@ -3087,7 +3096,7 @@ function BankSection({
                 <button
                   type="button"
                   className="accounting-button accounting-button-ghost accounting-button-small"
-                  disabled={busy}
+                  disabled={busy || pendingReconciliationWrite}
                   onClick={() =>
                     void onAction(
                       "/api/banking",
@@ -3160,7 +3169,7 @@ function BankSection({
                 <button
                   type="button"
                   className="accounting-button accounting-button-ghost accounting-button-small"
-                  disabled={busy}
+                  disabled={busy || pendingReconciliationWrite}
                   onClick={() =>
                     void onAction(
                       "/api/banking",
@@ -3174,7 +3183,7 @@ function BankSection({
                 <button
                   type="button"
                   className="accounting-button accounting-button-ghost accounting-button-small"
-                  disabled={busy}
+                  disabled={busy || pendingReconciliationWrite}
                   onClick={() =>
                     void onAction(
                       "/api/banking",
