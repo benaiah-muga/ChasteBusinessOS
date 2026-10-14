@@ -778,15 +778,20 @@ describe("messages page states", () => {
     render(<MessagesPage {...props} />);
     await waitFor(() => expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Corrected after reload"));
     expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).readOnly).toBe(true);
-    const requestCount = paths.length;
+    const editRequests = () => fetchMock.mock.calls.filter(([path, init]) => {
+      if (String(path) !== "/api/capabilities/execute") return false;
+      return (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId === "messaging.editMessage";
+    });
+    const priorEditRequest = JSON.parse(String(editRequests()[0]?.[1]?.body)) as { intentId: string };
+    const editRequestCount = editRequests().length;
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect((await screen.findByRole("status")).textContent).toContain("Manager review required");
-    await waitFor(() => expect(paths).toHaveLength(requestCount + 1));
+    await waitFor(() => expect(editRequests()).toHaveLength(editRequestCount + 1));
     const goBody = JSON.parse(String(fetchMock.mock.calls.find(([path, init]) =>
       String(path) === "/api/capabilities/execute" &&
       (JSON.parse(String(init?.body)) as { capabilityId?: string }).capabilityId === "messaging.editMessage",
     )?.[1]?.body)) as Record<string, unknown>;
-    expect(goBody).toMatchObject({ capabilityId: "messaging.editMessage", input: { body: "Corrected after reload" }, intentId: expect.any(String) });
+    expect(goBody).toMatchObject({ capabilityId: "messaging.editMessage", input: { body: "Corrected after reload" }, intentId: priorEditRequest.intentId });
   });
 
   it("keeps a Go edit 404 locked across selector rollback without calling legacy PATCH", async () => {

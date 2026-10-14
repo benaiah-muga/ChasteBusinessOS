@@ -202,7 +202,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Invalid document link" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Back to document library" }).getAttribute("href")).toBe("/documents");
     expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
-    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute")).toHaveLength(3);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute")).toHaveLength(3));
 
     cleanup();
     window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
