@@ -1588,8 +1588,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Go route. Other POS POST actions remain on legacy. The `/pos` page remains
      legacy-owned. Focused tests, full workspace tests, Go verification,
      typecheck, lint, route ownership checks, and contract checks pass.
-     Authenticated browser proof remains open because the local environment
-     does not provide `BETTER_AUTH_SECRET`.
+     Authenticated browser proof is recorded in item 401.
 154. (Implemented) Route Vite POS register opening through the existing Go
      `pos.openSession` capability by default whenever
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
@@ -4255,3 +4254,11 @@ new owners and the manifest shows zero legacy runtime paths.
      `inventory.adjustStock`, both returning HTTP 200 from Go. POS search showed
      12 units available at the configured sale price. No legacy inventory write
      or browser error was observed. This completes item 157.
+
+401. (Runtime verified) Authenticated Vite POS completed a cash sale for a
+     synthetic stocked item, returned the full sale to cash, and loaded the
+     shift summary. Go capability requests for sale and return each returned
+     HTTP 200; `POST /api/pos/shift-summary` also returned HTTP 200. The
+     reloaded summary showed one sale, UGX 2,500 cash takings, and UGX 2,500
+     cash refunds. No legacy `POST /api/pos` write or browser error was
+     observed. This completes the current Go runtime proof for item 153.
