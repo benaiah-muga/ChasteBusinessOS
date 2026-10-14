@@ -556,6 +556,12 @@
       "path": "/purchasing/receiving",
       "owner": "vite",
       "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/manufacturing",
+      "owner": "vite",
+      "parity": "verified"
     }
   ],
   "goRoutes": [

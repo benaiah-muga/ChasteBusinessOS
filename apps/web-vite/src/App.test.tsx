@@ -120,8 +120,9 @@ beforeEach(() => {
         { id: "inventory", label: "Inventory", description: "Stock levels and reorder needs", href: "/inventory" },
         { id: "documents", label: "Documents", description: "Business records", href: "/documents" },
         { id: "hr", label: "People", description: "People and payroll", href: "/hr" },
+        { id: "manufacturing", label: "Manufacturing", description: "Production planning and execution", href: "/manufacturing" },
       ],
-      enabledModules: ["accounting", "purchasing", "projects", "analytics", "inventory", "documents", "hr"],
+      enabledModules: ["accounting", "purchasing", "projects", "analytics", "inventory", "documents", "hr", "manufacturing"],
       usingDefaults: false,
     });
     if (path === "/api/hr") return Response.json({ employees: [], leave: [], runs: [], openings: [], applicants: [], attendance: [] });
@@ -259,6 +260,9 @@ beforeEach(() => {
       }
       if (capabilityId === "hr.report") return Response.json({ ok: true, data: {
         employees: [], leave: [], runs: [], openings: [], applicants: [], attendance: [],
+      } });
+      if (capabilityId === "manufacturing.overviewReport") return Response.json({ ok: true, data: {
+        boms: [], assemblies: [], workOrders: [], productionRuns: [], lots: [],
       } });
       if (capabilityId === "purchasing.apAging") return Response.json({ ok: true, data: { buckets: {
         current: 5000,
@@ -593,6 +597,23 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "People" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "People" }).getAttribute("aria-current")).toBe("page");
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+  });
+
+  it("routes Manufacturing to its Vite workspace and loads its Go report", async () => {
+    window.history.replaceState(null, "", "/manufacturing");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Manufacturing" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Manufacturing" }).getAttribute("aria-current")).toBe("page");
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+    expect(legacyMocks.legacyUrl).not.toHaveBeenCalledWith(expect.stringContaining("manufacturing"));
+    await waitFor(() => {
+      const capabilityCalls = fetchMock.mock.calls
+        .filter(([input]) => String(input) === "/api/capabilities/execute")
+        .map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId?: string });
+      expect(capabilityCalls).toContainEqual(expect.objectContaining({ capabilityId: "manufacturing.overviewReport" }));
+    });
   });
 
   it("opens Accounting close readiness in the authenticated shell", async () => {

@@ -38,6 +38,8 @@ The full v1 changelog is preserved at the bottom of this file.
   or workspace changes.
 - Vite message deletion recovery retries uncertain outcomes with the original
   Go intent and remains actionable after transient failures.
+- The Manufacturing workspace now opens in Vite and reads its overview through
+  the Go capability API.
 - Vite purchasing vendor and bill creation, bill payment, and bill credits now
   use Go capabilities. Credits on foreign-currency bills fail closed until an
   exchange rate is available.
