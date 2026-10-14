@@ -24,8 +24,20 @@ function detail(id: string, title: string, status: string, parsedMarkdown: strin
       sizeBytes: id === rows[0]!.id ? 1024 : null,
       parseError: null,
       parsedMarkdown,
+      suggestions: id === goDocumentId ? [{
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        orgId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        documentId: id,
+        description: "Printer paper",
+        quantityThousandths: 2000,
+        unitPriceMinor: 1500,
+        suggestedAccountCode: "6000",
+        matchScore: 2,
+        matchedOn: ["office"],
+        status: "open",
+        createdAt: "2026-09-28T10:00:00.000Z",
+      }] : [],
     },
-    suggestions: [],
   };
 }
 
@@ -62,6 +74,9 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Documents" })).not.toBeNull();
     expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
     expect(screen.getByText("Invoice number: 42")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Coding suggestions" })).not.toBeNull();
+    expect(screen.getByText("Printer paper")).not.toBeNull();
+    expect(screen.getByText("Account 6000")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe(`/api/go/documents/${rows[0]!.id}/content`);
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(4);
 
@@ -212,10 +227,10 @@ describe("Vite documents page", () => {
     expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
     const detailRequests = notFoundFetch.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute");
     expect(detailRequests).toHaveLength(4);
-    const previewRequest = detailRequests.map((call) => JSON.parse(String(call[1]?.body)) as { input: { id?: string; preview?: boolean } }).find((request) => request.input.id !== undefined);
-    expect(previewRequest).toMatchObject({
+    const detailRequest = detailRequests.map((call) => JSON.parse(String(call[1]?.body)) as { input: { id?: string; preview?: boolean } }).find((request) => request.input.id !== undefined);
+    expect(detailRequest).toMatchObject({
       capabilityId: "documents.listIngestedDocuments",
-      input: { id: goDocumentId, preview: true },
+      input: { id: goDocumentId },
     });
   });
 
@@ -228,6 +243,7 @@ describe("Vite documents page", () => {
       sizeBytes: 1024,
       parseError: null,
       parsedMarkdown: "Invoice number: 42",
+      suggestions: [],
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });

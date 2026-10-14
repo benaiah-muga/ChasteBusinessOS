@@ -10,6 +10,19 @@ const DocumentRowSchema = z.object({
 });
 
 const CapabilitySuccessSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const DocumentCodingSuggestionSchema = z.object({
+  id: z.string().uuid(),
+  orgId: z.string().uuid(),
+  documentId: z.string().uuid(),
+  description: z.string(),
+  quantityThousandths: z.number().int().nonnegative(),
+  unitPriceMinor: z.number().int().nonnegative(),
+  suggestedAccountCode: z.string().min(1),
+  matchScore: z.number().int(),
+  matchedOn: z.array(z.string()),
+  status: z.string().min(1),
+  createdAt: z.string().datetime(),
+}).strict();
 const GoDocumentListOutputSchema = z.object({
   documents: z.array(DocumentRowSchema.extend({ id: z.string().uuid() }).strict()).default([]),
   vendors: z.array(z.object({ id: z.string(), name: z.string() }).strict()).default([]),
@@ -26,6 +39,7 @@ const GoDocumentDetailOutputSchema = z.object({
     parsedMarkdown: z.string().nullable(),
     createdAt: z.string().datetime(),
     folder: z.string().nullable(),
+    suggestions: z.array(DocumentCodingSuggestionSchema).default([]),
   }).strict(),
 }).strict();
 const ModuleSwitchboardSchema = z.object({
@@ -158,7 +172,7 @@ export async function fetchDocumentDetail(id: string, signal?: AbortSignal): Pro
   if (!z.string().uuid().safeParse(id).success) {
     throw new DocumentsApiError(400, "The selected document has an invalid ID.");
   }
-  const body = await executeGoDocumentRead({ id, preview: true }, signal);
+  const body = await executeGoDocumentRead({ id }, signal);
   const parsed = GoDocumentDetailOutputSchema.safeParse(body);
   if (!parsed.success) {
     throw new DocumentsApiError(200, "The Go documents service returned data in an unexpected format.");

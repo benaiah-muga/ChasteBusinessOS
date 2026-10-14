@@ -122,6 +122,21 @@ function DocumentDetails({ state, selected }: { state: DetailState; selected: Do
           ? <pre>{document.parsedMarkdown}</pre>
           : <p className="documents-muted">{document.status === "queued" || document.status === "processing" ? "Text extraction is in progress." : "No extracted text is available for this document yet."}</p>}
       </section>
+      <section className="documents-extracted" aria-labelledby="documents-coding-title">
+        <h3 id="documents-coding-title">Coding suggestions</h3>
+        {document.suggestions.length > 0
+          ? <ul className="documents-coding-suggestions">
+              {document.suggestions.map((suggestion) => (
+                <li key={suggestion.id}>
+                  <strong>{suggestion.description}</strong>
+                  <span>Account {suggestion.suggestedAccountCode}</span>
+                  <span>{suggestion.quantityThousandths / 1000} × {suggestion.unitPriceMinor} minor units</span>
+                  <span>Status: {suggestion.status}</span>
+                </li>
+              ))}
+            </ul>
+          : <p className="documents-muted">No coding suggestions are available for this document.</p>}
+      </section>
       <p className="documents-detail-id">Record {document.id || selected.id}</p>
     </article>
   );

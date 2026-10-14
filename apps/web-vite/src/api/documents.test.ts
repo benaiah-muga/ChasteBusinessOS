@@ -20,6 +20,20 @@ const goDetail = {
   sizeBytes: 240,
   parseError: null,
   parsedMarkdown: "Invoice number: 42",
+  suggestions: [],
+};
+const goSuggestion = {
+  id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  orgId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  documentId: goDocumentId,
+  description: "Printer paper",
+  quantityThousandths: 2000,
+  unitPriceMinor: 1500,
+  suggestedAccountCode: "6000",
+  matchScore: 2,
+  matchedOn: ["office"],
+  status: "open",
+  createdAt: "2026-09-28T10:00:00.000Z",
 };
 
 describe("documents API client", () => {
@@ -90,16 +104,25 @@ describe("documents API client", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
   });
 
-  it("loads preview detail through Go without requesting suggestions or content", async () => {
+  it("loads detail and coding suggestions through Go without requesting file content", async () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { document: goDetail } }));
+    const detailWithSuggestions = { ...goDetail, suggestions: [goSuggestion] };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { document: detailWithSuggestions } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchDocumentDetail(goDocumentId)).resolves.toEqual(goDetail);
+    await expect(fetchDocumentDetail(goDocumentId)).resolves.toEqual(detailWithSuggestions);
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(request).toMatchObject({ capabilityId: "documents.listIngestedDocuments", input: { id: goDocumentId, preview: true }, intentId: expect.any(String) });
-    expect(JSON.stringify(request)).not.toContain("suggestions");
+    expect(request).toMatchObject({ capabilityId: "documents.listIngestedDocuments", input: { id: goDocumentId }, intentId: expect.any(String) });
     expect(JSON.stringify(request)).not.toContain("base64");
+  });
+
+  it("treats an omitted Go suggestions field as an empty collection", async () => {
+    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+    const detailWithoutSuggestions = { ...goDetail } as Record<string, unknown>;
+    delete detailWithoutSuggestions.suggestions;
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { document: detailWithoutSuggestions } })));
+
+    await expect(fetchDocumentDetail(goDocumentId)).resolves.toMatchObject({ suggestions: [] });
   });
 
   it("does not fall back to the legacy documents route after a selected Go error or malformed output", async () => {
@@ -117,9 +140,22 @@ describe("documents API client", () => {
     expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
-  it("rejects Go preview details that expose suggestions or extra fields", async () => {
+  it("rejects malformed Go coding suggestions and extra fields", async () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { document: { ...goDetail, suggestions: [] } } }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { document: { ...goDetail, suggestions: [{ ...goSuggestion, suggestedAccountCode: 6000 }] } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchDocumentDetail(goDocumentId)).rejects.toMatchObject({
+      name: "DocumentsApiError",
+      status: 200,
+      message: expect.stringContaining("unexpected format"),
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects malformed matched-on metadata from Go", async () => {
+    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { document: { ...goDetail, suggestions: [{ ...goSuggestion, matchedOn: { unexpected: "object" } }] } } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchDocumentDetail(goDocumentId)).rejects.toMatchObject({

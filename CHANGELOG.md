@@ -32,6 +32,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Support lists the 20 newest filed internal tickets through Go's `support.listTickets` capability with permission and actor/workspace scoped result handling.
 - Vite Analytics answers revenue, collections, and pipeline questions through Go's authenticated `analytics.askYourBusiness` capability, showing cited organization data and suggestions without executing them.
 - Vite People can edit an employee's department and job title through Go's `hr.updateEmployeeStructure` capability, with exact actor/org-scoped retries for pending or uncertain results.
+- Vite Documents shows stored coding suggestions on each ingested document, loaded and strictly validated from Go.
 
 ### Fixed
 

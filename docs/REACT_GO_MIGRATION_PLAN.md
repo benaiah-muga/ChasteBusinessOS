@@ -4491,3 +4491,14 @@ new owners and the manifest shows zero legacy runtime paths.
      updated the synthetic migration employee through Go, showed the refreshed
      department and title, observed the capability request return HTTP 200,
      and recorded no browser errors or legacy `/api/hr` requests.
+
+416. (Implemented and verified: focused tests and authenticated browser proof)
+     Vite Documents now shows the stored coding suggestions for the selected
+     ingested document. The full detail read remains organization-scoped through
+     Go's `documents.listIngestedDocuments` capability; Vite validates each
+     suggestion, including its JSON token metadata, and treats an omitted list
+     as empty. API and page tests pass 27 cases, with typecheck and lint passing.
+     Authenticated `agent-browser` proof created a synthetic text document,
+     generated a suggestion through Go's governed capability, and reloaded the
+     Vite detail view. The account suggestion appeared from Go, requests
+     returned HTTP 200, and the browser error log was empty.
