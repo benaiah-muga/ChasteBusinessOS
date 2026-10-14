@@ -376,7 +376,7 @@ describe("tab deep-linking", () => {
   it("opens the tab named in the URL on first paint", async () => {
     window.history.replaceState(null, "", "/accounting?tab=payables");
     stubAccounting();
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     expect(await screen.findByRole("table", { name: "Vendor bills" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open invoices workspace" }).getAttribute("href")).toBe("/accounting/invoices");
@@ -385,7 +385,7 @@ describe("tab deep-linking", () => {
 
   it("rewrites the URL in place when the tab changes", async () => {
     stubAccounting();
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
     await screen.findByRole("table", { name: "Journal entries" }).catch(() => undefined);
 
     fireEvent.click(screen.getByRole("button", { name: /Journal/ }));
@@ -473,7 +473,7 @@ describe("bank feed CSV parsing", () => {
 describe("AccountingPage states", () => {
   it("shows the overview position and working capital once loaded", async () => {
     stubAccounting();
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     expect(await screen.findByText("Net income · to date")).toBeTruthy();
     expect(screen.getByText("$115.00")).toBeTruthy();
@@ -494,7 +494,7 @@ describe("AccountingPage states", () => {
 
   it("does not fetch the books when Accounting is disabled", async () => {
     const { mock } = stubAccounting({ enabled: false });
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     expect(await screen.findByText("Accounting is turned off")).toBeTruthy();
     expect(mock).toHaveBeenCalledTimes(1);
@@ -502,7 +502,7 @@ describe("AccountingPage states", () => {
 
   it("surfaces a load failure with a retry that refetches", async () => {
     const { mock } = stubAccounting({ goOverviewResponse: () => Response.json({ ok: true, data: { nope: true } }) });
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     expect(await screen.findByRole("heading", { name: "Could not load your books" })).toBeTruthy();
     const callsBefore = mock.mock.calls.length;
@@ -512,7 +512,7 @@ describe("AccountingPage states", () => {
 
   it("keeps the books when an auxiliary read fails", async () => {
     stubAccounting({ banking: null });
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     expect(await screen.findByText("Net income · to date")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
@@ -521,7 +521,7 @@ describe("AccountingPage states", () => {
 
   it("keeps the books when auxiliary requests fail at the network layer", async () => {
     stubAccounting({ rejectCashBasis: true, rejectBanking: true });
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     expect(await screen.findByText("Net income · to date")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
@@ -729,7 +729,10 @@ describe("AccountingPage governed writes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
     await waitFor(() => {
       const write = calls.find((call) => call.body?.includes("recordPayment"));
-      expect(JSON.parse(write!.body!) as { amountMinor: number }).toMatchObject({ amountMinor: 5_000 });
+      expect(JSON.parse(write!.body!) as { capabilityId: string; input: { amountMinor: number } }).toMatchObject({
+        capabilityId: "accounting.recordPayment",
+        input: { amountMinor: 5_000 },
+      });
     });
   });
 
@@ -1157,7 +1160,7 @@ describe("AccountingPage tabs", () => {
 
   it("surfaces Go FX permission failures instead of presenting missing report data", async () => {
     stubAccounting({ goUnavailableReport: "accounting.unrealizedFxExposure" });
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
     expect(screen.getByText("forbidden: missing accounting.read")).toBeTruthy();
@@ -1169,7 +1172,7 @@ describe("AccountingPage tabs", () => {
         ? Response.json({ pendingApproval: true }, { status: 202 })
         : Response.json({ ok: true, data: reports.pnl }),
     });
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     expect(await screen.findByRole("heading", { name: "Could not load your books" })).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "Accounting sections" })).toBeNull();
@@ -1197,7 +1200,7 @@ describe("AccountingPage tabs", () => {
 
   it("fails the page when Go reports cannot load", async () => {
     stubAccounting({ reportsStatus: 500 });
-    render(<AccountingPage />);
+    render(<AccountingPage actorId="55555555-5555-4555-8555-555555555555" organizationId="66666666-6666-4666-8666-666666666666" />);
 
     expect(await screen.findByRole("heading", { name: "Could not load your books" })).toBeTruthy();
     expect(screen.getByText("The Accounting service is unavailable. Try again.")).toBeTruthy();

@@ -22,6 +22,8 @@ import {
   submitAccountingAction,
 } from "./accounting";
 
+const ORG_ID = "66666666-6666-4666-8666-666666666666";
+
 const entry = {
   id: "entry-1",
   memo: "Invoice 1042",
@@ -174,24 +176,32 @@ describe("accounting API: books and reports", () => {
       ...overview,
       entries: [{ ...entry, debitMinor: 12_500 }],
     } }));
-    const result = await fetchAccountingOverview();
+    const result = await fetchAccountingOverview(ORG_ID);
     expect(result.entries[0]?.debitMinor).toBe(12_500);
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
   });
 
+  it("fails closed before requesting overview or reports without a valid organization", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: overview }));
+    await expect(fetchAccountingOverview(null)).rejects.toMatchObject({ status: 0 });
+    await expect(fetchAccountingReports("not-an-org-id")).rejects.toMatchObject({ status: 0 });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
   it("still rejects a non-numeric aggregate", async () => {
     stubFetch(() => Response.json({ ok: true, data: { ...overview, entries: [{ ...entry, debitMinor: "not-a-number" }] } }));
-    await expect(fetchAccountingOverview()).rejects.toBeInstanceOf(AccountingApiError);
+    await expect(fetchAccountingOverview(ORG_ID)).rejects.toBeInstanceOf(AccountingApiError);
   });
 
   it("always loads the strict overview from Go with a session capability request", async () => {
     const mock = stubFetch(() => Response.json({ ok: true, data: overview }));
-    await expect(fetchAccountingOverview()).resolves.toEqual(overview);
+    await expect(fetchAccountingOverview(ORG_ID)).resolves.toEqual(overview);
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
       cache: "no-store",
       credentials: "same-origin",
+      headers: expect.objectContaining({ "X-Organization-ID": ORG_ID }),
       body: expect.stringContaining('"capabilityId":"accounting.overview"'),
     }));
     const requestBody = JSON.parse(String(mock.mock.calls[0]?.[1]?.body ?? "{}")) as { input?: unknown; intentId?: string };
@@ -202,7 +212,7 @@ describe("accounting API: books and reports", () => {
   it("fails closed on a Go error without retrying the legacy overview", async () => {
     const mock = stubFetch(() => Response.json({ message: "service unavailable" }, { status: 503 }));
 
-    await expect(fetchAccountingOverview()).rejects.toMatchObject({ status: 503 });
+    await expect(fetchAccountingOverview(ORG_ID)).rejects.toMatchObject({ status: 503 });
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything());
   });
@@ -213,7 +223,7 @@ describe("accounting API: books and reports", () => {
       data: { ...overview, entries: [{ ...entry, debitMinor: Number.MAX_SAFE_INTEGER + 1 }] },
     }));
 
-    await expect(fetchAccountingOverview()).rejects.toMatchObject({
+    await expect(fetchAccountingOverview(ORG_ID)).rejects.toMatchObject({
       name: "AccountingApiError",
       message: "The Go Accounting service returned an unexpected result.",
     });
@@ -221,7 +231,7 @@ describe("accounting API: books and reports", () => {
 
   it("rejects a body that drifts from the ledger contract", async () => {
     stubFetch(() => Response.json({ ok: true, data: { ...overview, entries: [{ ...entry, amountMinor: 12.5 }] } }));
-    await expect(fetchAccountingOverview()).rejects.toMatchObject({
+    await expect(fetchAccountingOverview(ORG_ID)).rejects.toMatchObject({
       name: "AccountingApiError",
       message: "The Go Accounting service returned an unexpected result.",
     });
@@ -229,12 +239,12 @@ describe("accounting API: books and reports", () => {
 
   it("rejects money that is not an integer in minor units", async () => {
     stubFetch(() => Response.json({ ok: true, data: { ...overview, baseCurrency: "USD", aging: { ...overview.aging, totalOutstanding: 1.5 } } }));
-    await expect(fetchAccountingOverview()).rejects.toBeInstanceOf(AccountingApiError);
+    await expect(fetchAccountingOverview(ORG_ID)).rejects.toBeInstanceOf(AccountingApiError);
   });
 
   it("maps a session ending to a sign-in message rather than wire truth", async () => {
     stubFetch(() => Response.json({ error: "unauthorized" }, { status: 401 }));
-    await expect(fetchAccountingOverview()).rejects.toMatchObject({
+    await expect(fetchAccountingOverview(ORG_ID)).rejects.toMatchObject({
       status: 401,
       message: "Your session has ended. Sign in again to continue.",
     });
@@ -242,7 +252,7 @@ describe("accounting API: books and reports", () => {
 
   it("hides markup in a server error message", async () => {
     stubFetch(() => Response.json({ message: "<script>alert(1)</script>" }, { status: 500 }));
-    await expect(fetchAccountingReports()).rejects.toMatchObject({
+    await expect(fetchAccountingReports(ORG_ID)).rejects.toMatchObject({
       status: 500,
       message: "The Accounting service is unavailable. Try again.",
     });
@@ -264,7 +274,7 @@ describe("accounting API: books and reports", () => {
       return Response.json({ ok: true, data: dataByCapability[body.capabilityId ?? ""] });
     });
 
-    await expect(fetchAccountingReports()).resolves.toEqual({
+    await expect(fetchAccountingReports(ORG_ID)).resolves.toEqual({
       baseCurrency: "USD",
       unsupportedCurrencies: ["EUR"],
       pnl: reports.pnl,
@@ -288,6 +298,7 @@ describe("accounting API: books and reports", () => {
     for (const call of calls) {
       expect(call.url).toBe("/api/capabilities/execute");
       expect(call.init).toMatchObject({ method: "POST", cache: "no-store", credentials: "same-origin" });
+      expect(call.init?.headers).toMatchObject({ "X-Organization-ID": ORG_ID });
       expect(call.body.input).toEqual({});
       expect(call.body.intentId).toEqual(expect.any(String));
     }
@@ -304,7 +315,7 @@ describe("accounting API: books and reports", () => {
       if (body.capabilityId === "accounting.balanceSheet") return Response.json({ ok: true, data: reports.balanceSheet });
       return Response.json({ ok: true, data: { baseCurrency: "USD", unsupportedCurrencies: [] } });
     });
-    await expect(fetchAccountingReports()).rejects.toMatchObject({
+    await expect(fetchAccountingReports(ORG_ID)).rejects.toMatchObject({
       status: 422,
       message: "forbidden: missing accounting.read",
     });
@@ -321,7 +332,7 @@ describe("accounting API: books and reports", () => {
       if (body.capabilityId === "accounting.unrealizedFxExposure") return Response.json({ ok: true, data: { exposures: [] } });
       return Response.json({ ok: true, data: { baseCurrency: "USD", unsupportedCurrencies: [] } });
     });
-    await expect(fetchAccountingReports()).rejects.toMatchObject({
+    await expect(fetchAccountingReports(ORG_ID)).rejects.toMatchObject({
       status: 422,
       message: "forbidden: missing accounting.read",
     });
@@ -350,7 +361,7 @@ describe("accounting API: books and reports", () => {
       }
       return Response.json({ ok: true, data: { baseCurrency: "USD", unsupportedCurrencies: [] } });
     });
-    await expect(fetchAccountingReports()).rejects.toMatchObject({
+    await expect(fetchAccountingReports(ORG_ID)).rejects.toMatchObject({
       message: "The Accounting reports service returned an unexpected result.",
     });
   });
@@ -366,7 +377,7 @@ describe("accounting API: books and reports", () => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
       return body.capabilityId === "accounting.incomeStatement" ? response() : Response.json({ ok: true, data: reports.pnl });
     });
-    await expect(fetchAccountingReports()).rejects.toMatchObject({ name: "AccountingApiError", status });
+    await expect(fetchAccountingReports(ORG_ID)).rejects.toMatchObject({ name: "AccountingApiError", status });
     expect(mock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
@@ -388,7 +399,7 @@ describe("accounting API: books and reports", () => {
             : { exposures: [] };
       return Response.json({ ok: true, data });
     });
-    await expect(fetchAccountingReports()).rejects.toMatchObject({ name: "AccountingApiError" });
+    await expect(fetchAccountingReports(ORG_ID)).rejects.toMatchObject({ name: "AccountingApiError" });
     expect(mock).toHaveBeenCalledTimes(5);
   });
 
@@ -409,7 +420,7 @@ describe("accounting API: books and reports", () => {
               : validCashFlow;
       return Response.json({ ok: true, data });
     });
-    await expect(fetchAccountingReports()).rejects.toMatchObject({ name: "AccountingApiError", status: 503 });
+    await expect(fetchAccountingReports(ORG_ID)).rejects.toMatchObject({ name: "AccountingApiError", status: 503 });
     expect(mock).toHaveBeenCalledTimes(5);
   });
 });
@@ -417,17 +428,18 @@ describe("accounting API: books and reports", () => {
 describe("accounting API: auxiliary reads never blank the books", () => {
   it("returns null cash basis when the capability answers with an error", async () => {
     stubFetch(() => Response.json({ error: "nope" }, { status: 400 }));
-    await expect(fetchAccountingCashBasis(2026)).resolves.toBeNull();
+    await expect(fetchAccountingCashBasis(2026, ORG_ID)).resolves.toBeNull();
   });
 
   it("loads cash basis from Go and never calls the legacy accounting route", async () => {
     const mock = stubFetch(() =>
       Response.json({ ok: true, data: { cashInMinor: 5_000, cashOutMinor: 1_000, netCashMinor: 4_000, accrualRevenueMinor: 9_000, accrualExpenseMinor: 2_000, uncollectedMinor: 1_000 } }),
     );
-    await expect(fetchAccountingCashBasis(2026)).resolves.toMatchObject({ netCashMinor: 4_000 });
+    await expect(fetchAccountingCashBasis(2026, ORG_ID)).resolves.toMatchObject({ netCashMinor: 4_000 });
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
       cache: "no-store",
+      headers: expect.objectContaining({ "X-Organization-ID": ORG_ID }),
       body: expect.stringContaining('"capabilityId":"accounting.cashBasisReport"'),
     }));
   });
@@ -443,7 +455,7 @@ describe("accounting API: auxiliary reads never blank the books", () => {
       uncollectedMinor: 1_000,
     } }));
 
-    await expect(fetchAccountingCashBasis(2026)).resolves.toEqual({
+    await expect(fetchAccountingCashBasis(2026, ORG_ID)).resolves.toEqual({
       cashInMinor: 5_000,
       cashOutMinor: 1_000,
       netCashMinor: 4_000,
@@ -452,6 +464,7 @@ describe("accounting API: auxiliary reads never blank the books", () => {
     });
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(mock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": ORG_ID });
     expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toMatchObject({
       capabilityId: "accounting.cashBasisReport",
       input: { year: 2026 },
@@ -468,7 +481,7 @@ describe("accounting API: auxiliary reads never blank the books", () => {
   ])("keeps Go cash-basis $label nullable without legacy fallback", async ({ response }) => {
     vi.stubGlobal("__GO_ACCOUNTING_CASH_BASIS__", false);
     const mock = stubFetch(response);
-    await expect(fetchAccountingCashBasis(2026)).resolves.toBeNull();
+    await expect(fetchAccountingCashBasis(2026, ORG_ID)).resolves.toBeNull();
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
@@ -478,14 +491,14 @@ describe("accounting API: auxiliary reads never blank the books", () => {
     const controller = new AbortController();
     controller.abort();
     const mock = stubFetch(() => { throw new DOMException("Aborted", "AbortError"); });
-    await expect(fetchAccountingCashBasis(2026, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(fetchAccountingCashBasis(2026, ORG_ID, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
   it("rejects an out-of-range reporting year before making a request", async () => {
     const mock = stubFetch(() => Response.json({}));
-    await expect(fetchAccountingCashBasis(1999)).rejects.toMatchObject({ status: 400 });
+    await expect(fetchAccountingCashBasis(1999, ORG_ID)).rejects.toMatchObject({ status: 400 });
     expect(mock).not.toHaveBeenCalled();
   });
 
@@ -601,9 +614,10 @@ describe("accounting API: capability reads", () => {
     };
     const mock = stubFetch(() => Response.json({ ok: true, data: workspace }));
 
-    await expect(fetchAccountingBanking()).resolves.toEqual(workspace);
+    await expect(fetchAccountingBanking(ORG_ID)).resolves.toEqual(workspace);
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(mock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": ORG_ID });
     expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toMatchObject({
       capabilityId: "accounting.listBankingWorkspace",
       input: {},
@@ -616,7 +630,7 @@ describe("accounting API: capability reads", () => {
       accounts: [], unmatched: [], payments: [], summary: { accounts: [], unmatchedCount: 0 },
     } }));
 
-    await expect(fetchAccountingBanking()).rejects.toMatchObject({ name: "AccountingApiError", status: 200 });
+    await expect(fetchAccountingBanking(ORG_ID)).rejects.toMatchObject({ name: "AccountingApiError", status: 200 });
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
@@ -765,6 +779,21 @@ describe("accounting API: capability reads", () => {
 });
 
 describe("accounting API: governed writes", () => {
+  it("fails closed on invoice writes without an organization", async () => {
+    const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
+    await expect(submitAccountingAction("/api/accounting", {
+      action: "recordPayment", invoiceNumber: 1042, amountMinor: 5_000, method: "bank_transfer",
+    })).rejects.toMatchObject({ status: 0 });
+    await expect(submitAccountingAction("/api/accounting", {
+      action: "createInvoice",
+      customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      lines: [{ description: "Advisory", quantity: 1_000, unitPriceMinor: 100, taxMinor: 0 }],
+      currency: "USD",
+      dueAt: "2026-11-01T12:00:00.000Z",
+    })).rejects.toMatchObject({ status: 0 });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
   it("reports a 202 as pending rather than completed", async () => {
     stubPaymentLocks();
     stubFetch(() => Response.json({ pendingApproval: true, reason: "Payment above threshold" }, { status: 202 }));
@@ -860,6 +889,7 @@ describe("accounting API: governed writes", () => {
   });
 
   it("turns a rejected write into a readable failure", async () => {
+    stubPaymentLocks();
     vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", false);
     stubFetch(() => Response.json({ message: "Period is sealed" }, { status: 422 }));
     await expect(submitAccountingAction("/api/accounting", {
@@ -1006,12 +1036,13 @@ describe("accounting API: Go invoice payments", () => {
   });
 
   it("sends only the Go capability input and clears the marker after validated success", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", true);
+    vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", false);
     const mock = stubFetch(() => Response.json({ ok: true, data: paymentOutput }));
 
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
     const body = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
+    expect(mock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": paymentRetryScope.organizationId });
     expect(body).toMatchObject({ capabilityId: "accounting.recordPayment", input: { invoiceNumber: 1042, amountMinor: 5000, method: "bank_transfer" }, intentId: expect.any(String) });
     expect(body).not.toHaveProperty("actorId");
     expect(body).not.toHaveProperty("organizationId");
@@ -1021,7 +1052,7 @@ describe("accounting API: Go invoice payments", () => {
     expect(nextBody.intentId).not.toBe(body.intentId);
   });
 
-  it("retains the exact actor/org attempt through approval and Go 404, blocking legacy rollback", async () => {
+  it("retains the exact actor/org attempt through approval and Go 404 without selector fallback", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", true);
     const mock = stubFetch((_url, _init) => {
       const calls = mock.mock.calls.length;
@@ -1037,8 +1068,9 @@ describe("accounting API: Go invoice payments", () => {
     const calls = mock.mock.calls;
     expect(JSON.parse(String(calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(calls[1]?.[1]?.body)).intentId);
     vi.stubGlobal("__GO_ACCOUNTING_RECORD_PAYMENT__", false);
-    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(mock).toHaveBeenCalledTimes(2);
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(mock).toHaveBeenCalledTimes(3);
+    expect(mock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
   it("keeps a malformed success unresolved and retries with the same intent", async () => {
@@ -1119,11 +1151,12 @@ describe("accounting API: Go invoice creation", () => {
   });
 
   it("routes only createInvoice to Go, preserving the parser's input/output contract", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
+    vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", false);
     const mock = stubFetch(() => Response.json({ ok: true, data: output }));
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
     const body = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
+    expect(mock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": paymentRetryScope.organizationId });
     expect(body).toMatchObject({ capabilityId: "accounting.createInvoice", input: { customerId: action.customerId, memo: action.memo, lines: action.lines, currency: "USD", dueAt: action.dueAt }, intentId: expect.any(String) });
     expect((body.input as Record<string, unknown>).action).toBeUndefined();
     expect(body).not.toHaveProperty("actorId");
@@ -1139,7 +1172,7 @@ describe("accounting API: Go invoice creation", () => {
     expect(mock).toHaveBeenCalledTimes(1);
   });
 
-  it("retains the exact intent across approval and Go 404, blocking legacy rollback", async () => {
+  it("retains the exact intent across approval and Go 404 without selector fallback", async () => {
     vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
     const mock = stubFetch((_url, _init) => mock.mock.calls.length === 1
       ? Response.json({ pendingApproval: true, reason: "Invoice approval required" }, { status: 202 })
@@ -1150,8 +1183,9 @@ describe("accounting API: Go invoice creation", () => {
     const calls = mock.mock.calls;
     expect(JSON.parse(String(calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(calls[1]?.[1]?.body)).intentId);
     vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", false);
-    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
-    expect(mock).toHaveBeenCalledTimes(2);
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(mock).toHaveBeenCalledTimes(3);
+    expect(mock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
   it("keeps malformed success unresolved and refuses changed payloads", async () => {
@@ -1499,7 +1533,7 @@ describe("accounting API: transport failures", () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new DOMException("The operation timed out", "TimeoutError");
     }));
-    await expect(fetchAccountingOverview()).rejects.toMatchObject({
+    await expect(fetchAccountingOverview(ORG_ID)).rejects.toMatchObject({
       status: 0,
       message: "The Accounting service took too long to respond. Check the record before trying again.",
     });
@@ -1509,7 +1543,7 @@ describe("accounting API: transport failures", () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new TypeError("Failed to fetch");
     }));
-    await expect(fetchAccountingOverview()).rejects.toMatchObject({
+    await expect(fetchAccountingOverview(ORG_ID)).rejects.toMatchObject({
       status: 0,
       message: "Could not reach the Accounting service. Check your connection and try again.",
     });

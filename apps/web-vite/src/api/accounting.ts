@@ -528,14 +528,6 @@ export type AccountingReverseEntryAction = z.infer<typeof ReverseEntryActionSche
 export type AccountingReversePaymentAction = z.infer<typeof ReversePaymentActionSchema>;
 export type AccountingBankReconciliationWriteAction = z.infer<typeof BankReconciliationWriteActionSchema>;
 
-export function goAccountingRecordPaymentUseGo(): boolean {
-  return typeof __GO_ACCOUNTING_RECORD_PAYMENT__ !== "undefined" && __GO_ACCOUNTING_RECORD_PAYMENT__;
-}
-
-export function goAccountingCreateInvoiceUseGo(): boolean {
-  return typeof __GO_ACCOUNTING_CREATE_INVOICE__ !== "undefined" && __GO_ACCOUNTING_CREATE_INVOICE__;
-}
-
 export function goAccountingCreditNoteUseGo(): boolean {
   return typeof __GO_ACCOUNTING_CREDIT_NOTE__ !== "undefined" && __GO_ACCOUNTING_CREDIT_NOTE__;
 }
@@ -655,6 +647,14 @@ function errorMessage(status: number, body: unknown, context: string): string {
   return usable ?? `Could not ${context}. Try again.`;
 }
 
+function requireAccountingOrganization(organizationId: string | null | undefined, context: string): string {
+  const orgId = organizationId?.trim() ?? "";
+  if (!z.string().uuid().safeParse(orgId).success) {
+    throw new AccountingApiError(0, `Wait for your organization to finish loading before you ${context}.`);
+  }
+  return orgId;
+}
+
 export async function fetchAccountingEnabled(signal?: AbortSignal): Promise<boolean> {
   const { response, body } = await getJson("/api/modules", { method: "GET" }, signal);
   if (!response.ok) throw new AccountingApiError(response.status, errorMessage(response.status, body, "check the Accounting module status"));
@@ -667,23 +667,26 @@ export async function fetchAccountingEnabled(signal?: AbortSignal): Promise<bool
   return parsed.data.enabledModules.includes("accounting");
 }
 
-export async function fetchAccountingOverview(signal?: AbortSignal): Promise<AccountingOverview> {
+export async function fetchAccountingOverview(organizationId: string | null | undefined, signal?: AbortSignal): Promise<AccountingOverview> {
+  const orgId = requireAccountingOrganization(organizationId, "load your books");
   return readGoAccountingCapability(
     "accounting.overview",
     {},
     GoAccountingOverviewSchema,
     "load your books",
     signal,
+    orgId,
   );
 }
 
-export async function fetchAccountingReports(signal?: AbortSignal): Promise<AccountingReports> {
+export async function fetchAccountingReports(organizationId: string | null | undefined, signal?: AbortSignal): Promise<AccountingReports> {
+  const orgId = requireAccountingOrganization(organizationId, "load Accounting reports");
   const [pnl, balanceSheet, cashFlow, fxExposure, metadata] = await Promise.all([
-    readGoAccountingReport("accounting.incomeStatement", PnlSchema, "income statement", signal),
-    readGoAccountingReport("accounting.balanceSheet", BalanceSheetSchema, "balance sheet", signal),
-    readGoAccountingReport("accounting.cashFlow", CashFlowSchema, "cash flow statement", signal, true),
-    readGoAccountingReport("accounting.unrealizedFxExposure", FxExposureSchema, "foreign exchange exposure", signal),
-    readGoAccountingReport("accounting.reportCurrencyMetadata", ReportCurrencyMetadataSchema, "report currency metadata", signal),
+    readGoAccountingReport("accounting.incomeStatement", PnlSchema, "income statement", orgId, signal),
+    readGoAccountingReport("accounting.balanceSheet", BalanceSheetSchema, "balance sheet", orgId, signal),
+    readGoAccountingReport("accounting.cashFlow", CashFlowSchema, "cash flow statement", orgId, signal, true),
+    readGoAccountingReport("accounting.unrealizedFxExposure", FxExposureSchema, "foreign exchange exposure", orgId, signal),
+    readGoAccountingReport("accounting.reportCurrencyMetadata", ReportCurrencyMetadataSchema, "report currency metadata", orgId, signal),
   ]);
   if (!pnl || !balanceSheet || !metadata) throw new AccountingApiError(503, "A required Accounting report was unavailable.");
   const aggregate = AccountingReportsSchema.safeParse({
@@ -702,12 +705,14 @@ async function readGoAccountingReport<T>(
   capabilityId: "accounting.incomeStatement" | "accounting.balanceSheet" | "accounting.cashFlow" | "accounting.unrealizedFxExposure" | "accounting.reportCurrencyMetadata",
   schema: z.ZodType<T>,
   subject: string,
+  organizationId: string,
   signal?: AbortSignal,
   optional = false,
 ): Promise<T | null> {
   const { response, body } = await getJson("/api/capabilities/execute", {
     method: "POST",
     cache: "no-store",
+    headers: { "X-Organization-ID": organizationId },
     body: JSON.stringify({ capabilityId, input: {}, intentId: crypto.randomUUID() }),
   }, signal);
   if (response.status === 422) {
@@ -730,10 +735,11 @@ async function readGoAccountingReport<T>(
 }
 
 /** Cash basis and bank feeds are auxiliary: a failure must never blank the books. */
-export async function fetchAccountingCashBasis(year: number, signal?: AbortSignal): Promise<AccountingCashBasis | null> {
+export async function fetchAccountingCashBasis(year: number, organizationId: string | null | undefined, signal?: AbortSignal): Promise<AccountingCashBasis | null> {
   if (!Number.isSafeInteger(year) || year < 2000 || year > 2100) {
     throw new AccountingApiError(400, "Choose a valid reporting year.");
   }
+  const orgId = requireAccountingOrganization(organizationId, "load the cash-basis summary");
   try {
     const result = await readGoAccountingCapability(
       "accounting.cashBasisReport",
@@ -741,6 +747,7 @@ export async function fetchAccountingCashBasis(year: number, signal?: AbortSigna
       GoCashBasisSchema,
       "load the cash-basis summary",
       signal,
+      orgId,
     );
     const projected = CashBasisSchema.safeParse({
       cashInMinor: result.cashInMinor,
@@ -756,13 +763,15 @@ export async function fetchAccountingCashBasis(year: number, signal?: AbortSigna
   }
 }
 
-export async function fetchAccountingBanking(signal?: AbortSignal): Promise<AccountingBanking> {
+export async function fetchAccountingBanking(organizationId: string | null | undefined, signal?: AbortSignal): Promise<AccountingBanking> {
+  const orgId = requireAccountingOrganization(organizationId, "load bank feeds");
   return readGoAccountingCapability(
     "accounting.listBankingWorkspace",
     {},
     BankingSchema,
     "load bank feeds",
     signal,
+    orgId,
   );
 }
 
@@ -794,10 +803,12 @@ async function readGoAccountingCapability<T>(
   schema: z.ZodType<T>,
   context: string,
   signal?: AbortSignal,
+  organizationId?: string,
 ): Promise<T> {
   const { response, body } = await getJson("/api/capabilities/execute", {
     method: "POST",
     cache: "no-store",
+    ...(organizationId ? { headers: { "X-Organization-ID": organizationId } } : {}),
     body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
   }, signal);
   if (response.status === 422) {
@@ -923,19 +934,13 @@ export async function submitAccountingAction(
     const action = CreateInvoiceActionSchema.safeParse(payload);
     if (!action.success) throw new AccountingApiError(400, "Enter a valid invoice before submitting.");
     const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
-    if (goAccountingCreateInvoiceUseGo()) return submitGoAccountingCreateInvoice(action.data, scoped, signal);
-    if (await readPendingAccountingCreateInvoice(retryScope ?? { actorId: null, organizationId: null })) {
-      throw new AccountingApiError(0, "A Go invoice creation is unresolved. Restore the Go invoice route and retry that exact invoice before using the legacy route.", true);
-    }
+    return submitGoAccountingCreateInvoice(action.data, scoped, signal);
   }
   if (path === "/api/accounting" && payload.action === "recordPayment") {
     const action = RecordPaymentActionSchema.safeParse(payload);
     if (!action.success) throw new AccountingApiError(400, "Enter a valid invoice payment before submitting.");
     const scoped = await accountingPaymentScope(retryScope ?? { actorId: null, organizationId: null });
-    if (goAccountingRecordPaymentUseGo()) return submitGoAccountingRecordPayment(action.data, scoped, signal);
-    if (await readPendingAccountingRecordPayment(retryScope ?? { actorId: null, organizationId: null })) {
-      throw new AccountingApiError(0, "A Go invoice payment is unresolved. Restore the Go payment route and retry that exact payment before using the legacy route.", true);
-    }
+    return submitGoAccountingRecordPayment(action.data, scoped, signal);
   }
   if (path === "/api/accounting" && payload.action === "reversePayment") {
     const action = ReversePaymentActionSchema.safeParse(payload);
@@ -1170,6 +1175,7 @@ async function submitGoAccountingCreateInvoice(
   try {
     ({ response, body } = await getJson("/api/capabilities/execute", {
       method: "POST",
+      headers: { "X-Organization-ID": scope.organizationId },
       body: JSON.stringify({ capabilityId: "accounting.createInvoice", input: createInvoiceCapabilityInput(action), intentId: attempt.intentId }),
     }, signal));
   } catch (error) {
@@ -1211,6 +1217,7 @@ async function submitGoAccountingRecordPayment(
   try {
     ({ response, body } = await getJson("/api/capabilities/execute", {
       method: "POST",
+      headers: { "X-Organization-ID": scope.organizationId },
       body: JSON.stringify({ capabilityId: "accounting.recordPayment", input: recordPaymentCapabilityInput(action), intentId: attempt.intentId }),
     }, signal));
   } catch (error) {

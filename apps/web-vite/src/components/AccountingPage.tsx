@@ -13,8 +13,6 @@ import {
   fetchCashForecast,
   fetchCustomerStatement,
   fetchPaymentReminders,
-  goAccountingRecordPaymentUseGo,
-  goAccountingCreateInvoiceUseGo,
   goAccountingCreditNoteUseGo,
   goAccountingReverseEntryUseGo,
   goAccountingBankReconciliationWritesUseGo,
@@ -387,10 +385,10 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       // The books and the reports must both land or the page is unusable.
       // Cash basis and bank feeds are auxiliary: a failure must never blank them.
       const [data, reports, cash, banking] = await Promise.all([
-        fetchAccountingOverview(signal),
-        fetchAccountingReports(signal),
-        fetchAccountingCashBasis(year, signal).catch(() => null),
-        fetchAccountingBanking(signal).catch(() => null),
+        fetchAccountingOverview(organizationId, signal),
+        fetchAccountingReports(organizationId, signal),
+        fetchAccountingCashBasis(year, organizationId, signal).catch(() => null),
+        fetchAccountingBanking(organizationId, signal).catch(() => null),
       ]);
       if (signal?.aborted) return;
       setState({ status: "ready", data, reports, cash, banking });
@@ -403,7 +401,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
           : new AccountingApiError(0, "Could not reach the Accounting service. Check your connection and try again."),
       });
     }
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -418,12 +416,10 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       if (!active) return;
       setPendingRecordPayment(action);
       if (action) {
-        setNotice({ tone: "pending", text: goAccountingRecordPaymentUseGo()
-          ? "An invoice payment is unresolved. Retry the exact payment to recover its result."
-          : "A Go invoice payment is unresolved. Restore the Go payment route and retry that exact payment before using legacy payments." });
+        setNotice({ tone: "pending", text: "An invoice payment is unresolved. Retry the exact payment to recover its result." });
       }
     }).catch((error) => {
-      if (active && goAccountingRecordPaymentUseGo()) {
+      if (active) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved invoice payment." });
       }
     });
@@ -514,11 +510,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     void readPendingAccountingCreateInvoice(paymentRetryScope).then((action) => {
       if (!active) return;
       setPendingCreateInvoice(action);
-      if (action) setNotice({ tone: "pending", text: goAccountingCreateInvoiceUseGo()
-        ? "An invoice creation is unresolved. Retry the exact invoice to recover its result."
-        : "A Go invoice creation is unresolved. Restore the Go invoice route and retry that exact invoice before using legacy invoice creation." });
+      if (action) setNotice({ tone: "pending", text: "An invoice creation is unresolved. Retry the exact invoice to recover its result." });
     }).catch((error) => {
-      if (active && goAccountingCreateInvoiceUseGo()) {
+      if (active) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved invoice creation." });
       }
     });
@@ -569,9 +563,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const actionScopeIsCurrent = () => paymentRetryScopeKeyRef.current === actionScopeKey;
       const isCloseYear = path === "/api/accounting" && payload.action === "closeYear";
       const isRecordPayment = path === "/api/accounting" && payload.action === "recordPayment";
-      const goRecordPayment = isRecordPayment && goAccountingRecordPaymentUseGo();
+      const goRecordPayment = isRecordPayment;
       const isCreateInvoice = path === "/api/accounting" && payload.action === "createInvoice";
-      const goCreateInvoice = isCreateInvoice && goAccountingCreateInvoiceUseGo();
+      const goCreateInvoice = isCreateInvoice;
       const isCreditNote = path === "/api/accounting" && payload.action === "creditNote";
       const goCreditNote = isCreditNote && goAccountingCreditNoteUseGo();
       const isReverseEntry = path === "/api/accounting" && payload.action === "reverse";
@@ -783,9 +777,9 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               {pendingCreateInvoice && <button
                 type="button"
                 className="accounting-button accounting-button-small"
-                disabled={busy || !goAccountingCreateInvoiceUseGo()}
+                disabled={busy}
                 onClick={() => void runAction("/api/accounting", { ...pendingCreateInvoice }, "Invoice creation")}
-              >{goAccountingCreateInvoiceUseGo() ? "Retry exact invoice" : "Enable Go invoice route to retry"}</button>}
+              >Retry exact invoice</button>}
               {pendingCreditNote && <button
                 type="button"
                 className="accounting-button accounting-button-small"
@@ -809,13 +803,13 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               {pendingRecordPayment && <button
                 type="button"
                 className="accounting-button accounting-button-small"
-                disabled={busy || !goAccountingRecordPaymentUseGo()}
+                disabled={busy}
                 onClick={() => void runAction(
                   "/api/accounting",
                   { ...pendingRecordPayment },
                   `Payment on invoice #${pendingRecordPayment.invoiceNumber}`,
                 )}
-              >{goAccountingRecordPaymentUseGo() ? "Retry exact payment" : "Enable Go payment route to retry"}</button>}
+              >Retry exact payment</button>}
               {pendingReversePayment && <button
                 type="button"
                 className="accounting-button accounting-button-small"

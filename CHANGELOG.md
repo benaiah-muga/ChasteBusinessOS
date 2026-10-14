@@ -74,6 +74,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Accounting payment reversals now execute through the Go capability
   executor and retain an actor/org-scoped retry intent for approval and
   uncertain outcomes.
+- Vite Accounting books, reports, cash-basis, and banking reads now require
+  the active organization. Invoice creation and payment recording go directly
+  to Go with the same organization scope and exact retry identity.
 - Vite Purchasing request creation now uses the Go capability executor and
   restores its scoped draft when approval or an uncertain result needs retry.
 - Vite Settings model edits now capture the input value before scheduling the
