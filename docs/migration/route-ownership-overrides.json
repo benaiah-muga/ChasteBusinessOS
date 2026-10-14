@@ -586,6 +586,12 @@
       "path": "/purchasing",
       "owner": "vite",
       "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/settings",
+      "owner": "vite",
+      "parity": "verified"
     }
   ],
   "goRoutes": [

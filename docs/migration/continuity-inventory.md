@@ -116,6 +116,15 @@ production requests and writes. No production traffic has moved to Go.
   [`PurchasingPage.tsx`](../../apps/web-vite/src/components/PurchasingPage.tsx),
   [`purchasing.ts`](../../apps/web-vite/src/api/purchasing.ts), and
   [`route-ownership-overrides.json`](route-ownership-overrides.json).
+- Authenticated agent-browser loaded Vite `/settings` and rendered the
+  workspace control room, organization details, module status and tab
+  navigation, and SMTP status. Go `/api/org`, `/api/modules`, and `/api/email` requests returned
+  HTTP 200, no `localhost:3001` request appeared, and agent-browser errors was
+  empty. This verifies the route and initial workspace reads; write and
+  per-tab proofs remain separately tracked. See
+  [`SettingsPage.tsx`](../../apps/web-vite/src/components/SettingsPage.tsx),
+  [`settings.ts`](../../apps/web-vite/src/api/settings.ts), and
+  [`route-ownership-overrides.json`](route-ownership-overrides.json).
 - Vite Support channel settings use exact `GET` and `POST /api/support/channels`
   requests. Both route directly to Go regardless of the former Vite selectors;
   the Go handler mounts by default, and `GO_SUPPORT_CHANNELS_ROUTE=0` unmounts
