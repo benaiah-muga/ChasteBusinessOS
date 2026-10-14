@@ -2312,7 +2312,7 @@ new owners and the manifest shows zero legacy runtime paths.
      metadata, and use no-store reads. Fail closed without `/api/reports`
      fallback. Keep Accounting writes and other report reads unchanged; add
      focused Vite API, page, proxy selector, and Go executor contract tests.
-     (Vite/Go implementation complete; browser proof pending) The focused
+     (Runtime verified) The focused
      Vite API/page/proxy suite passed all 310 tests; the six Go report,
      metadata, FX, permission, and organization-scope tests passed with runtime
      integration required; Vite typecheck and lint passed. Independent review
@@ -2320,19 +2320,19 @@ new owners and the manifest shows zero legacy runtime paths.
      Loss, Balance Sheet, Cash Flow, and FX exposure after reload. All five
      required Go capabilities returned HTTP 200; the legacy `/api/reports`
      route was not requested, and no browser errors occurred.
-206. (Done; enabled by default in `.env.example`; selector `0` restores
-     the legacy route) Route only Vite Manufacturing production cost previews,
+206. (Runtime verified; enabled by default in `.env.example`) Route only Vite
+     Manufacturing production cost previews,
      feasibility checks, and BOM reports through `manufacturing.costPreview`,
      `manufacturing.checkProductionFeasibility`, and `manufacturing.bomReport`
      behind paired `CHASTE_GO_MANUFACTURING_PLANNING_READS=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other Manufacturing
      routes unchanged, validate request and response schemas, and surface
      pending, malformed, and unavailable results without falling back to
-     `/api/manufacturing` when Go is selected; selector rollback explicitly
-     sends the legacy action request to that endpoint. Add focused Vite API,
+     `/api/manufacturing` when Go is selected. Setting the selector to `0`
+     bypasses specialized routing, while the Vite catch-all still sends the
+     request to Go. Add focused Vite API,
      page, proxy selector, and Go parser/executor contract tests. (Vite/Go
-     implementation complete; browser
-     proof pending) The focused Vite API/page/proxy suite passed all 222 tests;
+     implementation complete; runtime verified) The focused Vite API/page/proxy suite passed all 222 tests;
      four DB-backed Go parser, feasibility, governed execution, and permission
      tests passed with runtime integration required, including permission
      denial and foreign-SKU isolation for all three reads; Vite typecheck and
@@ -2351,7 +2351,7 @@ new owners and the manifest shows zero legacy runtime paths.
      surface pending, malformed, and unavailable responses without falling
      back to `/api/accounting`. Keep other Accounting routes unchanged; add
      focused Vite API, page, proxy selector, and Go contract checks.
-     (Vite/Go implementation complete; browser proof pending) The focused Vite
+     (Runtime verified) The focused Vite
      API/page/proxy suite passed all 312 tests; the Go statement executor test
      passed with runtime integration required, covering permission denial,
      customer/org isolation, and audit behavior. Vite typecheck and lint passed.
@@ -2632,15 +2632,20 @@ new owners and the manifest shows zero legacy runtime paths.
      `CHASTE_GO_MESSAGING_ATTACHMENT_DOWNLOAD=1`, and
      `GO_MESSAGE_ATTACHMENT_DOWNLOAD_ROUTE=1`. The downloaded bytes matched
      the uploaded fixture, and the browser error log was empty. See proof 324.
-229. (Go/Vite implementation complete; browser proof pending) Route Vite older
+229. (Go/Vite tests verified; browser proof pending) Route Vite older
      thread pages through `messaging.readMessages` using a visible message ID
      scoped to the same organization and conversation. Use stable keyset
      pagination and preserve around-message search jumps as a separate read.
-230. (Go/Vite implementation complete; browser proof pending) Route Vite
+     Messaging client and page suites passed, and the Go latest-window test
+     passed with runtime integration required. Authenticated browser proof
+     remains pending.
+230. (Go/Vite tests verified; browser proof pending) Route Vite
      around-message thread reads through `messaging.readMessages`. Return the
      target with up to 30 older and 30 newer visible messages, use stable
      `(created_at, id)` ordering, and report older-side pagination metadata.
-     Keep search result discovery separate from the thread read.
+     Keep search result discovery separate from the thread read. Messaging
+     client and page suites passed, and the Go around-window test passed with
+     runtime integration required. Authenticated browser proof remains pending.
 231. (Complete) Route Vite read
      receipt updates through the session-authenticated
      `messaging.advanceReadCursor` capability when
@@ -2743,13 +2748,15 @@ new owners and the manifest shows zero legacy runtime paths.
      capability request returned HTTP 200 and the active conversation count
      returned to zero. No legacy leave request occurred, and the browser error
      log was empty. See proof 329.
-240. (Vite implementation complete; browser proof pending) Route add-member
+240. (Vite and Go tests verified; browser proof pending) Route add-member
      actions through the session-authenticated `messaging.addMember`
      capability when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Validate the
      target user against the active organization in Go, retain exact pending
      target and intent across reloads and selector rollback, and set
      `CHASTE_GO_MESSAGING_CONVERSATION_ADD_MEMBER=0` for rollback of new
-     actions.
+     actions. The Messaging client and page suites passed, and Go's add-member
+     receipt replay and concurrent-duplicate test passed with runtime
+     integration required. Authenticated browser proof remains pending.
 241. (Complete) Route confirmed
      conversation deletion through the session-authenticated
      `messaging.deleteConversation` capability when

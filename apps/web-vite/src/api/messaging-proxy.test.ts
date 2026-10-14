@@ -151,11 +151,16 @@ describe("Messaging capability proxy", () => {
     expect(legacyRequests).toEqual([]);
   });
 
-  it("defaults messaging thread reads including older-page capability requests, edits, and deletions to Go with session routing and preserves independent selector rollbacks", async () => {
+  it("defaults messaging thread reads including older-page capability requests, edits, and deletions to Go with session routing and preserves independent selector opt-outs", async () => {
     const go = routeRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolveClose, reject) => go.close((error) => error ? reject(error) : resolveClose())) });
-    const legacy = routeRecorder("legacy");
+    let legacyCalls = 0;
+    const legacy = createHttpServer((_request, response) => {
+      legacyCalls += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ target: "legacy" }));
+    });
     const legacyOrigin = await listen(legacy);
     runningServers.push({ close: () => new Promise<void>((resolveClose, reject) => legacy.close((error) => error ? reject(error) : resolveClose())) });
 
@@ -203,10 +208,12 @@ describe("Messaging capability proxy", () => {
     expect(await presenceResponse.json()).toEqual({ target: "go", path: `/api/conversations/${conversationId}/presence` });
     const agentReplyResponse = await fetch(`${rollbackProxy.origin}/api/conversations/${conversationId}/agent-reply`, { method: "POST" });
     expect(await agentReplyResponse.json()).toEqual({ target: "go", path: `/api/conversations/${conversationId}/agent-reply` });
-    const legacyEditResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1`, { method: "PATCH" });
-    expect(await legacyEditResponse.json()).toEqual({ target: "legacy", path: "/api/messages/m1" });
-    const legacyDeleteResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1?intentId=11111111-1111-4111-8111-111111111111`, { method: "DELETE" });
-    expect(await legacyDeleteResponse.json()).toEqual({ target: "legacy", path: "/api/messages/m1?intentId=11111111-1111-4111-8111-111111111111" });
+    const selectorOptOutEditResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1`, { method: "PATCH" });
+    expect(await selectorOptOutEditResponse.json()).toEqual({ target: "go", path: "/api/messages/m1" });
+    const selectorOptOutDeleteResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1?intentId=11111111-1111-4111-8111-111111111111`, { method: "DELETE" });
+    expect(await selectorOptOutDeleteResponse.json()).toEqual({ target: "go", path: "/api/messages/m1?intentId=11111111-1111-4111-8111-111111111111" });
+    expect(legacyCalls).toBe(0);
+    expect(legacyOrigin).not.toBe(goOrigin);
     await rollbackProxy.server.close();
     runningServers.splice(runningServers.indexOf(rollbackProxy.tracked), 1);
 
