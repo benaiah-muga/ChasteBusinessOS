@@ -6,9 +6,12 @@ import {
   fetchAnalyticsEnabled,
   fetchAnalyticsPreview,
   generateAnalyticsReport,
+  askAnalytics,
   type AnalyticsChartType,
   type AnalyticsDataset,
   type AnalyticsPreview,
+  type AnalyticsQuestion,
+  type AnalyticsQuestionFocus,
   type AnalyticsReport,
 } from "../api/analytics";
 import "./AnalyticsPage.css";
@@ -36,7 +39,11 @@ function errorMessage(error: unknown): string {
   return "Could not reach the analytics service. Check your connection and try again.";
 }
 
-export function AnalyticsPage() {
+export function AnalyticsPage({ actorId, organizationId }: { actorId?: string | null; organizationId?: string | null } = {}) {
+  const scopeIdentity = JSON.stringify([actorId?.trim() ?? "", organizationId?.trim() ?? ""]);
+  const currentScopeIdentity = useRef(scopeIdentity);
+  currentScopeIdentity.current = scopeIdentity;
+  const [workspaceScopeIdentity, setWorkspaceScopeIdentity] = useState(scopeIdentity);
   const [workspace, setWorkspace] = useState<WorkspaceState>({ status: "loading" });
   const [sections, setSections] = useState<SectionDraft[]>([]);
   const [previews, setPreviews] = useState<Record<string, AnalyticsPreview>>({});
@@ -44,6 +51,9 @@ export function AnalyticsPage() {
   const [title, setTitle] = useState("Business report");
   const [narrative, setNarrative] = useState("");
   const [report, setReport] = useState<AnalyticsReport | null>(null);
+  const [questionFocus, setQuestionFocus] = useState<AnalyticsQuestionFocus>("revenue");
+  const [question, setQuestion] = useState<{ scopeIdentity: string; result: AnalyticsQuestion } | null>(null);
+  const [questionBusyScope, setQuestionBusyScope] = useState<string | null>(null);
   const [reportTitle, setReportTitle] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -51,21 +61,24 @@ export function AnalyticsPage() {
   const workspaceController = useRef<AbortController | null>(null);
   const previewControllers = useRef(new Map<string, AbortController>());
   const generationController = useRef<AbortController | null>(null);
+  const questionController = useRef<AbortController | null>(null);
+  const questionRequestScope = useRef<string | null>(null);
   const generationInFlight = useRef(false);
 
   const loadWorkspace = useCallback(async (signal?: AbortSignal) => {
-    if (!signal) setWorkspace({ status: "loading" });
+    const requestedScope = currentScopeIdentity.current;
+    setWorkspace({ status: "loading" });
     try {
       const enabled = await fetchAnalyticsEnabled(signal);
-      if (signal?.aborted) return;
+      if (signal?.aborted || currentScopeIdentity.current !== requestedScope) return;
       if (!enabled) {
         setWorkspace({ status: "disabled" });
         return;
       }
       const datasets = await fetchAnalyticsDatasets(signal);
-      if (!signal?.aborted) setWorkspace({ status: "ready", datasets });
+      if (!signal?.aborted && currentScopeIdentity.current === requestedScope) setWorkspace({ status: "ready", datasets });
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || currentScopeIdentity.current !== requestedScope) return;
       setWorkspace({ status: "failed", message: errorMessage(error) });
     }
   }, []);
@@ -74,6 +87,12 @@ export function AnalyticsPage() {
     mounted.current = true;
     const controller = new AbortController();
     workspaceController.current = controller;
+    setWorkspaceScopeIdentity(scopeIdentity);
+    setSections([]);
+    setPreviews({});
+    setReport(null);
+    setReportTitle(null);
+    setNotice(null);
     void loadWorkspace(controller.signal);
     return () => {
       mounted.current = false;
@@ -83,8 +102,18 @@ export function AnalyticsPage() {
       previewControllers.current.clear();
       generationController.current?.abort();
       generationController.current = null;
+      questionController.current?.abort();
+      questionController.current = null;
     };
-  }, [loadWorkspace]);
+  }, [loadWorkspace, scopeIdentity]);
+
+  useEffect(() => {
+    questionController.current?.abort();
+    questionController.current = null;
+    questionRequestScope.current = null;
+    setQuestion(null);
+    setQuestionBusyScope(null);
+  }, [scopeIdentity]);
 
   async function addDataset(datasetId: string): Promise<void> {
     if (!datasetId || workspace.status !== "ready" || previews[datasetId] || previewControllers.current.has(datasetId)) return;
@@ -161,6 +190,30 @@ export function AnalyticsPage() {
     }
   }
 
+  async function ask(): Promise<void> {
+    if (questionRequestScope.current === scopeIdentity) return;
+    const controller = new AbortController();
+    questionController.current?.abort();
+    questionController.current = controller;
+    questionRequestScope.current = scopeIdentity;
+    const submittedScope = scopeIdentity;
+    setQuestionBusyScope(scopeIdentity);
+    setNotice(null);
+    try {
+      const result = await askAnalytics(questionFocus, controller.signal);
+      if (!mounted.current || controller.signal.aborted || currentScopeIdentity.current !== submittedScope) return;
+      setQuestion({ scopeIdentity: submittedScope, result });
+    } catch (error) {
+      if (mounted.current && !controller.signal.aborted) setNotice(errorMessage(error));
+    } finally {
+      if (questionController.current === controller && currentScopeIdentity.current === submittedScope) {
+        questionController.current = null;
+        questionRequestScope.current = null;
+        if (mounted.current) setQuestionBusyScope(null);
+      }
+    }
+  }
+
   function download(): void {
     if (!report) return;
     const blob = new Blob([report.html], { type: "text/html" });
@@ -180,6 +233,9 @@ export function AnalyticsPage() {
 
   if (workspace.status === "loading") {
     return <main className="analytics-page"><p className="analytics-loading" role="status">Checking analytics availability…</p></main>;
+  }
+  if (workspaceScopeIdentity !== scopeIdentity) {
+    return <main className="analytics-page"><p className="analytics-loading" role="status">Changing workspace…</p></main>;
   }
   if (workspace.status === "failed") {
     return (
@@ -238,6 +294,46 @@ export function AnalyticsPage() {
           <button type="button" aria-label="Dismiss analytics error" onClick={() => setNotice(null)}>Dismiss</button>
         </div>
       )}
+
+      <section className="analytics-composer" aria-labelledby="analytics-question-title">
+        <div className="analytics-controls">
+          <label className="analytics-field">
+            <span id="analytics-question-title">Ask your business</span>
+            <select value={questionFocus} onChange={(event) => {
+              setQuestionFocus(event.currentTarget.value as AnalyticsQuestionFocus);
+              questionController.current?.abort();
+              questionController.current = null;
+              questionRequestScope.current = null;
+              setQuestionBusyScope(null);
+              setQuestion(null);
+            }}>
+              <option value="revenue">Revenue and top customers</option>
+              <option value="collections">Receivables and collections</option>
+              <option value="pipeline">Sales pipeline</option>
+            </select>
+          </label>
+          <button className="analytics-primary-button" type="button" onClick={() => void ask()} disabled={questionBusyScope === scopeIdentity} aria-busy={questionBusyScope === scopeIdentity}>
+            {questionBusyScope === scopeIdentity ? "Checking…" : "Get an answer"}
+          </button>
+        </div>
+        <p className="analytics-composer-note">Answers use cited organization data and may suggest a governed action. Suggestions are not executed here.</p>
+        {question?.scopeIdentity === scopeIdentity && (
+          <div className="analytics-question-results" aria-live="polite">
+            {question.result.sections.map((section, index) => (
+              <section key={`${section.heading}-${index}`} aria-labelledby={`analytics-question-section-${index}`}>
+                <h2 id={`analytics-question-section-${index}`}>{section.heading}</h2>
+                {section.lines.length > 0
+                  ? <ul>{section.lines.map((line, lineIndex) => <li key={lineIndex}>{line}</li>)}</ul>
+                  : <p>No matching records were found.</p>}
+                {section.citations.length > 0 && <p className="analytics-composer-note">Sources: {section.citations.join(", ")}</p>}
+              </section>
+            ))}
+            {question.result.proposedAction && (
+              <p className="analytics-composer-note">Suggested action: {question.result.proposedAction.capabilityId}. {question.result.proposedAction.why}</p>
+            )}
+          </div>
+        )}
+      </section>
 
       {workspace.datasets.length === 0 ? (
         <section className="analytics-empty" aria-labelledby="analytics-no-datasets-title">

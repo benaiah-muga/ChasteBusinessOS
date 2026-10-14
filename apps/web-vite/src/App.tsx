@@ -258,7 +258,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                   : projectsPage
                     ? <ProjectsPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                     : analyticsPage
-                      ? <AnalyticsPage key={organizationRevision} />
+                      ? <AnalyticsPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                       : teamPage
                         ? <TeamPage key={organizationRevision} />
                       : marketplacePage

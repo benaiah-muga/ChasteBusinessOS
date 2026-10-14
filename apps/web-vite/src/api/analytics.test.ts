@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   analyticsReportFilename,
+  askAnalytics,
   AnalyticsApiError,
   fetchAnalyticsDatasets,
   fetchAnalyticsEnabled,
@@ -64,6 +65,31 @@ describe("analytics API client", () => {
     }));
 
     await expect(fetchAnalyticsPreview("bad/id")).rejects.toEqual(new AnalyticsApiError(0, "Choose a valid analytics dataset to preview."));
+  });
+
+  it("asks a focused business question through the authenticated Go read path and validates its response", async () => {
+    const result = {
+      sections: [{ heading: "Top customers this period", citations: ["Acme"], lines: ["Acme: 2 invoice(s), 1250 minor"] }],
+      proposedAction: { capabilityId: "accounting.createInvoice", inputDraft: {}, why: "Revenue needs attention" },
+    };
+    const fetchMock = vi.fn(async () => Response.json(result));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(askAnalytics("revenue")).resolves.toEqual(result);
+    expect(fetchMock).toHaveBeenCalledWith("/api/analytics?questionFocus=revenue", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ sections: [{ heading: "Broken", citations: [], lines: [3] }], proposedAction: null })));
+    await expect(askAnalytics("pipeline")).rejects.toEqual(new AnalyticsApiError(200, "The analytics insight returned data in an unexpected format."));
+  });
+
+  it("surfaces analytics question permission failures without a fallback", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ error: "forbidden" }, { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(askAnalytics("collections")).rejects.toEqual(new AnalyticsApiError(403, "You do not have permission to access this analytics data."));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("posts the exact governed report contract to the existing endpoint and preserves returned values", async () => {

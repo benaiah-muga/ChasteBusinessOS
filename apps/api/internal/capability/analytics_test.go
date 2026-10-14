@@ -33,6 +33,12 @@ func TestAnalyticsParsers(t *testing.T) {
 	if _, err := ParseAnalyticsExplainChangeInput(json.RawMessage(`{"dimension":"product","periodAFrom":"not-a-date","periodATo":"2026-02-01T00:00:00Z","periodBFrom":"2026-02-01T00:00:00Z","periodBTo":"2026-03-01T00:00:00Z"}`)); err == nil {
 		t.Fatal("bad datetime refused")
 	}
+	if err := ValidateAnalyticsQuestionInput(json.RawMessage(`{"focus":"collections"}`)); err != nil {
+		t.Fatalf("valid question focus refused: %v", err)
+	}
+	if err := ValidateAnalyticsQuestionInput(json.RawMessage(`{"focus":"secrets"}`)); err == nil {
+		t.Fatal("unknown question focus accepted")
+	}
 	if _, err := parseAnalyticsInput(analyticsRenderReportCapabilityID, json.RawMessage(`{"title":"x","sections":[{"heading":"h","columns":["c"],"rows":[]}]}`)); err != nil {
 		t.Fatalf("dispatcher refused renderReport: %v", err)
 	}

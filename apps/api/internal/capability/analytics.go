@@ -923,6 +923,11 @@ func ParseAnalyticsAskYourBusinessInput(raw json.RawMessage) (AnalyticsAskYourBu
 	return input, nil
 }
 
+func ValidateAnalyticsQuestionInput(raw json.RawMessage) error {
+	_, err := ParseAnalyticsAskYourBusinessInput(raw)
+	return err
+}
+
 func parseAnalyticsInput(capabilityID string, raw json.RawMessage) (any, error) {
 	switch capabilityID {
 	case analyticsRenderReportCapabilityID:

@@ -4468,3 +4468,15 @@ new owners and the manifest shows zero legacy runtime paths.
      The Support API and page suites pass 73 cases. Authenticated browser proof
      filed a synthetic capability-gap ticket through Go; the capability
      request returned HTTP 200 and the browser error log was empty.
+
+414. (Implemented and verified: focused tests and authenticated browser proof)
+     Vite
+     Analytics can answer revenue, receivables, and sales-pipeline questions
+     through Go's authenticated `analytics.askYourBusiness` capability. Go
+     validates the single `questionFocus` query, resolves the signed-in user
+     and active organization, then executes the governed read capability. Vite
+     validates the complete answer shape and scopes displayed results to the
+     current actor and organization. Suggested actions are displayed but never
+     executed by this flow. Authenticated `agent-browser` proof on 2026-10-14
+     asked a revenue question and received a cited result from Go. The request
+     returned HTTP 200 and the browser error log was empty.

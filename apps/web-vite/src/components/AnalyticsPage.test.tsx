@@ -35,6 +35,10 @@ function responseFor(input: RequestInfo | URL, init?: RequestInit): Response {
   }
   if (path === "/api/analytics" && init?.method === "POST") return Response.json(report);
   if (path === "/api/analytics?dataset=analytics.revenueByMonth") return Response.json(preview);
+  if (path === "/api/analytics?questionFocus=revenue") return Response.json({
+    sections: [{ heading: "Top customers this period", citations: ["Acme"], lines: ["Acme: 2 invoices"] }],
+    proposedAction: null,
+  });
   if (path === "/api/analytics") return Response.json({ datasets });
   return Response.json({ error: "unexpected request" }, { status: 404 });
 }
@@ -73,6 +77,46 @@ describe("Vite analytics page", () => {
 
     expect(await screen.findByRole("heading", { name: "No datasets available" })).not.toBeNull();
     expect(screen.getByText(/roles don’t include read access/)).not.toBeNull();
+  });
+
+  it("renders cited business answers returned by the authenticated analytics endpoint", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => responseFor(input, init));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AnalyticsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Get an answer" }));
+    expect(await screen.findByRole("heading", { name: "Top customers this period" })).not.toBeNull();
+    expect(screen.getByText("Acme: 2 invoices")).not.toBeNull();
+    expect(screen.getByText("Sources: Acme")).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("/api/analytics?questionFocus=revenue", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+  });
+
+  it("discards an answer when actor scope changes while its request is pending", async () => {
+    let resolveQuestion: ((response: Response) => void) | undefined;
+    let questionSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/analytics?questionFocus=revenue") {
+        questionSignal = init?.signal as AbortSignal;
+        return new Promise<Response>((resolve) => { resolveQuestion = resolve; });
+      }
+      return Promise.resolve(responseFor(input, init));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<AnalyticsPage actorId="actor-one" organizationId="org-one" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Get an answer" }));
+    await waitFor(() => expect(questionSignal).toBeDefined());
+
+    view.rerender(<AnalyticsPage actorId="actor-two" organizationId="org-one" />);
+    expect(questionSignal?.aborted).toBe(true);
+    resolveQuestion?.(Response.json({
+      sections: [{ heading: "Old actor data", citations: [], lines: ["must not render"] }],
+      proposedAction: null,
+    }));
+    await waitFor(() => expect(screen.queryByText("Old actor data")).toBeNull());
+    expect(screen.queryByText("must not render")).toBeNull();
   });
 
   it("shows a module API error and allows retry", async () => {

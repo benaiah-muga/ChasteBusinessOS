@@ -44,6 +44,19 @@ const ReportSchema = z.object({
   sections: z.array(ReportSectionSchema),
 });
 
+const AnalyticsQuestionSchema = z.object({
+  sections: z.array(z.object({
+    heading: z.string(),
+    citations: z.array(z.string()),
+    lines: z.array(z.string()),
+  }).strict()),
+  proposedAction: z.object({
+    capabilityId: z.string().min(1),
+    inputDraft: z.record(z.string(), z.unknown()),
+    why: z.string(),
+  }).strict().nullable(),
+}).strict();
+
 const ModuleSwitchboardSchema = z.object({
   catalog: z.array(z.object({
     id: z.string().min(1),
@@ -62,6 +75,8 @@ export type AnalyticsPreview = z.infer<typeof DatasetPreviewSchema>;
 export type AnalyticsChartType = z.infer<typeof ChartSchema>["type"];
 export type AnalyticsReportInput = z.infer<typeof ReportInputSchema>;
 export type AnalyticsReport = z.infer<typeof ReportSchema>;
+export type AnalyticsQuestionFocus = "revenue" | "collections" | "pipeline";
+export type AnalyticsQuestion = z.infer<typeof AnalyticsQuestionSchema>;
 
 export class AnalyticsApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -150,6 +165,17 @@ export async function fetchAnalyticsPreview(datasetId: string, signal?: AbortSig
     DatasetPreviewSchema,
     await getJson(`/api/analytics?${query.toString()}`, signal),
     "analytics preview",
+  );
+}
+
+export async function askAnalytics(focus: AnalyticsQuestionFocus, signal?: AbortSignal): Promise<AnalyticsQuestion> {
+  const parsedFocus = z.enum(["revenue", "collections", "pipeline"]).safeParse(focus);
+  if (!parsedFocus.success) throw new AnalyticsApiError(0, "Choose a valid analytics question.");
+  const query = new URLSearchParams({ questionFocus: parsedFocus.data });
+  return parseResponse(
+    AnalyticsQuestionSchema,
+    await getJson(`/api/analytics?${query.toString()}`, signal),
+    "analytics insight",
   );
 }
 

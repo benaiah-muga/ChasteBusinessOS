@@ -93,6 +93,73 @@ func TestAnalyticsSessionHandlerRunsKnownDatasetPreviewThroughExecutor(t *testin
 	}
 }
 
+func TestAnalyticsSessionHandlerRunsBusinessQuestionWithResolvedSessionScope(t *testing.T) {
+	identity := directTestIdentity()
+	executor := &analyticsReportExecutor{results: map[string]capability.Result{
+		"analytics.askYourBusiness": {OK: true, Data: json.RawMessage(`{"sections":[{"heading":"Pipeline by stage","citations":[],"lines":["qualified"]}],"proposedAction":null}`)},
+	}}
+	response := httptest.NewRecorder()
+	NewAnalyticsSessionHandler(&fakeDirectSessionResolver{resolved: identity}, executor, nil).ServeHTTP(response, analyticsRequest(http.MethodGet, "/api/analytics?questionFocus=pipeline"))
+	if response.Code != http.StatusOK || len(executor.calls) != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, len(executor.calls), response.Body.String())
+	}
+	call := executor.calls[0]
+	if call.id != "analytics.askYourBusiness" || string(call.input) != `{"focus":"pipeline"}` ||
+		call.claims.Subject != identity.UserID || call.claims.OrganizationID != *identity.OrgID ||
+		call.claims.AuthSessionID != identity.AuthSessionID || call.claims.CapabilityID != call.id {
+		t.Fatalf("question was not executed with its validated input and resolved org/session scope: %+v", call)
+	}
+	if !strings.Contains(response.Body.String(), "Pipeline by stage") {
+		t.Fatalf("unexpected answer: %s", response.Body.String())
+	}
+}
+
+func TestAnalyticsSessionHandlerRejectsInvalidBusinessQuestionAndOrganizationScope(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		path string
+		org  string
+	}{
+		{name: "invalid focus", path: "/api/analytics?questionFocus=secrets"},
+		{name: "duplicate focus", path: "/api/analytics?questionFocus=revenue&questionFocus=pipeline"},
+		{name: "unexpected query field", path: "/api/analytics?questionFocus=revenue&dataset=analytics.pipelineByStage"},
+		{name: "organization mismatch", path: "/api/analytics?questionFocus=revenue", org: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			identity := directTestIdentity()
+			resolver := &fakeDirectSessionResolver{resolved: identity}
+			executor := &analyticsReportExecutor{results: map[string]capability.Result{}}
+			request := analyticsRequest(http.MethodGet, test.path)
+			if test.org != "" {
+				request.Header.Set("X-Organization-ID", test.org)
+			}
+			response := httptest.NewRecorder()
+			NewAnalyticsSessionHandler(resolver, executor, nil).ServeHTTP(response, request)
+			wantStatus := http.StatusBadRequest
+			if test.org != "" {
+				wantStatus = http.StatusForbidden
+			}
+			if response.Code != wantStatus || len(executor.calls) != 0 {
+				t.Fatalf("status=%d calls=%d body=%s", response.Code, len(executor.calls), response.Body.String())
+			}
+		})
+	}
+}
+
+func TestAnalyticsSessionHandlerDoesNotFallbackWhenQuestionCapabilityDeniesAccess(t *testing.T) {
+	executor := &analyticsReportExecutor{results: map[string]capability.Result{
+		"analytics.askYourBusiness": {OK: false, Error: "forbidden: missing analytics.report"},
+	}}
+	response := httptest.NewRecorder()
+	NewAnalyticsSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, executor, nil).ServeHTTP(
+		response,
+		analyticsRequest(http.MethodGet, "/api/analytics?questionFocus=collections"),
+	)
+	if response.Code != http.StatusForbidden || len(executor.calls) != 1 || !strings.Contains(response.Body.String(), "missing analytics.report") {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, len(executor.calls), response.Body.String())
+	}
+}
+
 func TestAnalyticsSessionHandlerSupportsBearerWithOrganizationHeader(t *testing.T) {
 	identity := directTestIdentity()
 	resolver := &fakeDirectSessionResolver{resolved: identity}

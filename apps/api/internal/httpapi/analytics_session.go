@@ -110,7 +110,26 @@ func (h *AnalyticsSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	requested := r.URL.Query().Get("dataset")
+	query := r.URL.Query()
+	if query.Has("questionFocus") {
+		if len(query) != 1 || len(query["questionFocus"]) != 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid analytics question"})
+			return
+		}
+		focus := query.Get("questionFocus")
+		input, err := json.Marshal(map[string]string{"focus": focus})
+		if err != nil || capability.ValidateAnalyticsQuestionInput(input) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid analytics question"})
+			return
+		}
+		h.executeRead(w, r, resolved, "analytics.askYourBusiness", input)
+		return
+	}
+	if len(query) > 1 || (query.Has("dataset") && len(query["dataset"]) != 1) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid analytics query"})
+		return
+	}
+	requested := query.Get("dataset")
 	if requested == "" {
 		datasets := make([]analyticsDataset, 0, len(analyticsDatasets))
 		for _, dataset := range analyticsDatasets {
@@ -127,6 +146,10 @@ func (h *AnalyticsSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	input := json.RawMessage(`{}`)
+	h.executeRead(w, r, resolved, requested, input)
+}
+
+func (h *AnalyticsSessionHandler) executeRead(w http.ResponseWriter, r *http.Request, resolved *session.ResolvedUser, requested string, input json.RawMessage) {
 	claims := analyticsSessionClaims(resolved, requested, input)
 	result, err := h.executor.Execute(r.Context(), claims, requested, input)
 	if err != nil {
@@ -138,7 +161,7 @@ func (h *AnalyticsSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		default:
 			if h.logger != nil {
-				h.logger.Error("Go direct analytics read failed", "datasetId", requested, "error", err)
+				h.logger.Error("Go direct analytics read failed", "capabilityId", requested, "error", err)
 			}
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		}
