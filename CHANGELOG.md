@@ -42,6 +42,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Sales shows order-line fulfillment details from Go and validates CRM deal lists against the Go response contract.
 - Vite Documents can delete ingested records through Go with confirmation and scope-pinned exact-retry recovery.
 - Vite Accounting can match bank lines to exact remaining payments or whole journal entries through Go.
+- Vite Support can insert organization-scoped saved replies into inbox drafts without sending them.
 
 ### Fixed
 

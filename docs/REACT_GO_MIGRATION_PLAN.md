@@ -4596,3 +4596,13 @@ new owners and the manifest shows zero legacy runtime paths.
      a matching bank line, matched it to the journal entry, and confirmed the
      line remained matched after reload. No console errors or failed requests
      were recorded.
+
+426. (Runtime verified) Vite Support can insert an organization-scoped canned
+     reply into an inbox composer using Go's existing `support.listLibrary`
+     capability. Insertion preserves the editable draft and never sends; it is
+     disabled while the message is marked as customer-authored. An open picker
+     reloads when organization scope changes and exposes retry on read failure.
+     The focused Support suite passes 23 cases, with typecheck and lint passing.
+     Authenticated browser proof created a synthetic response and conversation,
+     inserted the text into the composer, left Send untouched, saw successful Go
+     capability requests, and recorded no browser errors.

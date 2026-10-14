@@ -105,6 +105,14 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
+  const [savedRepliesOpen, setSavedRepliesOpen] = useState(false);
+  const [savedReplies, setSavedReplies] = useState<{ organizationId: string | null | undefined; canned: SupportLibrary["canned"] } | null>(null);
+  const [savedReplyId, setSavedReplyId] = useState("");
+  const [savedRepliesLoading, setSavedRepliesLoading] = useState<{ organizationId: string | null | undefined } | null>(null);
+  const [savedRepliesError, setSavedRepliesError] = useState<{ organizationId: string | null | undefined; message: string } | null>(null);
+  const [savedRepliesReload, setSavedRepliesReload] = useState(0);
+  const savedRepliesOrganizationRef = useRef(organizationId);
+  savedRepliesOrganizationRef.current = organizationId;
   const [fromCustomer, setFromCustomer] = useState(false);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
@@ -182,6 +190,29 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
     void refreshTickets(controller.signal);
     return () => controller.abort();
   }, [refreshTickets, state.status]);
+
+  useEffect(() => {
+    if (!savedRepliesOpen || savedReplies?.organizationId === organizationId) return;
+    const controller = new AbortController();
+    setSavedRepliesLoading({ organizationId });
+    setSavedRepliesError(null);
+    void fetchSupportLibrary(organizationId, controller.signal)
+      .then((library) => {
+        if (controller.signal.aborted || savedRepliesOrganizationRef.current !== organizationId) return;
+        setSavedReplies({ organizationId, canned: library.canned });
+        setSavedReplyId(library.canned[0]?.id ?? "");
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setSavedRepliesError({ organizationId, message: friendlyError(error) });
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSavedRepliesLoading(null);
+      });
+    return () => {
+      controller.abort();
+      setSavedRepliesLoading((current) => current?.organizationId === organizationId ? null : current);
+    };
+  }, [organizationId, savedReplies, savedRepliesOpen, savedRepliesReload]);
 
   const retryScope = useMemo<SupportConversationWriteRetryScope>(() => ({ actorId, organizationId }), [actorId, organizationId]);
 
@@ -395,6 +426,23 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
     if (accepted) setComposer("");
   }
 
+  async function toggleSavedReplies() {
+    if (savedRepliesOpen) {
+      setSavedRepliesOpen(false);
+      return;
+    }
+    setSavedRepliesOpen(true);
+  }
+
+  function insertSavedReply() {
+    const response = savedReplies?.organizationId === organizationId
+      ? savedReplies.canned.find((item) => item.id === savedReplyId)
+      : undefined;
+    if (!response) return;
+    setComposer((current) => current.trim() ? `${current.trimEnd()}\n\n${response.body}` : response.body);
+    setSavedRepliesOpen(false);
+  }
+
   async function makeDraft() {
     if (!activeId) return;
     setDrafting(true);
@@ -549,6 +597,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
   const visibleTicketList: TicketListState = ticketList.actorId === actorId && ticketList.organizationId === organizationId
     ? ticketList
     : { actorId, organizationId, status: "loading" };
+  const loadingCurrentSavedReplies = savedRepliesLoading !== null && savedRepliesLoading.organizationId === organizationId;
 
   return (
     <main className="support-page">
@@ -849,6 +898,36 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
                         <input type="checkbox" checked={fromCustomer} onChange={(event) => setFromCustomer(event.target.checked)} />
                         Log as customer's words
                       </label>
+                      <div className="support-actions">
+                        <button type="button" disabled={busy || loadingCurrentSavedReplies} onClick={() => void toggleSavedReplies()}>
+                          {loadingCurrentSavedReplies ? "Loading saved replies…" : savedRepliesOpen ? "Close saved replies" : "Use saved reply"}
+                        </button>
+                      </div>
+                      {savedRepliesOpen && (
+                        <div className="support-actions" aria-label="Saved reply insertion">
+                          {savedRepliesError?.organizationId === organizationId ? (
+                            <>
+                              <span role="alert">{savedRepliesError.message}</span>
+                              <button type="button" onClick={() => setSavedRepliesReload((count) => count + 1)}>Retry saved replies</button>
+                            </>
+                          ) : loadingCurrentSavedReplies || savedReplies?.organizationId !== organizationId ? (
+                            <span role="status">Loading saved replies…</span>
+                          ) : savedReplies.canned.length === 0 ? (
+                            <span className="support-muted">No saved replies yet. Add one in the Library.</span>
+                          ) : (
+                            <>
+                              <label>
+                                Saved reply
+                                <select aria-label="Saved reply" value={savedReplyId} onChange={(event) => setSavedReplyId(event.target.value)}>
+                                  {savedReplies.canned.map((response) => <option key={response.id} value={response.id}>{response.shortcut} · {response.title}</option>)}
+                                </select>
+                              </label>
+                              {fromCustomer && <span className="support-muted">Saved replies are staff responses. Turn off “Log as customer's words” to insert one.</span>}
+                              <button type="button" disabled={!savedReplyId || fromCustomer} onClick={insertSavedReply}>Insert into reply</button>
+                            </>
+                          )}
+                        </div>
+                      )}
                       <textarea
                         aria-label="Reply or logged message"
                         value={composer}

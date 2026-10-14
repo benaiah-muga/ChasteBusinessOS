@@ -71,6 +71,7 @@ interface Handlers {
   draft?: (conversationId: string) => Response;
   getThread?: () => Response;
   team?: () => Response;
+  library?: { canned: Array<{ id: string; shortcut: string; title: string; body: string }>; articles: Array<Record<string, unknown>> };
 }
 
 function supportFetch(handlers: Handlers = {}) {
@@ -88,12 +89,12 @@ function supportFetch(handlers: Handlers = {}) {
           const current = legacyThread as typeof thread;
           return Response.json({ ok: true, data: { ...current, conversation: { ...current.conversation, customerEmail: null } } });
         }
-        if (payload.capabilityId === "support.listLibrary") return Response.json({ ok: true, data: { canned: [], articles: [] } });
+        if (payload.capabilityId === "support.listLibrary" && !handlers.execute) return Response.json({ ok: true, data: handlers.library ?? { canned: [], articles: [] } });
         const defaultRead = () => {
           if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
           if (payload.capabilityId === "support.listTickets") return Response.json({ ok: true, data: { tickets: [] } });
           if (payload.capabilityId === "support.readConversation") return Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } });
-          return Response.json({ ok: true, data: { canned: [], articles: [] } });
+          return Response.json({ ok: true, data: handlers.library ?? { canned: [], articles: [] } });
         };
         if (handlers.execute) {
           const response = await handlers.execute(payload);
@@ -155,6 +156,84 @@ describe("Vite support page", () => {
       const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
       return payload.capabilityId === "support.listTickets";
     })).toBe(true);
+  }, SLOW);
+
+  it("inserts a Go-backed saved reply into the editable customer response", async () => {
+    const savedReply = {
+      id: "9a145d87-5642-4c92-9d87-67f93b63b327",
+      shortcut: "/refund",
+      title: "Refund status",
+      body: "Your refund is being processed.",
+    };
+    const { calls } = supportFetch({ library: { canned: [savedReply], articles: [] } });
+    render(<SupportPage organizationId={organizationId} />);
+
+    await screen.findByText("Invoice question");
+    fireEvent.click(screen.getByRole("button", { name: /Inbox/ }));
+    const composer = await screen.findByRole("textbox", { name: "Reply or logged message" });
+    fireEvent.change(composer, { target: { value: "Hello Ada," } });
+    fireEvent.click(screen.getByRole("button", { name: "Use saved reply" }));
+    await screen.findByRole("combobox", { name: "Saved reply" });
+    fireEvent.click(screen.getByRole("button", { name: "Insert into reply" }));
+
+    expect((composer as HTMLTextAreaElement).value).toBe("Hello Ada,\n\nYour refund is being processed.");
+    expect(calls.some((call) => call.payload?.capabilityId === "support.listLibrary")).toBe(true);
+    expect(calls.some((call) => call.payload?.capabilityId === "support.postMessage")).toBe(false);
+  }, SLOW);
+
+  it("reloads saved replies for a new organization while the picker stays open", async () => {
+    const otherOrganizationId = "88888888-8888-4888-8888-888888888888";
+    let finishFirstRead!: (response: Response) => void;
+    const firstRead = new Promise<Response>((resolve) => { finishFirstRead = resolve; });
+    let libraryReads = 0;
+    supportFetch({
+      execute: (payload) => {
+        if (payload.capabilityId === "support.listLibrary") {
+          libraryReads += 1;
+          return libraryReads === 1
+            ? firstRead
+            : Response.json({ ok: true, data: { canned: [{ id: "9a145d87-5642-4c92-9d87-67f93b63b327", shortcut: "/new", title: "New organization reply", body: "New organization text." }], articles: [] } });
+        }
+        return Response.json({ ok: true, data: {} });
+      },
+    });
+    const { rerender } = render(<SupportPage organizationId={organizationId} />);
+    await screen.findByText("Invoice question");
+    fireEvent.click(screen.getByRole("button", { name: /Inbox/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Use saved reply" }));
+    await screen.findAllByText("Loading saved replies…");
+
+    rerender(<SupportPage organizationId={otherOrganizationId} />);
+
+    expect(await screen.findByRole("option", { name: "/new · New organization reply" })).not.toBeNull();
+    finishFirstRead(Response.json({ ok: true, data: { canned: [{ id: "9a145d87-5642-4c92-9d87-67f93b63b327", shortcut: "/old", title: "Old organization reply", body: "Old organization text." }], articles: [] } }));
+    await waitFor(() => expect(screen.queryByText(/Old organization reply/)).toBeNull());
+  }, SLOW);
+
+  it("prevents staff canned replies from being inserted as customer words", async () => {
+    const savedReply = {
+      id: "9a145d87-5642-4c92-9d87-67f93b63b327",
+      shortcut: "/refund",
+      title: "Refund status",
+      body: "Your refund is being processed.",
+    };
+    supportFetch({ library: { canned: [savedReply], articles: [] } });
+    render(<SupportPage organizationId={organizationId} />);
+    await screen.findByText("Invoice question");
+    fireEvent.click(screen.getByRole("button", { name: /Inbox/ }));
+    const composer = await screen.findByRole("textbox", { name: "Reply or logged message" });
+    const customerWords = screen.getByRole("checkbox", { name: "Log as customer's words" });
+    fireEvent.click(customerWords);
+    fireEvent.click(screen.getByRole("button", { name: "Use saved reply" }));
+    await screen.findByRole("combobox", { name: "Saved reply" });
+
+    expect(screen.getByText(/Saved replies are staff responses/)).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Insert into reply" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(customerWords);
+    fireEvent.click(screen.getByRole("button", { name: "Insert into reply" }));
+
+    expect((composer as HTMLTextAreaElement).value).toBe(savedReply.body);
+    expect((customerWords as HTMLInputElement).checked).toBe(false);
   }, SLOW);
 
   it("displays filed internal tickets from the Go support capability", async () => {
