@@ -4262,7 +4262,12 @@ new owners and the manifest shows zero legacy runtime paths.
      action while an unresolved marker exists, and clears a marker only when
      both its intent ID and action fingerprint still match. Focused API tests
      cover cross-tab reservation, delayed duplicate completion, and unavailable
-     browser locks. Authenticated browser proof remains open.
+     browser locks. Authenticated `agent-browser` verification in the Migration
+     Verification Workspace set a synthetic `migration-proof-20261014` policy
+     through `accounting.setExpensePolicy`; Go returned HTTP 200 and Vite
+     reloaded the saved policy. The browser error log was empty, and no
+     `POST /api/expenses` request was captured. This completes the Expenses
+     browser proof.
 
 401. (Runtime verified) Authenticated Vite POS completed a cash sale for a
      synthetic stocked item, returned the full sale to cash, and loaded the
