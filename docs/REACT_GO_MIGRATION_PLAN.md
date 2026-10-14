@@ -3058,17 +3058,11 @@ new owners and the manifest shows zero legacy runtime paths.
      Authenticated Vite browser proof using an opaque Better Auth ID is
      recorded in proof 389.
 
-271. (Runtime verified) Remove
-     the Vite Manufacturing page's link to the legacy workspace. The Vite page
-     contains the overview, BOM, production, work order, and runs/lot sections.
-     Keep `/manufacturing` ownership pending until the authenticated browser
-     proof verifies the Go-backed route and key interactions. On 2026-10-11,
-     agent-browser opened `/manufacturing` in the authenticated Vite app with
-     Go manufacturing planning reads enabled. The overview report capability
-     returned HTTP 200, and the BOM, Produce, Work orders, and Runs & lots
-     sections rendered their empty-state forms. No browser page errors were
-     reported. This browser run completes item 252's overview-report proof;
-     it does not complete the broader `/manufacturing` route ownership gate.
+271. (Complete) Keep `/manufacturing` in Vite and remove its link to the
+     temporary legacy workspace. The page owns the overview, BOM, production,
+     work order, and runs/lot sections. The initial authenticated browser
+     proof on 2026-10-11 verified the Go overview report; proof 391 verifies
+     the complete Vite and Go manufacturing flow and route ownership.
 
 272. (Implemented and database-tested) Expose the existing Go
      `documents.listDocuments` capability to routine agents as
@@ -4175,3 +4169,13 @@ new owners and the manifest shows zero legacy runtime paths.
      list and the saved view appeared in the Vite customer selector. The
      authenticated Better Auth user ID was opaque and not a UUID. The browser
      error log was empty. This completes item 268.
+
+391. (Runtime verified) On 2026-10-14, authenticated Vite created synthetic
+     assembly and component items through `inventory.createItem`, stocked the
+     component through `inventory.adjustStock`, defined the BOM through
+     `manufacturing.defineBom`, and received a producible BOM report through
+     `manufacturing.bomReport`. Vite then created, released, and completed a
+     two-unit work order through Go capabilities. Every capability returned
+     HTTP 200. The Runs & lots page displayed the production record, consumed
+     component quantity, and completed state after a full reload; the browser
+     error log was empty. This completes item 271.
