@@ -156,6 +156,93 @@ describe("Vite sales page", () => {
     expect(fetchMock.mock.calls.some(([input]) => input === "/api/sales")).toBe(false);
   });
 
+  it("creates a catalog item through Go, retries an uncertain result exactly, and links it to the sales draft", async () => {
+    const itemId = "50000000-0000-4000-8000-000000000005";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (body.capabilityId === "sales.listOrders") return Response.json({ ok: true, data: { orders } });
+        if (body.capabilityId === "inventory.createItem") {
+          const attempts = fetchMock.mock.calls.filter(([url, request]) => {
+            if (url !== "/api/capabilities/execute") return false;
+            return JSON.parse(String(request?.body)).capabilityId === "inventory.createItem";
+          }).length;
+          if (attempts === 1) throw new TypeError("connection lost after request");
+          return Response.json({ ok: true, data: { itemId } });
+        }
+        if (body.capabilityId === "sales.createOrder") return Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } });
+      }
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_READS__", true);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+    render(<SalesPage baseCurrency="USD" actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Create catalog item" })[0]!);
+    fireEvent.change(screen.getByLabelText("SKU"), { target: { value: "NEW-COFFEE" } });
+    fireEvent.change(screen.getByLabelText("Item name"), { target: { value: "New coffee" } });
+    fireEvent.change(screen.getByLabelText("Sale price (USD)"), { target: { value: "12.50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create item and add line" }));
+    expect(await screen.findByText("Could not reach the inventory service. Check your connection and try again.")).not.toBeNull();
+    expect(localStorage.length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry saved item" }));
+    expect(await screen.findByText("Catalog item created through Go and added to the order line.")).not.toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
+
+    const itemRequests = fetchMock.mock.calls.filter(([url, init]) => {
+      if (url !== "/api/capabilities/execute") return false;
+      return JSON.parse(String(init?.body)).capabilityId === "inventory.createItem";
+    });
+    expect(itemRequests).toHaveLength(2);
+    const itemBodies = itemRequests.map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> });
+    expect(itemBodies[0]).toMatchObject({ capabilityId: "inventory.createItem", input: { sku: "NEW-COFFEE", name: "New coffee", salePriceMinor: 1250 } });
+    expect(itemBodies[1]?.intentId).toBe(itemBodies[0]?.intentId);
+    expect(itemBodies[1]?.input).toEqual(itemBodies[0]?.input);
+    const orderRequest = fetchMock.mock.calls.find(([url, init]) => url === "/api/capabilities/execute" && JSON.parse(String(init?.body)).capabilityId === "sales.createOrder");
+    expect(JSON.parse(String(orderRequest?.[1]?.body))).toMatchObject({ input: { lines: [{ sku: "NEW-COFFEE", description: "New coffee", unitPriceMinor: 1250 }] } });
+    expect(itemRequests[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": "40000000-0000-4000-8000-000000000004" });
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/inventory/items" || url === "/api/products")).toBe(false);
+    expect(localStorage.length).toBe(0);
+  });
+
+  it("disables catalog quick-create when Go inventory item writes are off but keeps Sales usable", async () => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "test-fixture:sales-orders") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (body.capabilityId === "sales.createOrder") return Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } });
+      }
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_READS__", true);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
+    const quickCreateButton = screen.getByRole("button", { name: "Create catalog item" }) as HTMLButtonElement;
+    expect(quickCreateButton.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Manual line" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/capabilities/execute" && JSON.parse(String(init?.body)).capabilityId === "inventory.createItem")).toBe(false);
+  });
+
   it("shows sales order status, totals, backorder context, searchable rows, and status filters", async () => {
     const fetchMock = salesFetch();
     vi.stubGlobal("fetch", fetchMock);

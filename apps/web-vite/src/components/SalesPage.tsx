@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
+import { getPendingInventoryItemCreation, InventoryItemActionError, submitInventoryItemAction, type CreateInventoryItem } from "../api/inventory-items";
 import { clearRouteLessSalesOrderAttempt, confirmSalesOrder, fetchSalesCustomers, fetchSalesEnabled, fetchSalesOrders, findRouteLessSalesOrderAction, restorePendingSalesOrderAction, SalesApiError, submitSalesOrderWrite, type RouteLessSalesOrderMarker, type SalesCustomer, type SalesOrder, type SalesOrderWrite } from "../api/sales";
 import { SalesQuoteWorkspace } from "./SalesQuoteWorkspace";
 import "./sales-page.css";
@@ -14,7 +15,9 @@ type CurrencyStyle = { symbol: string; minorUnits: number };
 type OrderFilter = "all" | "draft" | "confirmed" | "delivered" | "cancelled";
 type OrderDraftLine = { sku: string; description: string; quantity: string; unitPrice: string; tax: string };
 type OrderActionTarget = { action: "deliver" | "deliverPartial" | "cancel"; order: SalesOrder };
+type QuickCreateItemDraft = { sku: string; name: string; kind: "goods" | "service"; unitLabel: string; salePrice: string };
 const emptyOrderDraftLine = (): OrderDraftLine => ({ sku: "", description: "", quantity: "1", unitPrice: "0", tax: "0" });
+const emptyQuickCreateItemDraft = (): QuickCreateItemDraft => ({ sku: "", name: "", kind: "goods", unitLabel: "unit", salePrice: "0" });
 const ORDER_FILTERS: { value: OrderFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "draft", label: "Draft" },
@@ -24,6 +27,10 @@ const ORDER_FILTERS: { value: OrderFilter; label: string }[] = [
 ];
 const CURRENCY_PREFERENCES = ["org", "USD", "KES", "EUR", "GBP", "TZS", "UGX"];
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: "$", KES: "KSh", EUR: "€", GBP: "£", TZS: "TSh", UGX: "USh" };
+
+function goInventoryItemWritesEnabled(): boolean {
+  return typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
+}
 
 function currencyFor(baseCurrency: string | null): CurrencyStyle {
   let preference: string | null = null;
@@ -172,6 +179,11 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
   const [createError, setCreateError] = useState<string | null>(null);
+  const [quickCreateTargetIndex, setQuickCreateTargetIndex] = useState<number | null>(null);
+  const [quickCreateItemDraft, setQuickCreateItemDraft] = useState<QuickCreateItemDraft>(emptyQuickCreateItemDraft);
+  const [quickCreateBusy, setQuickCreateBusy] = useState(false);
+  const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
+  const [quickCreatePending, setQuickCreatePending] = useState(false);
   const [writeBusy, setWriteBusy] = useState(false);
   const [createAttemptPending, setCreateAttemptPending] = useState(false);
   const [createAttemptRestoredScope, setCreateAttemptRestoredScope] = useState<string | null>(null);
@@ -201,7 +213,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   }
   const createScopeReady = createScopeIdentity !== null && createAttemptRestoredScope === createScopeIdentity;
   const routeLessAttemptCurrent = routeLessAttempt?.scopeIdentity === createScopeIdentity;
-  const createWriteLocked = !createScopeReady || createAttemptPending || routeLessAttemptCurrent || scopedWriteRecoveryLocked;
+  const createWriteLocked = !createScopeReady || createAttemptPending || routeLessAttemptCurrent || scopedWriteRecoveryLocked || quickCreateBusy || quickCreatePending;
   const partialSelection = orderActionTarget?.action === "deliverPartial"
     ? partialDeliverySelection(orderActionTarget.order, partialDeliveryQuantities)
     : null;
@@ -259,12 +271,40 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
       setShowCreateForm(false);
       setCreateError(null);
+      setQuickCreateTargetIndex(null);
+      setQuickCreateItemDraft(emptyQuickCreateItemDraft());
+      setQuickCreateBusy(false);
+      setQuickCreateError(null);
+      setQuickCreatePending(false);
       setOrderActionTarget(null);
       setRecoveredWriteAction(null);
       setActionNotice(null);
     }
     if (!actorId || !organizationId || !createScopeIdentity) return () => { current = false; };
     void (async () => {
+      let pendingItem: CreateInventoryItem | null = null;
+      if (goInventoryItemWritesEnabled()) {
+        try {
+          pendingItem = await getPendingInventoryItemCreation({ actorId, organizationId, retryContext: "sales-catalog" });
+        } catch (error) {
+          if (!current) return;
+          setQuickCreateError(error instanceof InventoryItemActionError ? error.message : "A saved catalog item action could not be recovered safely.");
+        }
+      }
+      if (!current) return;
+      if (pendingItem) {
+        setQuickCreateItemDraft({
+          sku: pendingItem.sku,
+          name: pendingItem.name,
+          kind: pendingItem.kind,
+          unitLabel: pendingItem.unitLabel,
+          salePrice: String(pendingItem.salePriceMinor / (10 ** currency.minorUnits)),
+        });
+        setQuickCreatePending(true);
+        setQuickCreateError("An item creation is unresolved. Retry the saved item details to check its result.");
+        setShowCreateForm(true);
+        setQuickCreateTargetIndex(0);
+      }
       const routeLessAction = await findRouteLessSalesOrderAction({ actorId, organizationId });
       if (!current) return;
       if (routeLessAction) {
@@ -309,6 +349,64 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     });
     return () => { current = false; };
   }, [actorId, createScopeIdentity, currency.minorUnits, organizationId]);
+
+  async function handleQuickCreateItem(): Promise<void> {
+    if (!goInventoryItemWritesEnabled()) {
+      setQuickCreateError("Catalog quick-create is unavailable in this deployment because Go inventory item writes are disabled.");
+      return;
+    }
+    if (quickCreateTargetIndex === null || !createScopeReady || !createScopeIdentity || quickCreateBusy) return;
+    const submittedScope = createScopeIdentity;
+    const salePriceMinor = minorFromInput(quickCreateItemDraft.salePrice, currency.minorUnits);
+    if (!quickCreateItemDraft.sku.trim() || quickCreateItemDraft.sku.trim().length > 40
+      || !quickCreateItemDraft.name.trim() || quickCreateItemDraft.name.trim().length > 120
+      || !quickCreateItemDraft.unitLabel.trim() || quickCreateItemDraft.unitLabel.trim().length > 20
+      || salePriceMinor === null) {
+      setQuickCreateError("Enter a SKU, item name, unit, and non-negative price using the workspace currency.");
+      return;
+    }
+    const action: CreateInventoryItem = {
+      action: "createItem",
+      sku: quickCreateItemDraft.sku,
+      name: quickCreateItemDraft.name,
+      kind: quickCreateItemDraft.kind,
+      unitLabel: quickCreateItemDraft.unitLabel,
+      salePriceMinor,
+      reorderPointThousandths: 0,
+      tags: [],
+    };
+    setQuickCreateBusy(true);
+    setQuickCreateError(null);
+    try {
+      const result = await submitInventoryItemAction(action, undefined, { actorId, organizationId, retryContext: "sales-catalog" });
+      if (currentCreateScope.current !== submittedScope) return;
+      if (result.kind === "pending") {
+        setQuickCreatePending(true);
+        setQuickCreateError(result.reason);
+        return;
+      }
+      const targetIndex = quickCreateTargetIndex;
+      setCreateForm((current) => ({
+        ...current,
+        lines: current.lines.map((line, index) => index === targetIndex
+          ? { ...line, sku: quickCreateItemDraft.sku.trim(), description: quickCreateItemDraft.name.trim(), unitPrice: quickCreateItemDraft.salePrice }
+          : line),
+      }));
+      setQuickCreateTargetIndex(null);
+      setQuickCreateItemDraft(emptyQuickCreateItemDraft());
+      setQuickCreatePending(false);
+      setQuickCreateError(null);
+      setActionNotice({ tone: "success", message: "Catalog item created through Go and added to the order line." });
+    } catch (error) {
+      if (currentCreateScope.current !== submittedScope) return;
+      const uncertain = !(error instanceof InventoryItemActionError)
+        || error.status === 0 || error.status === 404 || error.status === 408 || error.status === 429 || error.status >= 500;
+      setQuickCreatePending(uncertain);
+      setQuickCreateError(error instanceof InventoryItemActionError ? error.message : "The catalog item result is unresolved. Retry these exact details or check the catalog first.");
+    } finally {
+      if (currentCreateScope.current === submittedScope) setQuickCreateBusy(false);
+    }
+  }
 
   async function clearReviewedRouteLessAttempt(): Promise<void> {
     if (!routeLessAttemptCurrent || !routeLessReviewConfirmed || routeLessRecoveryBusy || !actorId || !organizationId || !createScopeIdentity) return;
@@ -619,7 +717,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         </div>
         <div className="sales-header-actions">
           {visibleState.status === "ready" && <span className="sales-order-count">{visibleState.orders.length} {visibleState.orders.length === 1 ? "order" : "orders"}</span>}
-          <button className="sales-new-order" type="button" disabled={createAttemptPending} onClick={() => { setShowCreateForm((open) => !open); setCreateError(null); }} aria-expanded={showCreateForm}>
+          <button className="sales-new-order" type="button" disabled={createAttemptPending || quickCreateBusy || quickCreatePending} onClick={() => { setShowCreateForm((open) => !open); setCreateError(null); }} aria-expanded={showCreateForm}>
             {showCreateForm ? "Close order form" : "Create sales order"}
           </button>
         </div>
@@ -669,6 +767,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
             {createForm.lines.map((line, index) => (
               <div className="sales-write-line" key={index}>
                 <label>SKU (optional)<input value={line.sku} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, sku: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
+                <button type="button" className="sales-write-secondary" disabled={!goInventoryItemWritesEnabled() || writeBusy || !createScopeReady || createWriteLocked} onClick={() => { setQuickCreateTargetIndex(index); setQuickCreateError(null); }} title={!goInventoryItemWritesEnabled() ? "Go inventory item writes are disabled in this deployment." : undefined}>Create catalog item</button>
                 <label>Description<input value={line.description} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item) })); setCreateError(null); }} disabled={writeBusy || createWriteLocked} /></label>
                 <label>Quantity<input inputMode="decimal" value={line.quantity} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
                 <label>Unit price<input inputMode="decimal" value={line.unitPrice} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
@@ -683,6 +782,29 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
             {createError && <p className="sales-write-error" role="alert">{createError}</p>}
           </div>
         </section>
+      )}
+
+      {quickCreateTargetIndex !== null && visibleState.status === "ready" && (
+        <div className="sales-dialog-backdrop" role="presentation">
+          <section className="sales-action-dialog" role="dialog" aria-modal="true" aria-labelledby="sales-quick-item-title">
+            <div className="sales-write-heading">
+              <div><p className="sales-eyebrow">Catalog</p><h2 id="sales-quick-item-title">Create catalog item</h2></div>
+              <p>This creates the item through the Go inventory capability, then links it to this draft line.</p>
+            </div>
+            <div className="sales-write-grid">
+              <label>SKU<input value={quickCreateItemDraft.sku} maxLength={40} onChange={(event) => { const value = event.currentTarget.value; setQuickCreateItemDraft((current) => ({ ...current, sku: value })); }} disabled={quickCreateBusy || quickCreatePending} /></label>
+              <label>Item name<input value={quickCreateItemDraft.name} maxLength={120} onChange={(event) => { const value = event.currentTarget.value; setQuickCreateItemDraft((current) => ({ ...current, name: value })); }} disabled={quickCreateBusy || quickCreatePending} /></label>
+              <label>Type<select value={quickCreateItemDraft.kind} onChange={(event) => { const value = event.currentTarget.value; if (value === "goods" || value === "service") setQuickCreateItemDraft((current) => ({ ...current, kind: value, unitLabel: value === "service" ? "hour" : "unit" })); }} disabled={quickCreateBusy || quickCreatePending}><option value="goods">Goods</option><option value="service">Service</option></select></label>
+              <label>Unit<input value={quickCreateItemDraft.unitLabel} maxLength={20} onChange={(event) => { const value = event.currentTarget.value; setQuickCreateItemDraft((current) => ({ ...current, unitLabel: value })); }} disabled={quickCreateBusy || quickCreatePending} /></label>
+              <label>Sale price ({baseCurrency ?? "workspace currency"})<input inputMode="decimal" value={quickCreateItemDraft.salePrice} onChange={(event) => { const value = event.currentTarget.value; setQuickCreateItemDraft((current) => ({ ...current, salePrice: value })); }} disabled={quickCreateBusy || quickCreatePending} /></label>
+            </div>
+            <div className="sales-write-actions">
+              <button type="button" className="sales-write-secondary" disabled={quickCreateBusy || quickCreatePending} onClick={() => { setQuickCreateTargetIndex(null); setQuickCreateError(null); }}>Close</button>
+              <button type="button" className="sales-write-primary" disabled={quickCreateBusy || !createScopeReady} onClick={() => void handleQuickCreateItem()}>{quickCreateBusy ? "Saving…" : quickCreatePending ? "Retry saved item" : "Create item and add line"}</button>
+            </div>
+            {quickCreateError && <p className="sales-write-error" role="alert">{quickCreateError}</p>}
+          </section>
+        </div>
       )}
 
       {visibleState.status === "ready" && visibleState.orders.length > 0 && (

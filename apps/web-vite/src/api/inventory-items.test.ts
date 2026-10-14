@@ -53,6 +53,23 @@ describe("inventory item action API client", () => {
     await expect(getPendingInventoryItemCreation(retryScope)).resolves.toBeNull();
   });
 
+  it("keeps the Sales quick-create retry marker separate from Inventory item creation", async () => {
+    const salesScope = { ...retryScope, retryContext: "sales-catalog" as const };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId: "40000000-0000-4000-8000-000000000004" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+
+    await expect(submitInventoryItemAction(createAction, undefined, salesScope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(getPendingInventoryItemCreation(retryScope)).resolves.toBeNull();
+    await expect(getPendingInventoryItemCreation(salesScope)).resolves.toEqual(createAction);
+    await expect(submitInventoryItemAction(createAction, undefined, salesScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string });
+    expect(requests[1]?.intentId).toBe(requests[0]?.intentId);
+  });
+
   it("recovers the exact adjustment and intent across pending approval and retry", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }))

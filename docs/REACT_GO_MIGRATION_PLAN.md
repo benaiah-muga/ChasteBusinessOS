@@ -4425,3 +4425,14 @@ new owners and the manifest shows zero legacy runtime paths.
      synthetic named shift through `pos.openSession`, confirmed HTTP 200, then
      closed it with a balanced zero drawer and reopened the workspace's `main`
      register. The browser error log was empty.
+
+412. (Implemented and verified: focused tests, independent review, and
+     authenticated browser proof) Vite Sales now quick-creates catalog items
+     through Go's `inventory.createItem` capability and fills the selected
+     order line with the returned item's SKU, name, and price. Retry state is
+     isolated from the Inventory page by actor and organization; the create
+     action stays disabled when the Go inventory slice is off. Focused Sales
+     and inventory-item tests pass 43 cases, with typecheck and lint passing.
+     Authenticated browser proof created `MIG-SALES-20261014` through Go,
+     added it to a draft, and saved order #2. Capability requests returned
+     HTTP 200 and the browser error log was empty.

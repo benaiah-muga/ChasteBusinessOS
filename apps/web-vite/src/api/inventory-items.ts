@@ -48,7 +48,7 @@ export type CreateInventoryItem = z.infer<typeof CreateItemSchema>;
 export type AdjustInventoryStock = z.infer<typeof AdjustStockSchema>;
 export type InventoryItemAction = CreateInventoryItem | AdjustInventoryStock;
 export type InventoryItemActionResult = { kind: "completed"; data: { itemId: string } | { onHandThousandths: number } } | { kind: "pending"; reason: string };
-export type InventoryAdjustmentRetryScope = { actorId: string | null; organizationId: string | null };
+export type InventoryAdjustmentRetryScope = { actorId: string | null; organizationId: string | null; retryContext?: "sales-catalog" };
 
 type InventoryAdjustmentAttempt = z.infer<typeof AdjustmentAttemptSchema> & { storageKey: string };
 type InventoryCreateAttempt = z.infer<typeof CreateAttemptSchema> & { storageKey: string };
@@ -63,7 +63,8 @@ async function itemAttemptStorageKey(prefix: string, scope: InventoryAdjustmentR
     const identity = JSON.stringify({ actorId, organizationId });
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
     const hash = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
-    return `${prefix}${hash}`;
+    const contextKey = scope.retryContext ? `${scope.retryContext}:` : "";
+    return `${prefix}${contextKey}${hash}`;
   } catch {
     throw new InventoryItemActionError(0, `Inventory item retry protection is unavailable. Check browser security settings before ${operation}.`);
   }
