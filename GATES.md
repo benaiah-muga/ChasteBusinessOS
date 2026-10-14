@@ -634,3 +634,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /Tests\s+\d+ passed|✓ built in/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: The Vite Go proxy suite passed all 162 tests. It loaded the actual Vite config and verified `/api`, `/api/health`, and `/api/capabilities/execute` share the Go origin; an unknown API request reached the Go 404 recorder and never contacted a separate legacy recorder. Tests also cover exact request body, cookies, headers, and selector opt-outs. Vite lint, typecheck, production build, and `git diff --check` passed.
+
+- [x] G123: The default `pnpm dev` starts the Vite React app without starting the temporary Next compatibility app.
+  CHECK: node -e 'const assert=require("node:assert/strict");const p=require("./package.json");assert.equal(p.scripts.dev,"pnpm --filter @chaste/web-vite dev");assert.equal(p.scripts["dev:legacy"],"pnpm --filter web dev");console.log("VITE_DEFAULT_DEV_ONLY")' && git diff --check
+  EXPECT: /VITE_DEFAULT_DEV_ONLY/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: The root package assertion passed. Running `pnpm dev` started Vite at `http://localhost:3000`; installed `agent-browser` loaded the not-found page with the URL unchanged and an empty browser error log. A TCP connection check confirmed port 3001 stayed closed.

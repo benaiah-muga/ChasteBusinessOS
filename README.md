@@ -79,10 +79,11 @@ docker run -d --name chaste-pgvector \
 
 pnpm --filter @chaste/db db:migrate
 pnpm db:provision-runtime
-pnpm dev                    # Vite app on :3000, legacy compatibility server on :3001
-# To opt into legacy boot migration locally: AUTO_MIGRATE_ON_BOOT=1 pnpm dev
+pnpm dev                    # React/Vite app on :3000
 # In another terminal, run the Go API on :8080:
 pnpm dev:api
+# Run the temporary Next compatibility app only when working on an unmigrated legacy flow:
+# pnpm dev:legacy
 # In another terminal, run the Go capability/routine and outbox workers:
 pnpm worker
 ```
@@ -96,9 +97,9 @@ worker uses `OUTBOX_WORKER_DATABASE_URL`.
 
 The sample `.env` enables Go onboarding and direct Vite onboarding with
 `GO_ONBOARDING_ROUTE=1` and `CHASTE_GO_ONBOARDING_ROUTE=1`. The Vite selector
-defaults off when unset; setting it to `0` restores the compatibility route as
-an explicit rollback. Go handles onboarding GET, POST, and PATCH using the
-signed-in session. If HTTPS terminates before Go, set
+defaults off when unset; setting it to `0` disables specialized routing while
+the Vite API catch-all still sends requests to Go. Go handles onboarding GET,
+POST, and PATCH using the signed-in session. If HTTPS terminates before Go, set
 `GO_API_TRUSTED_PROXY_CIDRS` to the exact reverse-proxy peer CIDRs so Go can verify
 the forwarded scheme without accepting another origin.
 `GO_API_INTERNAL_URL` must identify the trusted Go API endpoint. HTTPS may point
@@ -106,8 +107,8 @@ to a remote or private service you control; the Vite development proxy accepts
 cleartext HTTP only for loopback hosts.
 
 Settings SMTP status and test sends, plus Accounting invoice email, use the Go
-`/api/email` route through Vite by default. Set `GO_EMAIL_ROUTE=0` only to
-restore the compatibility route. Go verifies the
+`/api/email` route through Vite by default. Setting `GO_EMAIL_ROUTE=0` disables
+the Go email handler; Vite still sends the request to Go. Go verifies the
 session or bearer token and derives the organization server-side. Configure
 `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and
 `SMTP_FROM` for delivery. Set `GO_PUBLIC_APP_URL` to the public app origin when
@@ -115,13 +116,13 @@ invoice emails are sent by bearer clients; cookie-authenticated browser requests
 use their validated same-origin URL when this setting is empty.
 
 The setup checklist read `GET /api/setup` uses Go by default in Vite and the Go
-API. Set both `CHASTE_GO_SETUP_ROUTE=0` and `GO_SETUP_ROUTE=0` to restore the
-compatibility handler. Go resolves the signed-in session and active organization
-and retains the `iam.admin` permission gate.
+API. Set both `CHASTE_GO_SETUP_ROUTE=0` and `GO_SETUP_ROUTE=0` to disable the
+Go handler; Vite still sends the request to Go. Go resolves the signed-in
+session and active organization and retains the `iam.admin` permission gate.
 
 The dashboard `GET /api/dashboard` also uses Go by default in Vite and the Go
 API. Set both `CHASTE_GO_DASHBOARD_ROUTE=0` and `GO_DASHBOARD_ROUTE=0` to
-restore the compatibility handler.
+disable the Go handler; Vite still sends the request to Go.
 
 ## Why React and Go: measured build benefits
 

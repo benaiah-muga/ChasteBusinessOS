@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "pnpm --filter @chaste/web-vite dev",
     "dev:vite": "pnpm --filter @chaste/web-vite dev",
     "dev:legacy": "pnpm --filter web dev",
     "dev:api": "node --env-file-if-exists=.env scripts/dev-api.mjs",

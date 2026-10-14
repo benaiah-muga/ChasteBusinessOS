@@ -4089,3 +4089,13 @@ new owners and the manifest shows zero legacy runtime paths.
      legacy recorder received no request. Existing proxy checks passed for
      request data and selector opt-outs. Vite lint, typecheck, production build,
      and `git diff --check` passed. This completes item 382.
+
+384. (Complete) Make `pnpm dev` start the React/Vite app only. Keep the
+     temporary Next.js compatibility server behind the explicit
+     `pnpm dev:legacy` command, and document Go API startup separately.
+
+385. (Runtime verified) The root package script assertion passed. Running
+     `pnpm dev` started Vite at `http://localhost:3000`; installed
+     `agent-browser` loaded the Vite not-found page, retained the Vite URL, and
+     reported no browser errors. A TCP check confirmed the legacy server port
+     3001 stayed closed. This completes item 384.

@@ -17,6 +17,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- The default `pnpm dev` command now starts only the React/Vite app; use `pnpm dev:legacy` explicitly for temporary Next compatibility work.
 - The Vite development API proxy now sends unclaimed `/api` paths to Go, where unsupported routes fail with 404 instead of reaching the legacy server.
 - Vite keeps unknown page URLs in its own not-found page instead of redirecting them to the legacy app.
 - Vite Documents capability writes now pin the requested organization in the Go request, and malformed messaging presence or attachment paths stay owned by Go instead of reaching the legacy API proxy.
