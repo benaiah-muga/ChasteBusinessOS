@@ -107,8 +107,24 @@ func TestDashboardSessionHandlerReadsCookieSessionAndTenantScopedPayload(t *test
 			t.Errorf("response omitted %q: %s", key, response.Body.String())
 		}
 	}
-	if string(body["signals"]) != `[{"id":"cash.low","severity":"orange","module":"accounting","subject":"Cash","detail":"Low cash"}]` {
-		t.Fatalf("signals response mismatch: %s", body["signals"])
+	var signals []struct {
+		ID       string `json:"id"`
+		Severity string `json:"severity"`
+		Module   string `json:"module"`
+		Subject  string `json:"subject"`
+		Detail   string `json:"detail"`
+	}
+	if err := json.Unmarshal(body["signals"], &signals); err != nil {
+		t.Fatalf("decode signals: %v", err)
+	}
+	if !reflect.DeepEqual(signals, []struct {
+		ID       string `json:"id"`
+		Severity string `json:"severity"`
+		Module   string `json:"module"`
+		Subject  string `json:"subject"`
+		Detail   string `json:"detail"`
+	}{{ID: "cash.low", Severity: "orange", Module: "accounting", Subject: "Cash", Detail: "Low cash"}}) {
+		t.Fatalf("signals response mismatch: %+v", signals)
 	}
 	if !reflect.DeepEqual(executor.calls, []string{"accounting.incomeStatement", "accounting.balanceSheet", "accounting.trialBalance", "signals.list"}) {
 		t.Fatalf("capability calls=%v", executor.calls)
@@ -136,6 +152,46 @@ func TestDashboardSessionHandlerSupportsBearerAndSelectedOrganization(t *testing
 	}
 	if reader.orgID != *identity.OrgID {
 		t.Fatalf("reader used org %q, expected selected org %q", reader.orgID, *identity.OrgID)
+	}
+}
+
+func TestDashboardSessionHandlerPreservesSignalDraftJSONNumbers(t *testing.T) {
+	identity := directTestIdentity()
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	reader := &fakeDashboardReader{}
+	executor := dashboardExecutorWithSuccess()
+	executor.results["signals.list"] = capability.Result{OK: true, Data: json.RawMessage(`{"signals":[{"id":"inventory.low","severity":"orange","module":"inventory","subject":"Low stock","detail":"Reorder soon.","suggestedAction":{"capabilityId":"inventory.createCount","inputDraft":{"quantity":9007199254740993}}}]}`)}
+	response := httptest.NewRecorder()
+	NewDashboardSessionHandler(resolver, reader, executor, nil).ServeHTTP(response, dashboardRequest(http.MethodGet))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"quantity":9007199254740993`) {
+		t.Fatalf("signal draft JSON number was changed: %s", response.Body.String())
+	}
+}
+
+func TestDashboardSessionHandlerDropsSignalsWithNonObjectDrafts(t *testing.T) {
+	identity := directTestIdentity()
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	reader := &fakeDashboardReader{}
+	executor := dashboardExecutorWithSuccess()
+	executor.results["signals.list"] = capability.Result{OK: true, Data: json.RawMessage(`{"signals":[{"id":"inventory.low","severity":"orange","module":"inventory","subject":"Low stock","detail":"Reorder soon.","suggestedAction":{"capabilityId":"inventory.createCount","inputDraft":9007199254740993}}]}`)}
+	response := httptest.NewRecorder()
+	NewDashboardSessionHandler(resolver, reader, executor, nil).ServeHTTP(response, dashboardRequest(http.MethodGet))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Signals []json.RawMessage `json:"signals"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Signals) != 0 {
+		t.Fatalf("malformed signal draft was returned: %s", body.Signals)
 	}
 }
 

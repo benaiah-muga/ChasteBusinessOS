@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 
 const MinorUnitsSchema = z.number().int().safe();
 const CountSchema = z.number().int().nonnegative().safe();
@@ -8,12 +9,15 @@ const SignalSchema = z.object({
   module: z.string().min(1),
   subject: z.string(),
   detail: z.string(),
-  evidence: z.object({ refType: z.string(), refId: z.string().optional() }).strict().optional(),
-  suggestedAction: z.object({ capabilityId: z.string().min(1), inputDraft: z.unknown().optional() }).strict().optional(),
+  evidence: z.object({ refType: z.string(), refId: z.string().nullable().optional() }).strict().nullable().optional(),
+  suggestedAction: z.object({
+    capabilityId: z.string().min(1),
+    inputDraft: z.record(z.string(), z.unknown()).optional(),
+  }).strict().nullable().optional(),
 }).strict();
 
 export const DashboardResponseSchema = z.object({
-  signals: z.array(SignalSchema),
+  signals: z.array(SignalSchema).max(8),
   money: z.object({
     revenueMinor: MinorUnitsSchema,
     expenseMinor: MinorUnitsSchema,
@@ -35,7 +39,7 @@ export const DashboardResponseSchema = z.object({
       stage: z.enum(["lead", "qualified", "proposal", "negotiation", "won", "lost"]),
       count: CountSchema,
       valueMinor: MinorUnitsSchema,
-    }).strict()),
+    }).strict()).length(6),
     openCount: CountSchema,
     weightedForecastMinor: MinorUnitsSchema,
   }).strict(),
@@ -52,14 +56,14 @@ export const DashboardResponseSchema = z.object({
     month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
     incomeMinor: MinorUnitsSchema,
     expenseMinor: MinorUnitsSchema,
-  }).strict()),
+  }).strict()).length(6),
   activity: z.array(z.object({
     seq: CountSchema,
     kind: z.string(),
     capabilityId: z.string().nullable(),
     actorType: z.string(),
     occurredAt: z.string().datetime({ offset: true }),
-  }).strict()),
+  }).strict()).max(8),
 }).strict();
 
 const SetupItemSchema = z.object({
@@ -126,7 +130,7 @@ const ApiErrorBodySchema = z.object({
   error: z.string().optional(),
 });
 
-export type DashboardData = z.infer<typeof DashboardResponseSchema>;
+export type DashboardData = components["schemas"]["DashboardResponse"];
 export type SetupItem = z.infer<typeof SetupItemSchema>;
 export type WorkCard = z.infer<typeof WorkCardSchema>;
 
@@ -193,7 +197,8 @@ export async function fetchDashboard(signal?: AbortSignal): Promise<DashboardDat
   if (!parsed.success) {
     throw new DashboardApiError(200, "The dashboard service returned data in an unexpected format.");
   }
-  return parsed.data;
+  const dashboard: DashboardData = parsed.data;
+  return dashboard;
 }
 
 export async function fetchSetup(signal?: AbortSignal): Promise<SetupItem[]> {

@@ -4,6 +4,148 @@ info:
   version: 1.0.0
   description: Versioned public HTTP contracts shared by the Go API and its clients.
 paths:
+  /api/dashboard:
+    get:
+      operationId: getDashboard
+      summary: Read the authenticated organization dashboard
+      description: >-
+        Returns the dashboard snapshot for the authenticated organization. The
+        response includes organization-scoped financial, working-capital,
+        pipeline, operations, trend, activity, and signal data. Report-derived
+        money fields use the legacy zero or null fallback when the actor cannot
+        read the corresponding accounting report. Every response includes
+        Cache-Control: no-store and Pragma: no-cache. Cookie sessions use the
+        active organization from session context unless X-Organization-ID is
+        supplied. Bearer tokens are resolved against the selected organization.
+        An explicit organization selector must match the resolved membership.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the organization for this request and must match an organization membership.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Dashboard snapshot for the authenticated organization.
+          headers:
+            Cache-Control:
+              description: Dashboard responses are not stored by clients or intermediaries.
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              description: Legacy cache prevention header.
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the actor is not a verified organization member.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the authenticated actor's organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The tenant-scoped dashboard read failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The dashboard service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/capabilities/execute:
     post:
       operationId: executeCapability
@@ -369,6 +511,256 @@ components:
       type: http
       scheme: bearer
   schemas:
+    DashboardSignal:
+      type: object
+      additionalProperties: false
+      required: [id, severity, module, subject, detail]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        severity:
+          type: string
+          enum: [red, orange, green]
+        module:
+          type: string
+          minLength: 1
+        subject:
+          type: string
+        detail:
+          type: string
+        evidence:
+          type: [object, "null"]
+          additionalProperties: false
+          required: [refType]
+          properties:
+            refType:
+              type: string
+            refId:
+              type: [string, "null"]
+        suggestedAction:
+          type: [object, "null"]
+          additionalProperties: false
+          required: [capabilityId]
+          properties:
+            capabilityId:
+              type: string
+              minLength: 1
+            inputDraft:
+              type: object
+              additionalProperties: true
+              x-go-type: apicontract.RawJSON
+              x-go-type-import:
+                path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+                name: apicontract
+    DashboardResponse:
+      type: object
+      additionalProperties: false
+      required: [signals, money, workingCapital, pipeline, ops, trend, activity]
+      properties:
+        signals:
+          type: array
+          maxItems: 8
+          items:
+            $ref: "#/components/schemas/DashboardSignal"
+        money:
+          type: object
+          additionalProperties: false
+          required: [revenueMinor, expenseMinor, netIncomeMinor, cashMinor, balanced, assetsMinor, liabilitiesMinor, equityMinor]
+          properties:
+            revenueMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            expenseMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            netIncomeMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            cashMinor:
+              type: [integer, "null"]
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            balanced:
+              type: [boolean, "null"]
+            assetsMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            liabilitiesMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            equityMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+        workingCapital:
+          type: object
+          additionalProperties: false
+          required: [arOutstandingMinor, overdueCount, overdueAmountMinor, apOutstandingMinor]
+          properties:
+            arOutstandingMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            overdueCount:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            overdueAmountMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            apOutstandingMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+        pipeline:
+          type: object
+          additionalProperties: false
+          required: [stages, openCount, weightedForecastMinor]
+          properties:
+            stages:
+              type: array
+              minItems: 6
+              maxItems: 6
+              items:
+                type: object
+                additionalProperties: false
+                required: [stage, count, valueMinor]
+                properties:
+                  stage:
+                    type: string
+                    enum: [lead, qualified, proposal, negotiation, won, lost]
+                  count:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    maximum: 9007199254740991
+                  valueMinor:
+                    type: integer
+                    format: int64
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+            openCount:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            weightedForecastMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+        ops:
+          type: object
+          additionalProperties: false
+          required: [headcount, pendingLeave, posOpen, lowStock, pendingApprovals, docsParsed, docsAwaitingCoding]
+          properties:
+            headcount:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            pendingLeave:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            posOpen:
+              oneOf:
+                - type: "null"
+                - type: object
+                  additionalProperties: false
+                  required: [register]
+                  properties:
+                    register:
+                      type: string
+            lowStock:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [sku, name]
+                properties:
+                  sku:
+                    type: string
+                  name:
+                    type: string
+            pendingApprovals:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            docsParsed:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            docsAwaitingCoding:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+        trend:
+          type: array
+          minItems: 6
+          maxItems: 6
+          items:
+            type: object
+            additionalProperties: false
+            required: [month, incomeMinor, expenseMinor]
+            properties:
+              month:
+                type: string
+                pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+              incomeMinor:
+                type: integer
+                format: int64
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              expenseMinor:
+                type: integer
+                format: int64
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+        activity:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [seq, kind, capabilityId, actorType, occurredAt]
+            properties:
+              seq:
+                type: integer
+                format: int64
+                minimum: 0
+                maximum: 9007199254740991
+              kind:
+                type: string
+              capabilityId:
+                type: [string, "null"]
+              actorType:
+                type: string
+              occurredAt:
+                type: string
+                format: date-time
     CapabilityExecutionRequest:
       type: object
       additionalProperties: false

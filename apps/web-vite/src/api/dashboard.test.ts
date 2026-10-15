@@ -38,6 +38,39 @@ describe("dashboard API client", () => {
     });
   });
 
+  it("accepts nullable signal evidence and suggested actions from signals.list", async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      ...dashboardFixture,
+      signals: [{
+        ...dashboardFixture.signals[0],
+        evidence: null,
+        suggestedAction: null,
+      }],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchDashboard()).resolves.toMatchObject({
+      signals: [{ evidence: null, suggestedAction: null }],
+    });
+  });
+
+  it("enforces dashboard collection sizes declared by the Go response contract", async () => {
+    const malformedResponses = [
+      { ...dashboardFixture, signals: Array(9).fill(dashboardFixture.signals[0]) },
+      { ...dashboardFixture, pipeline: { ...dashboardFixture.pipeline, stages: dashboardFixture.pipeline.stages.slice(0, 5) } },
+      { ...dashboardFixture, trend: dashboardFixture.trend.slice(0, 5) },
+      { ...dashboardFixture, activity: Array(9).fill(dashboardFixture.activity[0]) },
+    ];
+
+    for (const response of malformedResponses) {
+      vi.stubGlobal("fetch", vi.fn(async () => Response.json(response)));
+      await expect(fetchDashboard()).rejects.toMatchObject({
+        status: 200,
+        message: "The dashboard service returned data in an unexpected format.",
+      });
+    }
+  });
+
   it("rejects unknown fields at every dashboard response level while accepting Go signal details", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({
       ...dashboardFixture,

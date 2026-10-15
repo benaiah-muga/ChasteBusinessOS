@@ -5,6 +5,7 @@ package businesscontract
 
 import (
 	"encoding/json"
+	"time"
 
 	apicontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract"
 	"github.com/oapi-codegen/runtime"
@@ -65,6 +66,57 @@ const (
 func (e CapabilityExecutionSuccessOk) Valid() bool {
 	switch e {
 	case CapabilityExecutionSuccessOkTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DashboardResponsePipelineStagesStage.
+const (
+	Lead        DashboardResponsePipelineStagesStage = "lead"
+	Lost        DashboardResponsePipelineStagesStage = "lost"
+	Negotiation DashboardResponsePipelineStagesStage = "negotiation"
+	Proposal    DashboardResponsePipelineStagesStage = "proposal"
+	Qualified   DashboardResponsePipelineStagesStage = "qualified"
+	Won         DashboardResponsePipelineStagesStage = "won"
+)
+
+// Valid indicates whether the value is a known member of the DashboardResponsePipelineStagesStage enum.
+func (e DashboardResponsePipelineStagesStage) Valid() bool {
+	switch e {
+	case Lead:
+		return true
+	case Lost:
+		return true
+	case Negotiation:
+		return true
+	case Proposal:
+		return true
+	case Qualified:
+		return true
+	case Won:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DashboardSignalSeverity.
+const (
+	Green  DashboardSignalSeverity = "green"
+	Orange DashboardSignalSeverity = "orange"
+	Red    DashboardSignalSeverity = "red"
+)
+
+// Valid indicates whether the value is a known member of the DashboardSignalSeverity enum.
+func (e DashboardSignalSeverity) Valid() bool {
+	switch e {
+	case Green:
+		return true
+	case Orange:
+		return true
+	case Red:
 		return true
 	default:
 		return false
@@ -167,6 +219,85 @@ type CapabilityExecutionSuccess struct {
 // CapabilityExecutionSuccessOk defines model for CapabilityExecutionSuccess.Ok.
 type CapabilityExecutionSuccessOk bool
 
+// DashboardResponse defines model for DashboardResponse.
+type DashboardResponse struct {
+	Activity []struct {
+		ActorType    string    `json:"actorType"`
+		CapabilityId *string   `json:"capabilityId"`
+		Kind         string    `json:"kind"`
+		OccurredAt   time.Time `json:"occurredAt"`
+		Seq          int64     `json:"seq"`
+	} `json:"activity"`
+	Money struct {
+		AssetsMinor      int64  `json:"assetsMinor"`
+		Balanced         *bool  `json:"balanced"`
+		CashMinor        *int64 `json:"cashMinor"`
+		EquityMinor      int64  `json:"equityMinor"`
+		ExpenseMinor     int64  `json:"expenseMinor"`
+		LiabilitiesMinor int64  `json:"liabilitiesMinor"`
+		NetIncomeMinor   int64  `json:"netIncomeMinor"`
+		RevenueMinor     int64  `json:"revenueMinor"`
+	} `json:"money"`
+	Ops struct {
+		DocsAwaitingCoding int64 `json:"docsAwaitingCoding"`
+		DocsParsed         int64 `json:"docsParsed"`
+		Headcount          int64 `json:"headcount"`
+		LowStock           []struct {
+			Name string `json:"name"`
+			Sku  string `json:"sku"`
+		} `json:"lowStock"`
+		PendingApprovals int64 `json:"pendingApprovals"`
+		PendingLeave     int64 `json:"pendingLeave"`
+		PosOpen          *struct {
+			Register string `json:"register"`
+		} `json:"posOpen"`
+	} `json:"ops"`
+	Pipeline struct {
+		OpenCount int64 `json:"openCount"`
+		Stages    []struct {
+			Count      int64                                `json:"count"`
+			Stage      DashboardResponsePipelineStagesStage `json:"stage"`
+			ValueMinor int64                                `json:"valueMinor"`
+		} `json:"stages"`
+		WeightedForecastMinor int64 `json:"weightedForecastMinor"`
+	} `json:"pipeline"`
+	Signals []DashboardSignal `json:"signals"`
+	Trend   []struct {
+		ExpenseMinor int64  `json:"expenseMinor"`
+		IncomeMinor  int64  `json:"incomeMinor"`
+		Month        string `json:"month"`
+	} `json:"trend"`
+	WorkingCapital struct {
+		ApOutstandingMinor int64 `json:"apOutstandingMinor"`
+		ArOutstandingMinor int64 `json:"arOutstandingMinor"`
+		OverdueAmountMinor int64 `json:"overdueAmountMinor"`
+		OverdueCount       int64 `json:"overdueCount"`
+	} `json:"workingCapital"`
+}
+
+// DashboardResponsePipelineStagesStage defines model for DashboardResponse.Pipeline.Stages.Stage.
+type DashboardResponsePipelineStagesStage string
+
+// DashboardSignal defines model for DashboardSignal.
+type DashboardSignal struct {
+	Detail   string `json:"detail"`
+	Evidence *struct {
+		RefId   *string `json:"refId,omitempty"`
+		RefType string  `json:"refType"`
+	} `json:"evidence,omitempty"`
+	Id              string                  `json:"id"`
+	Module          string                  `json:"module"`
+	Severity        DashboardSignalSeverity `json:"severity"`
+	Subject         string                  `json:"subject"`
+	SuggestedAction *struct {
+		CapabilityId string               `json:"capabilityId"`
+		InputDraft   *apicontract.RawJSON `json:"inputDraft,omitempty"`
+	} `json:"suggestedAction,omitempty"`
+}
+
+// DashboardSignalSeverity defines model for DashboardSignal.Severity.
+type DashboardSignalSeverity string
+
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
 	Error string `json:"error"`
@@ -240,6 +371,12 @@ type ExecuteCapabilityParams struct {
 // ExecuteCapability422JSONResponseBody defines parameters for ExecuteCapability.
 type ExecuteCapability422JSONResponseBody struct {
 	union json.RawMessage
+}
+
+// GetDashboardParams defines parameters for GetDashboard.
+type GetDashboardParams struct {
+	// XOrganizationID Selects the organization for this request and must match an organization membership.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
 }
 
 // GetModuleSwitchboardParams defines parameters for GetModuleSwitchboard.

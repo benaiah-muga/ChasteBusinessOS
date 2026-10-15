@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated organization dashboard
+         * @description Returns the dashboard snapshot for the authenticated organization. The response includes organization-scoped financial, working-capital, pipeline, operations, trend, activity, and signal data. Report-derived money fields use the legacy zero or null fallback when the actor cannot read the corresponding accounting report. Every response includes Cache-Control: no-store and Pragma: no-cache. Cookie sessions use the active organization from session context unless X-Organization-ID is supplied. Bearer tokens are resolved against the selected organization. An explicit organization selector must match the resolved membership.
+         */
+        get: operations["getDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/capabilities/execute": {
         parameters: {
             query?: never;
@@ -76,6 +96,103 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        DashboardSignal: {
+            id: string;
+            /** @enum {string} */
+            severity: "red" | "orange" | "green";
+            module: string;
+            subject: string;
+            detail: string;
+            evidence?: {
+                refType: string;
+                refId?: string | null;
+            } | null;
+            suggestedAction?: {
+                capabilityId: string;
+                inputDraft?: {
+                    [key: string]: unknown;
+                };
+            } | null;
+        };
+        DashboardResponse: {
+            signals: components["schemas"]["DashboardSignal"][];
+            money: {
+                /** Format: int64 */
+                revenueMinor: number;
+                /** Format: int64 */
+                expenseMinor: number;
+                /** Format: int64 */
+                netIncomeMinor: number;
+                /** Format: int64 */
+                cashMinor: number | null;
+                balanced: boolean | null;
+                /** Format: int64 */
+                assetsMinor: number;
+                /** Format: int64 */
+                liabilitiesMinor: number;
+                /** Format: int64 */
+                equityMinor: number;
+            };
+            workingCapital: {
+                /** Format: int64 */
+                arOutstandingMinor: number;
+                /** Format: int64 */
+                overdueCount: number;
+                /** Format: int64 */
+                overdueAmountMinor: number;
+                /** Format: int64 */
+                apOutstandingMinor: number;
+            };
+            pipeline: {
+                stages: {
+                    /** @enum {string} */
+                    stage: "lead" | "qualified" | "proposal" | "negotiation" | "won" | "lost";
+                    /** Format: int64 */
+                    count: number;
+                    /** Format: int64 */
+                    valueMinor: number;
+                }[];
+                /** Format: int64 */
+                openCount: number;
+                /** Format: int64 */
+                weightedForecastMinor: number;
+            };
+            ops: {
+                /** Format: int64 */
+                headcount: number;
+                /** Format: int64 */
+                pendingLeave: number;
+                posOpen: null | {
+                    register: string;
+                };
+                lowStock: {
+                    sku: string;
+                    name: string;
+                }[];
+                /** Format: int64 */
+                pendingApprovals: number;
+                /** Format: int64 */
+                docsParsed: number;
+                /** Format: int64 */
+                docsAwaitingCoding: number;
+            };
+            trend: {
+                month: string;
+                /** Format: int64 */
+                incomeMinor: number;
+                /** Format: int64 */
+                expenseMinor: number;
+            }[];
+            activity: {
+                /** Format: int64 */
+                seq: number;
+                kind: string;
+                capabilityId: string | null;
+                actorType: string;
+                /** Format: date-time */
+                occurredAt: string;
+            }[];
+        };
         CapabilityExecutionRequest: {
             /** @description Capability registry identifier, limited to 200 Unicode code points by the server. Capability-specific input is validated by its runtime parser. */
             capabilityId: string;
@@ -160,6 +277,103 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getDashboard: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects the organization for this request and must match an organization membership. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dashboard snapshot for the authenticated organization. */
+            200: {
+                headers: {
+                    /** @description Dashboard responses are not stored by clients or intermediaries. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Legacy cache prevention header. */
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardResponse"];
+                };
+            };
+            /** @description The organization selector is malformed or repeated. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid or the actor is not a verified organization member. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The explicit organization selector does not match the authenticated actor's organization. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Only GET is supported. */
+            405: {
+                headers: {
+                    /** @description Allowed request method. */
+                    Allow?: "GET";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The tenant-scoped dashboard read failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The dashboard service is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     executeCapability: {
         parameters: {
             query?: never;

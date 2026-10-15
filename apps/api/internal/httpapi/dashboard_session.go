@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dashboard"
@@ -87,10 +88,24 @@ func (h *DashboardSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
+	response := struct {
 		dashboard.Payload
 		Signals []json.RawMessage `json:"signals"`
-	}{Payload: payload, Signals: h.dashboardSignals(r, resolved, claimsInput)})
+	}{Payload: payload, Signals: h.dashboardSignals(r, resolved, claimsInput)}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	var contract businesscontract.DashboardResponse
+	if err := json.Unmarshal(encoded, &contract); err != nil {
+		if h.logger != nil {
+			h.logger.Error("Go dashboard response did not match the generated API contract", "error", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, contract)
 }
 
 func (h *DashboardSessionHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, error) {
@@ -123,7 +138,33 @@ func (h *DashboardSessionHandler) dashboardSignals(r *http.Request, resolved *se
 	if len(output.Signals) > 8 {
 		output.Signals = output.Signals[:8]
 	}
+	for _, signal := range output.Signals {
+		if !dashboardSignalDraftIsObject(signal) {
+			return []json.RawMessage{}
+		}
+	}
 	return output.Signals
+}
+
+func dashboardSignalDraftIsObject(raw json.RawMessage) bool {
+	var signal map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &signal); err != nil || signal == nil {
+		return false
+	}
+	actionRaw, ok := signal["suggestedAction"]
+	if !ok || strings.TrimSpace(string(actionRaw)) == "null" {
+		return true
+	}
+	var action map[string]json.RawMessage
+	if err := json.Unmarshal(actionRaw, &action); err != nil || action == nil {
+		return false
+	}
+	draft, ok := action["inputDraft"]
+	if !ok {
+		return true
+	}
+	draft = json.RawMessage(strings.TrimSpace(string(draft)))
+	return len(draft) > 0 && draft[0] == '{'
 }
 
 func (h *DashboardSessionHandler) execute(r *http.Request, resolved *session.ResolvedUser, capabilityID string, input json.RawMessage) (capability.Result, error) {

@@ -199,6 +199,10 @@ by default. Its report-permission fallbacks, tenant-scoped metrics, operations,
 pipeline, trend, activity, and signals response were independently reviewed
 against the legacy and Vite contracts; set both dashboard route selectors to
 `0` to disable the Go handler. Vite still sends the request to Go.
+The dashboard response, organization selector, cache headers, authentication
+challenge, and handler error statuses are now documented in the generated
+business OpenAPI contract. Vite keeps its strict Zod validation and uses the
+generated OpenAPI response type for dashboard data.
 The existing Next.js application continues to own production traffic during
 the transition. Vite routes use their paired selectors independently.
 The Vite `/approvals` preview reads the tenant-scoped inbox through Go and
