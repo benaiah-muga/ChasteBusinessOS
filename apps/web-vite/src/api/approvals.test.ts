@@ -4,9 +4,27 @@ import { fetchApprovals, submitApprovalDecision } from "./approvals";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("approvals API client", () => {
-  it("reads the legacy pending queue and history response", async () => {
+  it("reads the exact Go pending queue and history response", async () => {
     const payload = {
-      approvals: [{ id: "approval-1", capabilityId: "crm.createCustomer", riskClass: "write", payload: { name: "Ada" }, rationale: "Create a customer", createdAt: "2026-09-27T10:15:00.000Z" }],
+      approvals: [{
+        id: "ad23b8f5-5c6b-4ff0-9fc0-e3c4dd0d155a",
+        orgId: "3196834e-9b90-4a20-9263-a3391fdc4329",
+        sessionId: null,
+        requestedByUserId: "c0f4707d-1e6c-4627-9ce5-a80b7b95a16e",
+        capabilityId: "crm.createCustomer",
+        riskClass: "write",
+        payload: { name: "Ada" },
+        rationale: "Create a customer",
+        status: "pending",
+        decidedByUserId: null,
+        decisionComment: null,
+        expiresAt: null,
+        decidedAt: null,
+        createdAt: "2026-09-27T10:15:00.000Z",
+        raisedBy: { name: "Ada Lovelace", kind: "human" },
+        decidedBy: null,
+        relatedDocuments: [],
+      }],
       history: [],
     };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json(payload));
@@ -33,6 +51,49 @@ describe("approvals API client", () => {
     expect(init.credentials).toBe("same-origin");
     expect(init.headers).toEqual({ accept: "application/json", "content-type": "application/json" });
     expect(JSON.parse(String(init.body))).toEqual({ decision: "reject" });
+  });
+
+  it("rejects a malformed Go inbox row and undeclared fields", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      approvals: [{ id: "approval-1", capabilityId: "crm.createCustomer", riskClass: "write", payload: {} }],
+      history: [],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchApprovals()).rejects.toMatchObject({ status: 200, message: "The approvals service returned data in an unexpected format." });
+
+    const payload = {
+      approvals: [{
+        id: "ad23b8f5-5c6b-4ff0-9fc0-e3c4dd0d155a",
+        orgId: "3196834e-9b90-4a20-9263-a3391fdc4329",
+        sessionId: null,
+        requestedByUserId: null,
+        capabilityId: "crm.createCustomer",
+        riskClass: "write",
+        payload: {},
+        rationale: null,
+        status: "pending",
+        decidedByUserId: null,
+        decisionComment: null,
+        expiresAt: null,
+        decidedAt: null,
+        createdAt: "2026-09-27T10:15:00.000Z",
+        raisedBy: { name: "Visitor", kind: "human" },
+        decidedBy: null,
+        relatedDocuments: [],
+        unexpected: true,
+      }],
+      history: [],
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(payload)));
+    await expect(fetchApprovals()).rejects.toMatchObject({ status: 200, message: "The approvals service returned data in an unexpected format." });
+  });
+
+  it("rejects undeclared fields in a successful Go decision response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, status: "rejected", internal: "unexpected" })));
+    await expect(submitApprovalDecision("approval-1", "reject")).rejects.toMatchObject({
+      status: 200,
+      message: "The approvals service returned an unexpected decision response.",
+    });
   });
 
   it("describes 422 as a held action that did not execute", async () => {

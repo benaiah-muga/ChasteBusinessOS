@@ -12,7 +12,6 @@ import {
   type Project,
   type ProjectAction,
   type ProjectActionOutcome,
-  type ProjectActionOutput,
   type ProjectMember,
   type PendingProjectAction,
   type ProjectsRetryScope,
@@ -192,7 +191,7 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
     action: Action,
     label: string,
     retry?: PendingProjectAction,
-  ): Promise<ProjectActionOutcome<ProjectActionOutput<Action>> | null> {
+  ): Promise<ProjectActionOutcome<Action> | null> {
     if (busy) return null;
     setBusy(true);
     try {

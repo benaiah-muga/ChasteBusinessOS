@@ -4779,3 +4779,9 @@ new owners and the manifest shows zero legacy runtime paths.
      validate Go's nullable fields and action-specific receipts. Malformed
      write responses preserve retry identity. Focused suites, targeted lint,
      Vite typecheck, and independent contract review pass.
+
+449. (Contract verified) Vite Projects returns separately typed Go and legacy
+     action receipts. Consumers can rely on Go-required fields only after
+     narrowing by backend, while legacy receipt fields remain optional. Focused
+     Projects, Approvals, portal, and widget suites pass 44 tests; lint,
+     typecheck, and independent review pass.

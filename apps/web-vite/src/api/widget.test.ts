@@ -94,6 +94,21 @@ describe("public widget API", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("requires the Go write receipts before confirming a message or escalation", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, status: "escalated", unexpected: true }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, replied: false }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, status: "escalated" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendWidgetMessage(token, conversationId, secret, "hello")).resolves.toBe(false);
+    await expect(escalateToHuman(token, conversationId, secret)).resolves.toBe(false);
+    await expect(sendWidgetMessage(token, conversationId, secret, "hello")).resolves.toBe(true);
+    await expect(escalateToHuman(token, conversationId, secret)).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it("stores only a validated thread secret and tolerates corrupt saved state", () => {
     storeThread(token, { conversationId, secret });
     expect(readStoredThread(token)).toEqual({ conversationId, secret });

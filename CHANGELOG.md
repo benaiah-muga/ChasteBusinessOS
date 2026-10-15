@@ -13,6 +13,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Projects validates Go project action receipts with required fields while preserving separately typed legacy receipts during migration.
 - Vite Sales quotes, Products, and invoice printing validate Go response contracts, including nullable fields and action-specific receipts; malformed write responses retain their retry intent.
 
 - Vite Accounting, HR, Marketing, and POS collection actions now execute through session-authenticated Go handlers and the governed capability pipeline.

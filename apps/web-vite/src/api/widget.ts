@@ -12,7 +12,7 @@ const TokenSchema = z.string().min(16).max(512).refine((value) =>
   }),
 );
 const ConversationIdSchema = z.string().uuid();
-const SecretSchema = z.string().min(16).max(512);
+const SecretSchema = z.string().regex(/^[a-f0-9]{48}$/);
 
 const MessageSchema = z.object({
   id: z.string().uuid(),
@@ -30,6 +30,9 @@ const StartedSchema = z.object({
   conversationId: ConversationIdSchema,
   secret: SecretSchema,
 }).strict();
+
+const MessageReceiptSchema = z.object({ ok: z.literal(true), replied: z.boolean() }).strict();
+const EscalationReceiptSchema = z.object({ ok: z.literal(true), status: z.literal("escalated") }).strict();
 
 const StoredThreadSchema = z.object({
   conversationId: ConversationIdSchema,
@@ -158,7 +161,12 @@ export async function sendWidgetMessage(
   const message = z.string().trim().min(1).max(2000).safeParse(body);
   if (!input.success || !message.success) return false;
   const response = await postAction({ action: "message", ...input.data, body: message.data });
-  return response?.ok ?? false;
+  if (!response?.ok) return false;
+  try {
+    return MessageReceiptSchema.safeParse(await response.json()).success;
+  } catch {
+    return false;
+  }
 }
 
 export async function escalateToHuman(
@@ -169,5 +177,10 @@ export async function escalateToHuman(
   const input = ExistingThreadInputSchema.safeParse({ token, conversationId, secret });
   if (!input.success) return false;
   const response = await postAction({ action: "human", ...input.data });
-  return response?.ok ?? false;
+  if (!response?.ok) return false;
+  try {
+    return EscalationReceiptSchema.safeParse(await response.json()).success;
+  } catch {
+    return false;
+  }
 }

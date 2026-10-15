@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   fetchProjectBoard,
   fetchProjectMembers,
@@ -7,11 +7,25 @@ import {
   readPendingProjectActions,
   ProjectsApiError,
   submitProjectAction,
+  type ProjectAction,
 } from "./projects";
 
 const projectId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const taskId = "9b73995f-15a4-49d1-94fd-ef35e2276104";
 const memberId = "a9d822e7-5518-4a0f-9850-607e4a226668";
+const taskSnapshot = {
+  taskId,
+  projectId,
+  title: "Write the brief",
+  parentTaskId: null,
+  status: "todo",
+  priority: "high",
+  assigneeUserId: null,
+  dueAt: null,
+  position: 2,
+  note: null,
+  createdAt: "2026-10-01T00:00:00.000Z",
+} as const;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -56,6 +70,16 @@ function boardResponse() {
 }
 
 describe("projects API client", () => {
+  it("types Go write receipts as complete and keeps the legacy receipt type separate", () => {
+    type ArchiveAction = Extract<ProjectAction, { action: "archiveProject" }>;
+    type Outcome = Awaited<ReturnType<typeof submitProjectAction<ArchiveAction>>>;
+    type GoOutcome = Extract<Outcome, { kind: "completed"; backend: "go" }>;
+    type LegacyOutcome = Extract<Outcome, { kind: "completed"; backend: "legacy" }>;
+
+    expectTypeOf<GoOutcome["data"]["projectId"]>().toEqualTypeOf<string>();
+    expectTypeOf<LegacyOutcome["data"]["projectId"]>().toEqualTypeOf<string | undefined>();
+  });
+
   it("loads the existing project list contract through the same-origin session", async () => {
     const rows = [{
       id: projectId,
@@ -104,6 +128,12 @@ describe("projects API client", () => {
     await expect(fetchProjectBoard(projectId)).rejects.toEqual(expect.objectContaining({
       message: "The project board returned data in an unexpected format.",
     }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ projects: [{
+      id: projectId, name: "Website relaunch", status: "active", dueAt: null,
+      createdAt: "2026-09-20T09:30:00.000Z", internalNotes: "unexpected",
+    }] })));
+    await expect(fetchProjects()).rejects.toMatchObject({ status: 200, message: "The projects service returned data in an unexpected format." });
   });
 
   it("surfaces unauthorized and malformed team directory responses", async () => {
@@ -166,7 +196,7 @@ describe("projects API client", () => {
     const intentId = "projects-intent-1";
 
     await expect(submitProjectAction({ action: "createProject", name: "Website relaunch", dueAt: "2026-10-10T00:00:00.000Z" }, intentId))
-      .resolves.toEqual({ kind: "completed", data: { projectId } });
+      .resolves.toEqual({ kind: "completed", backend: "legacy", data: { projectId } });
 
     const cases = [
       [{ action: "createProject", name: "Website relaunch", dueAt: "2026-10-10T00:00:00.000Z" }, { projectId }],
@@ -221,19 +251,19 @@ describe("projects API client", () => {
     vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
     const cases = [
       [{ action: "createProject", name: "Website relaunch", dueAt: "2026-10-10T00:00:00.000Z" }, "projects.createProject", { name: "Website relaunch", dueAt: "2026-10-10T00:00:00.000Z" }, { projectId }],
-      [{ action: "archiveProject", projectId }, "projects.archiveProject", { projectId }, { archived: true }],
-      [{ action: "createTask", projectId, title: "Write the brief", parentTaskId: taskId, assigneeUserId: memberId, dueAt: "2026-10-10T00:00:00.000Z", priority: "high" }, "projects.createTask", { projectId, title: "Write the brief", parentTaskId: taskId, assigneeUserId: memberId, dueAt: "2026-10-10T00:00:00.000Z", priority: "high" }, { taskId }],
-      [{ action: "moveTask", taskId, status: "doing", position: 4 }, "projects.moveTask", { taskId, status: "doing", position: 4 }, { moved: true, status: "doing" }],
-      [{ action: "assignTask", taskId, assigneeUserId: memberId }, "projects.assignTask", { taskId, assigneeUserId: memberId }, { assigned: true }],
-      [{ action: "deleteTask", taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }, "projects.deleteTask", { taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }, { taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }],
-      [{ action: "restoreTask", taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }, "projects.restoreTask", { taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }, { taskId, projectId, title: "Write the brief", parentTaskId: null, status: "todo", priority: "high", assigneeUserId: null, dueAt: null, position: 2, note: null, createdAt: "2026-10-01T00:00:00.000Z" }],
+      [{ action: "archiveProject", projectId }, "projects.archiveProject", { projectId }, { archived: true, projectId }],
+      [{ action: "createTask", projectId, title: "Write the brief", parentTaskId: taskId, assigneeUserId: memberId, dueAt: "2026-10-10T00:00:00.000Z", priority: "high" }, "projects.createTask", { projectId, title: "Write the brief", parentTaskId: taskId, assigneeUserId: memberId, dueAt: "2026-10-10T00:00:00.000Z", priority: "high" }, { ...taskSnapshot, parentTaskId: taskId, assigneeUserId: memberId, dueAt: "2026-10-10T00:00:00.000Z", priority: "high" }],
+      [{ action: "moveTask", taskId, status: "doing", position: 4 }, "projects.moveTask", { taskId, status: "doing", position: 4 }, { moved: true, status: "doing", position: 4, taskId, restoreStatus: "todo", restorePosition: 2, expectedStatus: "doing", expectedPosition: 4 }],
+      [{ action: "assignTask", taskId, assigneeUserId: memberId }, "projects.assignTask", { taskId, assigneeUserId: memberId }, { assigned: true, taskId, restoreAssigneeUserId: null, expectedAssigneeUserId: memberId }],
+      [{ action: "deleteTask", ...taskSnapshot }, "projects.deleteTask", taskSnapshot, taskSnapshot],
+      [{ action: "restoreTask", ...taskSnapshot }, "projects.restoreTask", taskSnapshot, taskSnapshot],
     ] as const;
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: cases[0][3] }));
     vi.stubGlobal("fetch", fetchMock);
 
     for (const [action, capabilityId, input, output] of cases) {
       fetchMock.mockResolvedValueOnce(Response.json({ ok: true, data: output }));
-      await expect(submitProjectAction(action, retryScope)).resolves.toEqual({ kind: "completed", data: output });
+      await expect(submitProjectAction(action, retryScope)).resolves.toEqual({ kind: "completed", backend: "go", data: output });
       const [url, init] = fetchMock.mock.calls.at(-1)!;
       expect(url).toBe("/api/capabilities/execute");
       expect(JSON.parse(String(init?.body))).toEqual({ capabilityId, input, intentId: expect.any(String) });
@@ -292,8 +322,8 @@ describe("projects API client", () => {
       submitProjectAction(action, retryScope),
       submitProjectAction(action, retryScope),
     ])).resolves.toEqual([
-      { kind: "completed", data: { projectId } },
-      { kind: "completed", data: { projectId } },
+      { kind: "completed", backend: "go", data: { projectId } },
+      { kind: "completed", backend: "go", data: { projectId } },
     ]);
 
     const intentIds = fetchMock.mock.calls.map(([, init]) => (JSON.parse(String(init?.body)) as { intentId: string }).intentId);
@@ -334,8 +364,27 @@ describe("projects API client", () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]?.action).toEqual(action);
 
-    await expect(submitProjectAction(action, retryScope, saved[0])).resolves.toEqual({ kind: "completed", data: { projectId } });
+    await expect(submitProjectAction(action, retryScope, saved[0])).resolves.toEqual({ kind: "completed", backend: "go", data: { projectId } });
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId).toBe(saved[0]?.intentId);
+    await expect(readPendingProjectActions(retryScope)).resolves.toEqual([]);
+  });
+
+  it("retains and retries the same Go intent after a malformed success receipt", async () => {
+    localStorage.clear();
+    vi.stubGlobal("__GO_PROJECTS_WRITES__", true);
+    const action = { action: "archiveProject", projectId } as const;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { archived: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { archived: true, projectId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitProjectAction(action, retryScope)).rejects.toMatchObject({ status: 200, mayHaveReachedServer: true });
+    const saved = await readPendingProjectActions(retryScope);
+    expect(saved).toHaveLength(1);
+    await expect(submitProjectAction(action, retryScope, saved[0])).resolves.toEqual({ kind: "completed", backend: "go", data: { archived: true, projectId } });
+
+    const intentIds = fetchMock.mock.calls.map(([, init]) => (JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+    expect(intentIds[1]).toBe(intentIds[0]);
     await expect(readPendingProjectActions(retryScope)).resolves.toEqual([]);
   });
 

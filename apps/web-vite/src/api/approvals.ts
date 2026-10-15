@@ -1,29 +1,43 @@
 import { z } from "zod";
 
 const ApprovalSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().uuid(),
+  orgId: z.string().uuid(),
+  sessionId: z.string().uuid().nullable(),
+  requestedByUserId: z.string().uuid().nullable(),
   capabilityId: z.string().min(1),
   riskClass: z.string().min(1),
   payload: z.unknown(),
-  rationale: z.string().optional().default(""),
-  createdAt: z.string().min(1),
-  status: z.string().optional(),
-  decidedAt: z.string().nullable().optional(),
-  decisionComment: z.string().nullable().optional(),
-  decidedBy: z.string().nullable().optional(),
-  relatedDocuments: z.array(z.object({ id: z.string().min(1), title: z.string() })).optional(),
-  raisedBy: z.object({ name: z.string(), kind: z.enum(["agent", "human"]) }).optional(),
-});
+  rationale: z.string().nullable(),
+  status: z.enum(["pending", "executing", "executed", "approved", "failed", "rejected", "expired"]),
+  decidedByUserId: z.string().uuid().nullable(),
+  decisionComment: z.string().nullable(),
+  expiresAt: z.string().datetime({ offset: true }).nullable(),
+  decidedAt: z.string().datetime({ offset: true }).nullable(),
+  createdAt: z.string().datetime({ offset: true }),
+  raisedBy: z.object({ name: z.string(), kind: z.enum(["agent", "human"]) }).strict(),
+  decidedBy: z.string().nullable(),
+  relatedDocuments: z.array(z.object({ id: z.string().uuid(), title: z.string() }).strict()),
+}).strict();
 
 const ApprovalListSchema = z.object({
   approvals: z.array(ApprovalSchema),
-  history: z.array(ApprovalSchema).optional(),
-});
+  history: z.array(ApprovalSchema),
+}).strict();
 
 const DecisionResponseSchema = z.object({
   ok: z.literal(true),
-  status: z.string().min(1),
-}).passthrough();
+  status: z.enum(["rejected", "executed", "approved"]),
+  result: z.object({
+    ok: z.boolean(),
+    data: z.unknown().optional(),
+    error: z.string().optional(),
+    pendingApproval: z.boolean().optional(),
+    approvalId: z.string().optional(),
+    approvalRationale: z.string().optional(),
+    replayed: z.boolean().optional(),
+  }).strict().optional(),
+}).strict();
 
 const ErrorResponseSchema = z.object({
   error: z.string().optional(),
@@ -97,7 +111,7 @@ export async function fetchApprovals(signal?: AbortSignal): Promise<ApprovalList
   if (!response.ok) throw new ApprovalApiError(response.status, await errorMessage(response));
   const parsed = ApprovalListSchema.safeParse(await parseJson(response));
   if (!parsed.success) throw new ApprovalApiError(response.status, "The approvals service returned data in an unexpected format.");
-  return { ...parsed.data, history: parsed.data.history ?? [] };
+  return parsed.data;
 }
 
 export async function submitApprovalDecision(id: string, decision: "approve" | "reject"): Promise<void> {

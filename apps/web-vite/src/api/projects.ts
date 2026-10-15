@@ -2,30 +2,30 @@ import { z } from "zod";
 import { normalizeRetryActorId } from "./retry-scope";
 
 const ProjectSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().uuid(),
   name: z.string(),
   status: z.string().min(1),
   dueAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
-});
+}).strict();
 
-const ProjectListSchema = z.object({ projects: z.array(ProjectSchema) });
+const ProjectListSchema = z.object({ projects: z.array(ProjectSchema) }).strict();
 
 const BoardTaskSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().uuid(),
   projectId: z.string().uuid(),
   title: z.string(),
-  parentTaskId: z.string().nullable(),
+  parentTaskId: z.string().uuid().nullable(),
   priority: z.enum(["low", "medium", "high"]),
-  assigneeUserId: z.string().nullable(),
+  assigneeUserId: z.string().uuid().nullable(),
   dueAt: z.string().datetime().nullable(),
   position: z.number().int().nonnegative(),
   note: z.string().nullable(),
   createdAt: z.string().datetime(),
-});
+}).strict();
 
-const BoardColumnSchema = z.object({ status: z.enum(["todo", "doing", "done"]), tasks: z.array(BoardTaskSchema) });
-const ProjectBoardSchema = z.object({ columns: z.array(BoardColumnSchema) });
+const BoardColumnSchema = z.object({ status: z.enum(["todo", "doing", "done"]), tasks: z.array(BoardTaskSchema) }).strict();
+const ProjectBoardSchema = z.object({ columns: z.array(BoardColumnSchema) }).strict();
 
 const ProjectMembersSchema = z.object({
   members: z.array(z.object({
@@ -102,12 +102,13 @@ export const ProjectActionSchema = z.discriminatedUnion("action", [
   RestoreTaskInputSchema,
 ]);
 
-const ProjectActionResponseSchema = z.object({ ok: z.literal(true), data: z.unknown() });
+const ProjectActionResponseSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
 const PendingProjectActionSchema = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
-  reason: z.string().optional(),
-});
+  reason: z.string(),
+  approvalId: z.string().uuid().optional(),
+}).strict();
 const ApiErrorSchema = z.object({ error: z.string().optional(), message: z.string().optional() });
 
 const ProjectActionOutputSchemas = {
@@ -130,6 +131,24 @@ const ProjectActionOutputSchemas = {
     expectedPosition: z.number().int().nonnegative().optional(),
   }).strict(),
   archiveProject: z.object({ archived: z.literal(true), projectId: z.string().uuid().optional() }).strict(),
+  deleteTask: ProjectTaskSnapshotSchema,
+  restoreTask: ProjectTaskSnapshotSchema,
+} as const;
+
+const GoProjectActionOutputSchemas = {
+  createProject: ProjectActionOutputSchemas.createProject,
+  createTask: ProjectTaskSnapshotSchema,
+  assignTask: z.object({
+    assigned: z.literal(true), taskId: z.string().uuid(),
+    restoreAssigneeUserId: z.string().uuid().nullable(), expectedAssigneeUserId: z.string().uuid().nullable(),
+  }).strict(),
+  moveTask: z.object({
+    moved: z.literal(true), status: z.enum(["todo", "doing", "done"]), position: z.number().int().nonnegative(),
+    taskId: z.string().uuid(), restoreStatus: z.enum(["todo", "doing", "done"]),
+    restorePosition: z.number().int().nonnegative(), expectedStatus: z.enum(["todo", "doing", "done"]),
+    expectedPosition: z.number().int().nonnegative(),
+  }).strict(),
+  archiveProject: z.object({ archived: z.literal(true), projectId: z.string().uuid() }).strict(),
   deleteTask: ProjectTaskSnapshotSchema,
   restoreTask: ProjectTaskSnapshotSchema,
 } as const;
@@ -280,10 +299,12 @@ export type ProjectAction = z.infer<typeof ProjectActionSchema>;
 export type ProjectsRetryScope = { actorId: string | null; organizationId: string | null };
 export type PendingProjectAction = { action: ProjectAction; intentId: string };
 
-export type ProjectActionOutput<Action extends ProjectAction> = z.infer<typeof ProjectActionOutputSchemas[Action["action"]]>;
+export type LegacyProjectActionOutput<Action extends ProjectAction> = z.infer<typeof ProjectActionOutputSchemas[Action["action"]]>;
+export type ProjectActionOutput<Action extends ProjectAction> = z.infer<typeof GoProjectActionOutputSchemas[Action["action"]]>;
 
-export type ProjectActionOutcome<Output> =
-  | { kind: "completed"; data: Output }
+export type ProjectActionOutcome<Action extends ProjectAction> =
+  | { kind: "completed"; backend: "go"; data: ProjectActionOutput<Action> }
+  | { kind: "completed"; backend: "legacy"; data: LegacyProjectActionOutput<Action> }
   | { kind: "pending"; reason?: string };
 
 export class ProjectsApiError extends Error {
@@ -376,7 +397,7 @@ export async function submitProjectAction<Action extends ProjectAction>(
   action: Action,
   retryScopeOrLegacyIntent: ProjectsRetryScope | string = { actorId: null, organizationId: null },
   retry?: PendingProjectAction,
-): Promise<ProjectActionOutcome<ProjectActionOutput<Action>>> {
+): Promise<ProjectActionOutcome<Action>> {
   const parsedAction = ProjectActionSchema.safeParse(action);
   if (!parsedAction.success) throw new ProjectsApiError(0, "The project action contains invalid details.");
   const retryScope = typeof retryScopeOrLegacyIntent === "string"
@@ -443,12 +464,16 @@ export async function submitProjectAction<Action extends ProjectAction>(
     throw new ProjectsApiError(response.status, errorMessage(response.status, raw), mayHaveReachedServer);
   }
 
-  const envelope = goSelected
-    ? z.object({ ok: z.literal(true), data: z.unknown() }).safeParse(raw)
-    : ProjectActionResponseSchema.safeParse(raw);
+  const envelope = ProjectActionResponseSchema.safeParse(raw);
   if (!envelope.success) throw new ProjectsApiError(response.status, "The projects service returned an unexpected action response.", Boolean(attempt));
+  if (goSelected) {
+    const output = GoProjectActionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
+    if (!output.success) throw new ProjectsApiError(response.status, "The projects service returned an unexpected action result.", Boolean(attempt));
+    if (attempt) await clearProjectAttempt(attempt);
+    return { kind: "completed", backend: "go", data: output.data as ProjectActionOutput<Action> };
+  }
   const output = ProjectActionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
   if (!output.success) throw new ProjectsApiError(response.status, "The projects service returned an unexpected action result.", Boolean(attempt));
   if (attempt) await clearProjectAttempt(attempt);
-  return { kind: "completed", data: output.data as ProjectActionOutput<Action> };
+  return { kind: "completed", backend: "legacy", data: output.data as LegacyProjectActionOutput<Action> };
 }
