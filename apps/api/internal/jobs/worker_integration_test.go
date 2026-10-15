@@ -800,7 +800,7 @@ func TestGoCapabilityJobWorkerMatchesLegacy(t *testing.T) {
 	if err := owner.QueryRow(ctx, `SELECT status FROM approvals WHERE id = $1::uuid AND org_id = $2::uuid`, approvalID, orgA).Scan(&approvalStatus); err != nil {
 		t.Fatal(err)
 	}
-	if stepStatus != "committed" || receiptID == nil || runStatus != "running" || approvalStatus != "executed" {
+	if stepStatus != "committed" || receiptID == nil || runStatus != "completed" || approvalStatus != "executed" {
 		t.Fatalf("linked durable state step=%q receipt=%v run=%q approval=%q", stepStatus, receiptID, runStatus, approvalStatus)
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id = $1::uuid AND kind = 'capability.executed' AND capability_id = 'crm.createCustomer' AND actor_type = 'system' AND actor_id IS NULL AND session_id IS NULL`, orgA); got != 2 {

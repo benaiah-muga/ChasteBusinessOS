@@ -147,6 +147,10 @@ func parseIAMInput(capabilityID string, raw json.RawMessage) (any, error) {
 			}
 		}
 		return IAMInviteMemberInput{Email: email, RoleID: roleID, ExpiresInDays: days}, nil
+	case iamCreateSSOConnectionCapabilityID:
+		return parseIAMSSOCreateInput(raw)
+	case iamDisableSSOConnectionCapabilityID, iamRestoreSSOConnectionCapabilityID:
+		return parseIAMSSOConnectionIDInput(raw)
 	default:
 		return nil, fmt.Errorf("unsupported IAM capability %q", capabilityID)
 	}

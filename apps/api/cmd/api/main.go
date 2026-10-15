@@ -319,7 +319,7 @@ func run(logger *slog.Logger) error {
 		if resolverErr != nil {
 			return resolverErr
 		}
-		supportChannelsRoute, err = httpapi.NewSupportChannelsHandler(pool, resolver, trustedProxyCIDRs, logger)
+		supportChannelsRoute, err = httpapi.NewSupportChannelsHandler(pool, resolver, capabilityExecutor, trustedProxyCIDRs, logger)
 		if err != nil {
 			return err
 		}
@@ -442,6 +442,12 @@ func run(logger *slog.Logger) error {
 		teamWriteRoute = httpapi.NewTeamWriteHandler(resolver, capabilityExecutor, logger, trustedProxyCIDRs)
 		logger.Info("Go team write route mounted", "path", "/api/team")
 	}
+	ssoResolver, ssoResolverErr := getSessionResolver()
+	if ssoResolverErr != nil {
+		return ssoResolverErr
+	}
+	teamSSORoute := httpapi.NewGoTeamSSOHandler(pool, ssoResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go team SSO route mounted", "paths", []string{"GET /api/team/sso", "POST /api/team/sso", "DELETE /api/team/sso"})
 	var brandingRoute http.Handler
 	if os.Getenv("GO_BRANDING_ROUTE") != "0" {
 		resolver, resolverErr := getSessionResolver()
@@ -888,7 +894,7 @@ func run(logger *slog.Logger) error {
 	apiMux := http.NewServeMux()
 	apiMux.Handle("/api/email", emailRoute)
 	apiMux.Handle("/", apiHandler)
-	apiHandler = apiMux
+	apiHandler = httpapi.MountGoTeamSSORoute(apiMux, teamSSORoute)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,

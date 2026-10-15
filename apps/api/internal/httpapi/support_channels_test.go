@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
 
@@ -21,11 +23,8 @@ func (r supportChannelsTestResolver) Resolve(context.Context, string, string) (*
 }
 
 type supportChannelsTestStore struct {
-	data       supportChannelsData
-	patch      supportChannelsPatch
-	token      string
-	readCalls  int
-	writeCalls int
+	data      supportChannelsData
+	readCalls int
 }
 
 func (s *supportChannelsTestStore) Read(context.Context, string, string) (supportChannelsData, error) {
@@ -33,23 +32,48 @@ func (s *supportChannelsTestStore) Read(context.Context, string, string) (suppor
 	return s.data, nil
 }
 
-func (s *supportChannelsTestStore) Upsert(_ context.Context, _, _ string, patch supportChannelsPatch, token string) (supportChannelsData, error) {
-	s.writeCalls++
-	if !s.data.CanManage {
-		return s.data, nil
+type supportChannelsTestExecutor struct {
+	calls       int
+	effectCalls int
+	claims      authbridge.CapabilityClaims
+	input       json.RawMessage
+	result      capability.Result
+	replays     map[string]capability.Result
+}
+
+func (e *supportChannelsTestExecutor) Execute(_ context.Context, claims authbridge.CapabilityClaims, capabilityID string, input json.RawMessage) (capability.Result, error) {
+	e.calls++
+	e.claims = claims
+	e.input = input
+	if capabilityID != "support.updateChannelSettings" {
+		return capability.Result{}, nil
 	}
-	s.patch = patch
-	s.token = token
-	if patch.AutoReplyEnabled != nil {
-		s.data.AutoReplyEnabled = *patch.AutoReplyEnabled
+	if e.replays == nil {
+		e.replays = map[string]capability.Result{}
 	}
-	if patch.Greeting != nil {
-		s.data.Greeting = *patch.Greeting
+	if prior, found := e.replays[claims.IntentID]; found {
+		prior.Replayed = true
+		return prior, nil
 	}
-	if patch.RegenerateToken != nil && *patch.RegenerateToken {
-		s.data.EmbedToken = &token
+	if !hasSupportChannelPermission(claims.Permissions, "iam.admin") {
+		return capability.Result{OK: false, Error: "forbidden: missing permission: iam.admin"}, nil
 	}
-	return s.data, nil
+	e.effectCalls++
+	result := e.result
+	if result.Data == nil && result.Error == "" {
+		result = capability.Result{OK: true, Data: json.RawMessage(`{"previous":null,"current":{"autoReplyEnabled":false,"greeting":"Hello there","embedToken":"` + strings.Repeat("a", 64) + `"}}`)}
+	}
+	e.replays[claims.IntentID] = result
+	return result, nil
+}
+
+func hasSupportChannelPermission(permissions []string, expected string) bool {
+	for _, permission := range permissions {
+		if permission == expected || permission == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSupportChannelsGetHidesEmbedTokenFromNonAdmin(t *testing.T) {
@@ -58,7 +82,7 @@ func TestSupportChannelsGetHidesEmbedTokenFromNonAdmin(t *testing.T) {
 		AutoReplyEnabled: true, Greeting: "Welcome", EmbedToken: &token,
 		Member: true, ModuleEnabled: true, CanManage: false,
 	}}
-	handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(false)}, nil, nil)
+	handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(false)}, nil, nil, nil)
 	recorder := requestChannels(handler, http.MethodGet, "", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("GET status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -77,7 +101,7 @@ func TestSupportChannelsGetHidesEmbedTokenFromNonAdmin(t *testing.T) {
 
 func TestSupportChannelsGetRequiresSessionMembershipAndModule(t *testing.T) {
 	t.Run("no session", func(t *testing.T) {
-		handler := newSupportChannelsHandler(&supportChannelsTestStore{}, supportChannelsTestResolver{err: session.ErrNoSession}, nil, nil)
+		handler := newSupportChannelsHandler(&supportChannelsTestStore{}, supportChannelsTestResolver{err: session.ErrNoSession}, nil, nil, nil)
 		recorder := requestChannels(handler, http.MethodGet, "", "")
 		if recorder.Code != http.StatusUnauthorized {
 			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -87,7 +111,7 @@ func TestSupportChannelsGetRequiresSessionMembershipAndModule(t *testing.T) {
 		user := channelsTestUser(true)
 		user.EmailVerified = false
 		store := &supportChannelsTestStore{}
-		handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: user}, nil, nil)
+		handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: user}, nil, nil, nil)
 		recorder := requestChannels(handler, http.MethodGet, "", "")
 		if recorder.Code != http.StatusUnauthorized || store.readCalls != 0 {
 			t.Fatalf("status=%d read calls=%d", recorder.Code, store.readCalls)
@@ -95,7 +119,7 @@ func TestSupportChannelsGetRequiresSessionMembershipAndModule(t *testing.T) {
 	})
 	t.Run("revoked membership", func(t *testing.T) {
 		store := &supportChannelsTestStore{data: supportChannelsData{Member: false, ModuleEnabled: true}}
-		handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(true)}, nil, nil)
+		handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(true)}, nil, nil, nil)
 		recorder := requestChannels(handler, http.MethodGet, "", "")
 		if recorder.Code != http.StatusUnauthorized {
 			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -103,7 +127,7 @@ func TestSupportChannelsGetRequiresSessionMembershipAndModule(t *testing.T) {
 	})
 	t.Run("support module disabled", func(t *testing.T) {
 		store := &supportChannelsTestStore{data: supportChannelsData{Member: true, ModuleEnabled: false}}
-		handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(true)}, nil, nil)
+		handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(true)}, nil, nil, nil)
 		recorder := requestChannels(handler, http.MethodGet, "", "")
 		if recorder.Code != http.StatusNotFound {
 			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -113,7 +137,7 @@ func TestSupportChannelsGetRequiresSessionMembershipAndModule(t *testing.T) {
 
 func TestSupportChannelsRejectsUnmatchedOrganizationSelector(t *testing.T) {
 	store := &supportChannelsTestStore{data: supportChannelsData{Member: true, ModuleEnabled: true, CanManage: true}}
-	handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(true)}, nil, nil)
+	handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(true)}, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "http://example.test/api/support/channels", nil)
 	request.Header.Set("X-Organization-ID", "bbbbbbbb-0000-4000-8000-000000000002")
 	request.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: "signed-cookie"})
@@ -126,29 +150,33 @@ func TestSupportChannelsRejectsUnmatchedOrganizationSelector(t *testing.T) {
 
 func TestSupportChannelsPostRequiresOriginAndAdmin(t *testing.T) {
 	store := &supportChannelsTestStore{data: supportChannelsData{Member: true, ModuleEnabled: true, CanManage: false}}
-	handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(false)}, nil, nil)
+	executor := &supportChannelsTestExecutor{}
+	handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(false)}, executor, nil, nil)
 	withoutOrigin := requestChannels(handler, http.MethodPost, `{ "greeting": "Hello" }`, "")
-	if withoutOrigin.Code != http.StatusForbidden || store.writeCalls != 0 {
-		t.Fatalf("missing origin status=%d writes=%d", withoutOrigin.Code, store.writeCalls)
+	if withoutOrigin.Code != http.StatusForbidden || executor.calls != 0 {
+		t.Fatalf("missing origin status=%d calls=%d", withoutOrigin.Code, executor.calls)
 	}
 	crossOrigin := requestChannels(handler, http.MethodPost, `{ "greeting": "Hello" }`, "https://attacker.example")
-	if crossOrigin.Code != http.StatusForbidden || store.writeCalls != 0 {
-		t.Fatalf("cross origin status=%d writes=%d", crossOrigin.Code, store.writeCalls)
+	if crossOrigin.Code != http.StatusForbidden || executor.calls != 0 {
+		t.Fatalf("cross origin status=%d calls=%d", crossOrigin.Code, executor.calls)
 	}
 	forbidden := requestChannels(handler, http.MethodPost, `{ "greeting": "Hello" }`, "http://example.test")
-	if forbidden.Code != http.StatusForbidden || store.writeCalls != 1 || store.data.Greeting != "" {
-		t.Fatalf("non-admin status=%d writes=%d body=%s", forbidden.Code, store.writeCalls, forbidden.Body.String())
+	if forbidden.Code != http.StatusForbidden || executor.calls != 1 || store.data.Greeting != "" {
+		t.Fatalf("non-admin status=%d calls=%d body=%s", forbidden.Code, executor.calls, forbidden.Body.String())
 	}
 }
 
 func TestSupportChannelsPostValidatesPatchAndTrimsGreeting(t *testing.T) {
 	store := &supportChannelsTestStore{data: supportChannelsData{Member: true, ModuleEnabled: true, CanManage: true}}
-	handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(true)}, nil, nil)
+	executor := &supportChannelsTestExecutor{}
+	handler := newSupportChannelsHandler(store, supportChannelsTestResolver{resolved: channelsTestUser(true)}, executor, nil, nil)
 	for _, body := range []string{
+		`{}`,
 		`{"unknown":true}`,
 		`{"greeting":null}`,
 		`{"autoReplyEnabled":null}`,
 		`{"regenerateToken":"true"}`,
+		`{"regenerateToken":false}`,
 		`{"greeting":""}`,
 		`{"greeting":"` + strings.Repeat("x", 301) + `"}`,
 		`{"greeting":"Hello"} {}`,
@@ -158,18 +186,46 @@ func TestSupportChannelsPostValidatesPatchAndTrimsGreeting(t *testing.T) {
 			t.Errorf("body %q status=%d want 400", body, recorder.Code)
 		}
 	}
-	if store.writeCalls != 0 {
-		t.Fatalf("invalid patches reached storage %d times", store.writeCalls)
+	if executor.calls != 0 {
+		t.Fatalf("invalid patches reached capability executor %d times", executor.calls)
 	}
 	valid := requestChannels(handler, http.MethodPost, `{"autoReplyEnabled":false,"greeting":"  Hello there  ","regenerateToken":true}`, "http://example.test")
 	if valid.Code != http.StatusOK {
 		t.Fatalf("valid patch status=%d body=%s", valid.Code, valid.Body.String())
 	}
-	if store.writeCalls != 1 || store.patch.Greeting == nil || *store.patch.Greeting != "Hello there" || store.patch.AutoReplyEnabled == nil || *store.patch.AutoReplyEnabled || store.patch.RegenerateToken == nil || !*store.patch.RegenerateToken {
-		t.Fatalf("stored patch=%+v calls=%d", store.patch, store.writeCalls)
+	if executor.calls != 1 || executor.effectCalls != 1 || executor.claims.CapabilityID != "support.updateChannelSettings" || executor.claims.IntentID == "" {
+		t.Fatalf("capability claims=%+v calls=%d", executor.claims, executor.calls)
 	}
-	if len(store.token) != 64 || strings.Trim(store.token, "0123456789abcdef") != "" {
-		t.Fatalf("generated embed token=%q, want 32 bytes of hex entropy", store.token)
+	var patch supportChannelsPatch
+	if err := json.Unmarshal(executor.input, &patch); err != nil {
+		t.Fatal(err)
+	}
+	if patch.Greeting == nil || *patch.Greeting != "Hello there" || patch.AutoReplyEnabled == nil || *patch.AutoReplyEnabled || patch.RegenerateToken == nil || !patch.RegenerateToken.Valid() {
+		t.Fatalf("executed patch=%+v", patch)
+	}
+	replay := requestChannels(handler, http.MethodPost, `{"autoReplyEnabled":false,"greeting":"  Hello there  ","regenerateToken":true}`, "http://example.test")
+	if replay.Code != http.StatusOK || replay.Body.String() != valid.Body.String() || executor.calls != 2 || executor.effectCalls != 1 {
+		t.Fatalf("same-key replay status=%d body=%s calls=%d effects=%d", replay.Code, replay.Body.String(), executor.calls, executor.effectCalls)
+	}
+}
+
+func TestSupportChannelsPostRequiresUUIDIdempotencyKey(t *testing.T) {
+	executor := &supportChannelsTestExecutor{}
+	handler := newSupportChannelsHandler(&supportChannelsTestStore{}, supportChannelsTestResolver{resolved: channelsTestUser(true)}, executor, nil, nil)
+	for _, key := range []string{"", "not-a-uuid", "40000000-0000-4000-8000-000000000004\n40000000-0000-4000-8000-000000000005"} {
+		request := httptest.NewRequest(http.MethodPost, "http://example.test/api/support/channels", strings.NewReader(`{"greeting":"Hello"}`))
+		request.Header.Set("Origin", "http://example.test")
+		request.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: "signed-cookie"})
+		if key != "" {
+			for _, value := range strings.Split(key, "\n") {
+				request.Header.Add("Idempotency-Key", value)
+			}
+		}
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest || executor.calls != 0 {
+			t.Fatalf("idempotency key %q status=%d executor calls=%d", key, recorder.Code, executor.calls)
+		}
 	}
 }
 
@@ -179,13 +235,20 @@ func channelsTestUser(admin bool) *session.ResolvedUser {
 	if admin {
 		permissions["iam.admin"] = true
 	}
-	return &session.ResolvedUser{UserID: "20000000-0000-4000-8000-000000000002", OrgID: &orgID, EmailVerified: true, Permissions: permissions}
+	return &session.ResolvedUser{UserID: "20000000-0000-4000-8000-000000000002", OrgID: &orgID, EmailVerified: true, AuthSessionID: "30000000-0000-4000-8000-000000000003", Permissions: permissions}
 }
 
 func requestChannels(handler http.Handler, method, body, origin string) *httptest.ResponseRecorder {
+	return requestChannelsWithKey(handler, method, body, origin, "40000000-0000-4000-8000-000000000004")
+}
+
+func requestChannelsWithKey(handler http.Handler, method, body, origin, intentID string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, "http://example.test/api/support/channels", strings.NewReader(body))
 	if origin != "" {
 		request.Header.Set("Origin", origin)
+	}
+	if intentID != "" {
+		request.Header.Set("Idempotency-Key", intentID)
 	}
 	request.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: "signed-cookie"})
 	recorder := httptest.NewRecorder()

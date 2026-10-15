@@ -1270,24 +1270,24 @@
       "path": "/api/team/sso",
       "method": "GET",
       "source": "apps/web/src/app/api/team/sso/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/team/sso",
       "method": "POST",
       "source": "apps/web/src/app/api/team/sso/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/team/sso",
       "method": "DELETE",
       "source": "apps/web/src/app/api/team/sso/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

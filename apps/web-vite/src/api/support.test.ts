@@ -28,6 +28,7 @@ import {
 
 const conversationId = "3f1b0c6e-2f6a-4a0a-9c9e-6c1a2b3d4e5f";
 const organizationId = "66666666-6666-4666-8666-666666666666";
+const supportRetryScope = { actorId: "user-123", organizationId };
 const customerId = "b2b7d5f0-9a3a-4f38-8f47-1a2b3c4d5e6f";
 
 const conversationRow = {
@@ -918,7 +919,7 @@ describe("support drafting", () => {
 });
 
 describe("support channel settings", () => {
-  it("reads channel settings using the strict legacy and Go response contract", async () => {
+  it("reads channel settings using the strict generated API response contract", async () => {
     const expected = { autoReplyEnabled: true, greeting: "Welcome", embedToken: null, canManage: false };
     const fetchMock = vi.fn(async () => jsonResponse(expected));
     vi.stubGlobal("fetch", fetchMock);
@@ -934,15 +935,64 @@ describe("support channel settings", () => {
     const fetchMock = vi.fn(async () => jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(updateSupportChannels({})).rejects.toMatchObject({ status: 0 });
+    await expect(updateSupportChannels({}, supportRetryScope)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("requires true when requesting embed token regeneration", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const invalidPatch = { regenerateToken: false } as unknown as Parameters<typeof updateSupportChannels>[0];
+    await expect(updateSupportChannels(invalidPatch, supportRetryScope)).rejects.toMatchObject({ status: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects a reply body that breaks the contract instead of reporting a save", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ autoReplyEnabled: true, greeting: "", embedToken: null, canManage: true, extra: 1 })));
 
-    await expect(updateSupportChannels({ autoReplyEnabled: true })).rejects.toMatchObject({
+    await expect(updateSupportChannels({ autoReplyEnabled: true }, supportRetryScope)).rejects.toMatchObject({
       message: "The support service returned unexpected channel settings.",
     });
+  });
+
+  it("sends and durably reuses an idempotency key for the exact pending approval", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ pendingApproval: true, approvalId: conversationId }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+    const patch = { greeting: "Welcome back" };
+
+    await expect(updateSupportChannels(patch, supportRetryScope)).resolves.toEqual({ status: "pending", approvalId: conversationId });
+    const firstHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(firstHeaders["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/i);
+    await expect(updateSupportChannels(patch, supportRetryScope)).resolves.toEqual({ status: "pending", approvalId: conversationId });
+    const secondHeaders = fetchMock.mock.calls[1]?.[1]?.headers as Record<string, string>;
+    expect(secondHeaders["Idempotency-Key"]).toBe(firstHeaders["Idempotency-Key"]);
+    await expect(updateSupportChannels({ greeting: "A different greeting" }, supportRetryScope)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([403, 404])("preserves the idempotency key after a %i response", async (status) => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => jsonResponse({ error: "unavailable" }, status))
+      .mockImplementationOnce(async () => jsonResponse({ autoReplyEnabled: true, greeting: "Welcome", embedToken: null, canManage: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const patch = { greeting: "Welcome" };
+
+    await expect(updateSupportChannels(patch, supportRetryScope)).rejects.toMatchObject({ status });
+    await expect(updateSupportChannels(patch, supportRetryScope)).resolves.toMatchObject({ status: "completed" });
+    const headers = fetchMock.mock.calls.map((call) => call[1]?.headers as Record<string, string>);
+    expect(headers[1]?.["Idempotency-Key"]).toBe(headers[0]?.["Idempotency-Key"]);
+  });
+
+  it("clears a completed idempotent channel update", async () => {
+    const expected = { autoReplyEnabled: true, greeting: "Welcome", embedToken: null, canManage: true };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(expected));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateSupportChannels({ autoReplyEnabled: true }, supportRetryScope)).resolves.toEqual({ status: "completed", channels: expected });
+    await expect(updateSupportChannels({ autoReplyEnabled: false }, supportRetryScope)).resolves.toEqual({ status: "completed", channels: expected });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const headers = fetchMock.mock.calls.map((call) => call[1]?.headers as Record<string, string>);
+    expect(headers[0]?.["Idempotency-Key"]).not.toBe(headers[1]?.["Idempotency-Key"]);
   });
 });

@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,9 +10,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
+	"time"
 	"unicode/utf16"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 	"github.com/jackc/pgx/v5"
@@ -23,11 +26,7 @@ import (
 
 const supportChannelsBodyLimit = 4096
 
-type supportChannelsPatch struct {
-	AutoReplyEnabled *bool   `json:"autoReplyEnabled"`
-	Greeting         *string `json:"greeting"`
-	RegenerateToken  *bool   `json:"regenerateToken"`
-}
+type supportChannelsPatch = businesscontract.SupportChannelsPatch
 
 type supportChannelsData struct {
 	AutoReplyEnabled bool
@@ -38,29 +37,31 @@ type supportChannelsData struct {
 	CanManage        bool
 }
 
-// supportChannelsStore isolates the channel route from PostgreSQL in handler tests.
-// Production reads and mutations use pgSupportChannelsStore, which repeats the
-// membership, module, and permission checks inside the tenant transaction.
+// supportChannelsStore isolates the channel read from PostgreSQL in handler
+// tests. Mutations use the capability executor's tenant transaction.
 type supportChannelsStore interface {
 	Read(context.Context, string, string) (supportChannelsData, error)
-	Upsert(context.Context, string, string, supportChannelsPatch, string) (supportChannelsData, error)
 }
 
 type supportChannelsHandler struct {
 	store        supportChannelsStore
 	session      SessionResolver
+	executor     CapabilityExecutor
 	logger       *slog.Logger
 	trustedProxy []*net.IPNet
 }
 
 // NewSupportChannelsHandler builds the authenticated support channel settings
 // endpoint. Mount it at /api/support/channels behind the Go API router.
-func NewSupportChannelsHandler(pool *pgxpool.Pool, resolver SessionResolver, trustedProxyCIDRs []*net.IPNet, logger *slog.Logger) (http.Handler, error) {
+func NewSupportChannelsHandler(pool *pgxpool.Pool, resolver SessionResolver, executor CapabilityExecutor, trustedProxyCIDRs []*net.IPNet, logger *slog.Logger) (http.Handler, error) {
 	if pool == nil {
 		return nil, errors.New("support channels handler requires a database pool")
 	}
 	if resolver == nil {
 		return nil, errors.New("support channels handler requires a session resolver")
+	}
+	if executor == nil {
+		return nil, errors.New("support channels handler requires a capability executor")
 	}
 	for _, cidr := range trustedProxyCIDRs {
 		if cidr == nil || cidr.IP == nil || cidr.Mask == nil {
@@ -70,16 +71,16 @@ func NewSupportChannelsHandler(pool *pgxpool.Pool, resolver SessionResolver, tru
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &supportChannelsHandler{store: newPgSupportChannelsStore(pool), session: resolver, logger: logger, trustedProxy: trustedProxyCIDRs}, nil
+	return &supportChannelsHandler{store: newPgSupportChannelsStore(pool), session: resolver, executor: executor, logger: logger, trustedProxy: trustedProxyCIDRs}, nil
 }
 
 // newSupportChannelsHandler is the test seam for exercising HTTP behavior
 // without opening a PostgreSQL connection.
-func newSupportChannelsHandler(store supportChannelsStore, resolver SessionResolver, trustedProxyCIDRs []*net.IPNet, logger *slog.Logger) http.Handler {
+func newSupportChannelsHandler(store supportChannelsStore, resolver SessionResolver, executor CapabilityExecutor, trustedProxyCIDRs []*net.IPNet, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &supportChannelsHandler{store: store, session: resolver, logger: logger, trustedProxy: trustedProxyCIDRs}
+	return &supportChannelsHandler{store: store, session: resolver, executor: executor, logger: logger, trustedProxy: trustedProxyCIDRs}
 }
 
 func (h *supportChannelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -113,26 +114,71 @@ func (h *supportChannelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		h.get(w, r, resolved)
 		return
 	}
+	if h.executor == nil || resolved.AuthSessionID == "" || !isUUID(resolved.UserID) || !isUUID(*resolved.OrgID) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "support channel updates unavailable"})
+		return
+	}
 	patch, ok := decodeSupportChannelsPatch(w, r)
 	if !ok {
 		return
 	}
-	token, err := newSupportEmbedToken()
+	input, err := json.Marshal(patch)
 	if err != nil {
-		h.fail(w, "generate embed token", err)
+		h.fail(w, "encode channel settings", err)
 		return
 	}
-	data, err := h.store.Upsert(r.Context(), resolved.UserID, *resolved.OrgID, patch, token)
+	keys := r.Header.Values("Idempotency-Key")
+	if len(keys) != 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid idempotency key"})
+		return
+	}
+	intentID := strings.TrimSpace(keys[0])
+	if !isUUID(intentID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid idempotency key"})
+		return
+	}
+	claims := supportChannelsCapabilityClaims(resolved, intentID, input)
+	result, err := h.executor.Execute(r.Context(), claims, "support.updateChannelSettings", input)
 	if err != nil {
+		if errors.Is(err, capability.ErrSessionInvalid) || errors.Is(err, capability.ErrScopeMismatch) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		if errors.Is(err, capability.ErrNotMember) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+			return
+		}
 		h.fail(w, "update channel settings", err)
 		return
 	}
-	if !h.authorized(w, data) {
+	if result.PendingApproval {
+		writeJSON(w, http.StatusAccepted, map[string]any{"pendingApproval": true, "approvalId": result.ApprovalID})
 		return
 	}
-	if !data.CanManage {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+	if !result.OK {
+		if strings.HasPrefix(result.Error, "forbidden:") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+			return
+		}
+		if strings.Contains(result.Error, `module "support" is disabled`) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": result.Error})
 		return
+	}
+	var output capability.SupportChannelSettingsOutput
+	if json.Unmarshal(result.Data, &output) != nil || output.Current == nil {
+		h.fail(w, "decode channel settings result", errors.New("capability returned invalid support channel state"))
+		return
+	}
+	data := supportChannelsData{
+		AutoReplyEnabled: output.Current.AutoReplyEnabled,
+		Greeting:         output.Current.Greeting,
+		EmbedToken:       &output.Current.EmbedToken,
+		Member:           true,
+		ModuleEnabled:    true,
+		CanManage:        true,
 	}
 	writeJSON(w, http.StatusOK, channelsResponse(data, true))
 }
@@ -188,16 +234,16 @@ func (h *supportChannelsHandler) authorized(w http.ResponseWriter, data supportC
 	return true
 }
 
-func channelsResponse(data supportChannelsData, canManage bool) map[string]any {
-	var token any
+func channelsResponse(data supportChannelsData, canManage bool) businesscontract.SupportChannelsResponse {
+	var token *string
 	if canManage {
 		token = data.EmbedToken
 	}
-	return map[string]any{
-		"autoReplyEnabled": data.AutoReplyEnabled,
-		"greeting":         data.Greeting,
-		"embedToken":       token,
-		"canManage":        canManage,
+	return businesscontract.SupportChannelsResponse{
+		AutoReplyEnabled: data.AutoReplyEnabled,
+		Greeting:         data.Greeting,
+		EmbedToken:       token,
+		CanManage:        canManage,
 	}
 }
 
@@ -219,6 +265,10 @@ func decodeSupportChannelsPatch(w http.ResponseWriter, r *http.Request) (support
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return patch, false
 	}
+	if len(fields) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return patch, false
+	}
 	for key := range fields {
 		if key != "autoReplyEnabled" && key != "greeting" && key != "regenerateToken" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -234,8 +284,8 @@ func decodeSupportChannelsPatch(w http.ResponseWriter, r *http.Request) (support
 		patch.AutoReplyEnabled = &value
 	}
 	if raw, ok := fields["regenerateToken"]; ok {
-		var value bool
-		if err := json.Unmarshal(raw, &value); err != nil || string(raw) == "null" {
+		var value businesscontract.SupportChannelsPatchRegenerateToken
+		if err := json.Unmarshal(raw, &value); err != nil || !value.Valid() {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 			return patch, false
 		}
@@ -243,22 +293,42 @@ func decodeSupportChannelsPatch(w http.ResponseWriter, r *http.Request) (support
 	}
 	if raw, ok := fields["greeting"]; ok {
 		var value string
-		if err := json.Unmarshal(raw, &value); err != nil || string(raw) == "null" || len(utf16.Encode([]rune(value))) < 1 || len(utf16.Encode([]rune(value))) > 300 {
+		if err := json.Unmarshal(raw, &value); err != nil || string(raw) == "null" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 			return patch, false
 		}
 		value = strings.TrimSpace(value)
+		if length := len(utf16.Encode([]rune(value))); length < 1 || length > 300 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+			return patch, false
+		}
 		patch.Greeting = &value
+	}
+	if patch.AutoReplyEnabled == nil && patch.Greeting == nil && patch.RegenerateToken == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return patch, false
 	}
 	return patch, true
 }
 
-func newSupportEmbedToken() (string, error) {
-	var entropy [32]byte
-	if _, err := rand.Read(entropy[:]); err != nil {
-		return "", fmt.Errorf("read embed token entropy: %w", err)
+func supportChannelsCapabilityClaims(resolved *session.ResolvedUser, intentID string, input json.RawMessage) authbridge.CapabilityClaims {
+	permissions := make([]string, 0, len(resolved.Permissions))
+	for permission, granted := range resolved.Permissions {
+		if granted {
+			permissions = append(permissions, permission)
+		}
 	}
-	return hex.EncodeToString(entropy[:]), nil
+	sort.Strings(permissions)
+	actorID := resolved.UserID
+	inputHash, _ := capability.InputHash(input)
+	now := time.Now().UTC()
+	return authbridge.CapabilityClaims{
+		Audience: authbridge.CapabilityExecuteAudience, Subject: resolved.UserID,
+		OrganizationID: *resolved.OrgID, CapabilityID: "support.updateChannelSettings", InputSHA256: inputHash,
+		ActorID: &actorID, ActorType: "human", Permissions: permissions,
+		AuthSessionID: resolved.AuthSessionID, IntentID: intentID,
+		IssuedAt: now.Unix(), ExpiresAt: now.Add(30 * time.Second).Unix(),
+	}
 }
 
 func (h *supportChannelsHandler) fail(w http.ResponseWriter, operation string, err error) {
@@ -285,35 +355,6 @@ func (s *pgSupportChannelsStore) Read(ctx context.Context, userID, orgID string)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return supportChannelsData{AutoReplyEnabled: false, Greeting: "", Member: data.Member, ModuleEnabled: data.ModuleEnabled, CanManage: data.CanManage}, nil
 		}
-		return data, err
-	})
-}
-
-func (s *pgSupportChannelsStore) Upsert(ctx context.Context, userID, orgID string, patch supportChannelsPatch, newToken string) (supportChannelsData, error) {
-	return dbx.WithOrgTx(ctx, s.pool, orgID, func(tx pgx.Tx) (supportChannelsData, error) {
-		data, err := loadSupportChannelsAccess(ctx, tx, userID, orgID)
-		if err != nil || !data.Member || !data.ModuleEnabled || !data.CanManage {
-			return data, err
-		}
-		var enabled any
-		if patch.AutoReplyEnabled != nil {
-			enabled = *patch.AutoReplyEnabled
-		}
-		var greeting any
-		if patch.Greeting != nil {
-			greeting = *patch.Greeting
-		}
-		regenerate := patch.RegenerateToken != nil && *patch.RegenerateToken
-		err = tx.QueryRow(ctx, `
-			INSERT INTO support_settings (org_id, embed_token, auto_reply_enabled, greeting)
-			VALUES ($1::uuid, $2, COALESCE($3::boolean, true), COALESCE($4::text, 'Hi - ask us anything and we''ll get right back to you.'))
-			ON CONFLICT (org_id) DO UPDATE SET
-				auto_reply_enabled = COALESCE($3::boolean, support_settings.auto_reply_enabled),
-				greeting = COALESCE($4::text, support_settings.greeting),
-				embed_token = CASE WHEN $5::boolean THEN EXCLUDED.embed_token ELSE support_settings.embed_token END,
-				updated_at = now()
-			RETURNING auto_reply_enabled, greeting, embed_token`, orgID, newToken, enabled, greeting, regenerate).
-			Scan(&data.AutoReplyEnabled, &data.Greeting, &data.EmbedToken)
 		return data, err
 	})
 }

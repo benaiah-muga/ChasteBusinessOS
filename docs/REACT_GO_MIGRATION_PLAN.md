@@ -603,13 +603,14 @@ new owners and the manifest shows zero legacy runtime paths.
    the worker, event, integration, auth/session, data, demo, and action
    continuity inventories.
 3. (In progress) Capture old-runtime fixtures and benchmark scripts on a migrated database. Repeatable frontend and Go build timings are recorded by `pnpm benchmark:migration:builds`. The three-run comparison on 2026-10-01 at `9bcce00` recorded median command times of 34.90s for Next, 25.77s for Vite including TypeScript, and 4.41s for the three Go binaries. Vite used 739,596 kB median peak RSS compared with 886,408 kB for Next. The Next p95 was 340.19s because the first cold build took 340.19s; warm samples were 34.02s and 34.90s. Vite took 27.20s, 24.30s, and 25.77s; Go took 3.18s, 4.41s, and 4.59s. Full machine, toolchain, and RSS data are saved in `docs/migration/benchmarks/phase-4-previews.json`. A refreshed three-run development-server comparison on revision `cedea09` recorded median process-spawn to TCP-listener times of 3.491s for Next and 2.767s for Vite, about 21% lower for Vite in that sample. The previous sample measured 4.341s for Next and 4.459s for Vite, showing run-to-run variation. This measurement uses the first TCP listener connection and does not measure route readiness; full samples are in `docs/migration/benchmarks/phase-4-startup.json`. The Vite app does not yet have equivalent feature coverage, and the first cold Next build sample remains in p95. Edit-to-ready, browser navigation, and demo fixtures remain to be measured before claiming faster end-to-end development.
-4. (Done) Define the versioned HTTP contract and auth bridge contract, and
-  prove Go read-only policy and ledger endpoints under existing session,
-  permission, and RLS policies. OpenAPI 3.1 covers `GET /__go/policy` and
-  `GET /__go/ledger`; audience-specific signed assertion claims are specified
-  for the Go bridge. `pnpm migration:contracts:check` verifies generated Go
-  and TypeScript models, and `TestGoReadOnlyHandlersEnforcePermissionsAndTenantRLS`
-  exercises both reads through the least-privilege runtime role.
+4. (In progress) Define versioned internal and public HTTP contracts and the
+  auth bridge contract, then prove each Go endpoint under existing session,
+  permission, and RLS policies. OpenAPI 3.1 covers `GET /__go/policy`,
+  `GET /__go/ledger`, and the public Support channel GET/POST operations.
+  Generated Go and TypeScript models are checked for drift, and the Support
+  handler and Vite client consume the generated request/response types alongside
+  runtime validation. Business API contract coverage remains incomplete and
+  must expand to every Go-owned route before migration completion.
 5. Port the kernel trust spine and the customer-to-payment slice; do not
    switch any write before its parity and rollback gates pass.
 6. (Done) Bridge only `POST /api/accounting` invoice creation to the existing Go
@@ -4995,3 +4996,13 @@ new owners and the manifest shows zero legacy runtime paths.
      bounds, defaults, and parser rejection of invalid values. A new
      database-backed system-actor and tenant-isolation proof remains pending
      PostgreSQL recovery.
+
+469. (Focused verified) Go now owns SSO connection management at
+     `/api/team/sso`. Listing resolves the Go session and uses organization RLS;
+     creation, disablement, and restoration resolve the Go session, require
+     `iam.admin`, and execute through audited, reversible capabilities. The Go
+     route rejects unsafe URL credentials and malformed hostnames, excludes
+     public signing certificates from list responses, and blocks cookie-based
+     writes without a same-origin request. Handler and capability tests pass;
+     runtime-role tenant isolation and governed-write integration proofs remain
+     pending PostgreSQL verification.

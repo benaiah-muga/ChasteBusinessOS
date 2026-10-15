@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 import { normalizeRetryActorId } from "./retry-scope";
 import { submitCrmCustomerCreate, type CrmTaskRetryScope } from "./crm";
 
@@ -476,40 +477,142 @@ function supportOrganizationHeader(organizationId: string | null | undefined): R
   return { "X-Organization-ID": orgId };
 }
 
-const SupportChannelsSchema = z.object({
+export type SupportChannels = components["schemas"]["SupportChannelsResponse"];
+type SupportChannelsPatch = components["schemas"]["SupportChannelsPatch"];
+type SupportChannelsRetryRecord = {
+  version: 1;
+  intentId: string;
+  patch: SupportChannelsPatch;
+  fingerprint: string;
+};
+const SUPPORT_CHANNELS_RETRY_PREFIX = "chaste.support.channels-intent.v1:";
+const SupportChannelsRetryRecordSchema = z.object({
+  version: z.literal(1),
+  intentId: uuid,
+  patch: z.object({
+    autoReplyEnabled: z.boolean().optional(),
+    greeting: z.string().min(1).max(300).optional(),
+    regenerateToken: z.literal(true).optional(),
+  }).strict(),
+  fingerprint: z.string().min(1),
+}).strict();
+
+const SupportChannelsSchema: z.ZodType<SupportChannels> = z.object({
   autoReplyEnabled: z.boolean(),
   greeting: z.string(),
   embedToken: z.string().nullable(),
   canManage: z.boolean(),
 }).strict();
-export type SupportChannels = z.infer<typeof SupportChannelsSchema>;
 
 export async function fetchSupportChannels(signal?: AbortSignal): Promise<SupportChannels> {
   return get("/api/support/channels", SupportChannelsSchema, signal);
 }
 
-const ChannelsPatchSchema = z
+const ChannelsPatchSchema: z.ZodType<SupportChannelsPatch> = z
   .object({
     autoReplyEnabled: z.boolean().optional(),
     greeting: z.string().min(1).max(300).optional(),
-    regenerateToken: z.boolean().optional(),
+    regenerateToken: z.literal(true).optional(),
   })
   .strict()
   .refine((patch) => patch.autoReplyEnabled !== undefined || patch.greeting !== undefined || patch.regenerateToken === true, {
     message: "A channel change must say what it changes.",
   });
 
+function supportChannelsRetryStorageKey(scope: SupportCannedResponseRetryScope): string {
+  const actorId = normalizeRetryActorId(scope.actorId);
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!actorId || !uuid.safeParse(organizationId).success) {
+    throw new SupportApiError(0, "Wait for your account and organization to finish loading before changing channel settings.");
+  }
+  return `${SUPPORT_CHANNELS_RETRY_PREFIX}${encodeURIComponent(actorId)}:${encodeURIComponent(organizationId)}`;
+}
+
+function readSupportChannelsRetryRecord(storageKey: string): SupportChannelsRetryRecord | null {
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "Channel update retry protection is unavailable. Enable browser storage before saving.");
+  }
+  if (raw === null) return null;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw);
+  } catch {
+    throw new SupportApiError(0, "A saved channel update retry record is unreadable. Verify the settings before trying again.");
+  }
+  const parsed = SupportChannelsRetryRecordSchema.safeParse(decoded);
+  if (!parsed.success || parsed.data.fingerprint !== JSON.stringify(parsed.data.patch)) {
+    throw new SupportApiError(0, "A saved channel update retry record is invalid. Verify the settings before trying again.");
+  }
+  return parsed.data;
+}
+
+function createSupportChannelsAttempt(
+  patch: SupportChannelsPatch,
+  scope: SupportCannedResponseRetryScope,
+): { storageKey: string; record: SupportChannelsRetryRecord } {
+  const storageKey = supportChannelsRetryStorageKey(scope);
+  const fingerprint = JSON.stringify(patch);
+  const existing = readSupportChannelsRetryRecord(storageKey);
+  if (existing) {
+    if (existing.fingerprint !== fingerprint) {
+      throw new SupportApiError(0, "A previous channel update is unresolved. Retry its exact saved change before changing settings.");
+    }
+    return { storageKey, record: existing };
+  }
+  const record: SupportChannelsRetryRecord = { version: 1, intentId: crypto.randomUUID(), patch, fingerprint };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(record));
+  } catch {
+    throw new SupportApiError(0, "Channel update retry protection could not be saved. Enable browser storage before saving.");
+  }
+  return { storageKey, record };
+}
+
+function clearSupportChannelsAttempt(storageKey: string, intentId: string): void {
+  if (readSupportChannelsRetryRecord(storageKey)?.intentId !== intentId) return;
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    throw new SupportApiError(0, "The channel change was saved, but its retry record could not be cleared. Refresh settings before making another change.");
+  }
+}
+
+const PendingApprovalSchema = z.object({ pendingApproval: z.literal(true), approvalId: uuid }).strict();
+export type SupportChannelsUpdateResult =
+  | { status: "completed"; channels: SupportChannels }
+  | { status: "pending"; approvalId: string };
+
 export async function updateSupportChannels(
-  patch: { autoReplyEnabled?: boolean; greeting?: string; regenerateToken?: true },
+  patch: SupportChannelsPatch,
+  retryScope: SupportCannedResponseRetryScope,
   signal?: AbortSignal,
-): Promise<SupportChannels> {
+): Promise<SupportChannelsUpdateResult> {
   const parsedPatch = ChannelsPatchSchema.safeParse(patch);
   if (!parsedPatch.success) throw new SupportApiError(0, "The channel change is missing what it should update.");
-  const { response, body } = await request("/api/support/channels", { method: "POST", body: JSON.stringify(parsedPatch.data) }, signal);
-  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
+  const { storageKey, record } = createSupportChannelsAttempt(parsedPatch.data, retryScope);
+  const { response, body } = await request("/api/support/channels", {
+    method: "POST",
+    body: JSON.stringify(record.patch),
+    headers: { "Idempotency-Key": record.intentId },
+  }, signal);
+  if (response.status === 202) {
+    const pending = PendingApprovalSchema.safeParse(body);
+    if (!pending.success) throw new SupportApiError(response.status, "The support service returned an invalid approval response.");
+    return { status: "pending", approvalId: pending.data.approvalId };
+  }
+  if (!response.ok) {
+    if (response.status >= 400 && response.status < 500 && response.status !== 401 && response.status !== 403 && response.status !== 404 && response.status !== 429) {
+      clearSupportChannelsAttempt(storageKey, record.intentId);
+    }
+    throw new SupportApiError(response.status, messageFor(response.status, body));
+  }
   const parsed = SupportChannelsSchema.safeParse(body);
   if (!parsed.success) throw new SupportApiError(response.status, "The support service returned unexpected channel settings.");
-  return parsed.data;
+  clearSupportChannelsAttempt(storageKey, record.intentId);
+  return { status: "completed", channels: parsed.data };
 }
 
 /** Shared team read. The envelope carries roles and a catalog alongside members. */

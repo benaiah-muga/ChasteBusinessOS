@@ -490,6 +490,27 @@
       "parity": "verified"
     },
     {
+      "kind": "api",
+      "path": "/api/team/sso",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team/sso",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team/sso",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
       "kind": "page",
       "path": "/approvals",
       "owner": "vite",

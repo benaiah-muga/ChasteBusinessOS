@@ -71,6 +71,7 @@ type capabilitySpec struct {
 	module               string
 	permission           string
 	risk                 string
+	intent               string
 	approvalExempt       bool
 	executionScope       string
 	moneyThresholdMinor  int64
@@ -343,20 +344,28 @@ var capabilitySpecs = map[string]capabilitySpec{
 	creatorSubmitProposalCapabilityID:         {module: "creator", permission: "platform.creator", risk: "write"},
 	creatorListProposalsCapabilityID:          {module: "creator", permission: "platform.creator", risk: "read"},
 	// A review is a terminal human decision; an inverse would erase that decision and is intentionally absent.
-	creatorReviewProposalCapabilityID:       {module: "creator", permission: "platform.creator", risk: "write", approvalExempt: true, humanOnly: true},
-	creatorListCapabilityGapsCapabilityID:   {module: "creator", permission: "platform.creator", risk: "read"},
-	creatorScaffoldCapabilityID:             {module: "creator", permission: "platform.creator", risk: "read"},
-	creatorVerifyPluginCapabilityID:         {module: "creator", permission: "platform.creator", risk: "read"},
-	creatorPublishListingCapabilityID:       {module: "creator", permission: "platform.creator", risk: "write", inverseCapabilityID: creatorRetractListingCapabilityID, inverseInputSource: "output", inverseFields: []string{"slug"}},
-	creatorRetractListingCapabilityID:       {module: "creator", permission: "platform.creator", risk: "write"},
-	creatorInstallListingCapabilityID:       {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorUninstallListingCapabilityID, inverseInputSource: "input", inverseFields: []string{"listingId"}},
-	creatorUninstallListingCapabilityID:     {module: "creator", permission: "platform.creator", risk: "write"},
-	creatorListMarketplaceCapabilityID:      {module: "creator", permission: "platform.browse", risk: "read"},
-	creatorStageCandidateCapabilityID:       {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
-	creatorPromoteCandidateCapabilityID:     {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
-	creatorRollbackCandidateCapabilityID:    {module: "creator", permission: "platform.creator", risk: "destructive"},
-	creatorRecordCanaryOutcomeCapabilityID:  {module: "creator", permission: "platform.creator.release", risk: "write"},
-	supportStartConversationCapabilityID:    {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.resolveConversation"},
+	creatorReviewProposalCapabilityID:      {module: "creator", permission: "platform.creator", risk: "write", approvalExempt: true, humanOnly: true},
+	creatorListCapabilityGapsCapabilityID:  {module: "creator", permission: "platform.creator", risk: "read"},
+	creatorScaffoldCapabilityID:            {module: "creator", permission: "platform.creator", risk: "read"},
+	creatorVerifyPluginCapabilityID:        {module: "creator", permission: "platform.creator", risk: "read"},
+	creatorPublishListingCapabilityID:      {module: "creator", permission: "platform.creator", risk: "write", inverseCapabilityID: creatorRetractListingCapabilityID, inverseInputSource: "output", inverseFields: []string{"slug"}},
+	creatorRetractListingCapabilityID:      {module: "creator", permission: "platform.creator", risk: "write"},
+	creatorInstallListingCapabilityID:      {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorUninstallListingCapabilityID, inverseInputSource: "input", inverseFields: []string{"listingId"}},
+	creatorUninstallListingCapabilityID:    {module: "creator", permission: "platform.creator", risk: "write"},
+	creatorListMarketplaceCapabilityID:     {module: "creator", permission: "platform.browse", risk: "read"},
+	creatorStageCandidateCapabilityID:      {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
+	creatorPromoteCandidateCapabilityID:    {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
+	creatorRollbackCandidateCapabilityID:   {module: "creator", permission: "platform.creator", risk: "destructive"},
+	creatorRecordCanaryOutcomeCapabilityID: {module: "creator", permission: "platform.creator.release", risk: "write"},
+	supportStartConversationCapabilityID:   {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.resolveConversation"},
+	supportUpdateChannelSettingsCapabilityID: {module: "support", permission: "iam.admin", risk: "write", intent: "Update the organization's support channel reply settings and widget token.", inverseCapabilityID: supportRestoreChannelSettingsCapabilityID, inverseInputSource: "output", inverseFieldMappings: []inverseFieldMapping{
+		{outputField: "previous", inputField: "target"},
+		{outputField: "current", inputField: "expectedCurrent"},
+	}},
+	supportRestoreChannelSettingsCapabilityID: {module: "support", permission: "iam.admin", risk: "write", intent: "Restore support channel settings only when the expected state is still current.", inverseCapabilityID: supportRestoreChannelSettingsCapabilityID, inverseInputSource: "output", inverseFieldMappings: []inverseFieldMapping{
+		{outputField: "previous", inputField: "target"},
+		{outputField: "current", inputField: "expectedCurrent"},
+	}},
 	supportPostMessageCapabilityID:          {module: "support", permission: "support.write", risk: "write"},
 	supportListConversationsCapabilityID:    {module: "support", permission: "support.read", risk: "read"},
 	supportListTicketsCapabilityID:          {module: "support", permission: "support.read", risk: "read"},
@@ -546,9 +555,11 @@ func supportedCapability(capabilityID string) bool {
 		supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
 		supportUpdateTicketCapabilityID, supportSuggestCategoryCapabilityID,
 		supportCreateCannedResponseCapabilityID, supportCreateKbArticleCapabilityID,
+		supportUpdateChannelSettingsCapabilityID, supportRestoreChannelSettingsCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID,
 		projectRestoreCapabilityID, deleteProjectTaskCapabilityID, restoreProjectTaskCapabilityID, restoreProjectTaskPlacementCapabilityID, restoreProjectTaskAssigneeCapabilityID,
 		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID,
+		iamCreateSSOConnectionCapabilityID, iamDisableSSOConnectionCapabilityID, iamRestoreSSOConnectionCapabilityID,
 		scimProvisionUserCapabilityID, SCIMTokenCreateCapabilityID, SCIMTokenRevokeCapabilityID,
 		settingsConfigureAiProviderCapabilityID, settingsRestoreAiProviderCapabilityID, harnessApproveCompositionCapabilityID, harnessListCompositionsCapabilityID:
 		return true
@@ -1383,8 +1394,21 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case supportUpdateChannelSettingsCapabilityID:
+			parsed, err := ParseSupportUpdateChannelSettingsInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case supportRestoreChannelSettingsCapabilityID:
+			parsed, err := ParseSupportRestoreChannelSettingsInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
 		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
-			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
+			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID,
+			iamCreateSSOConnectionCapabilityID, iamDisableSSOConnectionCapabilityID, iamRestoreSSOConnectionCapabilityID:
 			parsed, err := parseIAMInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -1702,6 +1726,23 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case IAMCreateSSOConnectionInput:
+			output, err := iamCreateSSOConnection(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case IAMSSOConnectionIDInput:
+			var output IAMSSOConnectionOutput
+			if claims.CapabilityID == iamDisableSSOConnectionCapabilityID {
+				output, err = iamDisableSSOConnection(ctx, tx, claims.OrganizationID, parsed)
+			} else {
+				output, err = iamRestoreSSOConnection(ctx, tx, claims.OrganizationID, parsed)
+			}
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case SCIMProvisionUserInput:
 			output, err := scimProvisionUser(ctx, tx, claims, parsed)
 			if err != nil {
@@ -1728,6 +1769,18 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case SettingsRestoreAiProviderInput:
 			output, err := settingsRestoreAiProvider(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportUpdateChannelSettingsInput:
+			output, err := supportUpdateChannelSettings(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportRestoreChannelSettingsInput:
+			output, err := supportRestoreChannelSettings(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3703,8 +3756,9 @@ func canonicalInputHash(input any) (string, error) {
 		SupportReadConversationInput, SupportLookupOrderStatusInput, SupportSearchKnowledgeInput,
 		SupportEscalateConversationInput, SupportStatusInput, SupportCreateTicketInput,
 		SupportUpdateTicketInput, SupportSuggestCategoryInput, SupportCreateCannedResponseInput,
-		SupportCreateKbArticleInput,
+		SupportCreateKbArticleInput, SupportUpdateChannelSettingsInput, SupportRestoreChannelSettingsInput,
 		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput,
+		IAMCreateSSOConnectionInput, IAMSSOConnectionIDInput,
 		SettingsConfigureAiProviderInput, SettingsRestoreAiProviderInput, HarnessApproveCompositionInput, HarnessListCompositionsInput,
 		DocumentsInput,
 		MessagingSendMessageInput, MessagingListConversationsInput, MessagingReadMessagesInput, MessagingSearchMessagesInput,

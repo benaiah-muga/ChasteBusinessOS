@@ -13,6 +13,8 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- A versioned public OpenAPI contract now generates Go and Vite TypeScript models for the Support channel settings API.
+- Go now owns organization-scoped SSO connection listing and routes SSO creation, disablement, and restoration through audited, reversible `iam.admin` capabilities.
 - Go routine agents now expose the legacy manufacturing read tools for production runs, work orders, BOM trees and reports, cost previews, lot traceability, and production feasibility through existing governed capabilities.
 - Go now accepts session-authenticated durable-run creation requests and dispatches ordered, approval-gated steps through the Go jobs worker.
 - Vite Event Ledger can load older organization-scoped events from Go in 100-entry pages, and searches include every page already loaded.

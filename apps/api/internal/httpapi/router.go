@@ -803,6 +803,21 @@ func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportC
 	return mux
 }
 
+// MountGoTeamSSORoute gives the Go API sole ownership of SSO connection
+// management, including unsupported methods, so they cannot fall through to
+// the compatibility app.
+func MountGoTeamSSORoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/api/team/sso", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoSessionReadRoutes mounts session reads and durable-run reads and
 // creates only when their handlers are explicitly enabled by API configuration.
 func MountGoSessionReadRoutes(base, sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute http.Handler) http.Handler {

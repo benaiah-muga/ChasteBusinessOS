@@ -738,7 +738,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
             </section>
           )}
 
-          {tab === "widget" && <SupportWidgetPanel onNotice={setNotice} />}
+          {tab === "widget" && <SupportWidgetPanel onNotice={setNotice} retryScope={{ actorId, organizationId }} />}
 
           {tab === "library" && <SupportLibraryPanel onNotice={setNotice} retryScope={{ actorId, organizationId }} />}
 
@@ -995,7 +995,7 @@ function SupportHeader() {
   );
 }
 
-function SupportWidgetPanel({ onNotice }: { onNotice: (notice: Notice) => void }) {
+function SupportWidgetPanel({ onNotice, retryScope }: { onNotice: (notice: Notice) => void; retryScope: SupportCannedResponseRetryScope }) {
   const [channels, setChannels] = useState<SupportChannels | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [greeting, setGreeting] = useState("");
@@ -1019,7 +1019,13 @@ function SupportWidgetPanel({ onNotice }: { onNotice: (notice: Notice) => void }
   async function patch(update: { autoReplyEnabled?: boolean; greeting?: string; regenerateToken?: true }) {
     setBusy(true);
     try {
-      setChannels(await updateSupportChannels(update));
+      const result = await updateSupportChannels(update, retryScope);
+      if (result.status === "pending") {
+        onNotice({ tone: "pending", text: `This channel change is waiting for approval (${result.approvalId}). Retry the exact change to recover its status.` });
+      } else {
+        setChannels(result.channels);
+        onNotice({ tone: "success", text: "Support channel settings saved." });
+      }
     } catch (error) {
       onNotice({ tone: "error", text: friendlyError(error) });
     } finally {

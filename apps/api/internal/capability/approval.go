@@ -666,7 +666,8 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
 		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
-			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
+			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID,
+			iamCreateSSOConnectionCapabilityID, iamDisableSSOConnectionCapabilityID, iamRestoreSSOConnectionCapabilityID:
 			parsed, parseErr := parseIAMInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
@@ -994,6 +995,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case documentsListDocsCapabilityID, documentsListDocVersionsCapabilityID, documentsGetDocVersionCapabilityID:
 		return "documents.read", true
 	case iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID,
+		iamCreateSSOConnectionCapabilityID, iamDisableSSOConnectionCapabilityID, iamRestoreSSOConnectionCapabilityID,
 		SCIMTokenCreateCapabilityID, SCIMTokenRevokeCapabilityID:
 		return "iam.admin", true
 	case settingsConfigureAiProviderCapabilityID, settingsRestoreAiProviderCapabilityID:

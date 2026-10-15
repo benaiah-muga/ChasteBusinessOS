@@ -1,0 +1,176 @@
+openapi: 3.1.0
+info:
+  title: Chaste Business API
+  version: 1.0.0
+  description: Versioned public HTTP contracts shared by the Go API and its clients.
+paths:
+  /api/support/channels:
+    get:
+      operationId: getSupportChannels
+      summary: Read support channel settings
+      description: Reads the current organization's support channel settings. The embed token is returned only to members with permission to manage support.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current support channel settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportChannelsResponse"
+        "401":
+          description: The session is invalid or the actor is not an organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The support module is not enabled for this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The settings could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Support settings are temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: updateSupportChannels
+      summary: Update support channel settings
+      description: Updates support settings for the active organization. Cookie-authenticated requests must include a same-origin Origin header. At least one field must be provided.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID for this exact settings update. Reuse it with the same body after an uncertain result.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupportChannelsPatch"
+      responses:
+        "202":
+          description: The change is waiting for an authorized reviewer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingApprovalResponse"
+        "200":
+          description: Updated support channel settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportChannelsResponse"
+        "400":
+          description: The patch is malformed, empty, or outside the supported bounds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the actor is not an organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The origin is not allowed or the actor cannot manage support settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The support module is not enabled for this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The settings could not be updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The capability rejected the requested change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Support settings are temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: better-auth.session_token
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+    PendingApprovalResponse:
+      type: object
+      additionalProperties: false
+      required: [pendingApproval, approvalId]
+      properties:
+        pendingApproval:
+          type: boolean
+          const: true
+        approvalId:
+          type: string
+          format: uuid
+    SupportChannelsResponse:
+      type: object
+      additionalProperties: false
+      required: [autoReplyEnabled, greeting, embedToken, canManage]
+      properties:
+        autoReplyEnabled:
+          type: boolean
+        greeting:
+          type: string
+        embedToken:
+          type: [string, "null"]
+        canManage:
+          type: boolean
+    SupportChannelsPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        autoReplyEnabled:
+          type: boolean
+        greeting:
+          type: string
+          minLength: 1
+          maxLength: 300
+        regenerateToken:
+          type: boolean
+          const: true
