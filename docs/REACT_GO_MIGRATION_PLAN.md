@@ -227,8 +227,16 @@ a narrowly privileged function owner, then reads payloads, acknowledges
 delivery, and reconciles uncertain outcomes inside tenant-scoped transactions.
 Its dedicated login cannot bypass RLS or access other tables. Retry delays,
 provider outcomes, lease renewal, fencing, and no-blind-resend behavior have
-database-backed parity tests. The legacy TypeScript worker remains the default
-runtime owner. A separate Go capability-jobs worker now claims only its
+database-backed parity tests. A Go marketing email worker now claims only email
+rows with the `marketing:` dedupe prefix. Its own non-login claim owner exposes
+lease metadata only; its NOBYPASSRLS login reads campaign payloads and only the
+customer email, opt-out, and deactivation fields inside the customer's
+organization transaction. SMTP messages use the stable provider operation ID
+as Message-ID and leave uncertain results closed for reconciliation.
+`pnpm worker` starts the Go jobs, webhook, and marketing email workers. The
+TypeScript `processOneOutbox` dispatcher remains in source for remaining Next
+compatibility producers; this cutover does not claim the whole TypeScript
+worker is retired. A separate Go capability-jobs worker now claims only its
 verified capability allowlist and reuses existing job rows, receipts,
 approval payloads, audit events, and durable-run transitions under a dedicated
 least-privilege role. Go can claim and execute `routines.executeRoutine` jobs
@@ -4818,3 +4826,17 @@ new owners and the manifest shows zero legacy runtime paths.
      public widget, portal, Dashboard, and agent requests already route through
      Go; no duplicate endpoints were added. Widget and Dashboard Go routing
      setup guidance was corrected.
+
+453. (Runtime verified) Vite Go marketing campaign email rows now
+     have a dedicated Go SMTP worker, database role, and
+     `claim_marketing_email` function. Claims require `kind=email` and the
+     `marketing:` prefix; delivery rechecks current customer email, opt-out,
+     and active status under `dbx.WithOrgTx`, then acknowledges through the
+     existing lease fence. Database-backed proof verifies role isolation,
+     blocked non-marketing payload reads, consent enforcement, and successful
+     eligible delivery. A separate opt-in SMTP sink test sent a message through
+     the running local SMTP server with its local CA certificate and verified
+     the captured headers, stable Message-ID, and body. The TypeScript
+     dispatcher remains in source for Next compatibility producers; this does
+     not claim that the wider TypeScript worker is retired. Independent review
+     found no remaining authorization or fencing issue.

@@ -968,6 +968,13 @@
       "when": 1791959902310,
       "tag": "0137_go_routines_webhook_app_execute",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1792065405000,
+      "tag": "0138_go_marketing_email_outbox_worker",
+      "breakpoints": true
     }
   ]
 }

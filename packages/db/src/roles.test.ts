@@ -1,12 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
 import {
+  ensureMarketingEmailWorkerRole,
   ensureJobsWorkerRole,
   ensureOutboxWorkerRole,
   JOBS_CLAIM_OWNER_ROLE_NAME,
   JOBS_WORKER_ROLE_NAME,
   OUTBOX_CLAIM_OWNER_ROLE_NAME,
   OUTBOX_WORKER_ROLE_NAME,
+  MARKETING_EMAIL_CLAIM_OWNER_ROLE_NAME,
+  MARKETING_EMAIL_WORKER_PASSWORD_ENV,
+  MARKETING_EMAIL_WORKER_ROLE_NAME,
 } from "./roles";
 
 const databaseUrl =
@@ -17,13 +21,19 @@ const workerPassword =
   "chaste_outbox_worker_dev_only";
 const jobsWorkerPassword =
   process.env.CHASTE_JOBS_WORKER_DB_PASSWORD ?? "chaste_jobs_worker_dev_only";
+const marketingEmailWorkerPassword =
+  process.env[MARKETING_EMAIL_WORKER_PASSWORD_ENV] ?? "chaste_marketing_email_worker_dev_only";
 
 let admin: ReturnType<typeof postgres>;
 let jobsWorker: ReturnType<typeof postgres>;
+let marketingEmailWorker: ReturnType<typeof postgres>;
 
 beforeAll(async () => {
   admin = postgres(databaseUrl, { max: 1 });
   await ensureOutboxWorkerRole({ databaseUrl, password: workerPassword });
+  await admin.unsafe(`GRANT SELECT (name) ON TABLE public.customers TO ${MARKETING_EMAIL_WORKER_ROLE_NAME}`);
+  const marketingEmailRole = await ensureMarketingEmailWorkerRole({ databaseUrl, password: marketingEmailWorkerPassword });
+  marketingEmailWorker = postgres(marketingEmailRole.workerUrl, { max: 1 });
   const jobsRole = await ensureJobsWorkerRole({
     databaseUrl,
     password: jobsWorkerPassword,
@@ -33,7 +43,88 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await jobsWorker?.end();
+  await marketingEmailWorker?.end();
   await admin?.end();
+});
+
+describe("marketing email outbox worker role provisioning", () => {
+  it("is a dedicated non-escalating login with only delivery and eligibility reads", async () => {
+    const result = await admin.unsafe<{
+      worker_login: boolean;
+      worker_safe: boolean;
+      owner_no_login: boolean;
+      owner_safe: boolean;
+      worker_can_claim: boolean;
+      app_can_claim: boolean;
+      worker_outbox_table_select: boolean;
+      worker_payload_select: boolean;
+      worker_dedupe_select: boolean;
+      worker_customer_email_select: boolean;
+      worker_customer_optout_select: boolean;
+      worker_customer_name_select: boolean;
+      owner_payload_select: boolean;
+      function_owner: string;
+      function_security_definer: boolean;
+      function_public_execute: boolean;
+    }[]>(`SELECT worker.rolcanlogin AS worker_login,
+        NOT worker.rolsuper AND NOT worker.rolcreatedb AND NOT worker.rolcreaterole AND NOT worker.rolreplication AND NOT worker.rolbypassrls AND NOT worker.rolinherit AS worker_safe,
+        NOT owner.rolcanlogin AS owner_no_login,
+        NOT owner.rolsuper AND NOT owner.rolcreatedb AND NOT owner.rolcreaterole AND NOT owner.rolreplication AND NOT owner.rolbypassrls AND NOT owner.rolinherit AS owner_safe,
+        has_function_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', procedure.oid, 'EXECUTE') AS worker_can_claim,
+        has_function_privilege('chaste_app', procedure.oid, 'EXECUTE') AS app_can_claim,
+        has_table_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.outbox_messages', 'SELECT') AS worker_outbox_table_select,
+        has_column_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.outbox_messages', 'payload', 'SELECT') AS worker_payload_select,
+        has_column_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.outbox_messages', 'dedupe_key', 'SELECT') AS worker_dedupe_select,
+        has_column_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.customers', 'email', 'SELECT') AS worker_customer_email_select,
+        has_column_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.customers', 'marketing_opt_out', 'SELECT') AS worker_customer_optout_select,
+        has_column_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.customers', 'name', 'SELECT') AS worker_customer_name_select,
+        has_column_privilege('${MARKETING_EMAIL_CLAIM_OWNER_ROLE_NAME}', 'public.outbox_messages', 'payload', 'SELECT') AS owner_payload_select,
+        role_owner.rolname AS function_owner, procedure.prosecdef AS function_security_definer,
+        EXISTS (SELECT 1 FROM aclexplode(COALESCE(procedure.proacl, acldefault('f', procedure.proowner))) acl WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE') AS function_public_execute
+      FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid=procedure.pronamespace
+      JOIN pg_roles role_owner ON role_owner.oid=procedure.proowner
+      CROSS JOIN pg_roles worker CROSS JOIN pg_roles owner
+      WHERE namespace.nspname='outbox_worker' AND procedure.proname='claim_marketing_email'
+        AND worker.rolname='${MARKETING_EMAIL_WORKER_ROLE_NAME}' AND owner.rolname='${MARKETING_EMAIL_CLAIM_OWNER_ROLE_NAME}'`);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      worker_login: true, worker_safe: true, owner_no_login: true, owner_safe: true,
+      worker_can_claim: true, app_can_claim: false, worker_outbox_table_select: false,
+      worker_payload_select: true, worker_dedupe_select: true,
+      worker_customer_email_select: true, worker_customer_optout_select: true,
+      worker_customer_name_select: false, owner_payload_select: false,
+      function_owner: MARKETING_EMAIL_CLAIM_OWNER_ROLE_NAME,
+      function_security_definer: true, function_public_execute: false,
+    });
+
+    const customerColumns = await admin.unsafe<{
+      column_name: string;
+      can_select: boolean;
+      can_insert: boolean;
+      can_update: boolean;
+      can_reference: boolean;
+    }[]>(`SELECT attribute.attname AS column_name,
+        has_column_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.customers', attribute.attname, 'SELECT') AS can_select,
+        has_column_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.customers', attribute.attname, 'INSERT') AS can_insert,
+        has_column_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.customers', attribute.attname, 'UPDATE') AS can_update,
+        has_column_privilege('${MARKETING_EMAIL_WORKER_ROLE_NAME}', 'public.customers', attribute.attname, 'REFERENCES') AS can_reference
+      FROM pg_attribute attribute
+      WHERE attribute.attrelid='public.customers'::regclass AND attribute.attnum > 0 AND NOT attribute.attisdropped`);
+    const eligibilityColumns = new Set(["id", "org_id", "email", "marketing_opt_out", "deactivated_at"]);
+    for (const column of customerColumns) {
+      expect(column.can_select, `${column.column_name} SELECT`).toBe(eligibilityColumns.has(column.column_name));
+      expect(column.can_insert, `${column.column_name} INSERT`).toBe(false);
+      expect(column.can_update, `${column.column_name} UPDATE`).toBe(false);
+      expect(column.can_reference, `${column.column_name} REFERENCES`).toBe(false);
+    }
+  });
+
+  it("reuses the provisioned worker credentials", async () => {
+    const result = await ensureMarketingEmailWorkerRole({ databaseUrl, password: marketingEmailWorkerPassword });
+    expect(result.roleName).toBe(MARKETING_EMAIL_WORKER_ROLE_NAME);
+    expect(result.functionOwnerRoleName).toBe(MARKETING_EMAIL_CLAIM_OWNER_ROLE_NAME);
+    expect(new URL(result.workerUrl).username).toBe(MARKETING_EMAIL_WORKER_ROLE_NAME);
+  });
 });
 
 describe("webhook outbox worker role provisioning", () => {

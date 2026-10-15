@@ -88,12 +88,16 @@ pnpm dev:api
 pnpm worker
 ```
 
-`pnpm worker` loads the repository `.env`, builds both Go workers, and runs them
+`pnpm worker` loads the repository `.env`, builds the three Go workers, and runs them
 with signal forwarding for graceful shutdown. Routine scheduling and the Go
 routine agent runner default on for local work; set either
 `GO_ROUTINE_SCHEDULER=0` or `GO_ROUTINE_AGENT_RUNNER=0` to disable it. The jobs
 worker uses `JOBS_WORKER_DATABASE_URL` and `GO_DATABASE_URL`, while the outbox
-worker uses `OUTBOX_WORKER_DATABASE_URL`.
+worker uses `OUTBOX_WORKER_DATABASE_URL`; the marketing email worker uses
+`MARKETING_EMAIL_OUTBOX_WORKER_DATABASE_URL` and the SMTP settings. Marketing
+campaign messages are rechecked against the current customer email, active
+status, and opt-out flag before delivery. Its database login can read only
+campaign email rows and the customer fields needed for that check.
 
 The sample `.env` enables Go onboarding and direct Vite onboarding with
 `GO_ONBOARDING_ROUTE=1` and `CHASTE_GO_ONBOARDING_ROUTE=1`. The Vite selector
@@ -756,7 +760,8 @@ curl http://localhost:3000/api/health
 ```
 
 Compose builds the React/Vite client as static assets served by nginx and the
-Go API, capability jobs worker, and webhook outbox worker as standalone Go
+Go API, capability jobs worker, webhook outbox worker, and marketing email
+outbox worker as standalone Go
 services. A one-shot setup step creates the least-privilege Go app role
 principal, then a second applies Drizzle migrations and requires a matching
 PostgreSQL 16 `pg_dump` snapshot. Final role grants are provisioned after
