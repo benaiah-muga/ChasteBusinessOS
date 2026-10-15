@@ -606,8 +606,10 @@ new owners and the manifest shows zero legacy runtime paths.
 4. (In progress) Define versioned internal and public HTTP contracts and the
   auth bridge contract, then prove each Go endpoint under existing session,
   permission, and RLS policies. OpenAPI 3.1 covers `GET /__go/policy`,
-  `GET /__go/ledger`, Support channel GET/POST, and the generic
-  `POST /api/capabilities/execute` envelope. The generic capability input and
+  `GET /__go/ledger`, Support channel GET/POST, module switchboard GET/POST,
+  and the generic `POST /api/capabilities/execute` envelope. The module
+  switchboard handlers and Vite Settings client use generated Go and
+  TypeScript types with runtime validation. The generic capability input and
   output remain open-ended; capability-specific shapes are checked by runtime
   validators. Generated Go and TypeScript models are checked for drift, and
   Vite Support consumes generated request and success-envelope types alongside

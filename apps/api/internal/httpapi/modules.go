@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
 
@@ -14,34 +15,26 @@ type modulesSessionResolver interface {
 	ResolveBearerToken(context.Context, string, string) (*session.ResolvedUser, error)
 }
 
-type moduleInfo struct {
-	ID          string  `json:"id"`
-	Label       string  `json:"label"`
-	Description string  `json:"description"`
-	Href        *string `json:"href"`
-	Protected   bool    `json:"protected,omitempty"`
-}
-
-var moduleCatalog = []moduleInfo{
-	{ID: "accounting", Label: "Accounting", Description: "Ledger, invoicing, bills, payments, reports", Href: modulePath("/accounting")},
-	{ID: "analytics", Label: "Analytics", Description: "Governed datasets, charts, downloadable reports", Href: modulePath("/analytics")},
-	{ID: "marketing", Label: "Marketing", Description: "Segments, campaigns, honest send log", Href: modulePath("/marketing")},
-	{ID: "projects", Label: "Projects", Description: "Project boards & tasks", Href: modulePath("/projects")},
-	{ID: "pos", Label: "Point of sale", Description: "Register sessions and instant sales", Href: modulePath("/pos")},
-	{ID: "inventory", Label: "Inventory", Description: "Stock ledger, valuation, counting, reorder alerts", Href: modulePath("/inventory")},
-	{ID: "manufacturing", Label: "Manufacturing", Description: "BOMs, work orders, production runs, traceability", Href: modulePath("/manufacturing")},
-	{ID: "purchasing", Label: "Purchasing (Procurement)", Description: "Vendors, purchase orders, receipts, bills, AP aging", Href: modulePath("/purchasing")},
-	{ID: "crm", Label: "CRM", Description: "Customers and deal pipeline", Href: modulePath("/crm")},
-	{ID: "sales", Label: "Sales", Description: "Quotes that convert to invoices, deal pipeline", Href: modulePath("/sales")},
-	{ID: "documents", Label: "Documents", Description: "Ingestion, OCR, coding suggestions, org memory", Href: modulePath("/documents")},
-	{ID: "hr", Label: "HR & Payroll", Description: "Employees, leave, payroll runs", Href: modulePath("/hr")},
-	{ID: "messaging", Label: "Messages", Description: "Internal channels and DMs with agent participation", Href: modulePath("/messages")},
-	{ID: "support", Label: "Customer care", Description: "Support desk with AI-drafted replies", Href: modulePath("/support")},
-	{ID: "skills", Label: "Skills", Description: "Advisory playbooks the workmate can consult", Href: nil},
-	{ID: "creator", Label: "Creator & marketplace", Description: "Capability proposals and signed plugins", Href: modulePath("/proposals")},
-	{ID: "iam", Label: "Identity & access", Description: "Roles, permissions, module switchboard", Href: modulePath("/team"), Protected: true},
-	{ID: "routines", Label: "Routines", Description: "Scheduled agent runs on a fixed least-privilege bundle", Href: nil, Protected: true},
-	{ID: "signals", Label: "Signals", Description: "Needs-attention registry feeding home and the workmate", Href: nil, Protected: true},
+var moduleCatalog = []businesscontract.ModuleInfo{
+	{Id: "accounting", Label: "Accounting", Description: "Ledger, invoicing, bills, payments, reports", Href: modulePath("/accounting")},
+	{Id: "analytics", Label: "Analytics", Description: "Governed datasets, charts, downloadable reports", Href: modulePath("/analytics")},
+	{Id: "marketing", Label: "Marketing", Description: "Segments, campaigns, honest send log", Href: modulePath("/marketing")},
+	{Id: "projects", Label: "Projects", Description: "Project boards & tasks", Href: modulePath("/projects")},
+	{Id: "pos", Label: "Point of sale", Description: "Register sessions and instant sales", Href: modulePath("/pos")},
+	{Id: "inventory", Label: "Inventory", Description: "Stock ledger, valuation, counting, reorder alerts", Href: modulePath("/inventory")},
+	{Id: "manufacturing", Label: "Manufacturing", Description: "BOMs, work orders, production runs, traceability", Href: modulePath("/manufacturing")},
+	{Id: "purchasing", Label: "Purchasing (Procurement)", Description: "Vendors, purchase orders, receipts, bills, AP aging", Href: modulePath("/purchasing")},
+	{Id: "crm", Label: "CRM", Description: "Customers and deal pipeline", Href: modulePath("/crm")},
+	{Id: "sales", Label: "Sales", Description: "Quotes that convert to invoices, deal pipeline", Href: modulePath("/sales")},
+	{Id: "documents", Label: "Documents", Description: "Ingestion, OCR, coding suggestions, org memory", Href: modulePath("/documents")},
+	{Id: "hr", Label: "HR & Payroll", Description: "Employees, leave, payroll runs", Href: modulePath("/hr")},
+	{Id: "messaging", Label: "Messages", Description: "Internal channels and DMs with agent participation", Href: modulePath("/messages")},
+	{Id: "support", Label: "Customer care", Description: "Support desk with AI-drafted replies", Href: modulePath("/support")},
+	{Id: "skills", Label: "Skills", Description: "Advisory playbooks the workmate can consult", Href: nil},
+	{Id: "creator", Label: "Creator & marketplace", Description: "Capability proposals and signed plugins", Href: modulePath("/proposals")},
+	{Id: "iam", Label: "Identity & access", Description: "Roles, permissions, module switchboard", Href: modulePath("/team"), Protected: moduleProtected(true)},
+	{Id: "routines", Label: "Routines", Description: "Scheduled agent runs on a fixed least-privilege bundle", Href: nil, Protected: moduleProtected(true)},
+	{Id: "signals", Label: "Signals", Description: "Needs-attention registry feeding home and the workmate", Href: nil, Protected: moduleProtected(true)},
 }
 
 var protectedModuleIDs = []string{"iam", "routines", "signals"}
@@ -102,10 +95,10 @@ func (h *modulesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	enabled := effectiveModuleIDs(resolved)
-	writeModulesJSON(w, http.StatusOK, map[string]any{
-		"catalog":        moduleCatalog,
-		"enabledModules": enabled,
-		"usingDefaults":  !resolved.ModulesRestricted,
+	writeModulesJSON(w, http.StatusOK, businesscontract.ModuleSwitchboardResponse{
+		Catalog:        moduleCatalog,
+		EnabledModules: enabled,
+		UsingDefaults:  !resolved.ModulesRestricted,
 	})
 }
 
@@ -130,7 +123,7 @@ func effectiveModuleIDs(resolved *session.ResolvedUser) []string {
 	if !resolved.ModulesRestricted {
 		ids := make([]string, 0, len(moduleCatalog))
 		for _, module := range moduleCatalog {
-			ids = append(ids, module.ID)
+			ids = append(ids, module.Id)
 		}
 		return ids
 	}
@@ -148,6 +141,8 @@ func effectiveModuleIDs(resolved *session.ResolvedUser) []string {
 }
 
 func modulePath(value string) *string { return &value }
+
+func moduleProtected(value bool) *bool { return &value }
 
 func setModulesHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")

@@ -24,6 +24,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the organization module switchboard
+         * @description Returns the module catalog and effective module selection for the authenticated organization. Every response includes Cache-Control: no-store and Pragma: no-cache. Cookie sessions use the active organization from session context unless X-Organization-ID is supplied. Bearer tokens are resolved against the selected organization, and an explicit selection must match an organization membership. This read does not require an Origin header.
+         */
+        get: operations["getModuleSwitchboard"];
+        put?: never;
+        /**
+         * Update the organization module switchboard
+         * @description Updates enabled modules through the governed iam.setModules capability. Every response includes Cache-Control: no-store and Pragma: no-cache. The authenticated actor must have iam.admin. Cookie-authenticated requests must include a same-origin Origin header. Bearer-authenticated requests bypass the browser Origin check. The request includes the current catalog module IDs, and the server preserves protected modules automatically.
+         */
+        post: operations["setModuleSwitchboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/support/channels": {
         parameters: {
             query?: never;
@@ -83,6 +107,28 @@ export interface components {
             approvalId?: string;
             approvalRationale?: string;
             replayed?: boolean;
+        };
+        ModuleInfo: {
+            id: string;
+            label: string;
+            description: string;
+            href: string | null;
+            protected?: boolean;
+        };
+        ModuleSwitchboardResponse: {
+            catalog: components["schemas"]["ModuleInfo"][];
+            enabledModules: string[];
+            usingDefaults: boolean;
+        };
+        ModuleSwitchboardRequest: {
+            modules: string[];
+            /** @description Optional idempotency intent; CR, LF, and NUL characters are rejected when non-null. */
+            intentId?: string | null;
+        };
+        ModuleSwitchboardPending: {
+            /** @constant */
+            pendingApproval: true;
+            hint: string;
         };
         ErrorResponse: {
             error: string;
@@ -216,6 +262,177 @@ export interface operations {
                 };
             };
             /** @description Capability execution is unavailable or the requested capability is disabled. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getModuleSwitchboard: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects the organization for this request. The server rejects malformed selectors and cookie sessions cannot select an organization they do not belong to. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The module catalog and effective module selection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleSwitchboardResponse"];
+                };
+            };
+            /** @description The organization selector is malformed or repeated. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid or the actor is not an authenticated organization member. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested organization does not match the authenticated actor's organization. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Only GET is supported. */
+            405: {
+                headers: {
+                    /** @description Allowed request method. */
+                    Allow?: "GET";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The module service is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    setModuleSwitchboard: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects the organization for this request and must match an organization membership. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModuleSwitchboardRequest"];
+            };
+        };
+        responses: {
+            /** @description The module switchboard update completed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityExecutionSuccess"];
+                };
+            };
+            /** @description The module change is waiting for approval. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleSwitchboardPending"];
+                };
+            };
+            /** @description The organization selector or request body is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid or the actor is not a verified organization member. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The origin is disallowed, the actor lacks iam.admin, or organization membership is no longer valid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Only POST is supported. */
+            405: {
+                headers: {
+                    /** @description Allowed request method. */
+                    Allow?: "POST";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The governed capability refused the module change. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The governed module update failed unexpectedly. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The module write service is unavailable. */
             503: {
                 headers: {
                     [name: string]: unknown;

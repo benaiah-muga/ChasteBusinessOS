@@ -22,12 +22,21 @@ func TestModulesWriteHandlerExecutesGovernedSwitchboardCapability(t *testing.T) 
 	identity.Permissions["iam.admin"] = true
 	resolver := &fakeDirectSessionResolver{resolved: identity}
 	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"enabledModules":["iam","projects","routines","signals"]}`)}}
-	request := modulesWriteRequest(`{"modules":["projects","projects"],"intentId":"intent-123","ignored":"legacy strips this"}`)
+	request := modulesWriteRequest(`{"modules":["projects","projects"],"intentId":"intent-123"}`)
 	response := httptest.NewRecorder()
 
 	NewModulesWriteHandler(resolver, executor, nil).ServeHTTP(response, request)
 
-	if response.Code != http.StatusOK || response.Body.String() != "{\"ok\":true,\"data\":{\"enabledModules\":[\"iam\",\"projects\",\"routines\",\"signals\"]}}\n" {
+	var result struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			EnabledModules []string `json:"enabledModules"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != http.StatusOK || !result.OK || strings.Join(result.Data.EnabledModules, ",") != "iam,projects,routines,signals" {
 		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
 	}
 	if response.Header().Get("Cache-Control") != "no-store" || resolver.resolveCalls != 1 || executor.calls != 1 {
@@ -100,6 +109,14 @@ func TestModulesWriteHandlerRejectsUnauthorizedRequestsBeforeExecution(t *testin
 				request.Body = io.NopCloser(strings.NewReader(`{"modules":["unknown"]}`))
 			},
 		},
+		{
+			name:   "unknown request field",
+			status: http.StatusBadRequest,
+			setup: func(resolver *fakeDirectSessionResolver, request *http.Request) {
+				resolver.resolved.Permissions["iam.admin"] = true
+				request.Body = io.NopCloser(strings.NewReader(`{"modules":["projects"],"extra":true}`))
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -132,5 +149,44 @@ func TestModulesWriteHandlerAcceptsBearerClients(t *testing.T) {
 
 	if response.Code != http.StatusOK || resolver.bearerCalls != 1 || resolver.bearer != "bearer-token" || executor.calls != 1 {
 		t.Fatalf("status=%d bearer calls=%d token=%q executor calls=%d body=%s", response.Code, resolver.bearerCalls, resolver.bearer, executor.calls, response.Body.String())
+	}
+}
+
+func TestModulesWriteHandlerRejectsMalformedIntentIDs(t *testing.T) {
+	for _, intentID := range []string{`123`, `true`, `{}`, `[]`} {
+		t.Run(intentID, func(t *testing.T) {
+			identity := directTestIdentity()
+			identity.Permissions["iam.admin"] = true
+			resolver := &fakeDirectSessionResolver{resolved: identity}
+			executor := &fakeDirectCapabilityExecutor{}
+			response := httptest.NewRecorder()
+			request := modulesWriteRequest(`{"modules":["projects"],"intentId":` + intentID + `}`)
+
+			NewModulesWriteHandler(resolver, executor, nil).ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest || executor.calls != 0 {
+				t.Fatalf("status=%d executor calls=%d body=%s", response.Code, executor.calls, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestModulesWriteHandlerCountsIntentIDRunes(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["iam.admin"] = true
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+	intentID := strings.Repeat("🙂", 101)
+	requestBody, err := json.Marshal(map[string]any{"modules": []string{"projects"}, "intentId": intentID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := modulesWriteRequest(string(requestBody))
+	response := httptest.NewRecorder()
+
+	NewModulesWriteHandler(resolver, executor, nil).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || executor.claims.IntentID != intentID {
+		t.Fatalf("status=%d intent id rune count was not accepted: %s", response.Code, response.Body.String())
 	}
 }

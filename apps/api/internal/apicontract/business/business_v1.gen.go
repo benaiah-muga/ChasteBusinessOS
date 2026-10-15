@@ -71,6 +71,21 @@ func (e CapabilityExecutionSuccessOk) Valid() bool {
 	}
 }
 
+// Defines values for ModuleSwitchboardPendingPendingApproval.
+const (
+	ModuleSwitchboardPendingPendingApprovalTrue ModuleSwitchboardPendingPendingApproval = true
+)
+
+// Valid indicates whether the value is a known member of the ModuleSwitchboardPendingPendingApproval enum.
+func (e ModuleSwitchboardPendingPendingApproval) Valid() bool {
+	switch e {
+	case ModuleSwitchboardPendingPendingApprovalTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PendingApprovalResponsePendingApproval.
 const (
 	PendingApprovalResponsePendingApprovalTrue PendingApprovalResponsePendingApproval = true
@@ -157,6 +172,38 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// ModuleInfo defines model for ModuleInfo.
+type ModuleInfo struct {
+	Description string  `json:"description"`
+	Href        *string `json:"href"`
+	Id          string  `json:"id"`
+	Label       string  `json:"label"`
+	Protected   *bool   `json:"protected,omitempty"`
+}
+
+// ModuleSwitchboardPending defines model for ModuleSwitchboardPending.
+type ModuleSwitchboardPending struct {
+	Hint            string                                  `json:"hint"`
+	PendingApproval ModuleSwitchboardPendingPendingApproval `json:"pendingApproval"`
+}
+
+// ModuleSwitchboardPendingPendingApproval defines model for ModuleSwitchboardPending.PendingApproval.
+type ModuleSwitchboardPendingPendingApproval bool
+
+// ModuleSwitchboardRequest defines model for ModuleSwitchboardRequest.
+type ModuleSwitchboardRequest struct {
+	// IntentId Optional idempotency intent; CR, LF, and NUL characters are rejected when non-null.
+	IntentId *string  `json:"intentId,omitempty"`
+	Modules  []string `json:"modules"`
+}
+
+// ModuleSwitchboardResponse defines model for ModuleSwitchboardResponse.
+type ModuleSwitchboardResponse struct {
+	Catalog        []ModuleInfo `json:"catalog"`
+	EnabledModules []string     `json:"enabledModules"`
+	UsingDefaults  bool         `json:"usingDefaults"`
+}
+
 // PendingApprovalResponse defines model for PendingApprovalResponse.
 type PendingApprovalResponse struct {
 	ApprovalId      openapi_types.UUID                     `json:"approvalId"`
@@ -195,6 +242,18 @@ type ExecuteCapability422JSONResponseBody struct {
 	union json.RawMessage
 }
 
+// GetModuleSwitchboardParams defines parameters for GetModuleSwitchboard.
+type GetModuleSwitchboardParams struct {
+	// XOrganizationID Selects the organization for this request. The server rejects malformed selectors and cookie sessions cannot select an organization they do not belong to.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// SetModuleSwitchboardParams defines parameters for SetModuleSwitchboard.
+type SetModuleSwitchboardParams struct {
+	// XOrganizationID Selects the organization for this request and must match an organization membership.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
 // UpdateSupportChannelsParams defines parameters for UpdateSupportChannels.
 type UpdateSupportChannelsParams struct {
 	// IdempotencyKey UUID for this exact settings update. Reuse it with the same body after an uncertain result.
@@ -203,6 +262,9 @@ type UpdateSupportChannelsParams struct {
 
 // ExecuteCapabilityJSONRequestBody defines body for ExecuteCapability for application/json ContentType.
 type ExecuteCapabilityJSONRequestBody = CapabilityExecutionRequest
+
+// SetModuleSwitchboardJSONRequestBody defines body for SetModuleSwitchboard for application/json ContentType.
+type SetModuleSwitchboardJSONRequestBody = ModuleSwitchboardRequest
 
 // UpdateSupportChannelsJSONRequestBody defines body for UpdateSupportChannels for application/json ContentType.
 type UpdateSupportChannelsJSONRequestBody = SupportChannelsPatch

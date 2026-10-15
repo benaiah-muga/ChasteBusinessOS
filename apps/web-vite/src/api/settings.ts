@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 
 /**
  * Settings client for the Vite app. Every governed write carries an
@@ -95,7 +96,7 @@ async function read<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {
 
 /* --------------------------------------------------------------- modules -- */
 
-const ModuleInfoSchema = z.object({
+const ModuleInfoSchema: z.ZodType<components["schemas"]["ModuleInfo"]> = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   description: z.string(),
@@ -103,7 +104,7 @@ const ModuleInfoSchema = z.object({
   protected: z.boolean().optional(),
 }).strict();
 
-const ModuleSwitchboardSchema = z.object({
+const ModuleSwitchboardSchema: z.ZodType<components["schemas"]["ModuleSwitchboardResponse"]> = z.object({
   catalog: z.array(ModuleInfoSchema),
   enabledModules: z.array(z.string()),
   usingDefaults: z.boolean(),
@@ -117,8 +118,8 @@ const ModuleSwitchboardSchema = z.object({
  */
 export const PROTECTED_MODULE_IDS = ["iam", "routines", "signals"] as const;
 
-export type ModuleInfo = z.infer<typeof ModuleInfoSchema>;
-export type ModuleSwitchboard = z.infer<typeof ModuleSwitchboardSchema>;
+export type ModuleInfo = components["schemas"]["ModuleInfo"];
+export type ModuleSwitchboard = components["schemas"]["ModuleSwitchboardResponse"];
 
 export function isProtectedModule(module: ModuleInfo): boolean {
   return module.protected === true || (PROTECTED_MODULE_IDS as readonly string[]).includes(module.id);
@@ -126,6 +127,22 @@ export function isProtectedModule(module: ModuleInfo): boolean {
 
 export function fetchModuleSwitchboard(signal?: AbortSignal): Promise<ModuleSwitchboard> {
   return read("/api/modules", ModuleSwitchboardSchema, {}, signal);
+}
+
+const ModuleSwitchboardModulesSchema = z.array(z.string().min(1)).min(1);
+const ModuleSwitchboardActionSchema = z.object({ modules: ModuleSwitchboardModulesSchema }).strict();
+
+export function buildModuleSwitchboardRequest(
+  modules: string[],
+  intentId: string,
+): components["schemas"]["ModuleSwitchboardRequest"] {
+  if (
+    !ModuleSwitchboardModulesSchema.safeParse(modules).success ||
+    Array.from(intentId).length > 200 || /[\r\n\0]/.test(intentId)
+  ) {
+    throw new SettingsApiError(0, "The module switchboard request contains invalid details.");
+  }
+  return { modules: [...modules], intentId };
 }
 
 const ModuleSettingsReadSchema = z.object({
@@ -457,9 +474,17 @@ async function sendGovernedAttempt(
   retryScope: GovernedRetryScope | undefined,
   signal?: AbortSignal,
 ): Promise<GovernedOutcome> {
+  let requestBody: object;
+  if (attempt.path === "/api/modules") {
+    const action = ModuleSwitchboardActionSchema.safeParse(attempt.action);
+    if (!action.success) throw new SettingsApiError(0, "The module switchboard request contains invalid details.");
+    requestBody = buildModuleSwitchboardRequest(action.data.modules, attempt.intentId);
+  } else {
+    requestBody = { ...attempt.action, intentId: attempt.intentId };
+  }
   const { response, body } = await request(
     attempt.path,
-    { method: "POST", body: JSON.stringify({ ...attempt.action, intentId: attempt.intentId }) },
+    { method: "POST", body: JSON.stringify(requestBody) },
     signal,
   );
   if (response.status === 202) {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildModuleSwitchboardRequest,
   fetchAiConfig,
   fetchAgentSoul,
   fetchBranding,
@@ -63,6 +64,16 @@ function enableRetryLock() {
 }
 
 describe("Vite settings API", () => {
+  it("builds the generated module switchboard request and validates its envelope", () => {
+    expect(buildModuleSwitchboardRequest(["crm"], "attempt-1")).toEqual({
+      modules: ["crm"],
+      intentId: "attempt-1",
+    });
+    expect(() => buildModuleSwitchboardRequest([], "attempt-1")).toThrow(SettingsApiError);
+    expect(() => buildModuleSwitchboardRequest(["crm"], "🙂".repeat(201))).toThrow(SettingsApiError);
+    expect(() => buildModuleSwitchboardRequest(["crm"], "bad\nintent")).toThrow(SettingsApiError);
+  });
+
   it("reuses the exact routine intent after uncertain transport and clears it only on completion", async () => {
     enableRetryLock();
     const scope = { actorId: "actor-1", organizationId: "org-1" };

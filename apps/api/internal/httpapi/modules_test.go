@@ -34,9 +34,16 @@ func TestModulesHandlerReturnsCatalogAndDefaultModules(t *testing.T) {
 	body := response.Body.String()
 	for _, fragment := range []string{
 		`"catalog":[`,
-		`"id":"accounting","label":"Accounting","description":"Ledger, invoicing, bills, payments, reports","href":"/accounting"`,
-		`"id":"skills","label":"Skills","description":"Advisory playbooks the workmate can consult","href":null`,
-		`"id":"iam","label":"Identity & access","description":"Roles, permissions, module switchboard","href":"/team","protected":true`,
+		`"id":"accounting"`,
+		`"label":"Accounting"`,
+		`"description":"Ledger, invoicing, bills, payments, reports"`,
+		`"href":"/accounting"`,
+		`"id":"skills"`,
+		`"label":"Skills"`,
+		`"href":null`,
+		`"id":"iam"`,
+		`"label":"Identity & access"`,
+		`"protected":true`,
 		`"enabledModules":["accounting","analytics","marketing","projects","pos","inventory","manufacturing","purchasing","crm","sales","documents","hr","messaging","support","skills","creator","iam","routines","signals"]`,
 		`"usingDefaults":true`,
 	} {

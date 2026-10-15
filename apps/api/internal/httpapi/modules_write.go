@@ -10,7 +10,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
@@ -23,11 +25,6 @@ type ModulesWriteHandler struct {
 	executor          CapabilityExecutor
 	logger            *slog.Logger
 	trustedProxyCIDRs []*net.IPNet
-}
-
-type modulesWriteBody struct {
-	Modules  []string        `json:"modules"`
-	IntentID json.RawMessage `json:"intentId"`
 }
 
 // NewModulesWriteHandler serves governed module switchboard writes for a verified session.
@@ -78,12 +75,10 @@ func (h *ModulesWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	intentID := ""
-	if len(body.IntentID) > 0 && string(body.IntentID) != "null" {
-		if err := json.Unmarshal(body.IntentID, &intentID); err != nil {
-			intentID = ""
-		}
+	if body.IntentId != nil {
+		intentID = *body.IntentId
 	}
-	if len(intentID) > 200 || strings.ContainsAny(intentID, "\r\n\x00") {
+	if utf8.RuneCountInString(intentID) > 200 || strings.ContainsAny(intentID, "\r\n\x00") {
 		writeModulesError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
@@ -113,9 +108,9 @@ func (h *ModulesWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if result.PendingApproval {
-		writeModulesJSON(w, http.StatusAccepted, map[string]any{
-			"pendingApproval": true,
-			"hint":            "Module changes proposed by the workmate wait for approval in the Approvals inbox.",
+		writeModulesJSON(w, http.StatusAccepted, businesscontract.ModuleSwitchboardPending{
+			PendingApproval: businesscontract.ModuleSwitchboardPendingPendingApprovalTrue,
+			Hint:            "Module changes proposed by the workmate wait for approval in the Approvals inbox.",
 		})
 		return
 	}
@@ -127,10 +122,10 @@ func (h *ModulesWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		writeModulesError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	writeModulesJSON(w, http.StatusOK, struct {
-		OK   bool            `json:"ok"`
-		Data json.RawMessage `json:"data"`
-	}{OK: true, Data: result.Data})
+	writeModulesJSON(w, http.StatusOK, businesscontract.CapabilityExecutionSuccess{
+		Ok:   businesscontract.CapabilityExecutionSuccessOkTrue,
+		Data: result.Data,
+	})
 }
 
 func (h *ModulesWriteHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, bool, error) {
@@ -146,27 +141,28 @@ func (h *ModulesWriteHandler) resolve(r *http.Request, selector string) (*sessio
 	return resolved, false, err
 }
 
-func decodeModulesWriteBody(w http.ResponseWriter, r *http.Request) (modulesWriteBody, bool) {
+func decodeModulesWriteBody(w http.ResponseWriter, r *http.Request) (businesscontract.ModuleSwitchboardRequest, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, modulesWriteBodyLimit)
 	decoder := json.NewDecoder(r.Body)
-	var body modulesWriteBody
+	decoder.DisallowUnknownFields()
+	var body businesscontract.ModuleSwitchboardRequest
 	if decoder.Decode(&body) != nil || len(body.Modules) == 0 {
 		writeModulesError(w, http.StatusBadRequest, "invalid body")
-		return modulesWriteBody{}, false
+		return businesscontract.ModuleSwitchboardRequest{}, false
 	}
 	var trailing any
 	if decoder.Decode(&trailing) != io.EOF {
 		writeModulesError(w, http.StatusBadRequest, "invalid body")
-		return modulesWriteBody{}, false
+		return businesscontract.ModuleSwitchboardRequest{}, false
 	}
 	known := make(map[string]struct{}, len(moduleCatalog))
 	for _, module := range moduleCatalog {
-		known[module.ID] = struct{}{}
+		known[module.Id] = struct{}{}
 	}
 	for _, id := range body.Modules {
 		if _, exists := known[id]; !exists {
 			writeModulesError(w, http.StatusBadRequest, "invalid body")
-			return modulesWriteBody{}, false
+			return businesscontract.ModuleSwitchboardRequest{}, false
 		}
 	}
 	return body, true

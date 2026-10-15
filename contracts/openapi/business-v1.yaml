@@ -101,6 +101,149 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/modules:
+    get:
+      operationId: getModuleSwitchboard
+      summary: Read the organization module switchboard
+      description: >-
+        Returns the module catalog and effective module selection for the authenticated organization. Every response includes Cache-Control: no-store and Pragma: no-cache. Cookie sessions use the active organization from session context unless X-Organization-ID is supplied. Bearer tokens are resolved against the selected organization, and an explicit selection must match an organization membership. This read does not require an Origin header.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the organization for this request. The server rejects malformed selectors and cookie sessions cannot select an organization they do not belong to.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The module catalog and effective module selection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleSwitchboardResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the actor is not an authenticated organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The requested organization does not match the authenticated actor's organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: GET
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The module service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: setModuleSwitchboard
+      summary: Update the organization module switchboard
+      description: >-
+        Updates enabled modules through the governed iam.setModules capability. Every response includes Cache-Control: no-store and Pragma: no-cache. The authenticated actor must have iam.admin. Cookie-authenticated requests must include a same-origin Origin header. Bearer-authenticated requests bypass the browser Origin check. The request includes the current catalog module IDs, and the server preserves protected modules automatically.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the organization for this request and must match an organization membership.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleSwitchboardRequest"
+      responses:
+        "200":
+          description: The module switchboard update completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityExecutionSuccess"
+        "202":
+          description: The module change is waiting for approval.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleSwitchboardPending"
+        "400":
+          description: The organization selector or request body is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the actor is not a verified organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The origin is disallowed, the actor lacks iam.admin, or organization membership is no longer valid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The governed capability refused the module change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The governed module update failed unexpectedly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The module write service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only POST is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: POST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/support/channels:
     get:
       operationId: getSupportChannels
@@ -298,6 +441,64 @@ components:
           type: string
         replayed:
           type: boolean
+    ModuleInfo:
+      type: object
+      additionalProperties: false
+      required: [id, label, description, href]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        label:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        href:
+          type: [string, "null"]
+        protected:
+          type: boolean
+    ModuleSwitchboardResponse:
+      type: object
+      additionalProperties: false
+      required: [catalog, enabledModules, usingDefaults]
+      properties:
+        catalog:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModuleInfo"
+        enabledModules:
+          type: array
+          items:
+            type: string
+        usingDefaults:
+          type: boolean
+    ModuleSwitchboardRequest:
+      type: object
+      additionalProperties: false
+      required: [modules]
+      properties:
+        modules:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+            description: A currently cataloged module ID. The handler validates each value against its current module catalog.
+        intentId:
+          type: [string, "null"]
+          maxLength: 200
+          description: Optional idempotency intent; CR, LF, and NUL characters are rejected when non-null.
+    ModuleSwitchboardPending:
+      type: object
+      additionalProperties: false
+      required: [pendingApproval, hint]
+      properties:
+        pendingApproval:
+          type: boolean
+          const: true
+        hint:
+          type: string
     ErrorResponse:
       type: object
       additionalProperties: false
