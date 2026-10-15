@@ -98,14 +98,14 @@ export const SupportConversationSchema = z.object({
   customerId: z.string(),
   customerName: z.string(),
   subject: z.string(),
-  status: z.string(),
-  lastMessageAt: z.string().nullable().optional(),
+  status: z.enum(["open", "escalated", "resolved"]),
+  lastMessageAt: z.string().datetime({ offset: true }).nullable().optional(),
   // Only the list read carries a preview; the detail read carries ticket fields instead.
   lastMessagePreview: z.string().optional(),
-  priority: z.string().nullable().optional(),
-  category: z.string().nullable().optional(),
+  priority: z.enum(["low", "normal", "high", "urgent"]).nullable().optional(),
+  category: z.string().max(40).nullable().optional(),
   assignedUserId: uuid.nullable().optional(),
-  slaDueAt: z.string().nullable().optional(),
+  slaDueAt: z.string().datetime({ offset: true }).nullable().optional(),
 }).strict();
 export type SupportConversation = z.infer<typeof SupportConversationSchema>;
 
@@ -430,10 +430,10 @@ export const SupportMessageSchema = z.object({
   id: uuid,
   orgId: uuid,
   conversationId: uuid,
-  senderType: z.string(),
+  senderType: z.enum(["customer", "staff", "agent", "system"]),
   senderUserId: uuid.nullable(),
   body: z.string(),
-  createdAt: z.string(),
+  createdAt: z.string().datetime({ offset: true }),
 }).strict();
 export type SupportMessage = z.infer<typeof SupportMessageSchema>;
 
@@ -513,20 +513,37 @@ export async function updateSupportChannels(
 }
 
 /** Shared team read. The envelope carries roles and a catalog alongside members. */
-const TeamMemberSchema = z.object({ userId: z.string().min(1), name: z.string().nullable(), email: z.string() }).passthrough();
+const TeamMemberSchema = z.object({
+  userId: uuid,
+  name: z.string().nullable(),
+  email: z.string(),
+  roleKeys: z.array(z.string().min(1)),
+}).strict();
+const TeamRoleSchema = z.object({
+  id: uuid,
+  key: z.string().min(1),
+  name: z.string().min(1),
+  isSystem: z.boolean(),
+  permissions: z.array(z.string().min(1)),
+}).strict();
+const TeamResponseSchema = z.object({
+  members: z.array(TeamMemberSchema),
+  roles: z.array(TeamRoleSchema),
+  catalog: z.array(z.string().min(1)),
+}).strict();
 export type SupportTeamMember = z.infer<typeof TeamMemberSchema>;
 
 export async function fetchSupportTeamMembers(signal?: AbortSignal): Promise<SupportTeamMember[]> {
-  const result = await get("/api/team", z.object({ members: z.array(TeamMemberSchema) }), signal);
+  const result = await get("/api/team", TeamResponseSchema, signal);
   return result.members;
 }
 
-/** Shared customer read. Rows carry CRM fields beyond the three the desk needs. */
-const CustomerOptionSchema = z.object({ id: uuid, name: z.string(), email: z.string().nullable().optional() }).passthrough();
+/** Mirrors the Go support-customer projection used by the Vite picker. */
+const CustomerOptionSchema = z.object({ id: uuid, name: z.string(), email: z.string().nullable() }).strict();
 export type SupportCustomerOption = z.infer<typeof CustomerOptionSchema>;
 
 export async function fetchSupportCustomerOptions(signal?: AbortSignal): Promise<SupportCustomerOption[]> {
-  const result = await get("/api/support/customers", z.object({ customers: z.array(CustomerOptionSchema) }), signal);
+  const result = await get("/api/support/customers", z.object({ customers: z.array(CustomerOptionSchema) }).strict(), signal);
   return result.customers;
 }
 
@@ -581,16 +598,16 @@ export const SupportWriteActionSchema = z.discriminatedUnion("action", [
 export type SupportWriteAction = z.infer<typeof SupportWriteActionSchema>;
 
 const SupportActionOutputSchemas = {
-  create: z.object({ conversationId: z.string().min(1) }).strict(),
-  message: z.object({ messageId: z.string().min(1), senderType: z.string() }).strict(),
-  send: z.object({ messageId: z.string().min(1), senderType: z.string() }).strict(),
+  create: z.object({ conversationId: uuid }).strict(),
+  message: z.object({ messageId: uuid, senderType: z.enum(["customer", "staff", "agent"]) }).strict(),
+  send: z.object({ messageId: uuid, senderType: z.enum(["customer", "staff", "agent"]) }).strict(),
   escalate: z.object({ status: z.literal("escalated") }).strict(),
   resolve: z.object({ status: z.literal("resolved") }).strict(),
   reopen: z.object({ status: z.literal("open") }).strict(),
   updateTicket: z.object({ updated: z.literal(true) }).strict(),
-  suggestCategory: z.object({ category: z.string(), draft: z.literal(true) }).strict(),
-  createCannedResponse: z.object({ cannedResponseId: z.string().min(1) }).strict(),
-  createKbArticle: z.object({ articleId: z.string().min(1) }).strict(),
+  suggestCategory: z.object({ category: z.enum(["billing", "technical", "how-to", "shipping", "general"]), draft: z.literal(true) }).strict(),
+  createCannedResponse: z.object({ cannedResponseId: uuid }).strict(),
+  createKbArticle: z.object({ articleId: uuid }).strict(),
 } as const;
 
 export type SupportActionOutput<Action extends SupportWriteAction> = z.infer<typeof SupportActionOutputSchemas[Action["action"]]>;

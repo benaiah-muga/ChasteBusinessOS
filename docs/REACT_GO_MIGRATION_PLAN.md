@@ -4753,3 +4753,10 @@ new owners and the manifest shows zero legacy runtime paths.
 444. (Typecheck verified) Vite Sales now narrows recovered order writes by
      action before reading delivery-only fields. This fixes the strict TypeScript
      error in the success-message branch without changing the action result.
+
+445. (Contract verified) Vite Support and Dashboard now reject malformed Go
+     response identifiers, unsupported enum values, and undeclared fields.
+     Support retains and reuses its original intent after malformed successful
+     write receipts. Focused Support and Dashboard tests pass 70 cases, targeted
+     lint and the Vite package typecheck pass, and independent review found no
+     contract or retry regressions.

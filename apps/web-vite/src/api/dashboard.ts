@@ -2,15 +2,18 @@ import { z } from "zod";
 
 const MinorUnitsSchema = z.number().int().safe();
 const CountSchema = z.number().int().nonnegative().safe();
+const SignalSchema = z.object({
+  id: z.string().min(1),
+  severity: z.enum(["red", "orange", "green"]),
+  module: z.string().min(1),
+  subject: z.string(),
+  detail: z.string(),
+  evidence: z.object({ refType: z.string(), refId: z.string().optional() }).strict().optional(),
+  suggestedAction: z.object({ capabilityId: z.string().min(1), inputDraft: z.unknown().optional() }).strict().optional(),
+}).strict();
 
 export const DashboardResponseSchema = z.object({
-  signals: z.array(z.object({
-    id: z.string().min(1),
-    severity: z.enum(["red", "orange", "green"]),
-    module: z.string().min(1),
-    subject: z.string(),
-    detail: z.string(),
-  })),
+  signals: z.array(SignalSchema),
   money: z.object({
     revenueMinor: MinorUnitsSchema,
     expenseMinor: MinorUnitsSchema,
@@ -20,44 +23,44 @@ export const DashboardResponseSchema = z.object({
     assetsMinor: MinorUnitsSchema,
     liabilitiesMinor: MinorUnitsSchema,
     equityMinor: MinorUnitsSchema,
-  }),
+  }).strict(),
   workingCapital: z.object({
     arOutstandingMinor: MinorUnitsSchema,
     overdueCount: CountSchema,
     overdueAmountMinor: MinorUnitsSchema,
     apOutstandingMinor: MinorUnitsSchema,
-  }),
+  }).strict(),
   pipeline: z.object({
     stages: z.array(z.object({
       stage: z.enum(["lead", "qualified", "proposal", "negotiation", "won", "lost"]),
       count: CountSchema,
       valueMinor: MinorUnitsSchema,
-    })),
+    }).strict()),
     openCount: CountSchema,
     weightedForecastMinor: MinorUnitsSchema,
-  }),
+  }).strict(),
   ops: z.object({
     headcount: CountSchema,
     pendingLeave: CountSchema,
-    posOpen: z.object({ register: z.string() }).nullable(),
-    lowStock: z.array(z.object({ sku: z.string(), name: z.string() })),
+    posOpen: z.object({ register: z.string() }).strict().nullable(),
+    lowStock: z.array(z.object({ sku: z.string(), name: z.string() }).strict()),
     pendingApprovals: CountSchema,
     docsParsed: CountSchema,
     docsAwaitingCoding: CountSchema,
-  }),
+  }).strict(),
   trend: z.array(z.object({
     month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
     incomeMinor: MinorUnitsSchema,
     expenseMinor: MinorUnitsSchema,
-  })),
+  }).strict()),
   activity: z.array(z.object({
     seq: CountSchema,
     kind: z.string(),
     capabilityId: z.string().nullable(),
     actorType: z.string(),
     occurredAt: z.string().datetime({ offset: true }),
-  })),
-});
+  }).strict()),
+}).strict();
 
 const SetupItemSchema = z.object({
   id: z.string().min(1),
@@ -72,12 +75,12 @@ const SetupItemSchema = z.object({
     }
   }, "Expected a local path"),
   done: z.boolean(),
-});
+}).strict();
 
 export const SetupResponseSchema = z.object({
   items: z.array(SetupItemSchema),
   remaining: CountSchema,
-});
+}).strict();
 
 const LocalPathSchema = z.string().refine((value) => {
   if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return false;
@@ -98,25 +101,25 @@ export const WorkCardSchema = z.object({
   actionHref: LocalPathSchema,
   createdAt: z.string().datetime({ offset: true }).nullable(),
   rank: CountSchema,
-});
+}).strict();
 
 const MyWorkResponseSchema = z.object({
   cards: z.array(WorkCardSchema).max(30),
   generatedAt: z.string().datetime({ offset: true }),
-});
+}).strict();
 
 const WorkBriefInputSchema = z.object({
   cards: z.array(z.object({
     kind: z.string().min(1),
     title: z.string().min(1),
     detail: z.string(),
-  })).min(1).max(30),
-});
+  }).strict()).min(1).max(30),
+}).strict();
 
 const WorkBriefResponseSchema = z.object({
   brief: z.string().min(1),
-  model: z.string().optional(),
-});
+  model: z.string().min(1),
+}).strict();
 
 const ApiErrorBodySchema = z.object({
   hint: z.string().optional(),

@@ -38,6 +38,27 @@ describe("dashboard API client", () => {
     });
   });
 
+  it("rejects unknown fields at every dashboard response level while accepting Go signal details", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ...dashboardFixture,
+      signals: [{
+        ...dashboardFixture.signals[0],
+        evidence: { refType: "inventory.item", refId: "item-1" },
+        suggestedAction: { capabilityId: "inventory.createCount", inputDraft: { itemId: "item-1" } },
+      }],
+    })));
+    await expect(fetchDashboard()).resolves.toMatchObject({ signals: [{ evidence: { refType: "inventory.item" } }] });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...dashboardFixture, unknown: true })));
+    await expect(fetchDashboard()).rejects.toMatchObject({ status: 200, message: "The dashboard service returned data in an unexpected format." });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ...dashboardFixture,
+      money: { ...dashboardFixture.money, unknown: true },
+    })));
+    await expect(fetchDashboard()).rejects.toMatchObject({ status: 200, message: "The dashboard service returned data in an unexpected format." });
+  });
+
   it("validates setup records and refuses paths that could leave the legacy origin", async () => {
     const safeResponse = vi.fn(async () => Response.json({ items: setupFixture, remaining: 1 }));
     vi.stubGlobal("fetch", safeResponse);
@@ -70,6 +91,20 @@ describe("dashboard API client", () => {
     await expect(fetchMyWork()).rejects.toMatchObject({
       message: "The work queue returned data in an unexpected format.",
     });
+  });
+
+  it("rejects undeclared work queue fields and requires the Go summary model receipt", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      cards: [{ ...myWorkFixture[0], unexpected: true }],
+      generatedAt: "2026-09-27T10:15:00.000Z",
+    })));
+    await expect(fetchMyWork()).rejects.toMatchObject({ message: "The work queue returned data in an unexpected format." });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ brief: "Review one approval." })));
+    await expect(summarizeWork(myWorkFixture)).rejects.toMatchObject({ message: "The work brief service returned data in an unexpected format." });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ brief: "Review one approval.", model: "test-model", extra: true })));
+    await expect(summarizeWork(myWorkFixture)).rejects.toMatchObject({ message: "The work brief service returned data in an unexpected format." });
   });
 
   it("posts a schema-checked work bundle to the existing summary API", async () => {

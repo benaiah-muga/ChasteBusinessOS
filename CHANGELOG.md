@@ -72,6 +72,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Inventory rejects cycle-count responses outside Go's exact output bounds, while preserving the same retry intent after a malformed response.
 - Vite Purchasing rejects vendor and AP aging payloads that do not match Go's exact workspace contract.
 - Vite Sales narrows recovered write results by action before reading delivery status, keeping its confirmed-order message correctly typed.
+- Vite Support and Dashboard reject Go responses that contain malformed IDs, unsupported values, or undeclared fields, and preserve retry intents after malformed write receipts.
 
 ### Changed
 

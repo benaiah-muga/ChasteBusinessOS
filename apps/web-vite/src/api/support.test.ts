@@ -9,6 +9,7 @@ import {
   fetchSupportEnabled,
   fetchSupportLibrary,
   fetchSupportTickets,
+  fetchSupportTeamMembers,
   fetchSupportThread,
   readPendingSupportCannedResponse,
   readPendingSupportKbArticle,
@@ -147,9 +148,10 @@ describe("support Go inbox reads", () => {
   });
 
   it("uses Go full-detail mode and projects its strict guest-customer shape", async () => {
+    const systemMessage = { ...message, id: "889a3b29-a63c-4d4b-a1db-f95393e8844b", senderType: "system", body: "Conversation reopened." };
     const goThread = {
       conversation: { ...threadResponse.conversation, customerId: null, customerEmail: "guest@example.test" },
-      messages: [message],
+      messages: [message, systemMessage],
     };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: goThread }));
     vi.stubGlobal("fetch", fetchMock);
@@ -158,7 +160,7 @@ describe("support Go inbox reads", () => {
 
     expect(result.conversation.customerId).toBe("");
     expect(result.conversation).not.toHaveProperty("customerEmail");
-    expect(result.messages).toEqual([message]);
+    expect(result.messages).toEqual([message, systemMessage]);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       body: expect.stringContaining('"capabilityId":"support.readConversation"'),
     }));
@@ -292,7 +294,7 @@ describe("support thread reads", () => {
 
 describe("support customer picker read", () => {
   it("reads the Go picker projection with same-origin credentials", async () => {
-    const customer = { id: customerId, name: "Ada Lovelace", email: "ada@example.test", purchaseCount: 2, lifetimeSpendMinor: 2500 };
+    const customer = { id: customerId, name: "Ada Lovelace", email: "ada@example.test" };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toBe("/api/support/customers");
       expect(init?.credentials).toBe("same-origin");
@@ -307,11 +309,27 @@ describe("support customer picker read", () => {
   it("rejects malformed picker rows and preserves HTTP errors", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ customers: [{ id: "not-a-uuid", name: "Ada" }] }))
+      .mockResolvedValueOnce(jsonResponse({ customers: [{ id: customerId, name: "Ada", email: null, purchaseCount: 2 }] }))
       .mockResolvedValueOnce(jsonResponse({ error: "forbidden" }, 403));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchSupportCustomerOptions()).rejects.toMatchObject({ status: 200, message: "The support service returned data in an unexpected format." });
+    await expect(fetchSupportCustomerOptions()).rejects.toMatchObject({ status: 200, message: "The support service returned data in an unexpected format." });
     await expect(fetchSupportCustomerOptions()).rejects.toMatchObject({ status: 403, message: expect.stringContaining("permission") });
+  });
+});
+
+describe("support team Go read", () => {
+  it("validates the full team response contract before returning members", async () => {
+    const member = { userId: customerId, name: "Ada Lovelace", email: "ada@example.test", roleKeys: ["support"] };
+    const role = { id: conversationId, key: "support", name: "Support", isSystem: false, permissions: ["support.read"] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ members: [member], roles: [role], catalog: ["support.read"] }))
+      .mockResolvedValueOnce(jsonResponse({ members: [member], roles: [role], catalog: ["support.read"], unexpected: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSupportTeamMembers()).resolves.toEqual([member]);
+    await expect(fetchSupportTeamMembers()).rejects.toMatchObject({ status: 200, message: "The support service returned data in an unexpected format." });
   });
 });
 
@@ -429,7 +447,7 @@ describe("governed support writes", () => {
 
   it("keeps quick customer creation on the Go capability when the former selector is off", async () => {
     vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", false);
-    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { customerId, duplicateWarning: null } }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { customerId, duplicateWarning: null } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(createSupportCustomer({ name: "Grace Hopper" }, retryScope)).resolves.toEqual({
@@ -732,6 +750,22 @@ describe("Go support conversation writes", () => {
     expect(retries[1]?.intentId).toBe(firstIntent);
     expect(retries[1]?.input).toEqual({ conversationId, body: action.body, from: "staff" });
     expect(window.localStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it("retains and reuses the same intent after a malformed successful Go receipt", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { conversationId: "not-a-uuid" } }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { conversationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "create" as const, customerId, subject: "Invoice question" };
+
+    await expect(submitSupportConversationAction(action, scope)).rejects.toMatchObject({ status: 200, message: "The Go support service returned an unexpected conversation result." });
+    const pending = readPendingSupportConversationWrite(scope);
+    expect(pending).toEqual({ capabilityId: "support.startConversation", input: { customerId, subject: action.subject } });
+    await expect(submitSupportConversationAction(action, scope)).resolves.toEqual({ kind: "completed", data: { conversationId } });
+    const payloads = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string; input: unknown });
+    expect(payloads[1]?.intentId).toBe(payloads[0]?.intentId);
+    expect(payloads[1]?.input).toEqual(payloads[0]?.input);
   });
 
   it("preserves the supported customer-words attribution choice in the Go message input", async () => {
