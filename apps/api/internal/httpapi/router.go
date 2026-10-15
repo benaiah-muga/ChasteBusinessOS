@@ -217,6 +217,50 @@ func MountGoAIConfigRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoBankingRoute owns the legacy Banking REST contract for authenticated
+// clients while dispatching its operations through the capability executor.
+func MountGoBankingRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/api/banking", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountGoAccountingBudgetsRoute owns the authenticated budget scenario REST API.
+func MountGoAccountingBudgetsRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/accounting/budgets", route)
+	mux.Handle("POST /api/accounting/budgets", route)
+	if base != nil {
+		mux.Handle("HEAD /api/accounting/budgets", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountGoTimeRoute owns authenticated HR time reporting and entry actions.
+func MountGoTimeRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/time", route)
+	mux.Handle("POST /api/time", route)
+	if base != nil {
+		mux.Handle("HEAD /api/time", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoDocumentsEditorWorkspaceRoute owns the authored-document draft,
 // presence, and editing-lock endpoint when supplied by server configuration.
 func MountGoDocumentsEditorWorkspaceRoute(base, route http.Handler) http.Handler {

@@ -4672,3 +4672,14 @@ new owners and the manifest shows zero legacy runtime paths.
      browser proof changed a synthetic draft, reloaded it, and confirmed the
      updated note, line values, and total persisted; Go returned HTTP 200 and
      the browser reported no errors.
+
+435. (Runtime verified) Go owns the session-authenticated GET and POST routes
+     for accounting budgets, banking, and time entries, and Vite proxies those
+     paths directly to Go. Budget undo validates its scenario ID before
+     capability dispatch, and all state-changing requests require a caller
+     supplied idempotency intent ID. Focused Go HTTP and router tests pass with
+     vet enabled, Vite proxy tests pass, and route ownership checks pass at
+     94 files, 162 methods (72 Go, 88 legacy, 2 auth), and 30 pages.
+     Authenticated agent-browser proof
+     used local SMTP email verification and returned HTTP 200 from all three
+     Go routes; the browser reported no errors.

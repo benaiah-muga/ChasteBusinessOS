@@ -22,16 +22,16 @@
       "path": "/api/accounting/budgets",
       "method": "GET",
       "source": "apps/web/src/app/api/accounting/budgets/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/accounting/budgets",
       "method": "POST",
       "source": "apps/web/src/app/api/accounting/budgets/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -158,16 +158,16 @@
       "path": "/api/banking",
       "method": "GET",
       "source": "apps/web/src/app/api/banking/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/banking",
       "method": "POST",
       "source": "apps/web/src/app/api/banking/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1286,16 +1286,16 @@
       "path": "/api/time",
       "method": "GET",
       "source": "apps/web/src/app/api/time/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/time",
       "method": "POST",
       "source": "apps/web/src/app/api/time/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "page",

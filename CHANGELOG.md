@@ -30,6 +30,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite CRM supports undoing the latest single or bulk customer profile update through Go, with scoped recovery after pending or uncertain results.
 - Vite Inventory can cancel an untouched pending stock transfer draft through Go after explicit confirmation, with scoped exact retry recovery.
 - Vite Hiring can close an open role through Go and keeps it closed after refresh.
+- Vite and future clients can read and update accounting budgets, banking data, and time entries through session-authenticated Go REST routes. Write requests require a client-supplied idempotency intent ID.
 - Vite Sales can quick-create a catalog item through Go's `inventory.createItem` capability and add it to a sales draft, with actor/org-scoped retry recovery.
 - Vite Support can file an internal request, bug, or capability-gap ticket through Go's `support.createTicket` capability with actor/org-scoped exact retry recovery.
 - Vite Sales can decline sent quotes through Go after explicit confirmation, with exact retry recovery and stale actor/workspace result suppression.

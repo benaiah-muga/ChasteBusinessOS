@@ -628,6 +628,48 @@
       "path": "/support",
       "owner": "vite",
       "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/budgets",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/budgets",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/banking",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/banking",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/time",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/time",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
     }
   ],
   "goRoutes": [

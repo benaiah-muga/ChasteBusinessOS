@@ -681,6 +681,29 @@ const supportedGoAuthRoutes: Array<{ method: string; url: string }> = [
 ];
 
 describe("Vite Go route proxy selection", () => {
+  it("routes the Banking REST contract to Go for every method on its exact path", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]) {
+      expect(isGoRouteRequest(defaults, method, "/api/banking")).toBe(true);
+    }
+    expect(isGoRouteRequest(defaults, "GET", "/api/banking?view=workspace")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/banking/extra")).toBe(false);
+  });
+
+  it("routes the migrated accounting budgets and time APIs to Go", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    for (const [path, methods] of [
+      ["/api/accounting/budgets", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]],
+      ["/api/time", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]],
+    ] as const) {
+      for (const method of methods) {
+        expect(isGoRouteRequest(defaults, method, path)).toBe(true);
+      }
+      expect(isGoRouteRequest(defaults, "GET", `${path}?probe=1`)).toBe(true);
+      expect(isGoRouteRequest(defaults, "GET", `${path}/extra`)).toBe(false);
+    }
+  });
+
   it("always routes email status and sends to Go", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     for (const method of ["GET", "POST"]) {

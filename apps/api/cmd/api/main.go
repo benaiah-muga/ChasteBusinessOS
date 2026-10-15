@@ -836,6 +836,12 @@ func run(logger *slog.Logger) error {
 		os.Getenv("SMTP_FROM"), os.Getenv("GO_PUBLIC_APP_URL"), logger, trustedProxyCIDRs,
 	)
 	logger.Info("Go email route mounted", "path", "/api/email")
+	bankingRoute := httpapi.NewBankingSessionHandler(emailResolver, capabilityExecutor, httpapi.NewPGXBankingPaymentReader(pool), logger, trustedProxyCIDRs)
+	logger.Info("Go Banking REST route mounted", "path", "/api/banking")
+	accountingBudgetsRoute := httpapi.NewAccountingBudgetsSessionHandler(pool, emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go accounting budgets route mounted", "path", "/api/accounting/budgets")
+	timeRoute := httpapi.NewTimeSessionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go HR time route mounted", "path", "/api/time")
 
 	apiHandler := httpapi.MountGoMessageAttachmentDownloadRoute(httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoCRMReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
 		pool,
@@ -851,6 +857,9 @@ func run(logger *slog.Logger) error {
 		authRoute,
 		approvalDecider,
 	), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute, routinesWebhookRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute)
+	apiHandler = httpapi.MountGoBankingRoute(apiHandler, bankingRoute)
+	apiHandler = httpapi.MountGoAccountingBudgetsRoute(apiHandler, accountingBudgetsRoute)
+	apiHandler = httpapi.MountGoTimeRoute(apiHandler, timeRoute)
 	apiHandler = httpapi.MountGoApprovalsReadRoute(apiHandler, approvalsReadRoute)
 	apiHandler = httpapi.MountGoSalesCustomersRoute(apiHandler, salesCustomersRoute)
 	apiHandler = httpapi.MountGoApprovalsDecisionRoute(apiHandler, approvalsDecisionRoute)
