@@ -449,6 +449,11 @@ func TestMountGoSessionReadRoutesUseExactMethodsAndUUIDPaths(t *testing.T) {
 			t.Fatalf("expected Go handler for %s, got legacy fallback", path)
 		}
 	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/durable-runs", nil))
+	if got := response.Body.String(); got != "durable-runs" {
+		t.Fatalf("POST /api/durable-runs response body=%q, want Go durable-runs handler", got)
+	}
 
 	for _, test := range []struct {
 		method string
@@ -461,6 +466,9 @@ func TestMountGoSessionReadRoutesUseExactMethodsAndUUIDPaths(t *testing.T) {
 		{method: http.MethodHead, path: "/api/sessions/" + sessionID},
 		{method: http.MethodGet, path: "/api/durable-runs/not-a-uuid"},
 		{method: http.MethodHead, path: "/api/durable-runs/" + runID},
+		{method: http.MethodPost, path: "/api/durable-runs/" + runID},
+		{method: http.MethodPost, path: "/api/durable-runs/extra"},
+		{method: http.MethodPut, path: "/api/durable-runs"},
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
@@ -469,7 +477,7 @@ func TestMountGoSessionReadRoutesUseExactMethodsAndUUIDPaths(t *testing.T) {
 		}
 	}
 
-	response := httptest.NewRecorder()
+	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/notifications", nil))
 	if got := response.Body.String(); got != "legacy" {
 		t.Fatalf("notification write did not reach fallback: got %q", got)

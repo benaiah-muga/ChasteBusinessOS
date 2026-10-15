@@ -803,10 +803,14 @@ func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportC
 	return mux
 }
 
-// MountGoSessionReadRoutes mounts session and durable-run reads only when
-// their handlers are explicitly enabled by the API process configuration.
+// MountGoSessionReadRoutes mounts session reads and durable-run reads and
+// creates only when their handlers are explicitly enabled by API configuration.
 func MountGoSessionReadRoutes(base, sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/durable-runs" && durableRunsRoute != nil {
+			durableRunsRoute.ServeHTTP(w, r)
+			return
+		}
 		if r.Method == http.MethodGet {
 			switch {
 			case r.URL.Path == "/api/sessions" && sessionsListRoute != nil:

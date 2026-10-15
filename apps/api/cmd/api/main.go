@@ -33,10 +33,6 @@ func main() {
 	}
 }
 
-func goAuthRouteEnabledFromEnv(value string) bool {
-	return value != "0"
-}
-
 func goMessageAttachmentDownloadRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -667,81 +663,76 @@ func run(logger *slog.Logger) error {
 	}
 	var authRoute http.Handler
 	var authOutbox *authn.Service
-	if (os.Getenv("GO_OIDC_ENABLED") == "1" || os.Getenv("GO_SAML_ENABLED") == "1") && !goAuthRouteEnabledFromEnv(os.Getenv("GO_AUTH_ROUTE")) {
-		return errors.New("GO_OIDC_ENABLED=1 and GO_SAML_ENABLED=1 require GO_AUTH_ROUTE=1")
+	authSecret := os.Getenv("BETTER_AUTH_SECRET")
+	if authSecret == "" {
+		return errors.New("BETTER_AUTH_SECRET is required because Go owns the authentication routes")
 	}
-	if goAuthRouteEnabledFromEnv(os.Getenv("GO_AUTH_ROUTE")) {
-		authSecret := os.Getenv("BETTER_AUTH_SECRET")
-		if authSecret == "" {
-			return errors.New("GO_AUTH_ROUTE=1 requires BETTER_AUTH_SECRET")
-		}
-		runtimeConfig, err := authn.ResolveAuthRouteRuntime(
-			os.Getenv("GO_AUTH_MODE"),
-			os.Getenv("GO_AUTH_PUBLIC_ORIGIN"),
-			os.Getenv("GO_AUTH_SECURE_COOKIE"),
-			os.Getenv("NEXT_PUBLIC_APP_URL"),
-		)
-		if err != nil {
-			return err
-		}
-		trustedProxyCIDRs, err := httpapi.ParseTrustedProxyCIDRs(os.Getenv("GO_AUTH_TRUSTED_PROXY_CIDRS"))
-		if err != nil {
-			return err
-		}
-		authService, err := authn.NewService(pool, authSecret, authn.Options{
-			BaseURL:                runtimeConfig.BaseURL,
-			TrustedOrigins:         runtimeConfig.TrustedOrigins,
-			Logger:                 logger,
-			RecoveryLinkSender:     authn.SMTPRecoveryLinkSenderFromEnv(),
-			VerificationLinkSender: authn.SMTPVerificationLinkSenderFromEnv(),
+	runtimeConfig, err := authn.ResolveAuthRouteRuntime(
+		os.Getenv("GO_AUTH_MODE"),
+		os.Getenv("GO_AUTH_PUBLIC_ORIGIN"),
+		os.Getenv("GO_AUTH_SECURE_COOKIE"),
+		os.Getenv("BETTER_AUTH_URL"),
+	)
+	if err != nil {
+		return err
+	}
+	authTrustedProxyCIDRs, err := httpapi.ParseTrustedProxyCIDRs(os.Getenv("GO_AUTH_TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		return err
+	}
+	authService, err := authn.NewService(pool, authSecret, authn.Options{
+		BaseURL:                runtimeConfig.BaseURL,
+		TrustedOrigins:         runtimeConfig.TrustedOrigins,
+		Logger:                 logger,
+		RecoveryLinkSender:     authn.SMTPRecoveryLinkSenderFromEnv(),
+		VerificationLinkSender: authn.SMTPVerificationLinkSenderFromEnv(),
+	})
+	if err != nil {
+		return errors.New("BETTER_AUTH_SECRET or auth URL is unusable: " + err.Error())
+	}
+	authOutbox = authService
+	var oidcRoutes, samlRoutes http.Handler
+	if os.Getenv("GO_OIDC_ENABLED") == "1" {
+		oidcRoutes, err = httpapi.NewOIDCSignInHandler(context.Background(), authService, authSecret, runtimeConfig.SecureCookie, logger, authTrustedProxyCIDRs, httpapi.OIDCConfig{
+			Issuer: os.Getenv("GO_OIDC_ISSUER"), ClientID: os.Getenv("GO_OIDC_CLIENT_ID"),
+			ClientSecret: os.Getenv("GO_OIDC_CLIENT_SECRET"), RedirectURI: os.Getenv("GO_OIDC_REDIRECT_URI"),
+			NativeRedirectURI:    os.Getenv("GO_OIDC_NATIVE_REDIRECT_URI"),
+			TrustVerifiedEmail:   os.Getenv("GO_OIDC_TRUST_VERIFIED_EMAIL") == "true",
+			AllowedEndpointHosts: os.Getenv("GO_OIDC_ALLOWED_ENDPOINT_HOSTS"),
 		})
 		if err != nil {
-			return errors.New("BETTER_AUTH_SECRET or auth URL is unusable: " + err.Error())
-		}
-		authOutbox = authService
-		var oidcRoutes, samlRoutes http.Handler
-		if os.Getenv("GO_OIDC_ENABLED") == "1" {
-			oidcRoutes, err = httpapi.NewOIDCSignInHandler(context.Background(), authService, authSecret, runtimeConfig.SecureCookie, logger, trustedProxyCIDRs, httpapi.OIDCConfig{
-				Issuer: os.Getenv("GO_OIDC_ISSUER"), ClientID: os.Getenv("GO_OIDC_CLIENT_ID"),
-				ClientSecret: os.Getenv("GO_OIDC_CLIENT_SECRET"), RedirectURI: os.Getenv("GO_OIDC_REDIRECT_URI"),
-				NativeRedirectURI:    os.Getenv("GO_OIDC_NATIVE_REDIRECT_URI"),
-				TrustVerifiedEmail:   os.Getenv("GO_OIDC_TRUST_VERIFIED_EMAIL") == "true",
-				AllowedEndpointHosts: os.Getenv("GO_OIDC_ALLOWED_ENDPOINT_HOSTS"),
-			})
-			if err != nil {
-				return err
-			}
-			logger.Info("Go OIDC sign-in routes mounted", "path", "/api/auth/sign-in/oidc")
-		}
-		if os.Getenv("GO_SAML_ENABLED") == "1" {
-			samlRoutes, err = httpapi.NewSAMLSignInHandler(authService, authSecret, runtimeConfig.SecureCookie, logger, httpapi.SAMLConfig{
-				IDPIssuer: os.Getenv("GO_SAML_IDP_ISSUER"), IDPSSOURL: os.Getenv("GO_SAML_IDP_SSO_URL"),
-				IDPSigningCertPEM: os.Getenv("GO_SAML_IDP_SIGNING_CERT_PEM"), SPEntityID: os.Getenv("GO_SAML_SP_ENTITY_ID"),
-				ACSURL: os.Getenv("GO_SAML_ACS_URL"), SuccessURL: os.Getenv("GO_SAML_SUCCESS_URL"),
-				TrustVerifiedEmail: os.Getenv("GO_SAML_TRUST_VERIFIED_EMAIL") == "true",
-				EmailAttribute:     os.Getenv("GO_SAML_EMAIL_ATTRIBUTE"), NameAttribute: os.Getenv("GO_SAML_NAME_ATTRIBUTE"),
-			})
-			if err != nil {
-				return err
-			}
-			logger.Info("Go SAML sign-in routes mounted", "paths", []string{"/api/auth/sign-in/saml", "/api/auth/callback/saml"})
-		}
-		authRoute, err = httpapi.NewAuthHandlerWithFederatedRoutes(authService, authSecret, runtimeConfig.SecureCookie, logger, trustedProxyCIDRs, oidcRoutes, samlRoutes)
-		if err != nil {
 			return err
 		}
-		invitationResolver, err := getSessionResolver()
-		if err != nil {
-			return err
-		}
-		invitationRoute, err := httpapi.NewGoInvitationHandler(pool, invitationResolver, trustedProxyCIDRs, logger)
-		if err != nil {
-			return err
-		}
-		authRoute = httpapi.MountGoInvitationRoutes(authRoute, invitationRoute)
-		logger.Info("Go invitation routes mounted", "paths", []string{"GET /api/auth/invitations/{token}", "POST /api/auth/invitations/{token}"})
-		logger.Info("Go authentication routes mounted", "path", "/api/auth")
+		logger.Info("Go OIDC sign-in routes mounted", "path", "/api/auth/sign-in/oidc")
 	}
+	if os.Getenv("GO_SAML_ENABLED") == "1" {
+		samlRoutes, err = httpapi.NewSAMLSignInHandler(authService, authSecret, runtimeConfig.SecureCookie, logger, httpapi.SAMLConfig{
+			IDPIssuer: os.Getenv("GO_SAML_IDP_ISSUER"), IDPSSOURL: os.Getenv("GO_SAML_IDP_SSO_URL"),
+			IDPSigningCertPEM: os.Getenv("GO_SAML_IDP_SIGNING_CERT_PEM"), SPEntityID: os.Getenv("GO_SAML_SP_ENTITY_ID"),
+			ACSURL: os.Getenv("GO_SAML_ACS_URL"), SuccessURL: os.Getenv("GO_SAML_SUCCESS_URL"),
+			TrustVerifiedEmail: os.Getenv("GO_SAML_TRUST_VERIFIED_EMAIL") == "true",
+			EmailAttribute:     os.Getenv("GO_SAML_EMAIL_ATTRIBUTE"), NameAttribute: os.Getenv("GO_SAML_NAME_ATTRIBUTE"),
+		})
+		if err != nil {
+			return err
+		}
+		logger.Info("Go SAML sign-in routes mounted", "paths", []string{"/api/auth/sign-in/saml", "/api/auth/callback/saml"})
+	}
+	authRoute, err = httpapi.NewAuthHandlerWithFederatedRoutes(authService, authSecret, runtimeConfig.SecureCookie, logger, authTrustedProxyCIDRs, oidcRoutes, samlRoutes)
+	if err != nil {
+		return err
+	}
+	invitationResolver, err := getSessionResolver()
+	if err != nil {
+		return err
+	}
+	invitationRoute, err := httpapi.NewGoInvitationHandler(pool, invitationResolver, authTrustedProxyCIDRs, logger)
+	if err != nil {
+		return err
+	}
+	authRoute = httpapi.MountGoInvitationRoutes(authRoute, invitationRoute)
+	logger.Info("Go invitation routes mounted", "paths", []string{"GET /api/auth/invitations/{token}", "POST /api/auth/invitations/{token}"})
+	logger.Info("Go authentication routes mounted", "path", "/api/auth")
 	var supportPublicRoute http.Handler
 	if os.Getenv("GO_SUPPORT_PUBLIC_ROUTE") != "0" {
 		trustedProxyCIDRs, err := httpapi.ParseTrustedProxyCIDRs(os.Getenv("GO_SUPPORT_TRUSTED_PROXY_CIDRS"))

@@ -13,7 +13,7 @@ type AuthRouteRuntime struct {
 }
 
 // ResolveAuthRouteRuntime rejects an implicit or insecure production browser
-// origin. Local development may retain the legacy app URL fallback.
+// origin. Local development may set BETTER_AUTH_URL to the Vite browser origin.
 func ResolveAuthRouteRuntime(mode, publicOrigin, secureCookiePolicy, appURL string) (AuthRouteRuntime, error) {
 	var result AuthRouteRuntime
 	switch mode {
@@ -31,7 +31,7 @@ func ResolveAuthRouteRuntime(mode, publicOrigin, secureCookiePolicy, appURL stri
 		result.SecureCookie = true
 		return result, nil
 	default:
-		return result, errors.New("GO_AUTH_MODE must be explicitly set to development or production when GO_AUTH_ROUTE=1")
+		return result, errors.New("GO_AUTH_MODE must be explicitly set to development or production")
 	}
 
 	if publicOrigin != "" {
@@ -53,9 +53,6 @@ func ResolveAuthRouteRuntime(mode, publicOrigin, secureCookiePolicy, appURL stri
 	}
 	result.BaseURL = strings.TrimRight(appURL, "/") + "/api/auth"
 	result.TrustedOrigins = []string{originOf(parsed)}
-	if mode == "development" {
-		result.TrustedOrigins = append(result.TrustedOrigins, "http://localhost:3001")
-	}
 	result.SecureCookie = secureCookiePolicy == "true"
 	return result, nil
 }

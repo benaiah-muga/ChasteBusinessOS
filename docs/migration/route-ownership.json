@@ -507,6 +507,14 @@
     },
     {
       "kind": "api",
+      "path": "/api/durable-runs",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/durable_runs_create_session.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
       "path": "/api/durable-runs/[id]",
       "method": "GET",
       "source": "apps/web/src/app/api/durable-runs/[id]/route.ts",

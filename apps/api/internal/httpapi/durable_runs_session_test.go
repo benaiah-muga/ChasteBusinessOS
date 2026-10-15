@@ -392,8 +392,8 @@ func TestDurableRunsSessionHandlerAuthOrganizationAndRouteErrors(t *testing.T) {
 		reader := &fakeDurableRunsSessionReader{}
 		response := httptest.NewRecorder()
 		newDurableRunsSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, reader, nil).ServeHTTP(
-			response, httptest.NewRequest(http.MethodPost, "/api/durable-runs", strings.NewReader(`{}`)))
-		if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet || reader.listCalls != 0 {
+			response, httptest.NewRequest(http.MethodPut, "/api/durable-runs", strings.NewReader(`{}`)))
+		if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "GET, POST" || reader.listCalls != 0 {
 			t.Fatalf("status=%d allow=%q reader calls=%d", response.Code, response.Header().Get("Allow"), reader.listCalls)
 		}
 	})

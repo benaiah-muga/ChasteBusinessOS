@@ -5,9 +5,6 @@ import { isGoSetupRequest } from "./go-setup-proxy.ts";
 
 export type GoRouteProxyFlags = {
   supportPublic: boolean;
-  auth: boolean;
-  authOidc: boolean;
-  authSaml: boolean;
   scimRead: boolean;
   scimWrite: boolean;
   salesOrders: boolean;
@@ -267,10 +264,6 @@ export function goBankReconciliationWritesFromEnv(env: Record<string, string | u
 export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>): GoRouteProxyFlags {
   return {
     supportPublic: true,
-    // Go owns the auth namespace by default and returns 404 or 405 for unsupported routes.
-    auth: env.CHASTE_GO_AUTH_ROUTE !== "0" && env.GO_AUTH_ROUTE !== "0",
-    authOidc: env.CHASTE_GO_AUTH_OIDC_ROUTE === "1",
-    authSaml: env.CHASTE_GO_AUTH_SAML_ROUTE === "1",
     scimRead: true,
     scimWrite: true,
     salesOrders: env.CHASTE_GO_SALES_ORDERS_ROUTE !== "0",
@@ -337,7 +330,9 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   const pathname = path.split("?", 1)[0] ?? "";
   if (pathname.startsWith("/api/conversations/") && /\/(?:presence|agent-reply)(?:\/|$)/.test(pathname)) return true;
   if (pathname === "/api/message-attachments" || pathname.startsWith("/api/message-attachments/")) return true;
-  if (flags.auth && isGoAuthRequest(path)) return true;
+  // Auth has one owner in the Vite application, including unsupported methods
+  // and provider routes that are disabled in Go configuration.
+  if (isGoAuthRequest(path)) return true;
   const scimUserPath = /^\/api\/scim\/v2\/Users(?:\?.*)?$/;
   const scimUserItemPath = /^\/api\/scim\/v2\/Users\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\?.*)?$/i;
   if (flags.scimRead && method === "GET" && (scimUserPath.test(path) || scimUserItemPath.test(path))) return true;

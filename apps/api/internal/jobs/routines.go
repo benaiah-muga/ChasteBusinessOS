@@ -359,12 +359,17 @@ type routineTool struct {
 	Schema                                    map[string]any
 }
 
+const routineMaxSafeInteger = 9_007_199_254_740_991
+
 func routineToolSet() ([]routineTool, map[string]string, error) {
 	stringField := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}
 	}
 	integerField := func(description string, minimum, maximum int) map[string]any {
 		return map[string]any{"type": "integer", "description": description, "minimum": minimum, "maximum": maximum}
+	}
+	positiveIntegerField := func(description string) map[string]any {
+		return map[string]any{"type": "integer", "description": description, "minimum": 1, "maximum": routineMaxSafeInteger}
 	}
 	definitions := []routineTool{
 		{Name: "crm_listCustomers", Capability: "crm.listCustomers", Permission: "crm.read", Description: "List customers, optionally filtered by a search query.", Schema: routineObjectSchema(map[string]any{"query": stringField("Customer name or terms to match.")}, nil)},
@@ -394,6 +399,32 @@ func routineToolSet() ([]routineTool, map[string]string, error) {
 		{Name: "inventory_listLocations", Capability: "inventory.listLocations", Permission: "inventory.read", Description: "List this organization's stock location codes and names in code order.", Schema: routineObjectSchema(map[string]any{}, nil)},
 		{Name: "inventory_listLots", Capability: "inventory.listLots", Permission: "inventory.read", Description: "List inventory lots with their SKU, lot code, remaining balance, and expiry date.", Schema: routineObjectSchema(map[string]any{}, nil)},
 		{Name: "inventory_listReservations", Capability: "inventory.listReservations", Permission: "inventory.read", Description: "List stock reservations with their SKU, quantity, reason, and status.", Schema: routineObjectSchema(map[string]any{"openOnly": map[string]any{"type": "boolean", "description": "Only include reservations that are still open. Defaults to true."}}, nil)},
+		{Name: "manufacturing_productionRuns", Capability: "manufacturing.productionRuns", Permission: "manufacturing.read", Description: "List recent production runs, including the produced assembly, consumed components, rolled-up cost, and reversal status.", Schema: routineObjectSchema(map[string]any{"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 25, "description": "Maximum number of recent production runs to return."}}, nil)},
+		{Name: "manufacturing_workOrdersList", Capability: "manufacturing.workOrdersList", Permission: "manufacturing.read", Description: "List planned production work orders with status, planned and produced quantities, and expected good output at yield.", Schema: routineObjectSchema(map[string]any{
+			"status": map[string]any{"type": "string", "enum": []string{"draft", "released", "completed", "cancelled"}, "description": "Only include work orders with this status."},
+			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 50, "description": "Maximum number of work orders to return."},
+		}, nil)},
+		{Name: "manufacturing_bomTree", Capability: "manufacturing.bomTree", Permission: "manufacturing.read", Description: "Read an assembly's nested bill of materials, with component quantities scaled to the requested build quantity.", Schema: routineObjectSchema(map[string]any{
+			"assemblySku":         stringField("SKU of the assembly item."),
+			"quantityThousandths": map[string]any{"type": "integer", "minimum": 1, "maximum": routineMaxSafeInteger, "default": 1000, "description": "Assembly quantity in thousandths; 1000 represents one unit."},
+		}, []string{"assemblySku"})},
+		{Name: "manufacturing_costPreview", Capability: "manufacturing.costPreview", Permission: "manufacturing.read", Description: "Preview the components, current costs, stock availability, and expected good output for a planned production quantity without posting it.", Schema: routineObjectSchema(map[string]any{
+			"assemblySku":         stringField("SKU of the assembly item."),
+			"quantityThousandths": positiveIntegerField("Planned assembly quantity in thousandths; 1000 represents one unit."),
+			"yieldPctThousandths": map[string]any{"type": "integer", "minimum": 0, "maximum": 1000000, "description": "Expected production yield in thousandths of a percent; 1000000 represents 100%."},
+		}, []string{"assemblySku", "quantityThousandths"})},
+		{Name: "manufacturing_lotTrace", Capability: "manufacturing.lotTrace", Permission: "manufacturing.read", Description: "Trace a finished-goods lot upstream through the component lots used to produce it.", Schema: routineObjectSchema(map[string]any{
+			"sku":     stringField("SKU of the item containing the lot."),
+			"lotCode": stringField("Lot code to trace upstream."),
+		}, []string{"sku", "lotCode"})},
+		{Name: "manufacturing_checkProductionFeasibility", Capability: "manufacturing.checkProductionFeasibility", Permission: "manufacturing.read", Description: "Check whether stock can cover a desired assembly quantity, with component shortfalls, maximum producible quantity, and estimated lead time.", Schema: routineObjectSchema(map[string]any{
+			"assemblySku":             stringField("SKU of the assembly item."),
+			"desiredUnitsThousandths": positiveIntegerField("Desired assembly quantity in thousandths; 1000 represents one unit."),
+		}, []string{"assemblySku", "desiredUnitsThousandths"})},
+		{Name: "manufacturing_bomReport", Capability: "manufacturing.bomReport", Permission: "manufacturing.read", Description: "Read scrap-adjusted component requirements and stock shortfalls for building an assembly quantity.", Schema: routineObjectSchema(map[string]any{
+			"assemblySku":         stringField("SKU of the assembly item."),
+			"quantityThousandths": map[string]any{"type": "integer", "minimum": 1, "maximum": routineMaxSafeInteger, "default": 1000, "description": "Assembly quantity in thousandths; 1000 represents one unit."},
+		}, []string{"assemblySku"})},
 		{Name: "routines_list", Capability: "routines.list", Permission: "routines.read", Description: "List this organization's recurring agent routines with their schedules, next run times, and last run status.", Schema: routineObjectSchema(map[string]any{"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 50, "description": "Maximum number of routines to return."}}, nil)},
 		{Name: "purchasing_supplierStatement", Capability: "purchasing.supplierStatement", Permission: "purchasing.read", Description: "Read a supplier's dated bills, payments, credits, and running balance.", Schema: routineObjectSchema(map[string]any{"vendorId": map[string]any{"type": "string", "format": "uuid", "description": "UUID of the supplier whose statement to read."}}, []string{"vendorId"})},
 		{Name: "purchasing_apAging", Capability: "purchasing.apAging", Permission: "purchasing.read", Description: "Read outstanding supplier bills grouped into current, 30, 60, and 90-plus day aging buckets.", Schema: routineObjectSchema(map[string]any{}, nil)},

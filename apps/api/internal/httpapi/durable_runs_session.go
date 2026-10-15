@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/jobs"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -245,6 +246,7 @@ func durableRunOptionalTime(value *time.Time) *string {
 type DurableRunsSessionHandler struct {
 	resolver durableRunsSessionResolver
 	reader   durableRunsSessionReader
+	starter  durableRunsSessionStarter
 	logger   *slog.Logger
 }
 
@@ -252,7 +254,7 @@ func NewDurableRunsSessionHandler(pool *pgxpool.Pool, resolver durableRunsSessio
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &DurableRunsSessionHandler{resolver: resolver, reader: pgDurableRunsSessionReader{pool: pool}, logger: logger}
+	return &DurableRunsSessionHandler{resolver: resolver, reader: pgDurableRunsSessionReader{pool: pool}, starter: jobs.NewDurableRunDispatcher(pool), logger: logger}
 }
 
 func newDurableRunsSessionHandler(resolver durableRunsSessionResolver, reader durableRunsSessionReader, logger *slog.Logger) http.Handler {
@@ -288,8 +290,12 @@ func (h *DurableRunsSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	admin := resolved.HasPermission("iam.admin") || resolved.HasPermission("*")
 
 	if r.URL.Path == "/api/durable-runs" {
+		if r.Method == http.MethodPost {
+			h.create(w, r, resolved)
+			return
+		}
 		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
+			w.Header().Set("Allow", "GET, POST")
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}

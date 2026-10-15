@@ -209,6 +209,20 @@ test("Go-only POS customer lookup has exact generated ownership", () => {
   );
 });
 
+test("Go-only durable-run creation has exact generated ownership", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.path === "/api/durable-runs" && entry.method === "POST"),
+    [{
+      kind: "api",
+      path: "/api/durable-runs",
+      method: "POST",
+      source: "apps/api/internal/httpapi/durable_runs_create_session.go",
+      owner: "go",
+      parity: "verified",
+    }],
+  );
+});
+
 test("Go-only POS shift summary has exact generated ownership", () => {
   assert.deepEqual(
     manifest.entries.filter((entry) => entry.path === "/api/pos/shift-summary"),

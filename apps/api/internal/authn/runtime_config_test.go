@@ -32,7 +32,7 @@ func TestDevelopmentAuthRouteCanUseLocalOriginButSecurePolicyIsParsed(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.BaseURL != "http://localhost:3000/api/auth" || !config.SecureCookie || len(config.TrustedOrigins) != 2 {
+	if config.BaseURL != "http://localhost:3000/api/auth" || !config.SecureCookie || len(config.TrustedOrigins) != 1 || config.TrustedOrigins[0] != "http://localhost:3000" {
 		t.Fatalf("development auth config=%+v", config)
 	}
 	if _, err := ResolveAuthRouteRuntime("development", "", "sometimes", "http://localhost:3000"); err == nil {

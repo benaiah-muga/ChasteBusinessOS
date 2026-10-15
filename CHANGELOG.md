@@ -13,6 +13,8 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Go routine agents now expose the legacy manufacturing read tools for production runs, work orders, BOM trees and reports, cost previews, lot traceability, and production feasibility through existing governed capabilities.
+- Go now accepts session-authenticated durable-run creation requests and dispatches ordered, approval-gated steps through the Go jobs worker.
 - Vite Event Ledger can load older organization-scoped events from Go in 100-entry pages, and searches include every page already loaded.
 - Go now delivers queued approval notification emails through a dedicated SMTP worker. A notification-only database role claims approval-email jobs, reads payloads in organization-scoped transactions, and uses fenced acknowledgements to prevent blind retries after uncertain SMTP delivery.
 - Go now delivers queued Vite marketing campaign emails through a dedicated SMTP worker role. It rechecks the recipient's current address, active status, and opt-out setting before sending, with separate tenant-scoped payload access and fenced acknowledgements.
@@ -112,6 +114,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Documents capability writes now pin the requested organization in the Go request, and malformed messaging presence or attachment paths stay owned by Go instead of reaching the legacy API proxy.
 - Vite invoice and settings email requests always route through the authenticated Go email handler; the legacy route toggle has been removed.
 - Vite AI configuration reads and writes always route through Go, and unsupported methods or nested paths in that namespace fail closed without reaching the legacy API.
+- Vite sends the complete authentication namespace to Go regardless of stale rollback selectors; the Go API always mounts auth and requires an explicit runtime auth configuration.
 - Vite Creator proposals now use Go for proposal and capability-gap reads,
   compare-and-set reviews, and governed release actions. Creator setup no longer
   reports the server's local coding-agent detection as browser state, and Go

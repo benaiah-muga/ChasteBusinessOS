@@ -251,6 +251,8 @@ invoice, receivables aging, quotes, customer statement, income statement, trial 
 balance sheet, cash flow, budget scenarios,
 inventory stock report, stock movement history, lots, reservations, supplier statement,
 AP aging, purchase-order receipts,
+production-run history, work-order lists, BOM trees and reports, production cost
+previews, lot traceability, and production feasibility,
 and support read tools through the Go system capability executor.
 These tools use the existing read-mostly routine permission bundle, so a
 routine cannot reach a capability whose permission the legacy bundle withholds
@@ -264,7 +266,10 @@ reservation, and purchase-order receipt totals, income-statement,
 trial-balance, balance-sheet, and cash-flow totals and tenant isolation,
 and session-linked audit history.
 Broader routine tool parity remains
-open because other legacy routine tools do not yet have Go model input schemas.
+open because legacy read capabilities in other modules still do not have Go model
+input schemas. The seven legacy manufacturing read capabilities now have explicit
+Go schemas and permission mappings; the Go-only manufacturing overview report is
+not advertised to routines.
 Due routine discovery can move to Go behind
 `GO_ROUTINE_SCHEDULER=1`, which defaults off; the TypeScript worker skips only
 routine scheduling when this flag is enabled. Go gets a globally ordered,
@@ -317,8 +322,8 @@ other unported CRM writes and read modes retain their existing route owners.
 The Go metrics reader matches the newest-200-session aggregate,
 null-rate, rounding, and organization-scope behavior. Its short-lived signed
 HTTP adapter is opt-in through `GO_METRICS_READ=1`; the public route remains
-legacy-owned by default. The current route manifest has 162 API methods: 89 business methods are
-Go-owned and verified, 71 are legacy-owned, and two Better Auth methods are
+legacy-owned by default. The current route manifest has 163 API methods: 92 methods are
+Go-owned and verified, 69 are legacy-owned, and two Better Auth methods are
 assigned to Go auth with endpoint compatibility parity still open. Vite owns all 30 page entries as
 verified.
 
@@ -4970,3 +4975,23 @@ new owners and the manifest shows zero legacy runtime paths.
      route manifest and its ownership tests now agree that both methods are
      verified Go routes. The census is 94 API files, 162 methods (91 Go, 69
      legacy, 2 auth), and 30 Vite pages.
+
+467. (Go durable-run producer and worker verified) Go now accepts authenticated
+     durable-run creation requests, persists pinned composition and actor
+     identity in a tenant-scoped transaction, and dispatches sequential governed
+     steps through the existing jobs worker. The runtime-role integration proof
+     creates and processes a two-step run, verifies approval linkage, and checks
+     that the run and approval reach their completed states. The migration
+     runner applied migration 0140, but could not take its requested pre-change
+     `pg_dump` snapshot because the binary is unavailable in the migration
+     environment.
+
+468. (Focused verified) Go routines now expose all seven legacy
+     `manufacturing.read` capabilities that already have Go system executors:
+     production runs, work-order lists, BOM trees, cost previews, lot tracing,
+     production feasibility, and BOM reports. The Go-only overview report is
+     excluded from the legacy routine contract. Unit tests verify sanitized tool
+     names, capability dispatch, read-only permission mapping, required fields,
+     bounds, defaults, and parser rejection of invalid values. A new
+     database-backed system-actor and tenant-isolation proof remains pending
+     PostgreSQL recovery.

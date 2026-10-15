@@ -10,8 +10,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 )
 
 func TestRoutineToolsMatchLegacyReadOnlyPermissionBundle(t *testing.T) {
@@ -29,12 +32,205 @@ func TestRoutineToolsMatchLegacyReadOnlyPermissionBundle(t *testing.T) {
 			t.Errorf("routine tool %s exposes permission %q outside the legacy routine bundle", tool.Capability, tool.Permission)
 		}
 	}
-	for _, denied := range []string{"crm.createCustomer", "iam.setModules", "accounting.recordPayment", "routines.runNow"} {
+	for _, denied := range []string{"crm.createCustomer", "iam.setModules", "accounting.recordPayment", "manufacturing.createWorkOrder", "routines.runNow"} {
 		for _, tool := range tools {
 			if tool.Capability == denied {
 				t.Errorf("routine tool set contains write capability %s", denied)
 			}
 		}
+	}
+}
+
+func TestRoutineManufacturingReadToolsMatchLegacyContracts(t *testing.T) {
+	tools, byName, err := routineToolSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := []struct {
+		name       string
+		capability string
+		required   []string
+	}{
+		{name: "manufacturing_productionRuns", capability: "manufacturing.productionRuns"},
+		{name: "manufacturing_workOrdersList", capability: "manufacturing.workOrdersList"},
+		{name: "manufacturing_bomTree", capability: "manufacturing.bomTree", required: []string{"assemblySku"}},
+		{name: "manufacturing_costPreview", capability: "manufacturing.costPreview", required: []string{"assemblySku", "quantityThousandths"}},
+		{name: "manufacturing_lotTrace", capability: "manufacturing.lotTrace", required: []string{"sku", "lotCode"}},
+		{name: "manufacturing_checkProductionFeasibility", capability: "manufacturing.checkProductionFeasibility", required: []string{"assemblySku", "desiredUnitsThousandths"}},
+		{name: "manufacturing_bomReport", capability: "manufacturing.bomReport", required: []string{"assemblySku"}},
+	}
+	byCapability := make(map[string]routineTool, len(tools))
+	for _, tool := range tools {
+		byCapability[tool.Capability] = tool
+	}
+	for _, test := range table {
+		t.Run(test.capability, func(t *testing.T) {
+			tool, ok := byCapability[test.capability]
+			if !ok {
+				t.Fatalf("missing legacy manufacturing read capability %s", test.capability)
+			}
+			if tool.Name != test.name || tool.Permission != "manufacturing.read" || byName[test.name] != test.capability {
+				t.Fatalf("tool=%+v dispatch=%q, want %s with manufacturing.read", tool, byName[test.name], test.name)
+			}
+			if tool.Schema["additionalProperties"] != false {
+				t.Fatalf("schema accepts undeclared fields: %#v", tool.Schema)
+			}
+			properties, ok := tool.Schema["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("schema has no properties: %#v", tool.Schema)
+			}
+			for _, key := range test.required {
+				if properties[key] == nil {
+					t.Errorf("schema omits required property %q: %#v", key, tool.Schema)
+				}
+			}
+			if len(test.required) == 0 {
+				if _, exists := tool.Schema["required"]; exists {
+					t.Errorf("schema unexpectedly requires inputs: %#v", tool.Schema["required"])
+				}
+			} else if got, ok := tool.Schema["required"].([]string); !ok || !reflect.DeepEqual(got, test.required) {
+				t.Errorf("required fields=%#v, want %v", tool.Schema["required"], test.required)
+			}
+		})
+	}
+	if _, ok := byCapability["manufacturing.overviewReport"]; ok {
+		t.Fatal("routine tool set exposes a Go-only manufacturing capability that has no legacy routine contract")
+	}
+
+	assertInteger := func(capability, field string, minimum, maximum, defaultValue any) {
+		t.Helper()
+		properties := byCapability[capability].Schema["properties"].(map[string]any)
+		property, ok := properties[field].(map[string]any)
+		if !ok || property["type"] != "integer" {
+			t.Fatalf("%s.%s schema=%#v, want integer", capability, field, properties[field])
+		}
+		if minimum != nil && property["minimum"] != minimum {
+			t.Errorf("%s.%s minimum=%#v, want %#v", capability, field, property["minimum"], minimum)
+		}
+		if maximum != nil && property["maximum"] != maximum {
+			t.Errorf("%s.%s maximum=%#v, want %#v", capability, field, property["maximum"], maximum)
+		}
+		if defaultValue != nil && property["default"] != defaultValue {
+			t.Errorf("%s.%s default=%#v, want %#v", capability, field, property["default"], defaultValue)
+		}
+	}
+	assertInteger("manufacturing.productionRuns", "limit", 1, 100, 25)
+	assertInteger("manufacturing.workOrdersList", "limit", 1, 100, 50)
+	assertInteger("manufacturing.bomTree", "quantityThousandths", 1, routineMaxSafeInteger, 1000)
+	assertInteger("manufacturing.costPreview", "quantityThousandths", 1, routineMaxSafeInteger, nil)
+	assertInteger("manufacturing.costPreview", "yieldPctThousandths", 0, 1000000, nil)
+	assertInteger("manufacturing.checkProductionFeasibility", "desiredUnitsThousandths", 1, routineMaxSafeInteger, nil)
+	assertInteger("manufacturing.bomReport", "quantityThousandths", 1, routineMaxSafeInteger, 1000)
+
+	status, ok := byCapability["manufacturing.workOrdersList"].Schema["properties"].(map[string]any)["status"].(map[string]any)
+	if !ok || status["type"] != "string" || !reflect.DeepEqual(status["enum"], []string{"draft", "released", "completed", "cancelled"}) {
+		t.Fatalf("work order status schema=%#v, want legacy status enum", status)
+	}
+}
+
+func TestRoutineManufacturingReadToolInputsUseFailClosedGoParsers(t *testing.T) {
+	tests := []struct {
+		capability string
+		valid      string
+		invalid    string
+		parse      func(json.RawMessage) error
+	}{
+		{
+			capability: "manufacturing.productionRuns",
+			valid:      `{}`,
+			invalid:    `{"limit":0}`,
+			parse: func(raw json.RawMessage) error {
+				_, err := capability.ParseManufacturingProductionRunsInput(raw)
+				return err
+			},
+		},
+		{
+			capability: "manufacturing.workOrdersList",
+			valid:      `{"status":"released","limit":10}`,
+			invalid:    `{"status":"pending"}`,
+			parse: func(raw json.RawMessage) error {
+				_, err := capability.ParseManufacturingWorkOrdersListInput(raw)
+				return err
+			},
+		},
+		{
+			capability: "manufacturing.bomTree",
+			valid:      `{"assemblySku":"BIKE"}`,
+			invalid:    `{"assemblySku":"BIKE","quantityThousandths":0}`,
+			parse: func(raw json.RawMessage) error {
+				_, err := capability.ParseManufacturingBomTreeInput(raw)
+				return err
+			},
+		},
+		{
+			capability: "manufacturing.costPreview",
+			valid:      `{"assemblySku":"BIKE","quantityThousandths":1000,"yieldPctThousandths":900000}`,
+			invalid:    `{"assemblySku":"BIKE","quantityThousandths":1000,"yieldPctThousandths":1000001}`,
+			parse: func(raw json.RawMessage) error {
+				_, err := capability.ParseManufacturingCostPreviewInput(raw)
+				return err
+			},
+		},
+		{
+			capability: "manufacturing.lotTrace",
+			valid:      `{"sku":"BIKE","lotCode":"LOT-1"}`,
+			invalid:    `{"sku":"BIKE"}`,
+			parse: func(raw json.RawMessage) error {
+				_, err := capability.ParseManufacturingLotTraceInput(raw)
+				return err
+			},
+		},
+		{
+			capability: "manufacturing.checkProductionFeasibility",
+			valid:      `{"assemblySku":"BIKE","desiredUnitsThousandths":1000}`,
+			invalid:    `{"assemblySku":"BIKE","desiredUnitsThousandths":0}`,
+			parse: func(raw json.RawMessage) error {
+				_, err := capability.ParseManufacturingCheckProductionFeasibilityInput(raw)
+				return err
+			},
+		},
+		{
+			capability: "manufacturing.bomReport",
+			valid:      `{"assemblySku":"BIKE"}`,
+			invalid:    `{"assemblySku":"BIKE","quantityThousandths":0}`,
+			parse: func(raw json.RawMessage) error {
+				_, err := capability.ParseManufacturingBomReportInput(raw)
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.capability, func(t *testing.T) {
+			if err := test.parse(json.RawMessage(test.valid)); err != nil {
+				t.Fatalf("legacy-shaped routine input rejected by Go parser: %v", err)
+			}
+			if err := test.parse(json.RawMessage(test.invalid)); err == nil {
+				t.Fatalf("invalid routine input %s was accepted", test.invalid)
+			}
+		})
+	}
+}
+
+func TestRoutineManufacturingLegacyParserDefaults(t *testing.T) {
+	productionRuns, err := capability.ParseManufacturingProductionRunsInput(json.RawMessage(`{}`))
+	if err != nil || productionRuns.Limit != 25 {
+		t.Fatalf("production-runs defaults=%+v err=%v, want limit 25", productionRuns, err)
+	}
+	workOrders, err := capability.ParseManufacturingWorkOrdersListInput(json.RawMessage(`{}`))
+	if err != nil || workOrders.Limit != 50 || workOrders.Status != nil {
+		t.Fatalf("work-order defaults=%+v err=%v, want limit 50 and no status filter", workOrders, err)
+	}
+	bomTree, err := capability.ParseManufacturingBomTreeInput(json.RawMessage(`{"assemblySku":"BIKE"}`))
+	if err != nil || bomTree.QuantityThousandths != 1000 {
+		t.Fatalf("BOM-tree defaults=%+v err=%v, want quantity 1000", bomTree, err)
+	}
+	costPreview, err := capability.ParseManufacturingCostPreviewInput(json.RawMessage(`{"assemblySku":"BIKE","quantityThousandths":1000}`))
+	if err != nil || costPreview.YieldPctThousandths != 1_000_000 {
+		t.Fatalf("cost-preview defaults=%+v err=%v, want 100 percent yield", costPreview, err)
+	}
+	bomReport, err := capability.ParseManufacturingBomReportInput(json.RawMessage(`{"assemblySku":"BIKE"}`))
+	if err != nil || bomReport.QuantityThousandths != 1000 {
+		t.Fatalf("BOM-report defaults=%+v err=%v, want quantity 1000", bomReport, err)
 	}
 }
 

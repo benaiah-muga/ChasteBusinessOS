@@ -618,7 +618,6 @@ function requestRecorder(target: string, streamed = false): Server {
 const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method: string; url: string }> = [
   { env: "CHASTE_GO_SUPPORT_PUBLIC_ROUTE", flag: "supportPublic", method: "POST", url: "/api/support/public?widget=1" },
   { env: "CHASTE_GO_APPROVALS_DECISION_ROUTE", flag: "approvalsDecision", method: "POST", url: "/api/approvals?id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
-  { env: "CHASTE_GO_AUTH_ROUTE", flag: "auth", method: "POST", url: "/api/auth/sign-in/email" },
   { env: "CHASTE_GO_SCIM_READ_ROUTE", flag: "scimRead", method: "GET", url: "/api/scim/v2/Users?startIndex=1" },
   { env: "CHASTE_GO_SCIM_READ_ROUTE", flag: "scimRead", method: "GET", url: "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001" },
   { env: "CHASTE_GO_SCIM_WRITE_ROUTE", flag: "scimWrite", method: "POST", url: "/api/scim/v2/Users" },
@@ -655,6 +654,7 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_SESSIONS_ROUTE", flag: "sessions", method: "GET", url: "/api/sessions/aaaaaaaa-0000-4000-8000-000000000001?include=events" },
   { env: "CHASTE_GO_SESSIONS_ROUTE", flag: "sessions", method: "GET", url: "/api/sessions/aaaaaaaa-0000-4000-8000-000000000001/replay" },
   { env: "CHASTE_GO_DURABLE_RUNS_ROUTE", flag: "durableRuns", method: "GET", url: "/api/durable-runs?limit=10" },
+  { env: "CHASTE_GO_DURABLE_RUNS_ROUTE", flag: "durableRuns", method: "POST", url: "/api/durable-runs" },
   { env: "CHASTE_GO_DURABLE_RUNS_ROUTE", flag: "durableRuns", method: "GET", url: "/api/durable-runs/aaaaaaaa-0000-4000-8000-000000000001?include=steps" },
   { env: "CHASTE_GO_NOTIFICATIONS_ROUTE", flag: "notifications", method: "GET", url: "/api/notifications?limit=10&cursor=next" },
   { env: "CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE", flag: "notificationsWrite", method: "POST", url: "/api/notifications" },
@@ -783,6 +783,59 @@ describe("Vite Go route proxy selection", () => {
     expect(legacyOrigin).not.toBe(goOrigin);
   });
 
+  it("routes every auth request to Go even when old auth opt-out variables remain set", async () => {
+    let goCalls = 0;
+    let legacyCalls = 0;
+    const go = createHttpServer((request, response) => {
+      goCalls += 1;
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ target: "go", method: request.method, url: request.url }));
+    });
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
+    const legacy = createHttpServer((_request, response) => {
+      legacyCalls += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ target: "legacy" }));
+    });
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
+
+    const vite = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({
+        CHASTE_GO_AUTH_ROUTE: "0",
+        GO_AUTH_ROUTE: "0",
+        CHASTE_GO_AUTH_OIDC_ROUTE: "0",
+        CHASTE_GO_AUTH_SAML_ROUTE: "0",
+      }), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
+      },
+    });
+    await vite.listen();
+    runningServers.push({ close: () => vite.close() });
+    const address = vite.httpServer?.address() as AddressInfo;
+    for (const [method, path] of [
+      ["GET", "/api/auth"],
+      ["POST", "/api/auth/sign-in/email"],
+      ["GET", "/api/auth/sign-in/oidc?state=one"],
+      ["POST", "/api/auth/callback/saml"],
+      ["DELETE", "/api/auth/unimplemented"],
+    ]) {
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`, { method });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ target: "go", method, url: path });
+    }
+    expect(goCalls).toBe(5);
+    expect(legacyCalls).toBe(0);
+    expect(legacyOrigin).not.toBe(goOrigin);
+  });
+
   it("preserves email request and response data on Go even when a stale rollback env var is set", async () => {
     const go = requestRecorder("go");
     const goOrigin = await listen(go);
@@ -828,7 +881,6 @@ describe("Vite Go route proxy selection", () => {
 
   it("routes implemented Go auth, dashboard, work queue, and analytics requests by default", () => {
     const flags = goRouteProxyFlagsFromEnv({});
-    expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.analyticsReport).toBe(true);
     expect(flags.myWork).toBe(true);
@@ -838,7 +890,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.memory).toBe(true);
     expect(flags.moduleSettings).toBe(true);
     expect(flags.onboarding).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "modulesWrite", "projects", "routines", "memory", "moduleSettings", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "crmFollowUpDraft", "supportReplyDraft", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision", "supportPublic", "branding", "ledger", "myWorkSummary", "signals", "notifications", "notificationsWrite", "onboarding", "scimRead", "scimWrite", "scimTokens"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "modulesWrite", "projects", "routines", "memory", "moduleSettings", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "crmFollowUpDraft", "supportReplyDraft", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision", "supportPublic", "branding", "ledger", "myWorkSummary", "signals", "notifications", "notificationsWrite", "onboarding", "scimRead", "scimWrite", "scimTokens"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -880,6 +932,8 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/scim/v2/Users")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/sessions")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/durable-runs")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/durable-runs")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/durable-runs/aaaaaaaa-0000-4000-8000-000000000001")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/notifications")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/notifications")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(true);
@@ -1385,29 +1439,24 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(rollback, "GET", "/api/analytics")).toBe(true);
   });
 
-  it("keeps the whole auth namespace on Go when auth is enabled", () => {
-    const oidc = goRouteProxyFlagsFromEnv({ CHASTE_GO_AUTH_OIDC_ROUTE: "1" });
-    expect(isGoRouteRequest(oidc, "GET", "/api/auth/sign-in/oidc")).toBe(true);
-    expect(isGoRouteRequest(oidc, "GET", "/api/auth/callback/oidc?code=one")).toBe(true);
-    expect(isGoRouteRequest(oidc, "POST", "/api/auth/native/exchange")).toBe(true);
-    expect(isGoRouteRequest(oidc, "GET", "/api/auth/sign-in/saml")).toBe(true);
-
-    const saml = goRouteProxyFlagsFromEnv({ CHASTE_GO_AUTH_SAML_ROUTE: "1" });
-    expect(isGoRouteRequest(saml, "GET", "/api/auth/sign-in/saml")).toBe(true);
-    expect(isGoRouteRequest(saml, "POST", "/api/auth/callback/saml")).toBe(true);
-    expect(isGoRouteRequest(saml, "GET", "/api/auth/sign-in/oidc")).toBe(true);
-  });
-
-  it("allows an explicit legacy-auth compatibility opt-out", () => {
-    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_AUTH_ROUTE: "0" });
-    expect(flags.auth).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/auth/sign-in/email")).toBe(false);
-  });
-
-  it("leaves auth unselected when the Go API explicitly disables its auth mount", () => {
-    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_AUTH_ROUTE: "1", GO_AUTH_ROUTE: "0" });
-    expect(flags.auth).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/auth/sign-in/email")).toBe(false);
+  it("always sends the complete auth namespace to Go despite stale rollback selectors", () => {
+    const flags = goRouteProxyFlagsFromEnv({
+      CHASTE_GO_AUTH_ROUTE: "0",
+      GO_AUTH_ROUTE: "0",
+      CHASTE_GO_AUTH_OIDC_ROUTE: "0",
+      CHASTE_GO_AUTH_SAML_ROUTE: "0",
+    });
+    for (const [method, path] of [
+      ["GET", "/api/auth"],
+      ["POST", "/api/auth/sign-in/email"],
+      ["GET", "/api/auth/sign-in/oidc"],
+      ["POST", "/api/auth/callback/saml"],
+      ["DELETE", "/api/auth/unimplemented"],
+      ["OPTIONS", "/api/auth/get-session"],
+    ]) {
+      expect(isGoRouteRequest(flags, method, path)).toBe(true);
+    }
+    expect(isGoRouteRequest(flags, "POST", "/api/authentication/sign-in/email")).toBe(false);
   });
 
   it.each(selectorCases)("routes $flag requests when enabled", ({ env, flag, method, url }) => {

@@ -18,9 +18,8 @@ import (
 
 const authBodyLimit = 1 << 20
 
-// NewAuthHandler creates the opt-in Go implementation of Better Auth's
-// email/password and session endpoints. It does not change production route
-// ownership by itself; main only mounts it while GO_AUTH_ROUTE=1.
+// NewAuthHandler creates the Go implementation of Better Auth's
+// email/password and session endpoints.
 func NewAuthHandler(service *authn.Service, secret string, secureCookie bool, logger *slog.Logger) http.Handler {
 	handler, _ := NewAuthHandlerWithTrustedProxyCIDRs(service, secret, secureCookie, logger, nil)
 	return handler

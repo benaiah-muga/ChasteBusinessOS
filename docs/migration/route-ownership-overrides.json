@@ -837,6 +837,14 @@
       "source": "apps/api/internal/httpapi/sales_customers_session.go",
       "owner": "go",
       "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/durable_runs_create_session.go",
+      "owner": "go",
+      "parity": "verified"
     }
   ]
 }
