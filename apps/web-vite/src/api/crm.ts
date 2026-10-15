@@ -34,6 +34,24 @@ export const CrmDealSchema = z.object({
 }).strict();
 export type CrmDeal = z.infer<typeof CrmDealSchema>;
 
+const CrmPipelineStageSummarySchema = z.object({
+  stage,
+  count: z.number().int().safe().nonnegative(),
+  totalMinor: z.number().int().safe().nonnegative(),
+  weightedMinor: z.number().int().safe().nonnegative(),
+}).strict();
+
+export const CrmPipelineReportSchema = z.object({
+  stages: z.array(CrmPipelineStageSummarySchema).length(6).superRefine((stages, context) => {
+    if (new Set(stages.map((summary) => summary.stage)).size !== 6) {
+      context.addIssue({ code: "custom", message: "Pipeline report must include each stage once." });
+    }
+  }),
+  openValueMinor: z.number().int().safe().nonnegative(),
+  weightedForecastMinor: z.number().int().safe().nonnegative(),
+}).strict();
+export type CrmPipelineReport = z.infer<typeof CrmPipelineReportSchema>;
+
 export const CrmCustomerSchema = z.object({
   id: uuid,
   name: z.string(),
@@ -168,7 +186,7 @@ async function get<T>(path: string, schema: z.ZodType<T>, signal: AbortSignal | 
 }
 
 async function executeCrmRead<T>(
-  capabilityId: "crm.listDeals" | "crm.listCustomerCollection" | "crm.listTasks" | "crm.customerTimeline" | "crm.listCustomerViews",
+  capabilityId: "crm.listDeals" | "crm.pipelineReport" | "crm.listCustomerCollection" | "crm.listTasks" | "crm.customerTimeline" | "crm.listCustomerViews",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   signal: AbortSignal | undefined,
@@ -191,6 +209,10 @@ async function executeCrmRead<T>(
 export async function fetchCrmDeals(organizationId: string | null | undefined, signal?: AbortSignal): Promise<CrmDeal[]> {
   const result = await executeCrmRead("crm.listDeals", {}, z.object({ deals: z.array(CrmDealSchema).max(200) }).strict(), signal, organizationId);
   return result.deals;
+}
+
+export async function fetchCrmPipelineReport(organizationId: string | null | undefined, signal?: AbortSignal): Promise<CrmPipelineReport> {
+  return executeCrmRead("crm.pipelineReport", {}, CrmPipelineReportSchema, signal, organizationId);
 }
 
 export async function fetchCrmCustomers(organizationId: string | null | undefined, signal?: AbortSignal): Promise<CrmCustomer[]> {

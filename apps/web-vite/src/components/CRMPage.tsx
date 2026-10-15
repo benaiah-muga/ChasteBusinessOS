@@ -3,6 +3,7 @@ import "./CRMPage.css";
 import {
   type CrmCustomer,
   type CrmDeal,
+  type CrmPipelineReport,
   type CrmFollowUpDraft,
   type CrmDealCreateInput,
   type CrmCustomerProfileUpdateMutation,
@@ -15,6 +16,7 @@ import {
   type SavedCustomerView,
   fetchCrmCustomers,
   fetchCrmDeals,
+  fetchCrmPipelineReport,
   fetchCrmFollowUpDraft,
   fetchCrmTasks,
   fetchCrmTeamMembers,
@@ -161,6 +163,7 @@ function downloadCustomerTemplate() {
 export function CRMPage({ actorId = null, organizationId = null }: { actorId?: string | null; organizationId?: string | null } = {}) {
   const [tab, setTab] = useState<Tab>("overview");
   const [deals, setDeals] = useState<CrmDeal[]>([]);
+  const [pipelineReport, setPipelineReport] = useState<CrmPipelineReport | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [tasks, setTasks] = useState<CrmTask[]>([]);
   const [loadedOrganizationId, setLoadedOrganizationId] = useState<string | null>(null);
@@ -250,6 +253,9 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [draftCopied, setDraftCopied] = useState(false);
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   const timelineRequest = useRef(0);
+  const collectionLoadGeneration = useRef(0);
+  const collectionLoadScope = useRef(organizationId?.trim().toLowerCase() ?? null);
+  collectionLoadScope.current = organizationId?.trim().toLowerCase() ?? null;
   const movingDealIds = useRef(new Set<string>());
   const customerCreateScopeRef = useRef<string | null>(null);
   const customerCreateScopeGeneration = useRef(0);
@@ -303,20 +309,28 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const lockedProfileCustomerId = profileUpdateLocked && profileUpdateAction?.name !== undefined ? profileUpdateAction.customerIds[0] : null;
 
   const load = useCallback(async (signal?: AbortSignal, isCurrent: () => boolean = () => true) => {
-    if (!isCurrent()) return;
+    const organizationScope = organizationId?.trim().toLowerCase() ?? null;
+    if (collectionLoadScope.current !== organizationScope || !isCurrent()) return;
+    const generation = ++collectionLoadGeneration.current;
+    const isLoadCurrent = () => collectionLoadGeneration.current === generation
+      && collectionLoadScope.current === organizationScope
+      && isCurrent();
+    if (!isLoadCurrent()) return;
     setError(null);
     setLoading(true);
     const results = await Promise.allSettled([
       fetchCrmDeals(organizationId, signal),
       fetchCrmCustomers(organizationId, signal),
       fetchCrmTasks(organizationId, signal),
+      fetchCrmPipelineReport(organizationId, signal),
     ]);
-    if (signal?.aborted || !isCurrent()) return;
+    if (signal?.aborted || !isLoadCurrent()) return;
     const failed = results.find((result) => result.status === "rejected");
     if (failed?.status === "rejected") setError(friendlyError(failed.reason));
     setDeals(results[0]?.status === "fulfilled" ? results[0].value : []);
     setCustomers(results[1]?.status === "fulfilled" ? results[1].value : []);
     setTasks(results[2]?.status === "fulfilled" ? results[2].value : []);
+    setPipelineReport(results[3]?.status === "fulfilled" ? results[3].value : null);
     setLoadedOrganizationId(organizationId?.trim().toLowerCase() ?? null);
     setLoading(false);
   }, [organizationId]);
@@ -843,8 +857,10 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     const matchesSearch = !query || `${deal.title} ${deal.customerName ?? ""} ${deal.note ?? ""}`.toLowerCase().includes(query);
     return matchesStage && matchesSearch;
   });
-  const openDeals = deals.filter((deal) => deal.stage !== "won" && deal.stage !== "lost");
-  const forecast = openDeals.reduce((sum, deal) => sum + Math.round(deal.valueMinor * (({ lead: .1, qualified: .3, proposal: .5, negotiation: .7 } as Record<string, number>)[deal.stage] ?? 0)), 0);
+  const pipelineStages = new Map(pipelineReport?.stages.map((summary) => [summary.stage, summary] as const) ?? []);
+  const openDealCount = pipelineReport?.stages
+    .filter((summary) => summary.stage !== "won" && summary.stage !== "lost")
+    .reduce((count, summary) => count + summary.count, 0) ?? null;
 
   async function saveCustomerProfile() {
     if (!selected) return;
@@ -1267,8 +1283,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     <nav className="crm-tabs" aria-label="CRM sections">{tabButton("overview", "Overview")}{tabButton("pipeline", "Pipeline", deals.length)}{tabButton("customers", "Customers", activeCustomers.length)}{tabButton("tasks", "Tasks", tasks.filter((task) => !task.doneAt).length)}</nav>
 
     {tab === "overview" && <section className="crm-overview" aria-label="CRM overview">
-      <div className="crm-kpis"><article><span>Open pipeline</span><strong>{openDeals.length}</strong></article><article><span>Weighted forecast</span><strong>{money(forecast)}</strong></article><article><span>Won</span><strong>{money(deals.filter((deal) => deal.stage === "won").reduce((sum, deal) => sum + deal.valueMinor, 0))}</strong></article><article><span>Active customers</span><strong>{activeCustomers.length}</strong></article></div>
-      <div className="crm-overview-grid"><section className="crm-panel"><header><h2>Pipeline by stage</h2><button type="button" onClick={() => navigateToTab("pipeline")}>Open pipeline</button></header>{stages.map((stageName) => { const rows = deals.filter((deal) => deal.stage === stageName); return <button className="crm-stage-summary" type="button" key={stageName} onClick={() => { setDealFilter(stageName === "won" || stageName === "lost" ? stageName : "open"); navigateToTab("pipeline"); }}><span>{stageLabels[stageName]}</span><strong>{rows.length}</strong><span>{money(rows.reduce((sum, deal) => sum + deal.valueMinor, 0))}</span></button>; })}</section>
+      <div className="crm-kpis"><article><span>Open pipeline</span><strong>{openDealCount ?? "Unavailable"}</strong></article><article><span>Weighted forecast</span><strong>{pipelineReport ? money(pipelineReport.weightedForecastMinor) : "Unavailable"}</strong></article><article><span>Won</span><strong>{pipelineStages.has("won") ? money(pipelineStages.get("won")!.totalMinor) : "Unavailable"}</strong></article><article><span>Active customers</span><strong>{activeCustomers.length}</strong></article></div>
+      <div className="crm-overview-grid"><section className="crm-panel"><header><h2>Pipeline by stage</h2><button type="button" onClick={() => navigateToTab("pipeline")}>Open pipeline</button></header>{stages.map((stageName) => { const summary = pipelineStages.get(stageName); return <button className="crm-stage-summary" type="button" key={stageName} onClick={() => { setDealFilter(stageName === "won" || stageName === "lost" ? stageName : "open"); navigateToTab("pipeline"); }}><span>{stageLabels[stageName]}</span><strong>{summary?.count ?? "Unavailable"}</strong><span>{summary ? money(summary.totalMinor) : "Unavailable"}</span></button>; })}</section>
         <section className="crm-panel"><header><h2>Recent customers</h2><button type="button" onClick={() => navigateToTab("customers")}>Browse customers</button></header>{activeCustomers.slice(0, 6).map((customer) => <button className="crm-list-row" key={customer.id} type="button" onClick={() => void openProfile(customer)}><span><strong>{customer.name}</strong><small>{customer.email ?? customer.phone ?? "No contact details"}</small></span><span>{customer.nextStep?.summary ?? "View profile"}</span></button>)}</section></div>
     </section>}
 

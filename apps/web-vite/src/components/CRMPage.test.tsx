@@ -24,6 +24,9 @@ function routeGoCrmReadsToFixtures(fetchMock: CrmFetchMock): CrmFetchMock {
     let body: { capabilityId?: string; input?: { openOnly?: boolean; customerId?: string; [key: string]: unknown } };
     try { body = JSON.parse(String(init?.body)) as typeof body; }
     catch { return fetchMock(input, init); }
+    if (body.capabilityId === "crm.pipelineReport") {
+      return Response.json({ ok: true, data: pipelineReport() });
+    }
     const readPath = body.capabilityId === "crm.listDeals" ? "/api/crm?deals=1"
       : body.capabilityId === "crm.listCustomerCollection" ? "/api/customers"
         : body.capabilityId === "crm.listTasks" ? `/api/crm?tasks=1${body.input?.openOnly ? "&open=1" : ""}`
@@ -55,6 +58,23 @@ function profileSnapshot(item: ReturnType<typeof customer>) {
 }
 function deal(stage: string) {
   return { id: dealId, title: "Annual renewal", stage, valueMinor: 480000, note: null, customerId, customerName: "Northwind", updatedAt: "2026-09-29T12:00:00.000Z" };
+}
+
+function pipelineReport(overrides: Partial<{ lead: { count: number; totalMinor: number; weightedMinor: number }; won: { count: number; totalMinor: number; weightedMinor: number }; openValueMinor: number; weightedForecastMinor: number }> = {}) {
+  const lead = overrides.lead ?? { count: 0, totalMinor: 0, weightedMinor: 0 };
+  const won = overrides.won ?? { count: 0, totalMinor: 0, weightedMinor: 0 };
+  return {
+    stages: [
+      { stage: "lead", ...lead },
+      { stage: "qualified", count: 0, totalMinor: 0, weightedMinor: 0 },
+      { stage: "proposal", count: 0, totalMinor: 0, weightedMinor: 0 },
+      { stage: "negotiation", count: 0, totalMinor: 0, weightedMinor: 0 },
+      { stage: "won", ...won },
+      { stage: "lost", count: 0, totalMinor: 0, weightedMinor: 0 },
+    ],
+    openValueMinor: overrides.openValueMinor ?? lead.totalMinor,
+    weightedForecastMinor: overrides.weightedForecastMinor ?? lead.weightedMinor,
+  };
 }
 
 function stubCrmDealStageLocks() {
@@ -91,6 +111,7 @@ describe("Vite CRM page", () => {
       const body = JSON.parse(String(init?.body)) as { capabilityId: string };
       const output = body.capabilityId === "crm.listCustomerCollection" ? { customers: [] }
         : body.capabilityId === "crm.listDeals" ? { deals: [] }
+          : body.capabilityId === "crm.pipelineReport" ? pipelineReport()
           : body.capabilityId === "crm.listTasks" ? { tasks: [] }
             : body.capabilityId === "crm.listCustomerViews" ? { views: [] }
               : null;
@@ -99,11 +120,240 @@ describe("Vite CRM page", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
     expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body))).map((body) => body.capabilityId).sort()).toEqual([
-      "crm.listCustomerCollection", "crm.listCustomerViews", "crm.listDeals", "crm.listTasks",
+      "crm.listCustomerCollection", "crm.listCustomerViews", "crm.listDeals", "crm.listTasks", "crm.pipelineReport",
     ]);
     expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("uses full Go aggregates for the overview while the pipeline list stays capped", async () => {
+    const cappedDeals = Array.from({ length: 200 }, (_, index) => ({
+      ...deal("lead"),
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    }));
+    const report = pipelineReport({
+      lead: { count: 205, totalMinor: 1_500_000, weightedMinor: 150_000 },
+      won: { count: 4, totalMinor: 99_000, weightedMinor: 99_000 },
+      openValueMinor: 1_500_000,
+      weightedForecastMinor: 150_000,
+    });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+      const output = body.capabilityId === "crm.listCustomerCollection" ? { customers: [] }
+        : body.capabilityId === "crm.listDeals" ? { deals: cappedDeals }
+          : body.capabilityId === "crm.pipelineReport" ? report
+            : body.capabilityId === "crm.listTasks" ? { tasks: [] }
+              : body.capabilityId === "crm.listCustomerViews" ? { views: [] }
+                : null;
+      return output ? Response.json({ ok: true, data: output }) : new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    await screen.findByText("Weighted forecast");
+    const kpis = document.querySelector(".crm-kpis");
+    expect(kpis).not.toBeNull();
+    const openPipelineKpi = within(kpis as HTMLElement).getByText("Open pipeline").closest("article");
+    expect(openPipelineKpi && within(openPipelineKpi).getByText("205")).toBeTruthy();
+    const weightedForecastKpi = within(kpis as HTMLElement).getByText("Weighted forecast").closest("article");
+    expect(weightedForecastKpi?.textContent).toContain("1,500");
+    const wonKpi = within(kpis as HTMLElement).getByText("Won").closest("article");
+    expect(wonKpi?.textContent).toContain("990");
+    const leadSummary = screen.getByRole("button", { name: /Lead/ });
+    expect(leadSummary.textContent).toContain("205");
+    expect(leadSummary.textContent).toContain("15,000");
+    expect(screen.getByRole("button", { name: /Pipeline\s*200/ })).toBeTruthy();
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([, init]) => JSON.parse(String(init?.body)).capabilityId === "crm.pipelineReport")?.[1]?.body))).toMatchObject({
+      capabilityId: "crm.pipelineReport",
+      input: {},
+      intentId: expect.any(String),
+    });
+  });
+
+  it("clears a stale overview aggregate when Go returns a malformed refresh", async () => {
+    let pipelineReads = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+      if (body.capabilityId === "crm.pipelineReport") {
+        pipelineReads += 1;
+        return Response.json({ ok: true, data: pipelineReads === 1 ? pipelineReport({ lead: { count: 205, totalMinor: 1_500_000, weightedMinor: 150_000 }, openValueMinor: 1_500_000, weightedForecastMinor: 150_000 }) : { stages: [], openValueMinor: 0, weightedForecastMinor: 0 } });
+      }
+      const output = body.capabilityId === "crm.listCustomerCollection" ? { customers: [] }
+        : body.capabilityId === "crm.listDeals" ? { deals: [] }
+          : body.capabilityId === "crm.listTasks" ? { tasks: [] }
+            : body.capabilityId === "crm.listCustomerViews" ? { views: [] }
+              : null;
+      return output ? Response.json({ ok: true, data: output }) : new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    await screen.findByText("Weighted forecast");
+    const getKpis = () => document.querySelector(".crm-kpis") as HTMLElement;
+    expect(within(getKpis()).getByText("Open pipeline").closest("article")?.textContent).toContain("205");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(pipelineReads).toBe(2));
+    await waitFor(() => expect(within(getKpis()).getByText("Open pipeline").closest("article")?.querySelector("strong")?.textContent).toBe("Unavailable"));
+    expect(within(getKpis()).getByText("Weighted forecast").closest("article")?.textContent).toContain("Unavailable");
+    expect(screen.queryByText("205")).toBeNull();
+  });
+
+  it("clears customer and pipeline data while the next organization collection is loading", async () => {
+    const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const firstCustomer = { ...customer(), name: "First organization customer" };
+    const nextCustomer = { ...customer(), id: "d79382ac-743f-4d27-8b5f-92f2cba74d8e", name: "Next organization customer" };
+    let holdNextOrganization = false;
+    let releaseNextOrganization!: () => void;
+    const nextOrganizationWait = new Promise<void>((resolve) => { releaseNextOrganization = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) !== "/api/capabilities/execute") return new Response(null, { status: 404 });
+      const requestOrganizationId = new Headers(init?.headers).get("X-Organization-ID");
+      if (holdNextOrganization && requestOrganizationId === nextOrganizationId) await nextOrganizationWait;
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+      const output = body.capabilityId === "crm.listCustomerCollection"
+        ? { customers: [requestOrganizationId === nextOrganizationId ? nextCustomer : firstCustomer] }
+        : body.capabilityId === "crm.listDeals" ? { deals: [] }
+          : body.capabilityId === "crm.pipelineReport" ? pipelineReport(requestOrganizationId === nextOrganizationId ? { lead: { count: 203, totalMinor: 1_600_000, weightedMinor: 160_000 } } : { lead: { count: 3, totalMinor: 300_000, weightedMinor: 30_000 } })
+          : body.capabilityId === "crm.listTasks" ? { tasks: [] }
+            : body.capabilityId === "crm.listCustomerViews" ? { views: [] }
+              : null;
+      return output ? Response.json({ ok: true, data: output }) : new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    expect(await screen.findByRole("button", { name: /First organization customer/ })).toBeTruthy();
+    await screen.findByText("Weighted forecast");
+
+    holdNextOrganization = true;
+    view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
+    expect((await screen.findByText("Loading CRM…")).textContent).toBe("Loading CRM…");
+    expect(screen.queryByRole("button", { name: /First organization customer/ })).toBeNull();
+    expect(screen.queryByText("Open pipeline")).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => new Headers(init?.headers).get("X-Organization-ID") === nextOrganizationId)).toBe(true);
+
+    releaseNextOrganization();
+    expect(await screen.findByRole("button", { name: /Next organization customer/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /First organization customer/ })).toBeNull();
+    const kpis = document.querySelector(".crm-kpis") as HTMLElement;
+    const openPipeline = within(kpis).getByText("Open pipeline").closest("article");
+    expect(openPipeline?.textContent).toContain("203");
+    expect(openPipeline && within(openPipeline).queryByText("3")).toBeNull();
+  });
+
+  it("ignores an old organization manual refresh after the new organization has loaded", async () => {
+    const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const firstCustomer = { ...customer(), name: "First organization customer" };
+    const nextCustomer = { ...customer(), id: "d79382ac-743f-4d27-8b5f-92f2cba74d8e", name: "Next organization customer" };
+    let holdFirstOrganization = false;
+    let firstOrganizationRequests = 0;
+    let completedFirstOrganizationRequests = 0;
+    let releaseFirstOrganization!: () => void;
+    const firstOrganizationWait = new Promise<void>((resolve) => { releaseFirstOrganization = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) !== "/api/capabilities/execute") return new Response(null, { status: 404 });
+      const requestOrganizationId = new Headers(init?.headers).get("X-Organization-ID");
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string };
+      const isCollectionRead = new Set<string>(["crm.listCustomerCollection", "crm.listDeals", "crm.listTasks", "crm.pipelineReport"]).has(body.capabilityId);
+      if (holdFirstOrganization && requestOrganizationId === dealId && isCollectionRead) {
+        firstOrganizationRequests += 1;
+        await firstOrganizationWait;
+        completedFirstOrganizationRequests += 1;
+      }
+      const output = body.capabilityId === "crm.listCustomerCollection"
+        ? { customers: [requestOrganizationId === nextOrganizationId ? nextCustomer : firstCustomer] }
+        : body.capabilityId === "crm.listDeals" ? { deals: [] }
+          : body.capabilityId === "crm.pipelineReport" ? pipelineReport(requestOrganizationId === nextOrganizationId ? { lead: { count: 203, totalMinor: 1_600_000, weightedMinor: 160_000 } } : { lead: { count: 3, totalMinor: 300_000, weightedMinor: 30_000 } })
+            : body.capabilityId === "crm.listTasks" ? { tasks: [] }
+              : body.capabilityId === "crm.listCustomerViews" ? { views: [] }
+                : null;
+      return output ? Response.json({ ok: true, data: output }) : new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    expect(await screen.findByRole("button", { name: /First organization customer/ })).toBeTruthy();
+
+    holdFirstOrganization = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(firstOrganizationRequests).toBe(4));
+
+    view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
+    expect(await screen.findByRole("button", { name: /Next organization customer/ })).toBeTruthy();
+    const kpis = document.querySelector(".crm-kpis") as HTMLElement;
+    expect(within(kpis).getByText("Open pipeline").closest("article")?.textContent).toContain("203");
+
+    releaseFirstOrganization();
+    await waitFor(() => expect(completedFirstOrganizationRequests).toBe(4));
+    expect(screen.getByRole("button", { name: /Next organization customer/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /First organization customer/ })).toBeNull();
+    expect(document.querySelector(".crm-kpis")?.textContent).toContain("203");
+    expect(screen.queryByText("Loading CRM…")).toBeNull();
+  });
+
+  it("does not let a stale import completion invalidate a pending new organization load", async () => {
+    const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    let holdNextOrganization = false;
+    let nextOrganizationRequests = 0;
+    let releaseNextOrganization!: () => void;
+    const nextOrganizationWait = new Promise<void>((resolve) => { releaseNextOrganization = resolve; });
+    let resolveImport!: (response: Response) => void;
+    const importWait = new Promise<Response>((resolve) => { resolveImport = resolve; });
+    let importPostStarted = false;
+    let importIntentId = "";
+    let importUndoReads = 0;
+    const originalGetItem = Storage.prototype.getItem;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+      if (key.startsWith("chaste.crm.customer-import-undo-state.v1:")) importUndoReads += 1;
+      return originalGetItem.call(this, key);
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) !== "/api/capabilities/execute") return new Response(null, { status: 404 });
+      const requestOrganizationId = new Headers(init?.headers).get("X-Organization-ID");
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; intentId?: string };
+      if (body.capabilityId === "crm.importCustomers") {
+        importPostStarted = true;
+        importIntentId = body.intentId ?? "";
+        return importWait;
+      }
+      const isCollectionRead = new Set<string>(["crm.listCustomerCollection", "crm.listDeals", "crm.listTasks", "crm.pipelineReport"]).has(body.capabilityId);
+      if (holdNextOrganization && requestOrganizationId === nextOrganizationId && isCollectionRead) {
+        nextOrganizationRequests += 1;
+        await nextOrganizationWait;
+      }
+      const output = body.capabilityId === "crm.listCustomerCollection" ? { customers: [customer(requestOrganizationId === nextOrganizationId ? "Next organization customer" : "Northwind")] }
+        : body.capabilityId === "crm.listDeals" ? { deals: [] }
+          : body.capabilityId === "crm.pipelineReport" ? pipelineReport()
+            : body.capabilityId === "crm.listTasks" ? { tasks: [] }
+              : body.capabilityId === "crm.listCustomerViews" ? { views: [] }
+                : null;
+      if (output) return Response.json({ ok: true, data: output });
+      if (body.capabilityId === "crm.importCustomers") return Response.json({ ok: true, data: { imported: 1, skippedDuplicateRows: [], createdIds: [dealId], importIntentId: body.intentId } });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    await screen.findByRole("button", { name: /Northwind/ });
+    fireEvent.click(screen.getByRole("button", { name: /^Customers/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Import CSV" }));
+    const file = new File(["Name,Email\nWidget,widget@example.test"], "customers.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Choose CSV"), { target: { files: [file] } });
+    fireEvent.change(await screen.findByLabelText("Map name"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Map email"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import 1 customers" }));
+    await waitFor(() => expect(importPostStarted).toBe(true));
+
+    holdNextOrganization = true;
+    view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
+    await waitFor(() => expect(nextOrganizationRequests).toBe(4));
+    const priorUndoReads = importUndoReads;
+    resolveImport(Response.json({ ok: true, data: { imported: 1, skippedDuplicateRows: [], createdIds: [dealId], importIntentId } }));
+    await waitFor(() => expect(importUndoReads).toBeGreaterThan(priorUndoReads));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    releaseNextOrganization();
+    expect(await screen.findByRole("button", { name: /Next organization customer/ })).toBeTruthy();
+    expect(screen.queryByText("Loading CRM…")).toBeNull();
   });
 
   it("enables Go-backed customer creation for opaque Better Auth user IDs", async () => {

@@ -4920,3 +4920,31 @@ new owners and the manifest shows zero legacy runtime paths.
      caller for the legacy POST route. The generated census now records 94
      route files, 162 API methods (89 Go, 71 legacy, 2 auth), and 30 Vite
      pages; the earlier count in item 438 is historical.
+
+461. (Runtime verified) Vite CRM Overview reads
+     full organization-scoped deal-stage counts and totals through the existing
+     Go `crm.pipelineReport` capability. The board, table, and search continue
+     to use the existing 200-row `crm.listDeals` collection. Vite strictly
+     validates the aggregate response, hides the prior organization's report
+     while loading, and shows unavailable values instead of stale totals after
+     an invalid response. The CRM API and page suites pass 133 tests, Vite
+     typecheck and targeted lint pass, and authenticated `agent-browser` opened
+     `/crm` in the Migration Proof Outfit organization. Its `crm.pipelineReport`
+     POST returned HTTP 200 through Go with all six stage rows and zero totals,
+     which matched the rendered Overview; all four CRM collection calls
+     returned 200 with the active organization header and no page errors.
+
+462. (Runtime and interleaving verified) Vite CRM collection loads use
+     a monotonically increasing request generation and current organization
+     scope guard. Late refresh, retry, and import-completion responses cannot
+     overwrite data loaded for a newer organization. The focused page suite
+     covers both an old refresh completing after a new organization load and a
+     stale import completion attempting to start a load while the new one is
+     pending.
+
+463. (Focused verified) Go AI provider settings count request limits in
+     JavaScript-compatible UTF-16 units. The encrypted-key bound is 4043
+     characters in both Go capability and shared Zod storage validation,
+     matching the maximum encoding of 1000 UTF-16-unit plaintext. Focused
+     handler tests post a maximum CJK key, pass the encrypted configuration
+     through the capability parser, and decrypt it back to the original value.

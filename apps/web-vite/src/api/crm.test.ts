@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, CrmCustomerSchema, CrmDealSchema, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTeamMembers, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readCrmCustomerProfileUndo, readPendingCrmCustomerProfileRestore, readPendingCrmDealCreate, readPendingCrmLeadConversion, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmCustomerProfileUndo, submitCrmDealCreate, submitCrmDealStageMove, submitCrmLeadConversion, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, CrmCustomerSchema, CrmDealSchema, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmPipelineReport, fetchCrmTasks, fetchCrmTeamMembers, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readCrmCustomerProfileUndo, readPendingCrmCustomerProfileRestore, readPendingCrmDealCreate, readPendingCrmLeadConversion, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmCustomerProfileUndo, submitCrmDealCreate, submitCrmDealStageMove, submitCrmLeadConversion, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -72,6 +72,37 @@ describe("CRM API client", () => {
     await expect(fetchCrmCustomers(dealId)).rejects.toMatchObject({ status: 403, message: "Your account does not have access to this CRM information." });
   });
 
+  it("reads a strict organization-scoped full pipeline report from Go", async () => {
+    const report = {
+      stages: [
+        { stage: "lead", count: 201, totalMinor: 1_500_000, weightedMinor: 150_000 },
+        { stage: "qualified", count: 0, totalMinor: 0, weightedMinor: 0 },
+        { stage: "proposal", count: 0, totalMinor: 0, weightedMinor: 0 },
+        { stage: "negotiation", count: 0, totalMinor: 0, weightedMinor: 0 },
+        { stage: "won", count: 3, totalMinor: 99_000, weightedMinor: 99_000 },
+        { stage: "lost", count: 0, totalMinor: 0, weightedMinor: 0 },
+      ],
+      openValueMinor: 1_500_000,
+      weightedForecastMinor: 150_000,
+    } as const;
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: report }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCrmPipelineReport(dealId)).resolves.toEqual(report);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": dealId },
+      body: expect.stringContaining('"capabilityId":"crm.pipelineReport"'),
+    }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { ...report, stages: [{ ...report.stages[0], debug: true }] } })));
+    await expect(fetchCrmPipelineReport(dealId)).rejects.toThrow("unexpected format");
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { ...report, stages: report.stages.map((stage) => stage.stage === "lost" ? { ...stage, stage: "won" } : stage) } })));
+    await expect(fetchCrmPipelineReport(dealId)).rejects.toThrow("unexpected format");
+  });
+
   it("uses Go capabilities for customer collection, tasks, and saved views", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: true, data: { customers: [{ id: customerId, name: "Northwind" }] } }))
@@ -133,6 +164,7 @@ describe("CRM API client", () => {
 
     await expect(fetchCrmCustomers(null)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
     await expect(fetchCrmDeals("not-a-uuid")).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    await expect(fetchCrmPipelineReport(null)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

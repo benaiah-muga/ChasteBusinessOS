@@ -27,6 +27,8 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Documents can start drafts from Go-backed reusable templates, with matching Go and Vite validation for ProseMirror content and canonical JSON limits.
 - Vite Analytics compares invoiced revenue across two inclusive date ranges by customer or product through the authenticated Go `analytics.explainChange` capability, showing totals and contribution details.
 - Vite CRM can edit open task titles and notes through Go, reload the stored details, and restore the complete prior task snapshot.
+- Vite CRM Overview reads complete deal-stage counts and totals from Go, independent of the 200-row deal list used by the interactive pipeline.
+- Vite CRM discards stale collection refreshes after a newer organization load starts, keeping overview totals and customer rows bound to the active organization.
 - Vite Sales can edit draft order notes and line details through the Go capability, with draft-only status checks and matching note length validation.
 - Vite Hiring captures opening departments and role notes through Go and displays the stored details after reload.
 - Vite Marketplace shows when a listing cannot be installed until verification and keeps organization uninstall available for existing installs.
