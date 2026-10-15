@@ -170,7 +170,6 @@ func TestGoOnboardingHandlerDatabaseBoundary(t *testing.T) {
 		"businessDescription": "A verified business onboarding request persists one workspace and its audit event.",
 		"baseCurrency":        "UGX", "path": "import", "deferredSteps": []string{"import_customers"},
 		"intentId": "handler-intent-" + integrationUUID(t),
-		"userId":   auditID,
 	}
 	encodedBody, err := json.Marshal(requestBody)
 	if err != nil {
