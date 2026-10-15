@@ -4736,3 +4736,10 @@ new owners and the manifest shows zero legacy runtime paths.
      successful HTTP response violates the exact Go output contract. The
      focused Accounting API suites pass 155 tests, targeted lint passes, and
      independent review confirmed the response shapes and retry behavior.
+
+442. (Contract verified) Vite Inventory now strictly validates cycle-count
+     success and pending-approval responses against Go. Recorded line counts
+     are constrained to Go's 500-entry input limit, while malformed responses
+     preserve the original retry intent. Focused API and component tests pass
+     21 cases, and independent review confirmed output bounds and retry
+     behavior against the Go executor.

@@ -69,6 +69,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Support clears a ticket retry marker after definitive authorization and request rejections, while preserving exact retries for uncertain outcomes and Go's 422 intent-conflict response.
 - Vite Sales rejects unexpected fields in Go create, deliver, and cancel responses, preserving retry markers when a response violates the exact contract.
 - Vite Accounting rejects unexpected or missing fields in Go module switchboard responses, and retains invoice-create retry state until an exact successful response is received.
+- Vite Inventory rejects cycle-count responses outside Go's exact output bounds, while preserving the same retry intent after a malformed response.
 
 ### Changed
 

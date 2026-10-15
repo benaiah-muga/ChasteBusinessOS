@@ -70,10 +70,11 @@ describe("inventory cycle count API", () => {
   });
 
   it("maps only the four supported actions to their Go capability ids", async () => {
+    const countId = "44444444-4444-4444-8444-444444444444";
     const fetchMock = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { capabilityId: string };
       const data = body.capabilityId === "inventory.createCycleCount"
-        ? { countId: "count-1", lineCount: 1 }
+        ? { countId, lineCount: 1 }
         : body.capabilityId === "inventory.recordCycleCounts"
           ? { recorded: 1 }
           : body.capabilityId === "inventory.postCycleCount"
@@ -84,9 +85,9 @@ describe("inventory cycle count API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const actions: InventoryCycleCountAction[] = [
       { action: "createCycleCount", note: "Weekly", skus: ["SKU-1"], locationId: "loc-1" },
-      { action: "recordCycleCounts", countId: "count-1", counts: [{ sku: "SKU-1", countedThousandths: 12_000 }] },
-      { action: "postCycleCount", countId: "count-1" },
-      { action: "cancelCycleCount", countId: "count-1" },
+      { action: "recordCycleCounts", countId, counts: [{ sku: "SKU-1", countedThousandths: 12_000 }] },
+      { action: "postCycleCount", countId },
+      { action: "cancelCycleCount", countId },
     ];
     const capabilityIds = [
       "inventory.createCycleCount",
@@ -103,7 +104,7 @@ describe("inventory cycle count API", () => {
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(Array(4).fill("/api/capabilities/execute"));
     expect(bodies.map((body) => body.capabilityId)).toEqual(capabilityIds);
     expect(bodies[0]).toMatchObject({ input: { note: "Weekly", skus: ["SKU-1"], locationId: "loc-1" } });
-    expect(bodies[1]).toMatchObject({ input: { countId: "count-1", counts: [{ sku: "SKU-1", countedThousandths: 12_000 }] } });
+    expect(bodies[1]).toMatchObject({ input: { countId, counts: [{ sku: "SKU-1", countedThousandths: 12_000 }] } });
   });
 
   it("does not fall back on a Go 404 and keeps the exact attempt for retry", async () => {
@@ -193,6 +194,53 @@ describe("inventory cycle count API", () => {
     await expect(submitInventoryCycleCountAction(action, undefined, true, retryScope)).resolves.toEqual({ kind: "completed" });
     const malformedIds = malformedFetch.mock.calls.map(([, init]) => (JSON.parse(String(init?.body)) as Record<string, unknown>).intentId);
     expect(malformedIds[0]).toBe(malformedIds[1]);
+  });
+
+  it("rejects extra Go cycle-count output fields and recovers with the saved intent", async () => {
+    const cases: Array<{ action: InventoryCycleCountAction; data: Record<string, unknown> }> = [
+      { action: { action: "createCycleCount", note: "Weekly", skus: ["SKU-1"] }, data: { countId: "44444444-4444-4444-8444-444444444444", lineCount: 1 } },
+      { action: { action: "recordCycleCounts", countId: "44444444-4444-4444-8444-444444444444", counts: [{ sku: "SKU-1", countedThousandths: 1000 }] }, data: { recorded: 1 } },
+      { action: { action: "postCycleCount", countId: "44444444-4444-4444-8444-444444444444" }, data: { posted: true, postedVariances: 1, netVarianceThousandths: 250 } },
+      { action: { action: "cancelCycleCount", countId: "44444444-4444-4444-8444-444444444444" }, data: { cancelled: true } },
+    ];
+
+    for (const { action, data } of cases) {
+      localStorage.clear();
+      retryScope = nextRetryScope();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(Response.json({ ok: true, data: { ...data, unexpected: "field" } }))
+        .mockResolvedValueOnce(Response.json({ ok: true, data }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(submitInventoryCycleCountAction(action, undefined, true, retryScope))
+        .rejects.toThrow("unexpected action response");
+      const pendingMarkers = Object.keys(localStorage).filter((key) => key.startsWith("chaste.inventory.cycle-count.intent.v2:") && !key.includes(":scope:"));
+      expect(pendingMarkers).toHaveLength(1);
+      await expect(submitInventoryCycleCountAction(action, undefined, true, retryScope)).resolves.toEqual({ kind: "completed" });
+
+      const intentIds = fetchMock.mock.calls.map(([, init]) => (JSON.parse(String(init?.body)) as Record<string, unknown>).intentId);
+      expect(intentIds[0]).toBe(intentIds[1]);
+    }
+  });
+
+  it("rejects a recorded count above Go's 500-item limit and recovers with the saved intent", async () => {
+    const counts = Array.from({ length: 500 }, (_, index) => ({ sku: `SKU-${index}`, countedThousandths: 1000 }));
+    const action: InventoryCycleCountAction = {
+      action: "recordCycleCounts",
+      countId: "44444444-4444-4444-8444-444444444444",
+      counts,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { recorded: 501 } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { recorded: 500 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitInventoryCycleCountAction(action, undefined, true, retryScope))
+      .rejects.toThrow("unexpected action response");
+    await expect(submitInventoryCycleCountAction(action, undefined, true, retryScope))
+      .resolves.toEqual({ kind: "completed" });
+    const intentIds = fetchMock.mock.calls.map(([, init]) => (JSON.parse(String(init?.body)) as Record<string, unknown>).intentId);
+    expect(intentIds[0]).toBe(intentIds[1]);
   });
 
   it("scopes Go retries to the actor and organization and blocks a different unresolved action", async () => {

@@ -6,20 +6,22 @@ const ActionResponseSchema = z.object({
 }).strict();
 
 const CycleCountOutputSchemas = {
-  createCycleCount: z.object({ countId: z.string().min(1), lineCount: z.number().int().nonnegative() }).passthrough(),
-  recordCycleCounts: z.object({ recorded: z.number().int().nonnegative() }).passthrough(),
+  createCycleCount: z.object({ countId: z.string().uuid(), lineCount: z.number().int().positive().safe() }).strict(),
+  recordCycleCounts: z.object({ recorded: z.number().int().positive().max(500).safe() }).strict(),
   postCycleCount: z.object({
-    posted: z.boolean(),
-    postedVariances: z.number().int().nonnegative(),
-    netVarianceThousandths: z.number().int(),
-  }).passthrough(),
-  cancelCycleCount: z.object({ cancelled: z.boolean() }).passthrough(),
+    posted: z.literal(true),
+    postedVariances: z.number().int().nonnegative().safe(),
+    netVarianceThousandths: z.number().int().safe(),
+  }).strict(),
+  cancelCycleCount: z.object({ cancelled: z.literal(true) }).strict(),
 } satisfies Record<InventoryCycleCountAction["action"], z.ZodType>;
 
 const PendingResponseSchema = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
-}).passthrough();
+  reason: z.string().min(1),
+  approvalId: z.string().uuid().optional(),
+}).strict();
 const RejectedResponseSchema = z.object({
   ok: z.literal(false),
   error: z.string().min(1),
