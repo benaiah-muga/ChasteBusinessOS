@@ -7,6 +7,13 @@ import {
 
 afterEach(() => vi.unstubAllGlobals());
 
+const accountingModule = {
+  id: "accounting",
+  label: "Accounting",
+  description: "Ledger, invoicing, bills, payments, reports",
+  href: "/accounting",
+};
+
 function closeReadiness(year: number, month: number) {
   return {
     year,
@@ -53,7 +60,7 @@ describe("accounting close API", () => {
 
   it("validates the Accounting switchboard and complete close-readiness response", async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["accounting"] }))
+      .mockResolvedValueOnce(Response.json({ catalog: [accountingModule], enabledModules: ["accounting"], usingDefaults: true }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: closeReadiness(2026, 8) }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -64,6 +71,18 @@ describe("accounting close API", () => {
       "/api/capabilities/execute",
     ]);
     expect(fetchMock.mock.calls.every(([, init]) => init?.credentials === "same-origin" && init.cache === "no-store")).toBe(true);
+  });
+
+  it.each([
+    ["unknown catalog field", { catalog: [{ ...accountingModule, extra: true }], enabledModules: ["accounting"], usingDefaults: true }],
+    ["unknown top-level field", { catalog: [accountingModule], enabledModules: ["accounting"], usingDefaults: true, extra: true }],
+    ["missing Go default-mode field", { catalog: [accountingModule], enabledModules: ["accounting"] }],
+  ])("rejects a Go switchboard with %s", async (_caseName, body) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(body)));
+    await expect(fetchAccountingCloseEnabled()).rejects.toMatchObject({
+      name: "AccountingCloseApiError",
+      message: "The module switchboard returned data in an unexpected format.",
+    });
   });
 
   it("rejects inconsistent blockers, invalid consumed fields, and mismatched periods", async () => {

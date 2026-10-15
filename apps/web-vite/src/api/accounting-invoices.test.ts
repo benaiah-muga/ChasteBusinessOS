@@ -14,12 +14,18 @@ const invoice = {
   issuedAt: "2026-09-20T10:30:00.000Z",
 };
 const goInvoice = { ...invoice, creditedMinor: 0 };
+const accountingModule = {
+  id: "accounting",
+  label: "Accounting",
+  description: "Ledger, invoicing, bills, payments, reports",
+  href: "/accounting",
+};
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Accounting invoices API", () => {
   it("checks the catalog and returns whether Accounting is enabled", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["accounting"] }));
+    const fetchMock = vi.fn(async () => Response.json({ catalog: [accountingModule], enabledModules: ["accounting"], usingDefaults: true }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchAccountingEnabled()).resolves.toBe(true);
@@ -121,8 +127,20 @@ describe("Accounting invoices API", () => {
   });
 
   it("rejects a switchboard that omits Accounting from its catalog", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ catalog: [{ id: "sales" }], enabledModules: [] })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ catalog: [{ ...accountingModule, id: "sales" }], enabledModules: [], usingDefaults: false })));
 
     await expect(fetchAccountingEnabled()).rejects.toBeInstanceOf(AccountingInvoicesApiError);
+  });
+
+  it.each([
+    ["unknown catalog field", { catalog: [{ ...accountingModule, extra: true }], enabledModules: ["accounting"], usingDefaults: true }],
+    ["unknown top-level field", { catalog: [accountingModule], enabledModules: ["accounting"], usingDefaults: true, extra: true }],
+    ["missing Go default-mode field", { catalog: [accountingModule], enabledModules: ["accounting"] }],
+  ])("rejects a Go switchboard with %s", async (_caseName, body) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(body)));
+    await expect(fetchAccountingEnabled()).rejects.toMatchObject({
+      name: "AccountingInvoicesApiError",
+      message: "The module switchboard returned data in an unexpected format.",
+    });
   });
 });

@@ -4728,3 +4728,11 @@ new owners and the manifest shows zero legacy runtime paths.
      fail closed and retain the scoped retry marker, avoiding a duplicate write
      after an uncertain response. The focused Sales API suite passes 38 tests,
      and independent review confirmed each schema matches its Go output struct.
+
+441. (Contract verified) Vite Accounting now validates the exact Go module
+     switchboard shape across its ledger, invoice, and period-close readers.
+     Unknown or missing catalog and top-level fields fail closed. Invoice
+     creation retains its actor and organization scoped retry marker when a
+     successful HTTP response violates the exact Go output contract. The
+     focused Accounting API suites pass 155 tests, targeted lint passes, and
+     independent review confirmed the response shapes and retry behavior.

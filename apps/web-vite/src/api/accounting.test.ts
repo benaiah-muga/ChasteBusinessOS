@@ -132,6 +132,10 @@ function stubFetch(handler: (url: string, init?: RequestInit) => Response | Prom
   return mock;
 }
 
+function moduleEntry(id: string) {
+  return { id, label: id, description: `${id} module`, href: `/${id}` };
+}
+
 describe("accounting API: module switchboard", () => {
   it("accepts the real switchboard payload, whose catalog entries carry more than an id", async () => {
     // /api/modules returns the whole MODULE_CATALOG, so each entry also has
@@ -145,30 +149,43 @@ describe("accounting API: module switchboard", () => {
           description: "Ledger, invoicing, bills, payments, reports",
           href: "/accounting",
         },
-        { id: "iam", label: "IAM", description: "Access governance", href: "/team" },
-        { id: "signals", label: "Signals", description: "Attention feeds", href: "/approvals" },
-        { id: "routines", label: "Routines", description: "Scheduled work", href: "/approvals" },
+        { id: "iam", label: "IAM", description: "Access governance", href: "/team", protected: true },
+        { id: "signals", label: "Signals", description: "Attention feeds", href: null, protected: true },
+        { id: "routines", label: "Routines", description: "Scheduled work", href: null, protected: true },
       ],
       // The route always prepends the protected modules to a saved list.
       enabledModules: ["accounting", "iam", "signals", "routines"],
+      usingDefaults: false,
     }));
     await expect(fetchAccountingEnabled()).resolves.toBe(true);
   });
 
   it("reports Accounting as enabled only when the catalog backs it", async () => {
-    stubFetch(() => Response.json({ catalog: [{ id: "accounting" }, { id: "sales" }], enabledModules: ["accounting", "sales"] }));
+    stubFetch(() => Response.json({ catalog: [moduleEntry("accounting"), moduleEntry("sales")], enabledModules: ["accounting", "sales"], usingDefaults: false }));
     await expect(fetchAccountingEnabled()).resolves.toBe(true);
   });
 
   it("reports Accounting as disabled without touching the books", async () => {
-    const mock = stubFetch(() => Response.json({ catalog: [{ id: "accounting" }], enabledModules: [] }));
+    const mock = stubFetch(() => Response.json({ catalog: [moduleEntry("accounting")], enabledModules: [], usingDefaults: false }));
     await expect(fetchAccountingEnabled()).resolves.toBe(false);
     expect(mock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects an enabled module the catalog does not describe", async () => {
-    stubFetch(() => Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["ghost"] }));
+    stubFetch(() => Response.json({ catalog: [moduleEntry("accounting")], enabledModules: ["ghost"], usingDefaults: false }));
     await expect(fetchAccountingEnabled()).rejects.toBeInstanceOf(AccountingApiError);
+  });
+
+  it.each([
+    ["unknown catalog field", { catalog: [{ ...moduleEntry("accounting"), extra: true }], enabledModules: ["accounting"], usingDefaults: false }],
+    ["unknown top-level field", { catalog: [moduleEntry("accounting")], enabledModules: ["accounting"], usingDefaults: false, extra: true }],
+    ["missing default-mode field", { catalog: [moduleEntry("accounting")], enabledModules: ["accounting"] }],
+  ])("rejects a Go switchboard with %s", async (_caseName, body) => {
+    stubFetch(() => Response.json(body));
+    await expect(fetchAccountingEnabled()).rejects.toMatchObject({
+      name: "AccountingApiError",
+      message: "The module switchboard returned data in an unexpected format.",
+    });
   });
 });
 
@@ -1366,13 +1383,21 @@ describe("accounting API: Go invoice creation", () => {
     expect(mock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
   });
 
-  it("keeps malformed success unresolved and refuses changed payloads", async () => {
-    vi.stubGlobal("__GO_ACCOUNTING_CREATE_INVOICE__", true);
-    const mock = stubFetch(() => Response.json({ ok: true, data: { ...output, invoiceId: "forged" } }));
+  it("rejects unknown Go output fields and preserves the exact retry until success", async () => {
+    const intents: string[] = [];
+    const mock = stubFetch((_url, init) => {
+      intents.push(String(JSON.parse(String(init?.body)).intentId));
+      return intents.length === 1
+        ? Response.json({ ok: true, data: { ...output, unexpected: true } })
+        : Response.json({ ok: true, data: output });
+    });
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
     await expect(readPendingAccountingCreateInvoice(paymentRetryScope)).resolves.toEqual(action);
     await expect(submitAccountingAction("/api/accounting", { ...action, memo: "changed" }, undefined, paymentRetryScope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
-    expect(mock).toHaveBeenCalledTimes(1);
+    await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    expect(mock).toHaveBeenCalledTimes(2);
+    expect(intents[1]).toBe(intents[0]);
+    await expect(readPendingAccountingCreateInvoice(paymentRetryScope)).resolves.toBeNull();
   });
 });
 

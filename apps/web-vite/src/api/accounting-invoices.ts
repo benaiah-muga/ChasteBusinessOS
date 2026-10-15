@@ -1,9 +1,16 @@
 import { z } from "zod";
 
 const SwitchboardSchema = z.object({
-  catalog: z.array(z.object({ id: z.string().min(1) })),
+  catalog: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string(),
+    description: z.string(),
+    href: z.string().nullable(),
+    protected: z.boolean().optional(),
+  }).strict()),
   enabledModules: z.array(z.string().min(1)),
-});
+  usingDefaults: z.boolean(),
+}).strict();
 
 const invoiceFields = {
   id: z.string().min(1),

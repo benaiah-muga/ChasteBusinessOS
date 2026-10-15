@@ -13,12 +13,19 @@ const currency = z.string().regex(/^[A-Z]{3}$/);
 const timestamp = z.string().datetime({ offset: true });
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
-// The catalog entries carry label, description, href, and protected alongside
-// id, so neither level may be strict or a real switchboard response is rejected.
+// Keep this aligned with the Go /api/modules response, including its optional
+// protected flag for catalog entries whose declaration marks them protected.
 const SwitchboardSchema = z.object({
-  catalog: z.array(z.object({ id: z.string().min(1) }).passthrough()),
+  catalog: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string(),
+    description: z.string(),
+    href: z.string().nullable(),
+    protected: z.boolean().optional(),
+  }).strict()),
   enabledModules: z.array(z.string().min(1)),
-}).passthrough();
+  usingDefaults: z.boolean(),
+}).strict();
 
 const EntrySchema = z.object({
   id: z.string().min(1),
