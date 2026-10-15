@@ -49,8 +49,8 @@ func TestGoCRMTasksCapabilityContractsDispatchAndOutputs(t *testing.T) {
 			permission: "crm.write",
 			want:       UpdateTaskDetailsInput{TaskID: taskID, DueAt: nil, DueAtSet: true, AssigneeUserID: nil, AssigneeUserIDSet: true},
 			wantJSON:   `{"assigneeUserId":null,"dueAt":null,"taskId":"` + taskID + `"}`,
-			output:     UpdateTaskDetailsOutput{TaskID: taskID, Previous: TaskDetailsPreviousState{DueAt: nil, AssigneeUserID: nil}},
-			outputJSON: `{"taskId":"` + taskID + `","previous":{"dueAt":null,"assigneeUserId":null}}`,
+			output:     UpdateTaskDetailsOutput{TaskID: taskID, Previous: TaskDetailsPreviousState{Title: "Old title", Note: nil, DueAt: nil, AssigneeUserID: nil}},
+			outputJSON: `{"taskId":"` + taskID + `","previous":{"title":"Old title","note":null,"dueAt":null,"assigneeUserId":null}}`,
 		},
 		{
 			id:         restoreTaskDetailsCapabilityID,
@@ -58,8 +58,8 @@ func TestGoCRMTasksCapabilityContractsDispatchAndOutputs(t *testing.T) {
 			permission: "crm.write",
 			want:       UpdateTaskDetailsInput{TaskID: taskID, DueAt: crmStringPointer(dueAt), DueAtSet: true, AssigneeUserID: crmStringPointer(assigneeID), AssigneeUserIDSet: true},
 			wantJSON:   `{"assigneeUserId":"` + assigneeID + `","dueAt":"` + dueAt + `","taskId":"` + taskID + `"}`,
-			output:     UpdateTaskDetailsOutput{TaskID: taskID, Previous: TaskDetailsPreviousState{DueAt: crmStringPointer(dueAt), AssigneeUserID: crmStringPointer(assigneeID)}},
-			outputJSON: `{"taskId":"` + taskID + `","previous":{"dueAt":"` + dueAt + `","assigneeUserId":"` + assigneeID + `"}}`,
+			output:     UpdateTaskDetailsOutput{TaskID: taskID, Previous: TaskDetailsPreviousState{Title: "Old title", Note: crmStringPointer("old note"), DueAt: crmStringPointer(dueAt), AssigneeUserID: crmStringPointer(assigneeID)}},
+			outputJSON: `{"taskId":"` + taskID + `","previous":{"title":"Old title","note":"old note","dueAt":"` + dueAt + `","assigneeUserId":"` + assigneeID + `"}}`,
 		},
 	}
 	for _, test := range cases {
@@ -152,6 +152,10 @@ func TestGoCRMTasksParsersMatchCRMContracts(t *testing.T) {
 		`{"taskId":"` + validID + `","dueAt":"soon"}`,
 		`{"taskId":"` + validID + `","dueAt":123}`,
 		`{"taskId":"` + validID + `","assigneeUserId":"nope"}`,
+		`{"taskId":"` + validID + `","title":"   "}`,
+		`{"taskId":"` + validID + `","title":"` + strings.Repeat("t", 201) + `"}`,
+		`{"taskId":"` + validID + `","note":123}`,
+		`{"taskId":"` + validID + `","note":"` + strings.Repeat("n", 2001) + `"}`,
 	} {
 		if _, err := ParseUpdateTaskDetailsInput(json.RawMessage(raw)); err == nil {
 			t.Errorf("ParseUpdateTaskDetailsInput accepted %s", raw)
@@ -164,6 +168,10 @@ func TestGoCRMTasksParsersMatchCRMContracts(t *testing.T) {
 	reassigned, err := ParseUpdateTaskDetailsInput(json.RawMessage(`{"taskId":"` + validID + `","assigneeUserId":null}`))
 	if err != nil || !reassigned.AssigneeUserIDSet || reassigned.AssigneeUserID != nil || reassigned.DueAtSet {
 		t.Fatalf("cleared assignee input=%+v err=%v", reassigned, err)
+	}
+	contentUpdate, err := ParseUpdateTaskDetailsInput(json.RawMessage(`{"taskId":"` + validID + `","title":"Call again","note":null}`))
+	if err != nil || !contentUpdate.TitleSet || contentUpdate.Title != "Call again" || !contentUpdate.NoteSet || contentUpdate.Note != nil {
+		t.Fatalf("title and note update input=%+v err=%v", contentUpdate, err)
 	}
 }
 
@@ -281,7 +289,7 @@ func TestGoCRMTasksEnforceTenancyCompletionAuditsAndReceiptReplay(t *testing.T) 
 	if err := json.Unmarshal(dueUpdate.Data, &dueUpdateOutput); err != nil {
 		t.Fatal(err)
 	}
-	if dueUpdateOutput.TaskID != defaultedRefOutput.TaskID || dueUpdateOutput.Previous.DueAt != nil || dueUpdateOutput.Previous.AssigneeUserID != nil {
+	if dueUpdateOutput.TaskID != defaultedRefOutput.TaskID || dueUpdateOutput.Previous.Title != "Ref defaults to customer" || dueUpdateOutput.Previous.Note != nil || dueUpdateOutput.Previous.DueAt != nil || dueUpdateOutput.Previous.AssigneeUserID != nil {
 		t.Fatalf("due update output=%+v, want untouched previous state", dueUpdateOutput)
 	}
 	conflictingPayload := json.RawMessage(fmt.Sprintf(`{"taskId":%q,"dueAt":"2026-12-01T08:00:00.000Z"}`, defaultedRefOutput.TaskID))
@@ -290,22 +298,23 @@ func TestGoCRMTasksEnforceTenancyCompletionAuditsAndReceiptReplay(t *testing.T) 
 		t.Fatalf("updateTaskDetails conflicting payload under one intent result=%+v err=%v", conflictResult, conflictErr)
 	}
 
-	detailsTaskID := seedCRMTask(t, fx, fx.orgID, seedCRMTaskValues{Title: "Reassign me", DueAt: parseCRMTaskTime(t, dueAt), Assignee: crmStringPointer(fx.userID)})
-	reassignPayload := json.RawMessage(fmt.Sprintf(`{"taskId":%q,"dueAt":null,"assigneeUserId":null}`, detailsTaskID))
+	detailsTaskID := seedCRMTask(t, fx, fx.orgID, seedCRMTaskValues{Title: "Reassign me", Note: crmStringPointer("original note"), DueAt: parseCRMTaskTime(t, dueAt), Assignee: crmStringPointer(fx.userID)})
+	reassignPayload := json.RawMessage(fmt.Sprintf(`{"taskId":%q,"title":"Call again","note":null,"dueAt":null,"assigneeUserId":null}`, detailsTaskID))
 	reassign := executeCRMTask(t, fx, updateTaskDetailsCapabilityID, reassignPayload, "crm-task-receipt-clear")
 	var reassignOutput UpdateTaskDetailsOutput
 	if err := json.Unmarshal(reassign.Data, &reassignOutput); err != nil {
 		t.Fatal(err)
 	}
-	if reassignOutput.Previous.DueAt == nil || *reassignOutput.Previous.DueAt != dueAt || reassignOutput.Previous.AssigneeUserID == nil || *reassignOutput.Previous.AssigneeUserID != fx.userID {
-		t.Fatalf("clear output=%+v, want previous due date and assignee", reassignOutput)
+	if reassignOutput.Previous.Title != "Reassign me" || reassignOutput.Previous.Note == nil || *reassignOutput.Previous.Note != "original note" || reassignOutput.Previous.DueAt == nil || *reassignOutput.Previous.DueAt != dueAt || reassignOutput.Previous.AssigneeUserID == nil || *reassignOutput.Previous.AssigneeUserID != fx.userID {
+		t.Fatalf("clear output=%+v, want previous title, note, due date, and assignee", reassignOutput)
 	}
-	var clearedDue, clearedAssignee *string
-	if err := fx.owner.QueryRow(fx.ctx, `SELECT due_at::text, assignee_user_id::text FROM tasks WHERE id=$1::uuid`, detailsTaskID).Scan(&clearedDue, &clearedAssignee); err != nil {
+	var clearedDue, clearedAssignee, clearedNote *string
+	var updatedTitle string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT title, note, due_at::text, assignee_user_id::text FROM tasks WHERE id=$1::uuid`, detailsTaskID).Scan(&updatedTitle, &clearedNote, &clearedDue, &clearedAssignee); err != nil {
 		t.Fatal(err)
 	}
-	if clearedDue != nil || clearedAssignee != nil {
-		t.Fatalf("cleared task state=%v/%v, want null due date and assignee", clearedDue, clearedAssignee)
+	if updatedTitle != "Call again" || clearedNote != nil || clearedDue != nil || clearedAssignee != nil {
+		t.Fatalf("updated task state=%q/%v/%v/%v, want new title and cleared note/date/assignee", updatedTitle, clearedNote, clearedDue, clearedAssignee)
 	}
 
 	nonMemberID := executorUUID(t)
@@ -322,22 +331,33 @@ func TestGoCRMTasksEnforceTenancyCompletionAuditsAndReceiptReplay(t *testing.T) 
 		t.Fatalf("completed task updateTaskDetails error=%v", err)
 	}
 
-	restorePayload := json.RawMessage(fmt.Sprintf(`{"taskId":%q,"dueAt":%q,"assigneeUserId":%q}`, detailsTaskID, dueAt, fx.userID))
+	restoreInput, err := json.Marshal(map[string]any{
+		"taskId":         detailsTaskID,
+		"title":          reassignOutput.Previous.Title,
+		"note":           reassignOutput.Previous.Note,
+		"dueAt":          reassignOutput.Previous.DueAt,
+		"assigneeUserId": reassignOutput.Previous.AssigneeUserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restorePayload := json.RawMessage(restoreInput)
 	restore := executeCRMTask(t, fx, restoreTaskDetailsCapabilityID, restorePayload, "crm-task-receipt-restore")
 	var restoreOutput UpdateTaskDetailsOutput
 	if err := json.Unmarshal(restore.Data, &restoreOutput); err != nil {
 		t.Fatal(err)
 	}
-	if restoreOutput.Previous.DueAt != nil || restoreOutput.Previous.AssigneeUserID != nil {
+	if restoreOutput.Previous.Title != "Call again" || restoreOutput.Previous.Note != nil || restoreOutput.Previous.DueAt != nil || restoreOutput.Previous.AssigneeUserID != nil {
 		t.Fatalf("restore output=%+v, want previous cleared state", restoreOutput)
 	}
 	var restoredDue *time.Time
-	var restoredAssignee *string
-	if err := fx.owner.QueryRow(fx.ctx, `SELECT due_at, assignee_user_id::text FROM tasks WHERE id=$1::uuid`, detailsTaskID).Scan(&restoredDue, &restoredAssignee); err != nil {
+	var restoredAssignee, restoredNote *string
+	var restoredTitle string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT title, note, due_at, assignee_user_id::text FROM tasks WHERE id=$1::uuid`, detailsTaskID).Scan(&restoredTitle, &restoredNote, &restoredDue, &restoredAssignee); err != nil {
 		t.Fatal(err)
 	}
-	if restoredDue == nil || crmISOTime(restoredDue) == nil || *crmISOTime(restoredDue) != dueAt || restoredAssignee == nil || *restoredAssignee != fx.userID {
-		t.Fatalf("restored task state=%v/%v, want original due date and assignee", restoredDue, restoredAssignee)
+	if restoredTitle != "Reassign me" || restoredNote == nil || *restoredNote != "original note" || restoredDue == nil || crmISOTime(restoredDue) == nil || *crmISOTime(restoredDue) != dueAt || restoredAssignee == nil || *restoredAssignee != fx.userID {
+		t.Fatalf("restored task state=%q/%v/%v/%v, want original title, note, due date, and assignee", restoredTitle, restoredNote, restoredDue, restoredAssignee)
 	}
 
 	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2 AND actor_type='human'`, fx.orgID, updateTaskDetailsCapabilityID); got != 2 {
@@ -403,6 +423,7 @@ func executeCRMTaskWithError(fx *executorFixture, capabilityID string, raw json.
 
 type seedCRMTaskValues struct {
 	Title    string
+	Note     *string
 	DueAt    *time.Time
 	Assignee *string
 	Done     bool
@@ -416,9 +437,9 @@ func seedCRMTask(t *testing.T, fx *executorFixture, orgID string, values seedCRM
 	}
 	var taskID string
 	if err := fx.owner.QueryRow(fx.ctx, `
-		INSERT INTO tasks (org_id, title, due_at, assignee_user_id, done_at)
-		VALUES ($1::uuid, $2, $3::timestamptz, $4::uuid, $5)
-		RETURNING id::text`, orgID, values.Title, values.DueAt, values.Assignee, doneAt).Scan(&taskID); err != nil {
+		INSERT INTO tasks (org_id, title, note, due_at, assignee_user_id, done_at)
+		VALUES ($1::uuid, $2, $3, $4::timestamptz, $5::uuid, $6)
+		RETURNING id::text`, orgID, values.Title, values.Note, values.DueAt, values.Assignee, doneAt).Scan(&taskID); err != nil {
 		t.Fatal(err)
 	}
 	return taskID

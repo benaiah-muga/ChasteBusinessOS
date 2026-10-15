@@ -283,13 +283,13 @@ const CreateTaskOutputSchema = z.object({ taskId: uuid }).strict();
 const CompleteTaskOutputSchema = z.object({ completed: z.literal(true) }).strict();
 const UpdateTaskDetailsOutputSchema = z.object({
   taskId: uuid,
-  previous: z.object({ dueAt: z.string().datetime().nullable(), assigneeUserId: uuid.nullable() }).strict(),
+  previous: z.object({ title: z.string().optional(), note: z.string().nullable().optional(), dueAt: z.string().datetime().nullable(), assigneeUserId: uuid.nullable() }).strict(),
 }).strict();
 
 export type CrmTaskMutation =
   | { action: "createTask"; title: string; dueAt?: string; assigneeUserId?: string; refType?: string; refId?: string; note?: string }
   | { action: "completeTask"; taskId: string }
-  | { action: "updateTaskDetails"; taskId: string; dueAt?: string | null; assigneeUserId?: string | null };
+  | { action: "updateTaskDetails"; taskId: string; title?: string; note?: string | null; dueAt?: string | null; assigneeUserId?: string | null };
 type CrmCustomerCreateMutation = { action: "createCustomer"; name: string; email?: string; phone?: string; preferredContactMethod: "email" | "phone" | "whatsapp" | "other"; doNotContact: boolean };
 export type CrmCustomerProfileUpdateMutation = {
   action: "updateProfile";
@@ -429,8 +429,9 @@ const CrmTaskMutationSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("completeTask"), taskId: uuid }).strict(),
   z.object({
     action: z.literal("updateTaskDetails"), taskId: uuid,
+    title: z.string().min(1).max(200).optional(), note: z.string().max(2000).nullable().optional(),
     dueAt: z.string().datetime().nullable().optional(), assigneeUserId: uuid.nullable().optional(),
-  }).strict().refine((action) => action.dueAt !== undefined || action.assigneeUserId !== undefined),
+  }).strict().refine((action) => action.title !== undefined || action.note !== undefined || action.dueAt !== undefined || action.assigneeUserId !== undefined),
 ]);
 
 export type CrmTaskRetryScope = { actorId: string | null; organizationId: string | null };
@@ -530,7 +531,7 @@ export async function submitCrmTaskMutation(
   action: CrmTaskMutation,
   signal?: AbortSignal,
   retryScope?: CrmTaskRetryScope,
-): Promise<CrmActionOutcome<{ taskId: string } | { completed: true } | { taskId: string; previous: { dueAt: string | null; assigneeUserId: string | null } }>> {
+): Promise<CrmActionOutcome<{ taskId: string } | { completed: true } | { taskId: string; previous: { title?: string; note?: string | null; dueAt: string | null; assigneeUserId: string | null } }>> {
   if (!CrmTaskMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the task details and correct invalid values before submitting.");
   const scope = await crmTaskScope(retryScope);
   const target = action.action === "createTask" ? "create" : action.action === "completeTask" ? "complete:" + action.taskId : "details:" + action.taskId;

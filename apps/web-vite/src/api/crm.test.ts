@@ -448,11 +448,11 @@ describe("CRM API client", () => {
     const taskId = "77e93149-61d7-48ed-929d-754ddfa263b1";
     const assigneeUserId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
     const scope = { actorId: customerId, organizationId: dealId };
-    const action = { action: "updateTaskDetails" as const, taskId, dueAt: null, assigneeUserId };
+    const action = { action: "updateTaskDetails" as const, taskId, title: "Review renewal", note: null, dueAt: null, assigneeUserId };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId, previous: { dueAt: "2026-10-15T12:00:00.000Z", assigneeUserId: null } } }));
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId, previous: { title: "Previous title", note: "Previous note", dueAt: "2026-10-15T12:00:00.000Z", assigneeUserId: null } } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(submitCrmTaskMutation(action, undefined, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
@@ -467,7 +467,7 @@ describe("CRM API client", () => {
     const goBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
-    expect(goBody).toMatchObject({ capabilityId: "crm.updateTaskDetails", input: { taskId, dueAt: null, assigneeUserId }, intentId: expect.any(String) });
+    expect(goBody).toMatchObject({ capabilityId: "crm.updateTaskDetails", input: { taskId, title: "Review renewal", note: null, dueAt: null, assigneeUserId }, intentId: expect.any(String) });
     expect(retryBody.intentId).toBe(goBody.intentId);
     await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toEqual(action);
     await expect(readPendingCrmTaskDetailsForScope(scope)).resolves.toEqual([action]);
@@ -481,13 +481,13 @@ describe("CRM API client", () => {
     const otherTaskId = "4d906ed9-70da-4e66-a8e7-a192cfaf42db";
     const actionWithWrongTaskOutput = { ...action, taskId: otherTaskId };
     const unexpectedTaskId = "6d39b818-fac3-41cb-8e71-3c1b27856f4a";
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId: unexpectedTaskId, previous: { dueAt: null, assigneeUserId: null } } })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId: unexpectedTaskId, previous: { title: "Task", note: null, dueAt: null, assigneeUserId: null } } })));
     await expect(submitCrmTaskMutation(actionWithWrongTaskOutput, undefined, scope)).rejects.toMatchObject({ message: "The CRM service returned an unexpected task result." });
     await expect(readPendingCrmTaskDetails(scope, otherTaskId)).resolves.toEqual(actionWithWrongTaskOutput);
 
     const extraOutputTaskId = "64cd9667-bd03-440e-a20d-11dc639625f0";
     const actionWithExtraOutput = { ...action, taskId: extraOutputTaskId };
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId: extraOutputTaskId, previous: { dueAt: null, assigneeUserId: null }, extra: true } })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId: extraOutputTaskId, previous: { title: "Task", note: null, dueAt: null, assigneeUserId: null }, extra: true } })));
     await expect(submitCrmTaskMutation(actionWithExtraOutput, undefined, scope)).rejects.toMatchObject({ message: "The CRM service returned an unexpected task result." });
   });
 

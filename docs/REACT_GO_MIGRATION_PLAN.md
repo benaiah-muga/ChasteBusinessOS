@@ -4654,3 +4654,11 @@ new owners and the manifest shows zero legacy runtime paths.
      handler/parser checks passing. Authenticated browser proof received HTTP
      200 from Go and rendered the zero-activity empty state for the selected
      dates; the browser reported no errors.
+
+433. (Runtime verified) Vite CRM edits open task titles and notes through the
+     Go `crm.updateTaskDetails` capability, reads the stored note from Go, and
+     restores title, note, due date, and assignee from the complete inverse
+     snapshot. Focused CRM API/page tests pass 124 cases, with typecheck, lint,
+     and the Go task integration test passing. Authenticated browser proof
+     created and edited a synthetic task, reloaded it, and confirmed the title
+     and note persisted through Go; no browser errors were reported.

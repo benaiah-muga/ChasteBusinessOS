@@ -91,6 +91,7 @@ type ListTasksInput struct {
 type CRMTaskSummary struct {
 	ID             string  `json:"id"`
 	Title          string  `json:"title"`
+	Note           *string `json:"note"`
 	DueAt          *string `json:"dueAt"`
 	DoneAt         *string `json:"doneAt"`
 	RefType        *string `json:"refType"`
@@ -231,7 +232,7 @@ func jsRoundStageWeight(value int64, weight float64) int64 {
 
 func listTasks(ctx context.Context, tx pgx.Tx, orgID string, input ListTasksInput) (ListTasksOutput, error) {
 	query := `
-		SELECT t.id::text, t.title, t.due_at, t.done_at, t.ref_type, t.ref_id::text,
+		SELECT t.id::text, t.title, t.note, t.due_at, t.done_at, t.ref_type, t.ref_id::text,
 		       t.assignee_user_id::text, u.name, u.email, c.name
 		FROM tasks t
 		LEFT JOIN users u ON u.id = t.assignee_user_id
@@ -251,7 +252,7 @@ func listTasks(ctx context.Context, tx pgx.Tx, orgID string, input ListTasksInpu
 		var task CRMTaskSummary
 		var dueAt, doneAt *time.Time
 		var assigneeName, assigneeEmail *string
-		if err := rows.Scan(&task.ID, &task.Title, &dueAt, &doneAt, &task.RefType, &task.RefID, &task.AssigneeUserID, &assigneeName, &assigneeEmail, &task.CustomerName); err != nil {
+		if err := rows.Scan(&task.ID, &task.Title, &task.Note, &dueAt, &doneAt, &task.RefType, &task.RefID, &task.AssigneeUserID, &assigneeName, &assigneeEmail, &task.CustomerName); err != nil {
 			return ListTasksOutput{}, err
 		}
 		task.DueAt = crmISOTime(dueAt)

@@ -210,6 +210,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [taskDraftLocked, setTaskDraftLocked] = useState(false);
   const [taskDetailsDraft, setTaskDetailsDraft] = useState<{
     taskId: string;
+    title: string;
+    note: string;
     dueAt: string;
     assigneeUserId: string;
     retryAction: Extract<CrmTaskMutation, { action: "updateTaskDetails" }> | null;
@@ -1001,6 +1003,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     const retryAction = taskDetailsRetryActions[task.id] ?? null;
     setTaskDetailsDraft({
       taskId: task.id,
+      title: retryAction ? (retryAction.title ?? task.title) : task.title,
+      note: retryAction?.note !== undefined ? (retryAction.note ?? "") : (task.note ?? ""),
       dueAt: retryAction ? (retryAction.dueAt ? retryAction.dueAt.slice(0, 10) : "") : (task.dueAt ? task.dueAt.slice(0, 10) : ""),
       assigneeUserId: retryAction ? (retryAction.assigneeUserId ?? "") : (task.assigneeUserId ?? ""),
       retryAction,
@@ -1010,6 +1014,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   async function saveTaskDetails(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!taskDetailsDraft || busy || !taskDraftReady || !taskDetailsReady) return;
+    if (!taskDetailsDraft.title.trim()) return;
     const operationScope = taskDraftScopeIdentity;
     const operationScopeGeneration = taskDraftScopeGeneration.current;
     const isCurrentScope = () => Boolean(operationScope && taskDraftScopeRef.current === operationScope && taskDraftScopeGeneration.current === operationScopeGeneration);
@@ -1018,6 +1023,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     const action: Extract<CrmTaskMutation, { action: "updateTaskDetails" }> = taskDetailsDraft.retryAction ?? {
       action: "updateTaskDetails",
       taskId: taskDetailsDraft.taskId,
+      title: taskDetailsDraft.title.trim(),
+      note: taskDetailsDraft.note.trim() || null,
       dueAt: taskDetailsDraft.dueAt ? new Date(`${taskDetailsDraft.dueAt}T12:00:00`).toISOString() : null,
       assigneeUserId: taskDetailsDraft.assigneeUserId || null,
     };
@@ -1299,9 +1306,12 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
           {task.doneAt ? <strong>{task.title}</strong> : <label><input type="checkbox" checked={Boolean(task.doneAt)} disabled={busy || !taskDetailsReady || Boolean(taskDetailsRetryActions[task.id])} onChange={() => void completeTask(task.id)} /> <strong>{task.title}</strong></label>}
           <span>{task.doneAt ? `Completed ${new Date(task.doneAt).toLocaleDateString()}` : task.dueAt ? new Date(task.dueAt).toLocaleDateString() : "No due date"}</span>
           <span>{task.assigneeName ?? "Unassigned"}</span>
+          {task.note && <small>{task.note}</small>}
           {!task.doneAt && task.refId && <button type="button" onClick={() => { const customer = customers.find((entry) => entry.id === task.refId); if (customer) void openProfile(customer, "activity"); }}>Open customer</button>}
           {!task.doneAt && <button type="button" disabled={busy || !taskDraftReady || !taskDetailsReady} onClick={() => editTaskDetails(task)}>{taskDetailsDraft?.taskId === task.id ? "Refresh details" : "Edit details"}</button>}
           {taskDetailsDraft?.taskId === task.id && <form className="crm-inline-form" aria-label={`Edit details for ${task.title}`} onSubmit={(event) => void saveTaskDetails(event)}>
+            <label>Task title<input aria-label="Task title" required maxLength={200} disabled={busy || Boolean(taskDetailsDraft.retryAction)} value={taskDetailsDraft.title} onChange={(event) => setTaskDetailsDraft({ ...taskDetailsDraft, title: event.target.value })} /></label>
+            <label>Task note<textarea aria-label="Task note" maxLength={2000} disabled={busy || Boolean(taskDetailsDraft.retryAction)} value={taskDetailsDraft.note} onChange={(event) => setTaskDetailsDraft({ ...taskDetailsDraft, note: event.target.value })} /></label>
             <label>Due date<input aria-label="Task due date" type="date" disabled={busy || Boolean(taskDetailsDraft.retryAction)} value={taskDetailsDraft.dueAt} onChange={(event) => setTaskDetailsDraft({ ...taskDetailsDraft, dueAt: event.target.value })} /></label>
             <label>Task assignee<select aria-label="Task assignee" disabled={busy || Boolean(taskDetailsDraft.retryAction)} value={taskDetailsDraft.assigneeUserId} onChange={(event) => setTaskDetailsDraft({ ...taskDetailsDraft, assigneeUserId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label>
             <button type="submit" disabled={busy || !taskDraftReady || !taskDetailsReady}>{taskDetailsDraft.retryAction ? "Retry update" : "Save details"}</button>

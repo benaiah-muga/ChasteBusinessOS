@@ -1258,7 +1258,7 @@ describe("Vite CRM page", () => {
         capabilityWrites += 1;
         return capabilityWrites === 1
           ? Response.json({ pendingApproval: true, reason: "Manager approval required" }, { status: 202 })
-          : Response.json({ ok: true, data: { taskId, previous: { dueAt: null, assigneeUserId: null } } });
+          : Response.json({ ok: true, data: { taskId, previous: { title: "Review renewal", note: null, dueAt: null, assigneeUserId: null } } });
       }
       return new Response(null, { status: 404 });
     });
@@ -1267,6 +1267,8 @@ describe("Vite CRM page", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    fireEvent.change(await screen.findByLabelText("Task title"), { target: { value: "Follow up on renewal" } });
+    fireEvent.change(screen.getByLabelText("Task note"), { target: { value: "Discuss the revised offer" } });
     fireEvent.change(await screen.findByLabelText("Task due date"), { target: { value: "2026-10-15" } });
     fireEvent.change(screen.getByLabelText("Task assignee"), { target: { value: ownerId } });
     fireEvent.click(screen.getByRole("button", { name: "Save details" }));
@@ -1278,7 +1280,7 @@ describe("Vite CRM page", () => {
 
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === "/api/capabilities/execute" && init?.method === "POST")).toHaveLength(2));
     const bodies = fetchMock.mock.calls.filter(([url, init]) => String(url) === "/api/capabilities/execute" && init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body)));
-    expect(bodies[0]).toMatchObject({ capabilityId: "crm.updateTaskDetails", input: { taskId, dueAt: new Date("2026-10-15T12:00:00").toISOString(), assigneeUserId: ownerId }, intentId: expect.any(String) });
+    expect(bodies[0]).toMatchObject({ capabilityId: "crm.updateTaskDetails", input: { taskId, title: "Follow up on renewal", note: "Discuss the revised offer", dueAt: new Date("2026-10-15T12:00:00").toISOString(), assigneeUserId: ownerId }, intentId: expect.any(String) });
     expect(bodies[1]).toEqual(bodies[0]);
   });
 
@@ -1348,7 +1350,7 @@ describe("Vite CRM page", () => {
     fireEvent.change(dueDate, { target: { value: "2026-10-20" } });
 
     await act(async () => {
-      finishUpdate(Response.json({ ok: true, data: { taskId, previous: { dueAt: null, assigneeUserId: null } } }));
+      finishUpdate(Response.json({ ok: true, data: { taskId, previous: { title: "Review renewal", note: null, dueAt: null, assigneeUserId: null } } }));
     });
 
     expect((screen.getByLabelText("Task due date") as HTMLInputElement).value).toBe("2026-10-20");
@@ -1379,7 +1381,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
       if (path === "/api/capabilities/execute" && init?.method === "POST") {
         capabilityWrites += 1;
-        return Response.json({ ok: true, data: { taskId, previous: { dueAt: null, assigneeUserId: null } } });
+        return Response.json({ ok: true, data: { taskId, previous: { title: "Review renewal", note: null, dueAt: null, assigneeUserId: null } } });
       }
       return new Response(null, { status: 404 });
     });

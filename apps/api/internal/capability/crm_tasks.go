@@ -42,6 +42,10 @@ type CompleteTaskOutput struct {
 
 type UpdateTaskDetailsInput struct {
 	TaskID            string  `json:"taskId"`
+	Title             string  `json:"-"`
+	TitleSet          bool    `json:"-"`
+	Note              *string `json:"-"`
+	NoteSet           bool    `json:"-"`
 	DueAt             *string `json:"-"`
 	DueAtSet          bool    `json:"-"`
 	AssigneeUserID    *string `json:"-"`
@@ -50,6 +54,12 @@ type UpdateTaskDetailsInput struct {
 
 func (input UpdateTaskDetailsInput) MarshalJSON() ([]byte, error) {
 	value := map[string]any{"taskId": input.TaskID}
+	if input.TitleSet {
+		value["title"] = input.Title
+	}
+	if input.NoteSet {
+		value["note"] = input.Note
+	}
 	if input.DueAtSet {
 		value["dueAt"] = input.DueAt
 	}
@@ -60,6 +70,8 @@ func (input UpdateTaskDetailsInput) MarshalJSON() ([]byte, error) {
 }
 
 type TaskDetailsPreviousState struct {
+	Title          string  `json:"title"`
+	Note           *string `json:"note"`
 	DueAt          *string `json:"dueAt"`
 	AssigneeUserID *string `json:"assigneeUserId"`
 }
@@ -143,6 +155,25 @@ func ParseUpdateTaskDetailsInput(raw json.RawMessage) (UpdateTaskDetailsInput, e
 		return UpdateTaskDetailsInput{}, errors.New("taskId must be a UUID")
 	}
 	input := UpdateTaskDetailsInput{TaskID: taskID}
+	if _, ok := fields["title"]; ok {
+		title, parseErr := requiredCRMDealString(fields, "title", 1, 200)
+		if parseErr != nil || strings.TrimSpace(title) == "" {
+			return UpdateTaskDetailsInput{}, errors.New("title must contain 1 to 200 non-whitespace characters")
+		}
+		input.Title = title
+		input.TitleSet = true
+	}
+	if rawNote, ok := fields["note"]; ok {
+		note, parseErr := readNullableString(rawNote)
+		if parseErr != nil {
+			return UpdateTaskDetailsInput{}, errors.New("note must be a string or null")
+		}
+		if note != nil && utf16Length(*note) > 2000 {
+			return UpdateTaskDetailsInput{}, errors.New("note must be at most 2000 characters")
+		}
+		input.Note = note
+		input.NoteSet = true
+	}
 	if rawDueAt, ok := fields["dueAt"]; ok {
 		dueAt, parseErr := crmTaskNullableDateTime(rawDueAt)
 		if parseErr != nil {
@@ -159,8 +190,8 @@ func ParseUpdateTaskDetailsInput(raw json.RawMessage) (UpdateTaskDetailsInput, e
 		input.AssigneeUserID = assignee
 		input.AssigneeUserIDSet = true
 	}
-	if !input.DueAtSet && !input.AssigneeUserIDSet {
-		return UpdateTaskDetailsInput{}, errors.New("include a due date or assignee change")
+	if !input.TitleSet && !input.NoteSet && !input.DueAtSet && !input.AssigneeUserIDSet {
+		return UpdateTaskDetailsInput{}, errors.New("include a title, note, due date, or assignee change")
 	}
 	return input, nil
 }
@@ -277,10 +308,10 @@ func updateTaskDetails(ctx context.Context, tx pgx.Tx, orgID string, input Updat
 	var previous TaskDetailsPreviousState
 	var previousDueAt *time.Time
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, due_at, assignee_user_id::text
+		SELECT id::text, title, note, due_at, assignee_user_id::text
 		FROM tasks
 		WHERE id = $1::uuid AND org_id = $2::uuid AND done_at IS NULL
-		LIMIT 1`, input.TaskID, orgID).Scan(&taskID, &previousDueAt, &previous.AssigneeUserID)
+		LIMIT 1`, input.TaskID, orgID).Scan(&taskID, &previous.Title, &previous.Note, &previousDueAt, &previous.AssigneeUserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UpdateTaskDetailsOutput{}, errors.New("open task not found in this organization")
 	}
@@ -300,8 +331,16 @@ func updateTaskDetails(ctx context.Context, tx pgx.Tx, orgID string, input Updat
 			return UpdateTaskDetailsOutput{}, errors.New("assignee is not a member of this organization")
 		}
 	}
-	setClauses := make([]string, 0, 2)
-	args := make([]any, 0, 4)
+	setClauses := make([]string, 0, 4)
+	args := make([]any, 0, 6)
+	if input.TitleSet {
+		setClauses = append(setClauses, fmt.Sprintf("title = $%d", len(args)+1))
+		args = append(args, input.Title)
+	}
+	if input.NoteSet {
+		setClauses = append(setClauses, fmt.Sprintf("note = $%d", len(args)+1))
+		args = append(args, input.Note)
+	}
 	if input.DueAtSet {
 		dueAt, err := projectDateTimeValue(input.DueAt)
 		if err != nil {
