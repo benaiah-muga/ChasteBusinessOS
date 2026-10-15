@@ -690,10 +690,13 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(defaults, "GET", "/api/banking/extra")).toBe(false);
   });
 
-  it("routes the migrated accounting budgets and time APIs to Go", () => {
+  it("routes the migrated accounting, expenses, and time APIs to Go", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     for (const [path, methods] of [
       ["/api/accounting/budgets", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]],
+      ["/api/accounting/tax", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]],
+      ["/api/accounting/close", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]],
+      ["/api/expenses", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]],
       ["/api/time", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]],
     ] as const) {
       for (const method of methods) {

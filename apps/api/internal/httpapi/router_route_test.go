@@ -60,3 +60,44 @@ func TestMountGoAccountingBudgetsAndTimeRoutesOwnExactPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestMountGoExpensesAccountingTaxAndPeriodCloseRoutesOwnExactPaths(t *testing.T) {
+	base := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+	route := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	})
+	handler := MountGoExpensesRoute(
+		MountGoAccountingTaxRoute(
+			MountGoAccountingPeriodCloseRoute(base, route),
+			route,
+		),
+		route,
+	)
+
+	for _, request := range []struct {
+		method string
+		path   string
+		status int
+	}{
+		{http.MethodGet, "/api/expenses", http.StatusAccepted},
+		{http.MethodPost, "/api/expenses", http.StatusAccepted},
+		{http.MethodGet, "/api/accounting/tax", http.StatusAccepted},
+		{http.MethodPost, "/api/accounting/tax", http.StatusAccepted},
+		{http.MethodGet, "/api/accounting/close", http.StatusAccepted},
+		{http.MethodPost, "/api/accounting/close", http.StatusAccepted},
+		{http.MethodGet, "/api/expenses/extra", http.StatusTeapot},
+		{http.MethodGet, "/api/accounting/tax/extra", http.StatusTeapot},
+		{http.MethodGet, "/api/accounting/close/extra", http.StatusTeapot},
+		{http.MethodDelete, "/api/accounting/close", http.StatusTeapot},
+	} {
+		t.Run(request.method+" "+request.path, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(request.method, request.path, nil))
+			if response.Code != request.status {
+				t.Fatalf("status=%d want=%d", response.Code, request.status)
+			}
+		})
+	}
+}

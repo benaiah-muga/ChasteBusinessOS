@@ -645,6 +645,48 @@
     },
     {
       "kind": "api",
+      "path": "/api/accounting/close",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/close",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/tax",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/tax",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/expenses",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/expenses",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
       "path": "/api/banking",
       "method": "GET",
       "owner": "go",

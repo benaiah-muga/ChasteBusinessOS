@@ -4683,3 +4683,13 @@ new owners and the manifest shows zero legacy runtime paths.
      Authenticated agent-browser proof
      used local SMTP email verification and returned HTTP 200 from all three
      Go routes; the browser reported no errors.
+
+436. (Runtime verified) Go owns the session-authenticated expenses, Accounting
+     tax, and period close routes, and Vite proxies those paths directly to Go.
+     Writes use the governed capability executor and require client intent IDs.
+     Tax report reads use request-scoped receipt IDs. Response contracts
+     validate required fields and period readiness before returning success.
+     Focused Go handler, router, and Vite proxy tests pass, and route ownership checks pass at
+     94 files, 162 methods (78 Go, 82 legacy, 2 auth), and 30 pages.
+     Authenticated agent-browser proof
+     verifies the routes through the Vite proxy with no browser errors.

@@ -842,6 +842,12 @@ func run(logger *slog.Logger) error {
 	logger.Info("Go accounting budgets route mounted", "path", "/api/accounting/budgets")
 	timeRoute := httpapi.NewTimeSessionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
 	logger.Info("Go HR time route mounted", "path", "/api/time")
+	expensesRoute := httpapi.NewExpensesSessionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go expenses route mounted", "path", "/api/expenses")
+	accountingTaxRoute := httpapi.NewAccountingTaxSessionHandler(pool, emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go accounting tax route mounted", "path", "/api/accounting/tax")
+	accountingPeriodCloseRoute := httpapi.NewAccountingPeriodCloseSessionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go accounting period close route mounted", "path", "/api/accounting/close")
 
 	apiHandler := httpapi.MountGoMessageAttachmentDownloadRoute(httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoCRMReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
 		pool,
@@ -860,6 +866,9 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoBankingRoute(apiHandler, bankingRoute)
 	apiHandler = httpapi.MountGoAccountingBudgetsRoute(apiHandler, accountingBudgetsRoute)
 	apiHandler = httpapi.MountGoTimeRoute(apiHandler, timeRoute)
+	apiHandler = httpapi.MountGoExpensesRoute(apiHandler, expensesRoute)
+	apiHandler = httpapi.MountGoAccountingTaxRoute(apiHandler, accountingTaxRoute)
+	apiHandler = httpapi.MountGoAccountingPeriodCloseRoute(apiHandler, accountingPeriodCloseRoute)
 	apiHandler = httpapi.MountGoApprovalsReadRoute(apiHandler, approvalsReadRoute)
 	apiHandler = httpapi.MountGoSalesCustomersRoute(apiHandler, salesCustomersRoute)
 	apiHandler = httpapi.MountGoApprovalsDecisionRoute(apiHandler, approvalsDecisionRoute)

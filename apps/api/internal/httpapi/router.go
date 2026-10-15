@@ -246,6 +246,51 @@ func MountGoAccountingBudgetsRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoExpensesRoute owns the authenticated expense claims REST API.
+func MountGoExpensesRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/expenses", route)
+	mux.Handle("POST /api/expenses", route)
+	if base != nil {
+		mux.Handle("HEAD /api/expenses", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountGoAccountingTaxRoute owns the authenticated Accounting tax API.
+func MountGoAccountingTaxRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/accounting/tax", route)
+	mux.Handle("POST /api/accounting/tax", route)
+	if base != nil {
+		mux.Handle("HEAD /api/accounting/tax", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountGoAccountingPeriodCloseRoute owns the authenticated period-close API.
+func MountGoAccountingPeriodCloseRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/accounting/close", route)
+	mux.Handle("POST /api/accounting/close", route)
+	if base != nil {
+		mux.Handle("HEAD /api/accounting/close", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoTimeRoute owns authenticated HR time reporting and entry actions.
 func MountGoTimeRoute(base, route http.Handler) http.Handler {
 	if route == nil {

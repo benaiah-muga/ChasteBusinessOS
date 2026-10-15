@@ -316,6 +316,8 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.onboarding && ["GET", "POST", "PATCH"].includes(method ?? "") && /^\/api\/onboarding(?:\?.*)?$/.test(path)) return true;
   if (/^\/api\/banking(?:\?.*)?$/.test(path)) return true;
   if (/^\/api\/accounting\/budgets(?:\?.*)?$/.test(path)) return true;
+  if (/^\/api\/accounting\/(?:tax|close)(?:\?.*)?$/.test(path)) return true;
+  if (/^\/api\/expenses(?:\?.*)?$/.test(path)) return true;
   if (/^\/api\/time(?:\?.*)?$/.test(path)) return true;
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/email(?:\?.*)?$/.test(path)) return true;
   if (["GET", "POST", "PUT", "PATCH"].includes(method ?? "") && /^\/api\/org(?:\?.*)?$/.test(path)) return true;
