@@ -4714,3 +4714,11 @@ new owners and the manifest shows zero legacy runtime paths.
      Go handlers with focused tests; their generated ownership records now
      match that runtime. Route ownership checks pass at 94 files, 162 methods
      (87 Go, 73 legacy, 2 auth), and 30 pages.
+
+439. (Runtime path verified; browser proof pending) Support quick-create now
+     submits `crm.createCustomer` through Go's session capability API even when
+     the obsolete client rollout selector is false. Go still resolves the
+     session and organization, enforces `crm.write` and policy approval, and
+     returns validated output; errors do not fall back to a legacy endpoint.
+     The 58 focused Support API tests, targeted lint, and an independent
+     authorization-path review pass. The browser launcher remains unavailable.

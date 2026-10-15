@@ -14,6 +14,7 @@ The full v1 changelog is preserved at the bottom of this file.
 ### Added
 
 - Vite Accounting, HR, Marketing, and POS collection actions now execute through session-authenticated Go handlers and the governed capability pipeline.
+- Vite Support can quick-create customers through the authenticated Go CRM capability without relying on a client-only rollout flag.
 - Vite Documents can start drafts from Go-backed reusable templates, with matching Go and Vite validation for ProseMirror content and canonical JSON limits.
 - Vite Analytics compares invoiced revenue across two inclusive date ranges by customer or product through the authenticated Go `analytics.explainChange` capability, showing totals and contribution details.
 - Vite CRM can edit open task titles and notes through Go, reload the stored details, and restore the complete prior task snapshot.

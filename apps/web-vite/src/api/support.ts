@@ -969,9 +969,6 @@ export async function createSupportCustomer(
 ): Promise<SupportActionOutcome<SupportCustomerCreated>> {
   const parsedInput = CustomerCreateSchema.safeParse({ action: "create", ...input });
   if (!parsedInput.success) throw new SupportApiError(0, "A customer name is required.");
-  if (typeof __GO_CRM_CUSTOMER_CREATE__ === "undefined" || !__GO_CRM_CUSTOMER_CREATE__) {
-    throw new SupportApiError(503, "Go customer creation is not enabled for this Vite deployment. Ask an operator to enable the Go CRM customer-create route.");
-  }
 
   const outcome = await submitCrmCustomerCreate({
     name: parsedInput.data.name,

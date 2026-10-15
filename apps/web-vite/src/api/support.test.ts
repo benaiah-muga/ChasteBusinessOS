@@ -427,13 +427,21 @@ describe("governed support writes", () => {
     });
   });
 
-  it("fails closed when the Go customer-create route is disabled", async () => {
+  it("keeps quick customer creation on the Go capability when the former selector is off", async () => {
     vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", false);
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { customerId, duplicateWarning: null } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(createSupportCustomer({ name: "Grace Hopper" }, retryScope)).rejects.toMatchObject({ status: 503 });
-    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(createSupportCustomer({ name: "Grace Hopper" }, retryScope)).resolves.toEqual({
+      kind: "completed",
+      data: { customerId, duplicateWarning: null },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "crm.createCustomer",
+      input: { name: "Grace Hopper", preferredContactMethod: "email", doNotContact: false },
+    });
   });
 });
 
