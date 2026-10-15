@@ -4693,3 +4693,17 @@ new owners and the manifest shows zero legacy runtime paths.
      94 files, 162 methods (78 Go, 82 legacy, 2 auth), and 30 pages.
      Authenticated agent-browser proof
      verifies the routes through the Vite proxy with no browser errors.
+
+437. (Implementation verified; authenticated browser proof pending) Go now owns
+     Vite's Accounting and HR collection reads/actions, Marketing reads/actions,
+     and POS collection writes. Writes resolve the Go session, enforce same
+     origin for cookie requests, validate exact request/output contracts, and
+     execute through the governed capability pipeline. Review added strict
+     Accounting unknown-field rejection and the missing HR payroll reversal
+     action. Focused Go handler/router tests, Vite proxy tests, the full
+     TypeScript gate, and `pnpm go:verify` pass. The live Vite and Go endpoints
+     both returned 401 without a session, confirming the proxy and auth boundary.
+     The installed `agent-browser` command is a dangling symlink and the
+     in-app browser registry is empty, so an authenticated browser proof remains
+     open. Route ownership checks pass at 94 files, 162 methods (85 Go, 75
+     legacy, 2 auth), and 30 pages.

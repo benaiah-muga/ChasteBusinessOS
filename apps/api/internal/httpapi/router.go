@@ -261,6 +261,65 @@ func MountGoExpensesRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoAccountingRoute owns the authenticated Accounting overview and action API.
+func MountGoAccountingRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/accounting", route)
+	mux.Handle("POST /api/accounting", route)
+	if base != nil {
+		mux.Handle("HEAD /api/accounting", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountGoHRRoute owns the authenticated HR people and payroll API.
+func MountGoHRRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/hr", route)
+	mux.Handle("POST /api/hr", route)
+	if base != nil {
+		mux.Handle("HEAD /api/hr", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountGoMarketingRoute owns the authenticated Marketing overview and action API.
+func MountGoMarketingRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/marketing", route)
+	mux.Handle("POST /api/marketing", route)
+	if base != nil {
+		mux.Handle("HEAD /api/marketing", base)
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountGoPOSWriteRoute owns authenticated POS actions; collection reads remain
+// mounted separately so the two methods can migrate independently.
+func MountGoPOSWriteRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/pos", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoAccountingTaxRoute owns the authenticated Accounting tax API.
 func MountGoAccountingTaxRoute(base, route http.Handler) http.Handler {
 	if route == nil {

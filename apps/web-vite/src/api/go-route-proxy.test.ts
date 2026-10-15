@@ -1722,6 +1722,16 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(staleRollback, "DELETE", userPath)).toBe(true);
   });
 
+  it("routes the migrated accounting, HR, and marketing collections to Go", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    for (const path of ["/api/accounting", "/api/hr", "/api/marketing"]) {
+      expect(isGoRouteRequest(defaults, "GET", path)).toBe(true);
+      expect(isGoRouteRequest(defaults, "POST", `${path}?source=vite`)).toBe(true);
+      expect(isGoRouteRequest(defaults, "HEAD", path)).toBe(false);
+      expect(isGoRouteRequest(defaults, "GET", `${path}/extra`)).toBe(false);
+    }
+  });
+
   it("routes project operations and module switchboard reads to Go by default", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(defaults, "GET", "/api/projects")).toBe(true);
@@ -2185,6 +2195,13 @@ describe("Vite Go route proxy selection", () => {
 
     const posRead = await fetch(`${origin}/api/pos?status=open`, { headers: { cookie: "auth-session=browser" } });
     expect((await posRead.json())).toMatchObject({ target: "go", method: "GET", url: "/api/pos?status=open", cookie: "auth-session=browser" });
+
+    for (const path of ["/api/accounting", "/api/hr", "/api/marketing"]) {
+      const read = await fetch(`${origin}${path}?source=vite`);
+      expect((await read.json())).toMatchObject({ target: "go", method: "GET", url: `${path}?source=vite` });
+      const write = await fetch(`${origin}${path}`, { method: "POST" });
+      expect((await write.json())).toMatchObject({ target: "go", method: "POST", url: path });
+    }
 
     const posCustomers = await fetch(`${origin}/api/pos/customers?active=1`, { headers: { cookie: "auth-session=browser" } });
     expect((await posCustomers.json())).toMatchObject({ target: "go", method: "GET", url: "/api/pos/customers?active=1", cookie: "auth-session=browser" });

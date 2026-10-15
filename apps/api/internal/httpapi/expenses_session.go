@@ -203,25 +203,70 @@ func parseExpenseInput(capabilityID string, input json.RawMessage) (any, error) 
 }
 
 func validExpenseOutput(action string, raw json.RawMessage) bool {
-	if !json.Valid(raw) {
-		return false
-	}
 	switch action {
 	case "submit":
 		var output capability.SubmitExpenseClaimOutput
-		return json.Unmarshal(raw, &output) == nil && isUUID(output.ClaimID) && output.Status == "submitted" && output.Category != ""
+		return decodeExactExpenseOutput(raw, &output, []string{"claimId", "status", "category", "overPolicyLimit", "policyLimitMinor"}, []string{"policyLimitMinor"}) == nil &&
+			isUUID(output.ClaimID) && output.Status == "submitted" && output.Category != "" &&
+			(output.PolicyLimitMinor == nil || (*output.PolicyLimitMinor >= 0 && *output.PolicyLimitMinor <= posMaxSafeInteger))
 	case "decide":
 		var output capability.DecideExpenseClaimOutput
-		return json.Unmarshal(raw, &output) == nil && isUUID(output.ClaimID) && (output.Status == "approved" || output.Status == "rejected")
+		return decodeExactExpenseOutput(raw, &output, []string{"claimId", "status"}, nil) == nil &&
+			isUUID(output.ClaimID) && (output.Status == "approved" || output.Status == "rejected")
 	case "pay":
 		var output capability.PayExpenseClaimOutput
-		return json.Unmarshal(raw, &output) == nil && isUUID(output.ClaimID) && isUUID(output.EntryID) && output.PaidMinor > 0
+		return decodeExactExpenseOutput(raw, &output, []string{"claimId", "entryId", "paidMinor"}, nil) == nil &&
+			isUUID(output.ClaimID) && isUUID(output.EntryID) && output.PaidMinor > 0 && output.PaidMinor <= posMaxSafeInteger
 	case "setPolicy":
 		var output capability.SetExpensePolicyOutput
-		return json.Unmarshal(raw, &output) == nil && output.Set && output.Category != "" && output.LimitMinor >= 0
+		return decodeExactExpenseOutput(raw, &output, []string{"set", "category", "limitMinor"}, nil) == nil &&
+			output.Set && output.Category != "" && output.LimitMinor >= 0 && output.LimitMinor <= posMaxSafeInteger
 	default:
 		return false
 	}
+}
+
+func decodeExactExpenseOutput(raw json.RawMessage, target any, required, nullable []string) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil || len(fields) != len(required) {
+		return errors.New("invalid expense output fields")
+	}
+	nullableFields := make(map[string]struct{}, len(nullable))
+	for _, key := range nullable {
+		nullableFields[key] = struct{}{}
+	}
+	for _, key := range required {
+		value, ok := fields[key]
+		if !ok {
+			return errors.New("missing expense output field")
+		}
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			if _, ok := nullableFields[key]; !ok {
+				return errors.New("null expense output field")
+			}
+		}
+	}
+	for key := range fields {
+		found := false
+		for _, requiredKey := range required {
+			if key == requiredKey {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return errors.New("unexpected expense output field")
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("trailing expense output")
+	}
+	return nil
 }
 
 func expensesJSONString(raw json.RawMessage) (string, bool) {
@@ -279,7 +324,11 @@ func (h *ExpensesSessionHandler) writeExecutionError(w http.ResponseWriter, capa
 		if message == "" {
 			message = "capability execution failed"
 		}
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": message})
+		status := http.StatusUnprocessableEntity
+		if strings.HasPrefix(message, "forbidden: missing permission:") {
+			status = http.StatusForbidden
+		}
+		writeJSON(w, status, map[string]string{"error": message})
 		return true
 	}
 	return false

@@ -139,6 +139,46 @@ func TestExpensesSessionHandlerMapsPendingApprovalAndRejectsWrongMethod(t *testi
 	}
 }
 
+func TestExpensesSessionHandlerMapsMissingPermissionToForbidden(t *testing.T) {
+	executor := &expensesExecutorStub{results: []capability.Result{{OK: false, Error: "forbidden: missing permission: accounting.post"}}}
+	response := httptest.NewRecorder()
+	NewExpensesSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, executor, nil).ServeHTTP(response, expensesRequest(http.MethodPost, "/api/expenses", `{"action":"submit","intentId":"expense-submit-permission-test","amountMinor":1000,"memo":"Taxi"}`))
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "forbidden: missing permission: accounting.post") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestExpenseActionOutputsRequireExactCompleteContracts(t *testing.T) {
+	valid := map[string]string{
+		"submit":    `{"claimId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","status":"submitted","category":"travel","overPolicyLimit":false,"policyLimitMinor":10000}`,
+		"decide":    `{"claimId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","status":"approved"}`,
+		"pay":       `{"claimId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","entryId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","paidMinor":10}`,
+		"setPolicy": `{"set":true,"category":"travel","limitMinor":10000}`,
+	}
+	for action, raw := range valid {
+		if !validExpenseOutput(action, json.RawMessage(raw)) {
+			t.Errorf("%s rejected valid output %s", action, raw)
+		}
+	}
+	if !validExpenseOutput("submit", json.RawMessage(strings.Replace(valid["submit"], `"policyLimitMinor":10000`, `"policyLimitMinor":null`, 1))) {
+		t.Error("submit rejected the defined null policy limit")
+	}
+	invalid := []struct{ action, raw string }{
+		{"submit", `{"claimId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","status":"submitted","category":"travel","policyLimitMinor":10000}`},
+		{"submit", `{"claimId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","status":"submitted","category":"travel","overPolicyLimit":false}`},
+		{"submit", `{"claimId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","status":"submitted","category":"travel","overPolicyLimit":null,"policyLimitMinor":10000}`},
+		{"submit", `{"claimId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","status":"submitted","category":"travel","overPolicyLimit":false,"policyLimitMinor":10000,"extra":true}`},
+		{"decide", `{"claimId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","status":"approved","extra":true}`},
+		{"pay", `{"claimId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","entryId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","paidMinor":10,"extra":true}`},
+		{"setPolicy", `{"set":true,"category":"travel","limitMinor":null}`},
+	}
+	for _, test := range invalid {
+		if validExpenseOutput(test.action, json.RawMessage(test.raw)) {
+			t.Errorf("%s accepted invalid/incomplete output %s", test.action, test.raw)
+		}
+	}
+}
+
 func TestExpensesPaymentOutputRequiresUUIDEntryID(t *testing.T) {
 	validClaimID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	if !validExpenseOutput("pay", json.RawMessage(`{"claimId":"`+validClaimID+`","entryId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","paidMinor":10}`)) {

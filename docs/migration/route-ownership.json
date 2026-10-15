@@ -6,16 +6,16 @@
       "path": "/api/accounting",
       "method": "GET",
       "source": "apps/web/src/app/api/accounting/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/accounting",
       "method": "POST",
       "source": "apps/web/src/app/api/accounting/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -566,16 +566,16 @@
       "path": "/api/hr",
       "method": "GET",
       "source": "apps/web/src/app/api/hr/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/hr",
       "method": "POST",
       "source": "apps/web/src/app/api/hr/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -646,16 +646,16 @@
       "path": "/api/marketing",
       "method": "GET",
       "source": "apps/web/src/app/api/marketing/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/marketing",
       "method": "POST",
       "source": "apps/web/src/app/api/marketing/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -902,8 +902,8 @@
       "path": "/api/pos",
       "method": "POST",
       "source": "apps/web/src/app/api/pos/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

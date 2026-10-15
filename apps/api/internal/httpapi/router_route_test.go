@@ -101,3 +101,42 @@ func TestMountGoExpensesAccountingTaxAndPeriodCloseRoutesOwnExactPaths(t *testin
 		})
 	}
 }
+
+func TestMountGoAccountingHRMarketingAndPOSWriteRoutesOwnExactMethods(t *testing.T) {
+	base := routeMarker("base")
+	route := routeMarker("go")
+	handler := MountGoPOSWriteRoute(
+		MountGoMarketingRoute(
+			MountGoHRRoute(
+				MountGoAccountingRoute(base, route),
+				route,
+			),
+			route,
+		),
+		route,
+	)
+	for _, request := range []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{http.MethodGet, "/api/accounting", "go"},
+		{http.MethodPost, "/api/accounting", "go"},
+		{http.MethodGet, "/api/hr", "go"},
+		{http.MethodPost, "/api/hr", "go"},
+		{http.MethodGet, "/api/marketing", "go"},
+		{http.MethodPost, "/api/marketing", "go"},
+		{http.MethodPost, "/api/pos", "go"},
+		{http.MethodGet, "/api/pos", "base"},
+		{http.MethodPost, "/api/pos/extra", "base"},
+		{http.MethodGet, "/api/accounting/extra", "base"},
+		{http.MethodDelete, "/api/hr", "base"},
+		{http.MethodPatch, "/api/marketing", "base"},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(request.method, request.path, nil))
+		if response.Code != http.StatusOK || response.Body.String() != request.want {
+			t.Errorf("%s %s response=%d %q, want %q", request.method, request.path, response.Code, response.Body.String(), request.want)
+		}
+	}
+}

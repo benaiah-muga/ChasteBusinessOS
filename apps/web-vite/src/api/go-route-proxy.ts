@@ -319,6 +319,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (/^\/api\/accounting\/(?:tax|close)(?:\?.*)?$/.test(path)) return true;
   if (/^\/api\/expenses(?:\?.*)?$/.test(path)) return true;
   if (/^\/api\/time(?:\?.*)?$/.test(path)) return true;
+  if (["GET", "POST"].includes(method ?? "") && /^\/api\/(?:accounting|hr|marketing)(?:\?.*)?$/.test(path)) return true;
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/email(?:\?.*)?$/.test(path)) return true;
   if (["GET", "POST", "PUT", "PATCH"].includes(method ?? "") && /^\/api\/org(?:\?.*)?$/.test(path)) return true;
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
