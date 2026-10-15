@@ -15,7 +15,11 @@ const invoice = {
   outstandingMinor: 100_000,
   issuedAt: "2026-09-20T10:30:00.000Z",
 };
-const switchboard = { catalog: [{ id: "accounting" }], enabledModules: ["accounting"] };
+const switchboard = {
+  catalog: [{ id: "accounting", label: "Accounting", description: "Accounting workspace", href: "/accounting" }],
+  enabledModules: ["accounting"],
+  usingDefaults: true,
+};
 
 function stubAccounting(invoices: unknown = [invoice]) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/modules"
@@ -60,7 +64,7 @@ describe("Vite Accounting invoices preview", () => {
   });
 
   it("does not call the accounting endpoint when its module is disabled", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ catalog: [{ id: "accounting" }], enabledModules: [] }));
+    const fetchMock = vi.fn(async () => Response.json({ ...switchboard, enabledModules: [] }));
     vi.stubGlobal("fetch", fetchMock);
     render(<AccountingInvoicesPage />);
 

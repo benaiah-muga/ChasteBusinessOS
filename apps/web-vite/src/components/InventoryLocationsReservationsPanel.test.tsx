@@ -20,11 +20,11 @@ const items: InventoryItem[] = [
     reservedThousandths: 0, availableThousandths: 0, totalValueMinor: 0, reorderPointThousandths: 0, reorderNeeded: false,
   },
 ];
-const locations: InventoryLocation[] = [{ id: "loc-main", code: "MAIN", name: "Main warehouse" }];
+const locations: InventoryLocation[] = [{ id: "07363742-7f2b-4b18-8f65-6874f17e88e4", code: "MAIN", name: "Main warehouse" }];
 const reservations: InventoryReservation[] = [{
-  id: "reservation-1", sku: "BAG-50", quantityThousandths: 2500, reason: "SO-1042", status: "open", createdAt: "2026-10-01T00:00:00Z",
+  id: "07363742-7f2b-4b18-8f65-6874f17e88e4", sku: "BAG-50", quantityThousandths: 2500, reason: "SO-1042", status: "open", createdAt: "2026-10-01T00:00:00Z",
 }];
-let retryScope = { actorId: "actor-1", organizationId: "org-1" };
+let retryScope = { actorId: crypto.randomUUID(), organizationId: crypto.randomUUID() };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return Response.json(body, { status });
@@ -37,13 +37,13 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  retryScope = { actorId: `actor-${crypto.randomUUID()}`, organizationId: `org-${crypto.randomUUID()}` };
+  retryScope = { actorId: crypto.randomUUID(), organizationId: crypto.randomUUID() };
   vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", true);
 });
 
 describe("inventory location and reservation API", () => {
   it("posts location creation with a fresh intent ID and validates the capability response", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { locationId: "loc-new" } }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { locationId: "f7d59a13-6a75-4e16-a38f-2c6067fdca83" } }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(createInventoryLocation({ code: "WH-A", name: "Warehouse A" }, retryScope)).resolves.toEqual({ kind: "completed" });
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store", signal: expect.any(AbortSignal) }));
@@ -113,9 +113,9 @@ describe("InventoryLocationsReservationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create location" }));
     await waitFor(() => expect(resolveWrite).toBeDefined());
 
-    rerender(<InventoryLocationsReservationsPanel {...props} retryScope={{ actorId: "actor-1", organizationId: "org-2" }} />);
+    rerender(<InventoryLocationsReservationsPanel {...props} retryScope={{ actorId: retryScope.actorId, organizationId: crypto.randomUUID() }} />);
     await act(async () => {
-      resolveWrite?.(jsonResponse({ ok: true, data: { locationId: "loc-new" } }));
+      resolveWrite?.(jsonResponse({ ok: true, data: { locationId: "f7d59a13-6a75-4e16-a38f-2c6067fdca83" } }));
     });
 
     expect(onChanged).not.toHaveBeenCalled();
@@ -153,7 +153,7 @@ describe("InventoryLocationsReservationsPanel", () => {
         return new Promise<Response>((resolve) => { pendingReads.push(resolve); });
       }
       if (payload.capabilityId === "inventory.reserveStock") {
-        return jsonResponse({ ok: true, data: { reservationId: "reservation-new", availableAfterThousandths: 8750 } });
+        return jsonResponse({ ok: true, data: { reservationId: "f7d59a13-6a75-4e16-a38f-2c6067fdca83", availableAfterThousandths: 8750 } });
       }
       throw new Error(`Unexpected capability: ${payload.capabilityId}`);
     });
@@ -194,7 +194,7 @@ describe("InventoryLocationsReservationsPanel", () => {
 
   it("reserves stock with exact thousandths and releases open reservations", async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { reservationId: "reservation-new", availableAfterThousandths: 8750 } }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { reservationId: "f7d59a13-6a75-4e16-a38f-2c6067fdca83", availableAfterThousandths: 8750 } }))
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: { released: true } }));
     vi.stubGlobal("fetch", fetchMock);
     const onChanged = vi.fn().mockResolvedValue(undefined);
@@ -217,7 +217,7 @@ describe("InventoryLocationsReservationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Release" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/capabilities/execute");
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ capabilityId: "inventory.releaseReservation", input: { reservationId: "reservation-1" } });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ capabilityId: "inventory.releaseReservation", input: { reservationId: reservations[0]!.id } });
   });
 
   it("rejects fractional precision beyond thousandths before posting", async () => {

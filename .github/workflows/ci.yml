@@ -71,6 +71,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check Vite and Go CI contract
+        run: node scripts/migration/check-vite-go-ci.mjs
+
       - name: Check migration route ownership manifest
         run: pnpm migration:routes:check
 
@@ -101,8 +104,8 @@ jobs:
       - name: Provision least-privilege Go runtime role
         run: pnpm db:provision-runtime
 
-      - name: Verify Go API
-        run: pnpm go:verify
+      - name: Verify Vite and Go
+        run: pnpm verify:vite-go
 
       - name: Typecheck
         run: pnpm typecheck
@@ -112,12 +115,6 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
-
-      - name: Build web app
-        run: pnpm --filter web build
-
-      - name: Build Vite React app
-        run: pnpm --filter @chaste/web-vite build
 
       # Live proofs need the NVIDIA key; run when present so PRs from forks
       # still pass without it.

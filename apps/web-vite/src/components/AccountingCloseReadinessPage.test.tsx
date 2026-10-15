@@ -2,6 +2,19 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountingCloseReadinessPage } from "./AccountingCloseReadinessPage";
 
+function modulesResponse(enabledModules: string[]) {
+  return Response.json({
+    catalog: [{
+      id: "accounting",
+      label: "Accounting",
+      description: "Financial reporting and close management",
+      href: "/accounting",
+    }],
+    enabledModules,
+    usingDefaults: false,
+  });
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -30,7 +43,7 @@ function stubAccounting(taskList = readiness(2026, 8).tasks) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/modules") {
-      return Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["accounting"] });
+      return modulesResponse(["accounting"]);
     }
     if (url === "/api/capabilities/execute") {
       const request = JSON.parse(String(init?.body)) as { input: { year: number; month: number } };
@@ -47,7 +60,7 @@ describe("AccountingCloseReadinessPage", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") {
-        return Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["accounting"] });
+        return modulesResponse(["accounting"]);
       }
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { input: { year: number; month: number } };
@@ -121,7 +134,7 @@ describe("AccountingCloseReadinessPage", () => {
   });
 
   it("shows a module-disabled state without requesting readiness", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ catalog: [{ id: "accounting" }], enabledModules: [] }));
+    const fetchMock = vi.fn().mockResolvedValue(modulesResponse([]));
     vi.stubGlobal("fetch", fetchMock);
     render(<AccountingCloseReadinessPage />);
 
@@ -132,7 +145,7 @@ describe("AccountingCloseReadinessPage", () => {
 
   it("provides a sign-in path when readiness access expires", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/modules"
-      ? Response.json({ catalog: [{ id: "accounting" }], enabledModules: ["accounting"] })
+      ? modulesResponse(["accounting"])
       : Response.json({ error: "unauthorized" }, { status: 401 }));
     vi.stubGlobal("fetch", fetchMock);
     render(<AccountingCloseReadinessPage />);

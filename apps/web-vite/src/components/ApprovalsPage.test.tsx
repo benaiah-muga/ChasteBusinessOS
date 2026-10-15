@@ -2,8 +2,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApprovalsPage } from "./ApprovalsPage";
 
+const pendingApprovalId = "e0bc52a5-49e1-4d3c-b92b-f2834978882d";
+const recentApprovalId = "090f030c-2783-4b6b-83b7-2d8fe9c0608b";
+const organizationId = "62d994c0-a6d8-4ac2-9ec6-6689ba2bfc12";
+const relatedDocumentId = "95c2f64f-0e55-4f05-a6c2-4f95f8ce12e7";
+
 const pending = {
-  id: "approval-1",
+  id: pendingApprovalId,
+  orgId: organizationId,
+  sessionId: null,
+  requestedByUserId: null,
   capabilityId: "accounting.recordPayment",
   riskClass: "money",
   payload: {
@@ -19,21 +27,33 @@ const pending = {
   rationale: "A payment needs a human review.",
   createdAt: "2026-09-27T10:15:00.000Z",
   status: "pending",
+  decidedByUserId: null,
+  decisionComment: null,
+  expiresAt: null,
+  decidedAt: null,
   raisedBy: { name: "Ada Lovelace", kind: "agent" as const },
-  relatedDocuments: [{ id: "doc-1", title: "Invoice 104" }],
+  decidedBy: null,
+  relatedDocuments: [{ id: relatedDocumentId, title: "Invoice 104" }],
 };
 
 const recent = {
-  id: "approval-0",
+  id: recentApprovalId,
+  orgId: organizationId,
+  sessionId: null,
+  requestedByUserId: null,
   capabilityId: "crm.createCustomer",
   riskClass: "write",
   payload: { name: "Grace Hopper" },
   rationale: "Customer setup.",
   createdAt: "2026-09-26T09:00:00.000Z",
   status: "rejected",
+  decidedByUserId: null,
+  expiresAt: null,
   decidedAt: "2026-09-26T09:05:00.000Z",
   decisionComment: "Please confirm the billing address first.",
+  raisedBy: { name: "Ada Lovelace", kind: "human" as const },
   decidedBy: "Ada Lovelace",
+  relatedDocuments: [],
 };
 
 afterEach(() => {
@@ -58,7 +78,7 @@ describe("Vite approvals page", () => {
     expect(screen.getByText("$1,250.00")).not.toBeNull();
     expect(screen.getByText("agent · for Ada Lovelace")).not.toBeNull();
     const documentLink = screen.getByRole("link", { name: "Invoice 104" }) as HTMLAnchorElement;
-    expect(documentLink.getAttribute("href")).toBe("/documents?documentId=doc-1");
+    expect(documentLink.getAttribute("href")).toBe(`/documents?documentId=${relatedDocumentId}`);
     expect(new URL(documentLink.href).origin).toBe(window.location.origin);
     expect(screen.getByRole("heading", { name: "Recent decisions" })).not.toBeNull();
     expect(screen.getByText("Please confirm the billing address first.")).not.toBeNull();
@@ -91,7 +111,7 @@ describe("Vite approvals page", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
       if (path.startsWith("/api/approvals?") && listReads > 0) return Response.json({ ok: true, status: "executed" });
-      if (path.startsWith("/api/approvals?") && path.includes("approval-1")) return Response.json({ ok: true, status: "executed" });
+      if (path.startsWith("/api/approvals?") && path.includes(pendingApprovalId)) return Response.json({ ok: true, status: "executed" });
       if (path === "/api/approvals") {
         listReads += 1;
         return listReads === 1
@@ -113,7 +133,7 @@ describe("Vite approvals page", () => {
     expect(await screen.findByText("executed", { selector: ".approval-status" })).not.toBeNull();
     expect(screen.queryByRole("region", { name: "Pending approvals" })).toBeNull();
     const post = fetchMock.mock.calls.find(([input]) => String(input).startsWith("/api/approvals?"));
-    expect(post?.[0]).toBe("/api/approvals?id=approval-1");
+    expect(post?.[0]).toBe(`/api/approvals?id=${pendingApprovalId}`);
     expect(JSON.parse(String((post?.[1] as RequestInit).body))).toMatchObject({ decision: "approve" });
   });
 
@@ -134,7 +154,7 @@ describe("Vite approvals page", () => {
     expect(screen.queryByText("Approved and executed, the result is in the ledger.")).toBeNull();
     expect(screen.getByRole("region", { name: "Pending approvals" })).not.toBeNull();
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
-    expect(post?.[0]).toBe("/api/approvals?id=approval-1");
+    expect(post?.[0]).toBe(`/api/approvals?id=${pendingApprovalId}`);
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ decision: "approve" });
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/approvals")).toHaveLength(2);
   });

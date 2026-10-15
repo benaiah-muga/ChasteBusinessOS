@@ -466,6 +466,7 @@ describe("Vite inventory page", () => {
   });
 
   it("shows movement costs in organization currency when the display preference differs", async () => {
+    document.cookie = "chaste_display_currency=; Max-Age=0; path=/";
     localStorage.setItem("chaste-prefs", JSON.stringify({ currency: "UGX" }));
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);

@@ -26,17 +26,17 @@ Delete this block if the PR targets `main` directly.
 
 ## How it was verified
 
-- [ ] `pnpm lint`
-- [ ] `pnpm typecheck`
-- [ ] `pnpm test`
-- [ ] `pnpm --filter web build`
+- [ ] `pnpm verify:vite-go`
+- [ ] `pnpm typecheck && pnpm lint && pnpm test` while the legacy app remains
+- [ ] Required database continuity checks and applicable live business proofs
 - [ ] `pnpm-lock.yaml` regenerated with `pnpm install` if dependencies changed
 - [ ] Migrations added under `packages/db/migrations` if the schema changed
 - [ ] ADR added/updated for architectural changes
 
 <!--
-CI runs `verify` (install, migrate, typecheck, lint, test, build) and
-`gitleaks`. A green check here proves this PR is correct against its own base --
+CI runs the Vite and Go verification gate alongside the full migration-era
+checks after database migration and continuity checks, plus `gitleaks`. Keyed
+live business proofs run when their provider secret is available. A green check here proves this PR is correct against its own base --
 not that `main` is green once the whole stack lands. Say what you actually ran.
 -->
 

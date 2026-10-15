@@ -111,7 +111,7 @@ function supportFetch(handlers: Handlers = {}) {
         if (payload.capabilityId === "support.updateTicket") return Response.json({ ok: true, data: { updated: true } });
         if (payload.capabilityId === "support.reopenConversation") return Response.json({ ok: true, data: { status: "open" } });
         if (payload.capabilityId === "support.startConversation") return Response.json({ ok: true, data: { conversationId } });
-        if (payload.capabilityId === "support.createCannedResponse") return Response.json({ ok: true, data: { cannedResponseId: "c1" } });
+        if (payload.capabilityId === "support.createCannedResponse") return Response.json({ ok: true, data: { cannedResponseId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
         if (payload.capabilityId === "support.createKbArticle") return Response.json({ ok: true, data: { articleId: conversationId } });
         return Response.json({ error: "unexpected capability" }, { status: 400 });
       }
@@ -453,7 +453,7 @@ describe("Vite support page", () => {
     const second = supportFetch({
       execute: (payload) => payload.capabilityId === "support.listLibrary"
         ? Response.json({ ok: true, data: { canned: [], articles: [] } })
-        : Response.json({ ok: true, data: { cannedResponseId: "canned-1" } }),
+        : Response.json({ ok: true, data: { cannedResponseId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" } }),
     });
     render(<SupportPage actorId={actorId} organizationId={organizationId} />);
     await screen.findByText("Latest activity");
@@ -757,7 +757,7 @@ describe("Vite support page", () => {
         const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
         if (payload.capabilityId === "support.createCannedResponse") {
           expect(payload.intentId).toEqual(expect.any(String));
-          return Response.json({ ok: true, data: { cannedResponseId: "c1" } });
+          return Response.json({ ok: true, data: { cannedResponseId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
         }
         if (payload.capabilityId === "support.listConversations") return Response.json({ ok: true, data: { conversations } });
         if (payload.capabilityId === "support.readConversation") return Response.json({ ok: true, data: { ...thread, conversation: { ...thread.conversation, customerEmail: null } } });

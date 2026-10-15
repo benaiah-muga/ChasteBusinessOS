@@ -117,9 +117,15 @@ cookie. `GO_ORG_SWITCH` remains only for the legacy Next.js compatibility
 bridge. A parallel React 19 and Vite client now builds as static assets and
 proxies the Go health check in development.
 API-method, page, server-action, live capability, and exported database-table
-manifests are checked in and CI verifies them against the current source and
-runtime registry. The active Vite organization list and switch requests route
-directly to Go; the Go handler is mounted by default unless
+manifests remain checked in and CI continues to validate them while their
+legacy-owned behavior remains in use. The focused active-stack CI gate is
+`pnpm verify:vite-go`: it builds the Vite client, then runs Go tests and vet.
+CI requires it alongside the migration-era typecheck, lint, test,
+route/action/capability/contract census, database continuity, and live proof
+checks. The Next.js production build is no longer required. These broader
+legacy checks remain until their Go replacements are implemented. The active
+Vite organization list and switch requests route directly to Go; the Go
+handler is mounted by default unless
 `GO_ORG_ROUTE=0`.
 The Vite invoice print page fetches exact `GET /api/sales/{orderId}` requests
 from Go unconditionally. Go resolves the Better Auth session, validates the
@@ -4791,3 +4797,10 @@ new owners and the manifest shows zero legacy runtime paths.
      The page renders populated and zero balances. Eight focused UI and API
      suites pass 75 tests, the Go handler test and Vite typecheck pass, and
      independent review found no contract mismatch.
+
+451. (CI gate added) Required CI now runs `pnpm verify:vite-go` to build the
+     active Vite app and run Go tests and vet, alongside migration-era
+     typecheck, lint, test, route/action/capability/contract census, database
+     continuity, and live business proof checks. These broader checks remain
+     required while their Go replacements are pending. CI no longer requires a
+     Next.js production build.

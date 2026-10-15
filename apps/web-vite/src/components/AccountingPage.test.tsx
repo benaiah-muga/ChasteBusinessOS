@@ -163,8 +163,14 @@ function stubAccounting(options: StubOptions = {}) {
     calls.push({ url, method, body, headers: init?.headers });
     if (url === "/api/modules") {
       return Response.json({
-        catalog: [{ id: "accounting" }],
+        catalog: [{
+          id: "accounting",
+          label: "Accounting",
+          description: "Accounting workspace",
+          href: "/accounting",
+        }],
         enabledModules: options.enabled === false ? [] : ["accounting"],
+        usingDefaults: true,
       });
     }
     if (url === "/api/capabilities/execute") {

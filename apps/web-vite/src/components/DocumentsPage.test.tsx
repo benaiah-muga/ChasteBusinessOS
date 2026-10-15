@@ -8,6 +8,19 @@ const rows = [
 ];
 const goDocumentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
+function modulesResponse(enabledModules: string[]) {
+  return Response.json({
+    catalog: [{
+      id: "documents",
+      label: "Documents",
+      description: "Business records and files",
+      href: "/documents",
+    }],
+    enabledModules,
+    usingDefaults: false,
+  });
+}
+
 function emptyLibraryCapability(capabilityId: string): Response | undefined {
   if (capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
   if (capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
@@ -51,7 +64,7 @@ afterEach(() => {
 
 describe("Vite documents page", () => {
   it("does not request document records when the module is disabled", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ catalog: [{ id: "documents" }], enabledModules: [] }));
+    const fetchMock = vi.fn(async () => modulesResponse([]));
     vi.stubGlobal("fetch", fetchMock);
     render(<DocumentsPage />);
 
@@ -61,7 +74,7 @@ describe("Vite documents page", () => {
 
   it("shows the existing library, selected document details, extracted text, and file link", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (String(input) === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string } };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
@@ -95,7 +108,7 @@ describe("Vite documents page", () => {
       { id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", title: "Hiring plan", status: "draft", versions: 1, templateId: null, folder: "People", documentType: "plan", linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: null, updatedAt: "2026-10-02T00:00:00.000Z" },
     ];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (String(input) === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: authoredDocuments } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
@@ -121,9 +134,9 @@ describe("Vite documents page", () => {
     let folder: { id: string; path: string } | null = null;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/auth/get-session") return Response.json({ user: { id: actorId, name: "Ada", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: actorId, expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
-      if (url === "/api/org") return Response.json({ activeOrgId: organizationId, orgs: [{ id: organizationId, name: "Workspace" }] });
+      if (url === "/api/org") return Response.json({ activeOrgId: organizationId, orgs: [{ id: organizationId, name: "Workspace", baseCurrency: "USD" }] });
       const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, string>; intentId?: string };
       if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
@@ -166,7 +179,7 @@ describe("Vite documents page", () => {
     window.history.replaceState(null, "", `/documents?documentId=${rows[1]!.id}`);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
@@ -189,7 +202,7 @@ describe("Vite documents page", () => {
     window.history.replaceState(null, "", "/documents?documentId=unsafe%2Fid");
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string };
         if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
@@ -213,7 +226,7 @@ describe("Vite documents page", () => {
     window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
     const notFoundFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
         if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
@@ -252,7 +265,7 @@ describe("Vite documents page", () => {
       suggestions: [],
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (String(input) === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
       const libraryResponse = emptyLibraryCapability(request.capabilityId);
       if (libraryResponse) return libraryResponse;
@@ -280,9 +293,9 @@ describe("Vite documents page", () => {
     const requests: Array<{ url: string; capabilityId?: string; input?: Record<string, unknown>; intentId?: string }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/auth/get-session") return Response.json({ user: { id: actorId, name: "Ada", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: actorId, expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
-      if (url === "/api/org") return Response.json({ activeOrgId: organizationId, orgs: [{ id: organizationId, name: "Workspace" }] });
+      if (url === "/api/org") return Response.json({ activeOrgId: organizationId, orgs: [{ id: organizationId, name: "Workspace", baseCurrency: "USD" }] });
       const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: Record<string, unknown>; intentId?: string };
       requests.push({ url, ...request });
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
@@ -318,7 +331,7 @@ describe("Vite documents page", () => {
 
   it("keeps delete confirmation bound to the document that opened it", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (String(input) === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string } };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
@@ -352,9 +365,9 @@ describe("Vite documents page", () => {
     const deleteRequests: Array<{ intentId?: string; documentId?: string }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/auth/get-session") return Response.json({ user: { id: activeActorId, name: "Ada", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: activeActorId, expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
-      if (url === "/api/org") return Response.json({ activeOrgId: activeOrganizationId, orgs: [{ id: activeOrganizationId, name: "Workspace" }] });
+      if (url === "/api/org") return Response.json({ activeOrgId: activeOrganizationId, orgs: [{ id: activeOrganizationId, name: "Workspace", baseCurrency: "USD" }] });
       const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string; documentId?: string }; intentId?: string };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
@@ -409,7 +422,7 @@ describe("Vite documents page", () => {
   it("shows selected Go list errors without retrying the legacy document route", async () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (String(input) === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body)) as { capabilityId: string };
       return emptyLibraryCapability(request.capabilityId) ?? Response.json({ error: "Go route unavailable" }, { status: 404 });
     });
@@ -425,7 +438,7 @@ describe("Vite documents page", () => {
     vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const goRow = { ...rows[0]!, id: goDocumentId };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (String(input) === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
       const libraryResponse = emptyLibraryCapability(request.capabilityId);
       if (libraryResponse) return libraryResponse;
@@ -452,7 +465,7 @@ describe("Vite documents page", () => {
   it("announces loading and empty library states", async () => {
     const pending: Array<{ capabilityId: string; resolve: (response: Response) => void }> = [];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input) === "/api/modules"
-      ? Promise.resolve(Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] }))
+      ? Promise.resolve(modulesResponse(["documents"]))
       : new Promise<Response>((resolve) => {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string };
         pending.push({ capabilityId: request.capabilityId, resolve });
@@ -473,9 +486,9 @@ describe("Vite documents page", () => {
     vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
-      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
+      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace", baseCurrency: "USD" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
         const libraryResponse = emptyLibraryCapability(request.capabilityId);
@@ -511,9 +524,9 @@ describe("Vite documents page", () => {
     const createInputs: Array<Record<string, unknown>> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
-      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
+      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace", baseCurrency: "USD" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
         if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [template] } });
@@ -546,7 +559,7 @@ describe("Vite documents page", () => {
 
   it("shows an empty Go template gallery without offering a draft action", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (String(input) === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string };
       return emptyLibraryCapability(request.capabilityId) ?? Response.json({ ok: true, data: { documents: [], vendors: [] } });
     }));
@@ -570,9 +583,9 @@ describe("Vite documents page", () => {
     const capabilities: Array<{ capabilityId: string; organizationId: string | null }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
-      if (url === "/api/org") return Response.json({ activeOrgId: "22222222-2222-4222-8222-222222222222", orgs: [{ id: "22222222-2222-4222-8222-222222222222", name: "Current workspace" }] });
+      if (url === "/api/org") return Response.json({ activeOrgId: "22222222-2222-4222-8222-222222222222", orgs: [{ id: "22222222-2222-4222-8222-222222222222", name: "Current workspace", baseCurrency: "USD" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string };
         const organizationId = new Headers(init?.headers).get("X-Organization-ID");
@@ -596,9 +609,9 @@ describe("Vite documents page", () => {
     vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
-      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
+      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace", baseCurrency: "USD" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
         const libraryResponse = emptyLibraryCapability(request.capabilityId);
@@ -628,9 +641,9 @@ describe("Vite documents page", () => {
     vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/modules") return modulesResponse(["documents"]);
       if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
-      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
+      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace", baseCurrency: "USD" }] });
       if (url === "/api/capabilities/execute") {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
         const libraryResponse = emptyLibraryCapability(request.capabilityId);
@@ -659,7 +672,7 @@ describe("Vite documents page", () => {
   it("surfaces permission errors and allows retry", async () => {
     let listAttempt = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (String(input) === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body)) as { capabilityId: string };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });

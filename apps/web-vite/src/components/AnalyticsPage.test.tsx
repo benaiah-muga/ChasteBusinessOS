@@ -9,6 +9,7 @@ const datasets = [{
 }];
 
 const preview = {
+  region: null,
   columns: ["month", "valueMinor", "invoiceCount"],
   rows: [{ month: "Sep", valueMinor: 1250, invoiceCount: 4 }],
 };

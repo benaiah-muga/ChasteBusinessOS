@@ -58,7 +58,16 @@ describe("Vite team page", () => {
 
   it("creates an invite, shows the acceptance URL, and clears the invite fields", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === "POST") return jsonResponse({ ok: true, data: { token: "invite-abc" } });
+      if (init?.method === "POST") {
+        return jsonResponse({
+          ok: true,
+          data: {
+            invitationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            token: "invite-abc",
+            expiresAt: "2026-10-22T00:00:00.000Z",
+          },
+        });
+      }
       return jsonResponse(fixture);
     });
     vi.stubGlobal("fetch", fetchMock);

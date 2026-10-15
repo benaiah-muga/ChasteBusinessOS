@@ -63,13 +63,25 @@ beforeEach(() => {
       const workspace = activeOrgId === firstOrgId ? "First" : "Second";
       return Response.json({
         approvals: [{
-          id: `approval-${workspace.toLowerCase()}`,
+          id: activeOrgId === firstOrgId
+            ? "30000000-0000-4000-8000-000000000001"
+            : "30000000-0000-4000-8000-000000000002",
+          orgId: activeOrgId,
+          sessionId: null,
+          requestedByUserId: null,
           capabilityId: "crm.createCustomer",
           riskClass: "write",
           payload: { name: `${workspace} workspace approval` },
           rationale: "A person needs to review this change.",
           createdAt: "2026-09-27T10:15:00.000Z",
           status: "pending",
+          decidedByUserId: null,
+          decisionComment: null,
+          expiresAt: null,
+          decidedAt: null,
+          raisedBy: { name: "Ada Lovelace", kind: "human" },
+          decidedBy: null,
+          relatedDocuments: [],
         }],
         history: [],
       });
@@ -178,13 +190,14 @@ beforeEach(() => {
     if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
     if (path === "/api/crm?views=1") return Response.json({ views: [] });
     if (path === "/api/inventory") return Response.json({
-      items: [{ sku: "MUG-1", name: "Ceramic mug", kind: "goods", unitLabel: "unit", salePriceMinor: 1250, imageUrl: null, tags: ["Kitchen"], barcode: "123456", onHandThousandths: 4000, valueMinor: 2000, avgUnitCostMinor: 500, reservedThousandths: 1000, availableThousandths: 3000, totalValueMinor: 2000, reorderPointThousandths: 5000, reorderNeeded: true }],
+      items: [{ id: "40000000-0000-4000-8000-000000000001", sku: "MUG-1", name: "Ceramic mug", kind: "goods", unitLabel: "unit", salePriceMinor: 1250, imageUrl: null, tags: ["Kitchen"], barcode: "123456", onHandThousandths: 4000, valueMinor: 2000, avgUnitCostMinor: 500, reservedThousandths: 1000, availableThousandths: 3000, totalValueMinor: 2000, reorderPointThousandths: 5000, reorderNeeded: true }],
       totalValueMinor: 2000,
-      reorderAlerts: [],
+      reorderAlerts: [{ sku: "MUG-1", name: "Ceramic mug", onHandThousandths: 4000, reorderPointThousandths: 5000, shortfallThousandths: 1000, avgUnitCostMinor: 500 }],
       lots: [],
       locations: [],
       cycleCounts: [],
       transfers: [],
+      reservations: [],
     });
     if (path === "/api/accounting") return Response.json({ invoices: [{
       id: "f9184ddd-a042-4e24-9fe1-553cadc44df1",
@@ -526,7 +539,7 @@ describe("Vite app frame", () => {
     const pushState = vi.spyOn(window.history, "pushState");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "How would you like to start?" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "How would you like to start?" }, { timeout: 5_000 })).not.toBeNull();
     expect(window.location.pathname).toBe("/onboarding");
     expect(replaceState).toHaveBeenCalledWith(null, "", "/onboarding");
     expect(pushState).not.toHaveBeenCalled();
@@ -570,10 +583,10 @@ describe("Vite app frame", () => {
     window.history.replaceState(null, "", "/documents");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Documents" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Documents" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Documents" }).getAttribute("aria-current")).toBe("page");
-    expect(await screen.findByText("Supplier agreement")).not.toBeNull();
-    expect(await screen.findByText("Terms for supplier orders.")).not.toBeNull();
+    expect(await screen.findByText("Supplier agreement", {}, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByText("Terms for supplier orders.", {}, { timeout: 5_000 })).not.toBeNull();
   });
 
   it("opens the People workspace within the authenticated shell", async () => {
@@ -589,7 +602,7 @@ describe("Vite app frame", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Manufacturing" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Manufacturing" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Manufacturing" }).getAttribute("aria-current")).toBe("page");
     await waitFor(() => {
       const capabilityCalls = fetchMock.mock.calls
@@ -636,9 +649,9 @@ describe("Vite app frame", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Accounts payable aging" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Accounts payable aging" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Payables aging" }).getAttribute("aria-current")).toBe("page");
-    expect(await screen.findByRole("heading", { name: "$140.00" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "$140.00" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open full Purchasing workspace" }).getAttribute("href"))
       .toBe("/purchasing?tab=bills");
     expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute"

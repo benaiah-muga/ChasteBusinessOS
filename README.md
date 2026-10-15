@@ -811,6 +811,15 @@ Clicking "pay invoice" in the UI and typing "pay the Acme invoice" in chat reach
 
 Capabilities carry their own contract: zod schemas, risk class (`read`, `write`, `money`, `identity`, `destructive`), permission reference, and an inverse action so state changes stay reversible. The registry validates all of it at boot; a module declaring an inverse that doesn't exist refuses to start the server.
 
+## Verification
+
+`pnpm verify:vite-go` builds the active Vite client and runs Go tests and vet.
+CI combines that explicit active-stack check with the full typecheck, lint,
+and test gates, migration manifests, database continuity checks, and live
+business proofs when their provider key is available. The Next.js production
+build is not required. The broader gates remain until the legacy app and
+TypeScript demos have Go replacements.
+
 ## Demo proofs
 
 Each script is an executable specification. If one fails, that's a bug worth knowing about.

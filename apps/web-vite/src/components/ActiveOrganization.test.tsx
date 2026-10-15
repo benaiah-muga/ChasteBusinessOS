@@ -23,8 +23,8 @@ describe("active organization selector", () => {
     stubFetch(Response.json({
       activeOrgId: firstOrgId,
       orgs: [
-        { id: firstOrgId, name: "First workspace" },
-        { id: secondOrgId, name: "Second workspace" },
+        { id: firstOrgId, name: "First workspace", baseCurrency: "USD" },
+        { id: secondOrgId, name: "Second workspace", baseCurrency: "UGX" },
       ],
     }));
 
@@ -68,8 +68,8 @@ describe("active organization selector", () => {
       return Promise.resolve(Response.json({
         activeOrgId: firstOrgId,
         orgs: [
-          { id: firstOrgId, name: "First workspace" },
-          { id: secondOrgId, name: "Second workspace" },
+          { id: firstOrgId, name: "First workspace", baseCurrency: "USD" },
+          { id: secondOrgId, name: "Second workspace", baseCurrency: "UGX" },
         ],
       }));
     });
@@ -120,7 +120,7 @@ describe("active organization selector", () => {
 
   it("shows server rejection and leaves the current organization unchanged", async () => {
     stubFetch(
-      Response.json({ activeOrgId: firstOrgId, orgs: [{ id: firstOrgId, name: "First workspace" }, { id: secondOrgId, name: "Second workspace" }] }),
+      Response.json({ activeOrgId: firstOrgId, orgs: [{ id: firstOrgId, name: "First workspace", baseCurrency: "USD" }, { id: secondOrgId, name: "Second workspace", baseCurrency: "UGX" }] }),
       new Response(null, { status: 403 }),
     );
     const onChanged = vi.fn();
