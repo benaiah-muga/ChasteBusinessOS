@@ -658,21 +658,22 @@ export async function fetchCompositions(signal?: AbortSignal): Promise<Compositi
 
 /* ------------------------------------------------------------ agent soul -- */
 
-const SoulSchema = z.object({ agentSoul: z.string() }).strict();
-const SoulSavedSchema = z.object({ ok: z.literal(true) }).strict();
+const SoulSchema: z.ZodType<components["schemas"]["AgentSoulResponse"]> = z.object({ agentSoul: z.string() }).strict();
+const SoulSavedSchema: z.ZodType<components["schemas"]["OrganizationWriteSuccess"]> = z.object({ ok: z.literal(true) }).strict();
 
-/** The soul editor reads with PUT on the legacy `/api/org` route. */
+/** The soul editor reads with PUT on the authenticated Go `/api/org` route. */
 export function fetchAgentSoul(signal?: AbortSignal): Promise<string> {
   return read("/api/org", SoulSchema, { method: "PUT" }, signal).then((data) => data.agentSoul);
 }
 
 export async function saveAgentSoul(agentSoul: string, signal?: AbortSignal): Promise<void> {
-  const { response, body } = await request(
+  const requestBody: components["schemas"]["OrganizationSoulPatchRequest"] = { agentSoul };
+  const { response, body: responseBody } = await request(
     "/api/org",
-    { method: "PATCH", body: JSON.stringify({ agentSoul }) },
+    { method: "PATCH", body: JSON.stringify(requestBody) },
     signal,
   );
-  if (!response.ok) throw new SettingsApiError(response.status, errorMessage(response.status, body));
-  const saved = SoulSavedSchema.safeParse(body);
+  if (!response.ok) throw new SettingsApiError(response.status, errorMessage(response.status, responseBody));
+  const saved = SoulSavedSchema.safeParse(responseBody);
   if (!saved.success) throw new SettingsApiError(response.status, "The settings service returned an unexpected save response.");
 }

@@ -5,6 +5,7 @@ package businesscontract
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	apicontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract"
@@ -252,6 +253,36 @@ func (e ModuleSwitchboardPendingPendingApproval) Valid() bool {
 	}
 }
 
+// Defines values for OrganizationSwitchSuccessOk.
+const (
+	OrganizationSwitchSuccessOkTrue OrganizationSwitchSuccessOk = true
+)
+
+// Valid indicates whether the value is a known member of the OrganizationSwitchSuccessOk enum.
+func (e OrganizationSwitchSuccessOk) Valid() bool {
+	switch e {
+	case OrganizationSwitchSuccessOkTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrganizationWriteSuccessOk.
+const (
+	OrganizationWriteSuccessOkTrue OrganizationWriteSuccessOk = true
+)
+
+// Valid indicates whether the value is a known member of the OrganizationWriteSuccessOk enum.
+func (e OrganizationWriteSuccessOk) Valid() bool {
+	switch e {
+	case OrganizationWriteSuccessOkTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PendingApprovalResponsePendingApproval.
 const (
 	PendingApprovalResponsePendingApprovalTrue PendingApprovalResponsePendingApproval = true
@@ -280,6 +311,11 @@ func (e SupportChannelsPatchRegenerateToken) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// AgentSoulResponse defines model for AgentSoulResponse.
+type AgentSoulResponse struct {
+	AgentSoul string `json:"agentSoul"`
 }
 
 // ApprovalDecisionFailure defines model for ApprovalDecisionFailure.
@@ -535,6 +571,48 @@ type ModuleSwitchboardResponse struct {
 	UsingDefaults  bool         `json:"usingDefaults"`
 }
 
+// OrganizationListResponse defines model for OrganizationListResponse.
+type OrganizationListResponse struct {
+	ActiveOrgId *openapi_types.UUID   `json:"activeOrgId"`
+	Orgs        []OrganizationSummary `json:"orgs"`
+}
+
+// OrganizationSoulPatchRequest defines model for OrganizationSoulPatchRequest.
+type OrganizationSoulPatchRequest struct {
+	// AgentSoul Trimmed before storage; an empty or whitespace-only value clears the persona. The server rejects values exceeding 8000 UTF-16 code units.
+	AgentSoul            string                 `json:"agentSoul"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// OrganizationSummary defines model for OrganizationSummary.
+type OrganizationSummary struct {
+	BaseCurrency string             `json:"baseCurrency"`
+	Id           openapi_types.UUID `json:"id"`
+	Name         string             `json:"name"`
+}
+
+// OrganizationSwitchRequest defines model for OrganizationSwitchRequest.
+type OrganizationSwitchRequest struct {
+	OrgId                openapi_types.UUID     `json:"orgId"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// OrganizationSwitchSuccess defines model for OrganizationSwitchSuccess.
+type OrganizationSwitchSuccess struct {
+	Ok OrganizationSwitchSuccessOk `json:"ok"`
+}
+
+// OrganizationSwitchSuccessOk defines model for OrganizationSwitchSuccess.Ok.
+type OrganizationSwitchSuccessOk bool
+
+// OrganizationWriteSuccess defines model for OrganizationWriteSuccess.
+type OrganizationWriteSuccess struct {
+	Ok OrganizationWriteSuccessOk `json:"ok"`
+}
+
+// OrganizationWriteSuccessOk defines model for OrganizationWriteSuccess.Ok.
+type OrganizationWriteSuccessOk bool
+
 // PendingApprovalResponse defines model for PendingApprovalResponse.
 type PendingApprovalResponse struct {
 	ApprovalId      openapi_types.UUID                     `json:"approvalId"`
@@ -641,8 +719,146 @@ type ExecuteCapabilityJSONRequestBody = CapabilityExecutionRequest
 // SetModuleSwitchboardJSONRequestBody defines body for SetModuleSwitchboard for application/json ContentType.
 type SetModuleSwitchboardJSONRequestBody = ModuleSwitchboardRequest
 
+// UpdateOrganizationAgentSoulJSONRequestBody defines body for UpdateOrganizationAgentSoul for application/json ContentType.
+type UpdateOrganizationAgentSoulJSONRequestBody = OrganizationSoulPatchRequest
+
+// SwitchActiveOrganizationJSONRequestBody defines body for SwitchActiveOrganization for application/json ContentType.
+type SwitchActiveOrganizationJSONRequestBody = OrganizationSwitchRequest
+
 // UpdateSupportChannelsJSONRequestBody defines body for UpdateSupportChannels for application/json ContentType.
 type UpdateSupportChannelsJSONRequestBody = SupportChannelsPatch
+
+// Getter for additional properties for OrganizationSoulPatchRequest. Returns the specified
+// element and whether it was found
+func (a OrganizationSoulPatchRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for OrganizationSoulPatchRequest
+func (a *OrganizationSoulPatchRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for OrganizationSoulPatchRequest to handle AdditionalProperties
+func (a *OrganizationSoulPatchRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["agentSoul"]; found {
+		err = json.Unmarshal(raw, &a.AgentSoul)
+		if err != nil {
+			return fmt.Errorf("error reading 'agentSoul': %w", err)
+		}
+		delete(object, "agentSoul")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for OrganizationSoulPatchRequest to handle AdditionalProperties
+func (a OrganizationSoulPatchRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["agentSoul"], err = json.Marshal(a.AgentSoul)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'agentSoul': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for OrganizationSwitchRequest. Returns the specified
+// element and whether it was found
+func (a OrganizationSwitchRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for OrganizationSwitchRequest
+func (a *OrganizationSwitchRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for OrganizationSwitchRequest to handle AdditionalProperties
+func (a *OrganizationSwitchRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["orgId"]; found {
+		err = json.Unmarshal(raw, &a.OrgId)
+		if err != nil {
+			return fmt.Errorf("error reading 'orgId': %w", err)
+		}
+		delete(object, "orgId")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for OrganizationSwitchRequest to handle AdditionalProperties
+func (a OrganizationSwitchRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["orgId"], err = json.Marshal(a.OrgId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'orgId': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // AsErrorResponse returns the union data inside the DecideApproval400JSONResponseBody as a ErrorResponse
 func (t DecideApproval400JSONResponseBody) AsErrorResponse() (ErrorResponse, error) {

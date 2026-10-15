@@ -4,6 +4,362 @@ info:
   version: 1.0.0
   description: Versioned public HTTP contracts shared by the Go API and its clients.
 paths:
+  /api/org:
+    get:
+      operationId: getOrganizations
+      summary: List organizations available to the signed-in user
+      description: >-
+        Returns the authenticated user's organization memberships and active
+        organization. The Better Auth session cookie is the only supported
+        authentication mechanism for this route. The active organization is
+        selected from the server-resolved session and HttpOnly active-org
+        cookie; X-Organization-ID is not read here. An unverified user receives
+        an empty orgs list and a null activeOrgId. Responses include
+        Cache-Control: no-store. No Origin header is required for this read.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Organization memberships and active selection.
+          headers:
+            Cache-Control:
+              description: Organization membership data is not stored.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationListResponse"
+        "401":
+          description: The Better Auth session is missing or invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure or the organization membership query failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The session service is misconfigured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT.
+          headers:
+            Allow:
+              description: Methods accepted by this route.
+              schema:
+                type: string
+                const: GET, POST, PATCH, PUT
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: switchActiveOrganization
+      summary: Switch the active organization
+      description: >-
+        Verifies membership in the requested organization and sets the
+        HttpOnly active-org cookie. Only Better Auth cookie sessions are
+        supported. The request must include a same-origin Origin header and the
+        session email must be verified. This endpoint does not accept an
+        X-Organization-ID selector; orgId in the body is the requested target.
+        Every response includes Cache-Control: no-store.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        description: JSON request body limited to 4096 bytes.
+        x-maxBodyBytes: 4096
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrganizationSwitchRequest"
+      responses:
+        "200":
+          description: Active organization cookie was set.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Set-Cookie:
+              description: HttpOnly, SameSite=Lax chaste_active_org cookie scoped to /.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationSwitchSuccess"
+        "400":
+          description: The body is malformed or orgId is not a UUID.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The Better Auth session is missing or invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The Origin is not same-origin, the email is unverified, or the user is not a member of orgId.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure or membership verification failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The session service is misconfigured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT.
+          headers:
+            Allow:
+              description: Methods accepted by this route.
+              schema:
+                type: string
+                const: GET, POST, PATCH, PUT
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateOrganizationAgentSoul
+      summary: Update the organization's agent persona
+      description: >-
+        Replaces the standing agent persona for the active organization. This
+        cookie-session route requires an active organization, iam.admin, and a
+        same-origin Origin header. The body is limited to 65536 bytes. The
+        agentSoul value is trimmed before storage; whitespace-only text clears
+        the persona. Its maximum is 8000 UTF-16 code units. Unknown object
+        properties are accepted and ignored.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        x-maxBodyBytes: 65536
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrganizationSoulPatchRequest"
+      responses:
+        "200":
+          description: Agent persona was updated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationWriteSuccess"
+        "400":
+          description: The body is malformed, agentSoul is absent or null, or the UTF-16 length exceeds 8000 code units.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or has no active organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The Origin is not same-origin or the actor lacks iam.admin.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure or updating the agent persona failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The session service is misconfigured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT.
+          headers:
+            Allow:
+              description: Methods accepted by this route.
+              schema:
+                type: string
+                const: GET, POST, PATCH, PUT
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: getOrganizationAgentSoul
+      summary: Read the organization's agent persona
+      description: >-
+        Reads the standing agent persona for the active organization. This
+        cookie-session route requires an active organization, but does not
+        require iam.admin or an Origin header. Every response includes
+        Cache-Control: no-store.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Current agent persona.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentSoulResponse"
+        "401":
+          description: The session is invalid or has no active organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure or reading the agent persona failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The session service is misconfigured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT.
+          headers:
+            Allow:
+              description: Methods accepted by this route.
+              schema:
+                type: string
+                const: GET, POST, PATCH, PUT
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/dashboard:
     get:
       operationId: getDashboard
@@ -822,6 +1178,71 @@ components:
       type: http
       scheme: bearer
   schemas:
+    OrganizationSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, baseCurrency]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        baseCurrency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+    OrganizationListResponse:
+      type: object
+      additionalProperties: false
+      required: [activeOrgId, orgs]
+      properties:
+        activeOrgId:
+          type: [string, "null"]
+          format: uuid
+        orgs:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrganizationSummary"
+    OrganizationSwitchRequest:
+      type: object
+      additionalProperties: true
+      required: [orgId]
+      properties:
+        orgId:
+          type: string
+          format: uuid
+    OrganizationSwitchSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
+    AgentSoulResponse:
+      type: object
+      additionalProperties: false
+      required: [agentSoul]
+      properties:
+        agentSoul:
+          type: string
+    OrganizationSoulPatchRequest:
+      type: object
+      additionalProperties: true
+      required: [agentSoul]
+      properties:
+        agentSoul:
+          type: string
+          x-maxUtf16Length: 8000
+          description: Trimmed before storage; an empty or whitespace-only value clears the persona. The server rejects values exceeding 8000 UTF-16 code units.
+    OrganizationWriteSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
     DashboardSignal:
       type: object
       additionalProperties: false

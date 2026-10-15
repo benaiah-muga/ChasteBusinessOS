@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -177,6 +180,37 @@ func TestOrgGetRefusesWithoutASession(t *testing.T) {
 	}
 	if decodeBody(t, recorder)["error"] != "unauthorized" {
 		t.Fatalf("body = %q", recorder.Body.String())
+	}
+}
+
+func TestOrgResolverConfigurationErrorReturnsServiceUnavailable(t *testing.T) {
+	handler := newOrgTestHandler(t, &stubOrgRepo{}, func() (*session.ResolvedUser, error) {
+		return nil, session.ErrSecretTooShort
+	})
+	recorder := orgRequest(t, handler, http.MethodGet, "", nil)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", recorder.Code)
+	}
+	if decodeBody(t, recorder)["error"] != "organization service unavailable" {
+		t.Fatalf("body = %q, want generic service error", recorder.Body.String())
+	}
+}
+
+func TestOrgResolverInfrastructureErrorReturnsLoggedInternalError(t *testing.T) {
+	var logs bytes.Buffer
+	resolver := SessionResolverFunc(func(context.Context, string, string) (*session.ResolvedUser, error) {
+		return nil, errors.New("session database is unavailable")
+	})
+	handler := NewOrgHandler(&stubOrgRepo{}, resolver, orgTestSecret, slog.New(slog.NewTextHandler(&logs, nil)))
+	recorder := orgRequest(t, handler, http.MethodGet, "", nil)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", recorder.Code)
+	}
+	if decodeBody(t, recorder)["error"] != "internal error" {
+		t.Fatalf("body = %q, want generic internal error", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "database") || !strings.Contains(logs.String(), "session database is unavailable") || !strings.Contains(logs.String(), "resolve session") {
+		t.Fatalf("resolver cause should be logged and hidden: body=%q logs=%q", recorder.Body.String(), logs.String())
 	}
 }
 

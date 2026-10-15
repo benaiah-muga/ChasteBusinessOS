@@ -5017,3 +5017,12 @@ new owners and the manifest shows zero legacy runtime paths.
      writes without a same-origin request. Handler and capability tests pass;
      runtime-role tenant isolation and governed-write integration proofs remain
      pending PostgreSQL verification.
+
+470. (Focused verified) The public business OpenAPI contract now describes all
+     four `/api/org` methods, including cookie-session requirements, active
+     organization selection, same-origin switching and persona writes,
+     membership and `iam.admin` checks, body limits, no-store caching, and
+     error responses. Go handlers and Vite organization/settings clients
+     consume generated types while retaining strict runtime validation.
+     Resolver infrastructure failures are logged and return a generic 500;
+     missing sessions remain 401 and short secrets remain 503.

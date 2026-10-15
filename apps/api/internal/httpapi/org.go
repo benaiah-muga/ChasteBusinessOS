@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,9 @@ import (
 	"strings"
 	"unicode/utf16"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
+	"github.com/google/uuid"
 )
 
 // SessionResolver is the slice of the session package this route depends on.
@@ -90,7 +93,11 @@ func (h *OrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "organization service unavailable"})
 			return
 		}
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		if errors.Is(err, session.ErrNoSession) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		h.fail(w, "resolve session", err)
 		return
 	}
 
@@ -131,7 +138,7 @@ func (h *OrgHandler) resolve(r *http.Request) (*orgActor, error) {
 // legitimately holds no membership yet.
 func (h *OrgHandler) get(w http.ResponseWriter, r *http.Request, actor *orgActor) {
 	if !actor.resolved.EmailVerified {
-		writeJSON(w, http.StatusOK, map[string]any{"activeOrgId": nil, "orgs": []OrgSummary{}})
+		writeJSON(w, http.StatusOK, businesscontract.OrganizationListResponse{Orgs: []businesscontract.OrganizationSummary{}})
 		return
 	}
 
@@ -144,11 +151,29 @@ func (h *OrgHandler) get(w http.ResponseWriter, r *http.Request, actor *orgActor
 		orgs = []OrgSummary{}
 	}
 
-	var activeOrgID any
+	var activeOrgID *uuid.UUID
 	if actor.resolved.OrgID != nil {
-		activeOrgID = *actor.resolved.OrgID
+		parsed, err := uuid.Parse(*actor.resolved.OrgID)
+		if err != nil {
+			h.fail(w, "encode active organization", err)
+			return
+		}
+		activeOrgID = &parsed
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"activeOrgId": activeOrgID, "orgs": orgs})
+	responseOrgs := make([]businesscontract.OrganizationSummary, 0, len(orgs))
+	for _, org := range orgs {
+		id, err := uuid.Parse(org.ID)
+		if err != nil {
+			h.fail(w, "encode organization membership", err)
+			return
+		}
+		responseOrgs = append(responseOrgs, businesscontract.OrganizationSummary{
+			Id:           id,
+			Name:         org.Name,
+			BaseCurrency: org.BaseCurrency,
+		})
+	}
+	writeJSON(w, http.StatusOK, businesscontract.OrganizationListResponse{ActiveOrgId: activeOrgID, Orgs: responseOrgs})
 }
 
 // post switches the active organization by setting the per-session cookie.
@@ -164,12 +189,18 @@ func (h *OrgHandler) post(w http.ResponseWriter, r *http.Request, actor *orgActo
 		return
 	}
 
-	body, ok := decodeOrgID(r, w)
-	if !ok {
+	var body businesscontract.OrganizationSwitchRequest
+	if !decodeJSONBody(w, r, 4096, &body) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	orgID := body.OrgId.String()
+	if body.OrgId == uuid.Nil || !isUUID(orgID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
 
-	member, err := h.repo.IsMember(r.Context(), actor.resolved.UserID, body)
+	member, err := h.repo.IsMember(r.Context(), actor.resolved.UserID, orgID)
 	if err != nil {
 		h.fail(w, "check membership", err)
 		return
@@ -181,13 +212,13 @@ func (h *OrgHandler) post(w http.ResponseWriter, r *http.Request, actor *orgActo
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     session.ActiveOrgCookieName,
-		Value:    body,
+		Value:    orgID,
 		Path:     "/",
 		MaxAge:   activeOrgCookieMaxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, businesscontract.OrganizationSwitchSuccess{Ok: businesscontract.OrganizationSwitchSuccessOkTrue})
 }
 
 // patch replaces the organization's agent persona. This text steers every agent
@@ -215,7 +246,7 @@ func (h *OrgHandler) patch(w http.ResponseWriter, r *http.Request, actor *orgAct
 		h.fail(w, "set agent soul", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, businesscontract.OrganizationWriteSuccess{Ok: businesscontract.OrganizationWriteSuccessOkTrue})
 }
 
 // put returns the organization's agent persona for the settings editor.
@@ -230,44 +261,37 @@ func (h *OrgHandler) put(w http.ResponseWriter, r *http.Request, actor *orgActor
 		h.fail(w, "read agent soul", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"agentSoul": soul})
-}
-
-// decodeOrgID reads the single-field body, refusing unknown keys and trailing
-// data so a malformed request cannot be half-applied.
-func decodeOrgID(r *http.Request, w http.ResponseWriter) (string, bool) {
-	var body struct {
-		OrgID string `json:"orgId"`
-	}
-	if !decodeJSONBody(w, r, 4096, &body) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
-		return "", false
-	}
-	if !isUUID(body.OrgID) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
-		return "", false
-	}
-	return body.OrgID, true
+	writeJSON(w, http.StatusOK, businesscontract.AgentSoulResponse{AgentSoul: soul})
 }
 
 // decodeSoul reads the persona body and applies the legacy trimming rule: an
 // all-whitespace persona clears it rather than storing blanks.
 func decodeSoul(r *http.Request, w http.ResponseWriter) (string, bool) {
-	var body struct {
-		AgentSoul *string `json:"agentSoul"`
-	}
-	if !decodeJSONBody(w, r, maxSoulBodyBytes, &body) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxSoulBodyBytes)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return "", false
 	}
-	if body.AgentSoul == nil || utf16CodeUnits(*body.AgentSoul) > maxSoulLength {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return "", false
 	}
-	if strings.TrimSpace(*body.AgentSoul) == "" {
+	agentSoulJSON, ok := fields["agentSoul"]
+	if !ok || bytes.Equal(bytes.TrimSpace(agentSoulJSON), []byte("null")) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return "", false
+	}
+	var body businesscontract.OrganizationSoulPatchRequest
+	if err := json.Unmarshal(data, &body); err != nil || utf16CodeUnits(body.AgentSoul) > maxSoulLength {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return "", false
+	}
+	if strings.TrimSpace(body.AgentSoul) == "" {
 		return "", true
 	}
-	return strings.TrimSpace(*body.AgentSoul), true
+	return strings.TrimSpace(body.AgentSoul), true
 }
 
 func utf16CodeUnits(value string) int {

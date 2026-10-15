@@ -4,6 +4,38 @@
  */
 
 export interface paths {
+    "/api/org": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List organizations available to the signed-in user
+         * @description Returns the authenticated user's organization memberships and active organization. The Better Auth session cookie is the only supported authentication mechanism for this route. The active organization is selected from the server-resolved session and HttpOnly active-org cookie; X-Organization-ID is not read here. An unverified user receives an empty orgs list and a null activeOrgId. Responses include Cache-Control: no-store. No Origin header is required for this read.
+         */
+        get: operations["getOrganizations"];
+        /**
+         * Read the organization's agent persona
+         * @description Reads the standing agent persona for the active organization. This cookie-session route requires an active organization, but does not require iam.admin or an Origin header. Every response includes Cache-Control: no-store.
+         */
+        put: operations["getOrganizationAgentSoul"];
+        /**
+         * Switch the active organization
+         * @description Verifies membership in the requested organization and sets the HttpOnly active-org cookie. Only Better Auth cookie sessions are supported. The request must include a same-origin Origin header and the session email must be verified. This endpoint does not accept an X-Organization-ID selector; orgId in the body is the requested target. Every response includes Cache-Control: no-store.
+         */
+        post: operations["switchActiveOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the organization's agent persona
+         * @description Replaces the standing agent persona for the active organization. This cookie-session route requires an active organization, iam.admin, and a same-origin Origin header. The body is limited to 65536 bytes. The agentSoul value is trimmed before storage; whitespace-only text clears the persona. Its maximum is 8000 UTF-16 code units. Unknown object properties are accepted and ignored.
+         */
+        patch: operations["updateOrganizationAgentSoul"];
+        trace?: never;
+    };
     "/api/dashboard": {
         parameters: {
             query?: never;
@@ -120,6 +152,40 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        OrganizationSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            baseCurrency: string;
+        };
+        OrganizationListResponse: {
+            /** Format: uuid */
+            activeOrgId: string | null;
+            orgs: components["schemas"]["OrganizationSummary"][];
+        };
+        OrganizationSwitchRequest: {
+            /** Format: uuid */
+            orgId: string;
+        } & {
+            [key: string]: unknown;
+        };
+        OrganizationSwitchSuccess: {
+            /** @constant */
+            ok: true;
+        };
+        AgentSoulResponse: {
+            agentSoul: string;
+        };
+        OrganizationSoulPatchRequest: {
+            /** @description Trimmed before storage; an empty or whitespace-only value clears the persona. The server rejects values exceeding 8000 UTF-16 code units. */
+            agentSoul: string;
+        } & {
+            [key: string]: unknown;
+        };
+        OrganizationWriteSuccess: {
+            /** @constant */
+            ok: true;
+        };
         DashboardSignal: {
             id: string;
             /** @enum {string} */
@@ -370,6 +436,310 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getOrganizations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Organization memberships and active selection. */
+            200: {
+                headers: {
+                    /** @description Organization membership data is not stored. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationListResponse"];
+                };
+            };
+            /** @description The Better Auth session is missing or invalid. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT. */
+            405: {
+                headers: {
+                    /** @description Methods accepted by this route. */
+                    Allow?: "GET, POST, PATCH, PUT";
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session resolution infrastructure or the organization membership query failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session service is misconfigured. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getOrganizationAgentSoul: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current agent persona. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSoulResponse"];
+                };
+            };
+            /** @description The session is invalid or has no active organization. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT. */
+            405: {
+                headers: {
+                    /** @description Methods accepted by this route. */
+                    Allow?: "GET, POST, PATCH, PUT";
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session resolution infrastructure or reading the agent persona failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session service is misconfigured. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    switchActiveOrganization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description JSON request body limited to 4096 bytes. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationSwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description Active organization cookie was set. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    /** @description HttpOnly, SameSite=Lax chaste_active_org cookie scoped to /. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSwitchSuccess"];
+                };
+            };
+            /** @description The body is malformed or orgId is not a UUID. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Better Auth session is missing or invalid. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Origin is not same-origin, the email is unverified, or the user is not a member of orgId. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT. */
+            405: {
+                headers: {
+                    /** @description Methods accepted by this route. */
+                    Allow?: "GET, POST, PATCH, PUT";
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session resolution infrastructure or membership verification failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session service is misconfigured. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    updateOrganizationAgentSoul: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationSoulPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent persona was updated. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationWriteSuccess"];
+                };
+            };
+            /** @description The body is malformed, agentSoul is absent or null, or the UTF-16 length exceeds 8000 code units. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid or has no active organization. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Origin is not same-origin or the actor lacks iam.admin. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT. */
+            405: {
+                headers: {
+                    /** @description Methods accepted by this route. */
+                    Allow?: "GET, POST, PATCH, PUT";
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session resolution infrastructure or updating the agent persona failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session service is misconfigured. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     getDashboard: {
         parameters: {
             query?: never;
