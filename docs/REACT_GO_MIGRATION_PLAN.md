@@ -4860,3 +4860,14 @@ new owners and the manifest shows zero legacy runtime paths.
      returned four Go capability reads with HTTP 200 and no console or page
      errors. The component suite covers populated-data switches and in-flight
      writes across organization changes.
+
+456. (Worker port, independently reviewed) Go now delivers queued approval
+     notification emails through a dedicated SMTP worker and notification-only
+     database role. Claims are limited to approval email jobs; payload reads,
+     lease renewal, and acknowledgements are organization-scoped and fenced.
+     The migration and role provisioning succeeded locally, and the database
+     integration proved delivery, stored receipt, and isolation from another
+     email class. Notification role tests passed. The dispatcher rerun and
+     delivery through the local SMTP sink remain unverified because Docker Go
+     compilation stalled while host swap was exhausted. Independent review
+     found no authorization or fencing issues.

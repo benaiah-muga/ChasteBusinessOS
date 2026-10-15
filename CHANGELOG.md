@@ -13,6 +13,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Go now delivers queued approval notification emails through a dedicated SMTP worker. A notification-only database role claims approval-email jobs, reads payloads in organization-scoped transactions, and uses fenced acknowledgements to prevent blind retries after uncertain SMTP delivery.
 - Go now delivers queued Vite marketing campaign emails through a dedicated SMTP worker role. It rechecks the recipient's current address, active status, and opt-out setting before sending, with separate tenant-scoped payload access and fenced acknowledgements.
 - Docker Compose now runs the static React/Vite client, Go API, capability jobs worker, and webhook outbox worker; it provisions least-privilege database roles and requires a PostgreSQL 16 snapshot before applying migrations.
 - Vite Inventory now displays lot balances from the Go inventory read, including zero balances, with a strict validated response contract.

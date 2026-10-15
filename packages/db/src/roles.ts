@@ -28,6 +28,10 @@ export const MARKETING_EMAIL_WORKER_ROLE_NAME = "chaste_marketing_email_worker";
 export const MARKETING_EMAIL_CLAIM_OWNER_ROLE_NAME = "chaste_marketing_email_claim_owner";
 export const MARKETING_EMAIL_WORKER_PASSWORD_ENV = "CHASTE_MARKETING_EMAIL_WORKER_DB_PASSWORD";
 export const DEFAULT_MARKETING_EMAIL_WORKER_PASSWORD = "chaste_marketing_email_worker_dev_only";
+export const NOTIFICATION_EMAIL_WORKER_ROLE_NAME = "chaste_notification_email_worker";
+export const NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME = "chaste_notification_email_claim_owner";
+export const NOTIFICATION_EMAIL_WORKER_PASSWORD_ENV = "CHASTE_NOTIFICATION_EMAIL_WORKER_DB_PASSWORD";
+export const DEFAULT_NOTIFICATION_EMAIL_WORKER_PASSWORD = "chaste_notification_email_worker_dev_only";
 export const JOBS_WORKER_ROLE_NAME = "chaste_jobs_worker";
 export const JOBS_CLAIM_OWNER_ROLE_NAME = "chaste_jobs_claim_owner";
 export const JOBS_WORKER_PASSWORD_ENV = "CHASTE_JOBS_WORKER_DB_PASSWORD";
@@ -219,6 +223,20 @@ export interface MarketingEmailWorkerRoleOptions {
 }
 
 export interface MarketingEmailWorkerRoleResult {
+  roleName: string;
+  functionOwnerRoleName: string;
+  created: boolean;
+  /** Connection URL contains the worker password and must never be logged. */
+  workerUrl: string;
+}
+
+export interface NotificationEmailWorkerRoleOptions {
+  databaseUrl?: string;
+  password?: string;
+  adminUrl?: string;
+}
+
+export interface NotificationEmailWorkerRoleResult {
   roleName: string;
   functionOwnerRoleName: string;
   created: boolean;
@@ -618,6 +636,77 @@ export async function ensureMarketingEmailWorkerRole(
   workerUrl.username = MARKETING_EMAIL_WORKER_ROLE_NAME;
   workerUrl.password = password;
   return { roleName: MARKETING_EMAIL_WORKER_ROLE_NAME, functionOwnerRoleName: MARKETING_EMAIL_CLAIM_OWNER_ROLE_NAME, created, workerUrl: workerUrl.toString() };
+}
+
+export async function ensureNotificationEmailWorkerRole(
+  options: NotificationEmailWorkerRoleOptions = {},
+): Promise<NotificationEmailWorkerRoleResult> {
+  const databaseUrl = options.databaseUrl ?? process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
+  const configuredPassword = options.password ?? process.env[NOTIFICATION_EMAIL_WORKER_PASSWORD_ENV];
+  if (!configuredPassword && process.env.NODE_ENV === "production") {
+    throw new Error(`${NOTIFICATION_EMAIL_WORKER_PASSWORD_ENV} is required to provision the notification email worker role`);
+  }
+  const password = configuredPassword ?? DEFAULT_NOTIFICATION_EMAIL_WORKER_PASSWORD;
+  const adminDatabase = new URL(databaseUrl);
+  adminDatabase.pathname = "/postgres";
+  const admin = postgres(options.adminUrl ?? adminDatabase.toString(), { max: 1 });
+  let created = false;
+  try {
+    await admin.begin(async (tx) => {
+      await tx.unsafe(`SELECT pg_advisory_xact_lock(hashtext('chaste_ensure_app_role'), hashtext('role'))`);
+      const [existing] = await tx.unsafe<{ present: boolean }[]>(`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=${sqlString(NOTIFICATION_EMAIL_WORKER_ROLE_NAME)}) AS present`);
+      if (!existing?.present) {
+        await tx.unsafe(`CREATE ROLE ${NOTIFICATION_EMAIL_WORKER_ROLE_NAME} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 8 PASSWORD ${sqlString(password)}`);
+        created = true;
+      }
+      await tx.unsafe(`ALTER ROLE ${NOTIFICATION_EMAIL_WORKER_ROLE_NAME} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 8 PASSWORD ${sqlString(password)}`);
+      const [ownerExists] = await tx.unsafe<{ present: boolean }[]>(`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=${sqlString(NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME)}) AS present`);
+      if (!ownerExists?.present) await tx.unsafe(`CREATE ROLE ${NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
+      await tx.unsafe(`ALTER ROLE ${NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD NULL`);
+      for (const roleName of [NOTIFICATION_EMAIL_WORKER_ROLE_NAME, NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME]) {
+        const memberships = await tx.unsafe<{ granted_role: string }[]>(`SELECT granted.rolname AS granted_role FROM pg_auth_members membership JOIN pg_roles granted ON granted.oid=membership.roleid JOIN pg_roles member ON member.oid=membership.member WHERE member.rolname=${sqlString(roleName)}`);
+        for (const membership of memberships) await tx.unsafe(`REVOKE ${sqlIdent(membership.granted_role)} FROM ${sqlIdent(roleName)}`);
+        const dependents = await tx.unsafe<{ member_role: string }[]>(`SELECT member.rolname AS member_role FROM pg_auth_members membership JOIN pg_roles granted ON granted.oid=membership.roleid JOIN pg_roles member ON member.oid=membership.member WHERE granted.rolname=${sqlString(roleName)}`);
+        for (const dependent of dependents) await tx.unsafe(`REVOKE ${sqlIdent(roleName)} FROM ${sqlIdent(dependent.member_role)}`);
+      }
+    });
+  } finally {
+    await admin.end();
+  }
+
+  const db = postgres(databaseUrl, { max: 1 });
+  try {
+    await db.begin(async (tx) => {
+      await tx.unsafe(`SELECT pg_advisory_xact_lock(hashtext('chaste_ensure_app_role'), hashtext(current_database()))`);
+      await tx.unsafe(`GRANT USAGE ON SCHEMA public TO ${NOTIFICATION_EMAIL_WORKER_ROLE_NAME}, ${NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME}`);
+      await tx.unsafe(`GRANT USAGE, CREATE ON SCHEMA outbox_worker TO ${NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME}`);
+      for (const roleName of [NOTIFICATION_EMAIL_WORKER_ROLE_NAME, NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME]) {
+        await tx.unsafe(`REVOKE ALL PRIVILEGES ON TABLE public.outbox_messages FROM ${roleName}`);
+        for (const column of OUTBOX_COLUMNS) {
+          const ident = sqlIdent(column);
+          await tx.unsafe(`REVOKE SELECT (${ident}), INSERT (${ident}), UPDATE (${ident}), REFERENCES (${ident}) ON TABLE public.outbox_messages FROM ${roleName}`);
+        }
+      }
+      const grant = async (roleName: string, select: readonly string[], update: readonly string[]) => {
+        await tx.unsafe(`GRANT SELECT (${select.map(sqlIdent).join(", ")}) ON TABLE public.outbox_messages TO ${roleName}`);
+        await tx.unsafe(`GRANT UPDATE (${update.map(sqlIdent).join(", ")}) ON TABLE public.outbox_messages TO ${roleName}`);
+      };
+      await grant(NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME, MARKETING_EMAIL_CLAIM_SELECT_COLUMNS, CLAIM_UPDATE_COLUMNS);
+      await grant(NOTIFICATION_EMAIL_WORKER_ROLE_NAME, MARKETING_EMAIL_WORKER_SELECT_COLUMNS, WORKER_UPDATE_COLUMNS);
+      await tx.unsafe(`ALTER FUNCTION outbox_worker.claim_notification_email(text, integer) OWNER TO ${NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME}`);
+      await tx.unsafe(`REVOKE ALL ON FUNCTION outbox_worker.claim_notification_email(text, integer) FROM PUBLIC`);
+      await tx.unsafe(`REVOKE ALL ON FUNCTION outbox_worker.claim_notification_email(text, integer) FROM ${APP_ROLE_NAME}`);
+      await tx.unsafe(`GRANT USAGE ON SCHEMA outbox_worker TO ${NOTIFICATION_EMAIL_WORKER_ROLE_NAME}`);
+      await tx.unsafe(`REVOKE CREATE ON SCHEMA outbox_worker FROM ${NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME}`);
+      await tx.unsafe(`GRANT EXECUTE ON FUNCTION outbox_worker.claim_notification_email(text, integer) TO ${NOTIFICATION_EMAIL_WORKER_ROLE_NAME}`);
+    });
+  } finally {
+    await db.end();
+  }
+  const workerUrl = new URL(databaseUrl);
+  workerUrl.username = NOTIFICATION_EMAIL_WORKER_ROLE_NAME;
+  workerUrl.password = password;
+  return { roleName: NOTIFICATION_EMAIL_WORKER_ROLE_NAME, functionOwnerRoleName: NOTIFICATION_EMAIL_CLAIM_OWNER_ROLE_NAME, created, workerUrl: workerUrl.toString() };
 }
 
 /**

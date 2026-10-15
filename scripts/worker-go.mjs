@@ -6,7 +6,7 @@ import { join } from "node:path";
 import process from "node:process";
 import { jobsWorkerKeys, selectedEnvironment } from "./worker-go-env.mjs";
 
-const workerNames = ["jobs-worker", "outbox-worker", "marketing-email-worker"];
+const workerNames = ["jobs-worker", "outbox-worker", "marketing-email-worker", "notification-email-worker"];
 const directory = mkdtempSync(join(tmpdir(), "chaste-workers-"));
 const buildChildren = new Set();
 const workerChildren = new Set();
@@ -104,6 +104,11 @@ try {
     run("marketing-email-worker", selectedEnvironment([
       "MARKETING_EMAIL_OUTBOX_WORKER_DATABASE_URL",
       "MARKETING_EMAIL_OUTBOX_WORKER_ID",
+      "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
+    ]));
+    run("notification-email-worker", selectedEnvironment([
+      "NOTIFICATION_EMAIL_OUTBOX_WORKER_DATABASE_URL",
+      "NOTIFICATION_EMAIL_OUTBOX_WORKER_ID",
       "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
     ]));
     await Promise.all(workerPromises);

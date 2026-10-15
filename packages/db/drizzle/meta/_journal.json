@@ -975,6 +975,13 @@
       "when": 1792065405000,
       "tag": "0138_go_marketing_email_outbox_worker",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1792068826925,
+      "tag": "0139_go_notification_email_outbox_worker",
+      "breakpoints": true
     }
   ]
 }

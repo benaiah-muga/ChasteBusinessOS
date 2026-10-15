@@ -41,6 +41,7 @@ services:
       CHASTE_JOBS_WORKER_DB_PASSWORD: ${CHASTE_JOBS_WORKER_DB_PASSWORD:-chaste_jobs_worker_dev_only}
       CHASTE_OUTBOX_WORKER_DB_PASSWORD: ${CHASTE_OUTBOX_WORKER_DB_PASSWORD:-chaste_outbox_worker_dev_only}
       CHASTE_MARKETING_EMAIL_WORKER_DB_PASSWORD: ${CHASTE_MARKETING_EMAIL_WORKER_DB_PASSWORD:-chaste_marketing_email_worker_dev_only}
+      CHASTE_NOTIFICATION_EMAIL_WORKER_DB_PASSWORD: ${CHASTE_NOTIFICATION_EMAIL_WORKER_DB_PASSWORD:-chaste_notification_email_worker_dev_only}
     restart: "no"
 
   migrate-schema:
@@ -205,6 +206,28 @@ services:
         condition: service_healthy
     environment:
       MARKETING_EMAIL_OUTBOX_WORKER_DATABASE_URL: postgresql://chaste_marketing_email_worker:${CHASTE_MARKETING_EMAIL_WORKER_DB_PASSWORD:-chaste_marketing_email_worker_dev_only}@db:5432/chaste_os_v2
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-chaste@localhost}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+
+  notification-email-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["/usr/local/bin/chaste-notification-email-worker"]
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    environment:
+      NOTIFICATION_EMAIL_OUTBOX_WORKER_DATABASE_URL: postgresql://chaste_notification_email_worker:${CHASTE_NOTIFICATION_EMAIL_WORKER_DB_PASSWORD:-chaste_notification_email_worker_dev_only}@db:5432/chaste_os_v2
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}
