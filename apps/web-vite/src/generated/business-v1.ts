@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/capabilities/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute an authenticated business capability
+         * @description Executes one capability through the governed kernel using the authenticated actor and active organization. Input and output remain open-ended at this generic boundary; capability-specific shapes are checked by runtime validators. Cookie-authenticated requests must include a same-origin Origin header. Bearer-authenticated requests do not use the browser origin check. If X-Organization-ID is provided, it must match the authenticated active organization.
+         */
+        post: operations["executeCapability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/support/channels": {
         parameters: {
             query?: never;
@@ -32,6 +52,38 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        CapabilityExecutionRequest: {
+            /** @description Capability registry identifier, limited to 200 Unicode code points by the server. Capability-specific input is validated by its runtime parser. */
+            capabilityId: string;
+            /** @description Arbitrary JSON value. The Go implementation retains the raw JSON bytes for exact capability parsing and hashing. */
+            input: unknown;
+            /** @description Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters. */
+            intentId?: string | null;
+        };
+        CapabilityExecutionSuccess: {
+            /** @constant */
+            ok: true;
+            /** @description Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients. */
+            data: unknown;
+        };
+        CapabilityExecutionPending: {
+            /** @constant */
+            ok: false;
+            /** @constant */
+            pendingApproval: true;
+            reason: string;
+            approvalId?: string;
+        };
+        CapabilityExecutionRefusal: {
+            /** @constant */
+            ok: false;
+            /** @description Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients. */
+            data?: unknown;
+            error?: string;
+            approvalId?: string;
+            approvalRationale?: string;
+            replayed?: boolean;
+        };
         ErrorResponse: {
             error: string;
         };
@@ -62,6 +114,118 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    executeCapability: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects the active organization when the authenticated identity belongs to more than one organization. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilityExecutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Capability completed successfully. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityExecutionSuccess"];
+                };
+            };
+            /** @description Capability is waiting for human approval. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityExecutionPending"];
+                };
+            };
+            /** @description Request body or capability execution envelope is malformed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid or does not identify an authenticated organization member. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The origin is not allowed or the actor cannot perform the requested action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Only POST is supported. */
+            405: {
+                headers: {
+                    /** @description Allowed request method. */
+                    Allow?: "POST";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Capability input was valid JSON but the capability refused the request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityExecutionRefusal"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A capability-specific rate limit was reached. */
+            429: {
+                headers: {
+                    /** @description Seconds until the request can be retried. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Capability execution failed unexpectedly. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Capability execution is unavailable or the requested capability is disabled. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     getSupportChannels: {
         parameters: {
             query?: never;

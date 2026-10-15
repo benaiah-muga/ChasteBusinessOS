@@ -4,6 +4,103 @@ info:
   version: 1.0.0
   description: Versioned public HTTP contracts shared by the Go API and its clients.
 paths:
+  /api/capabilities/execute:
+    post:
+      operationId: executeCapability
+      summary: Execute an authenticated business capability
+      description: Executes one capability through the governed kernel using the authenticated actor and active organization. Input and output remain open-ended at this generic boundary; capability-specific shapes are checked by runtime validators. Cookie-authenticated requests must include a same-origin Origin header. Bearer-authenticated requests do not use the browser origin check. If X-Organization-ID is provided, it must match the authenticated active organization.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the active organization when the authenticated identity belongs to more than one organization.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapabilityExecutionRequest"
+      responses:
+        "200":
+          description: Capability completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityExecutionSuccess"
+        "202":
+          description: Capability is waiting for human approval.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityExecutionPending"
+        "400":
+          description: Request body or capability execution envelope is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or does not identify an authenticated organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The origin is not allowed or the actor cannot perform the requested action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Capability input was valid JSON but the capability refused the request.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/CapabilityExecutionRefusal"
+                  - $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: A capability-specific rate limit was reached.
+          headers:
+            Retry-After:
+              description: Seconds until the request can be retried.
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Capability execution failed unexpectedly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Capability execution is unavailable or the requested capability is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only POST is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: POST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/support/channels:
     get:
       operationId: getSupportChannels
@@ -129,6 +226,78 @@ components:
       type: http
       scheme: bearer
   schemas:
+    CapabilityExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Capability registry identifier, limited to 200 Unicode code points by the server. Capability-specific input is validated by its runtime parser.
+        input:
+          description: Arbitrary JSON value. The Go implementation retains the raw JSON bytes for exact capability parsing and hashing.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        intentId:
+          type: [string, "null"]
+          maxLength: 200
+          description: Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+    CapabilityExecutionSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, data]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        data:
+          description: Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+    CapabilityExecutionPending:
+      type: object
+      additionalProperties: false
+      required: [ok, pendingApproval, reason]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        pendingApproval:
+          type: boolean
+          const: true
+        reason:
+          type: string
+        approvalId:
+          type: string
+          minLength: 1
+    CapabilityExecutionRefusal:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        data:
+          description: Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        error:
+          type: string
+        approvalId:
+          type: string
+        approvalRationale:
+          type: string
+        replayed:
+          type: boolean
     ErrorResponse:
       type: object
       additionalProperties: false

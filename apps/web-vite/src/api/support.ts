@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { components } from "../generated/business-v1";
 import { normalizeRetryActorId } from "./retry-scope";
 import { submitCrmCustomerCreate, type CrmTaskRetryScope } from "./crm";
+import {
+  CapabilityExecutionSuccessSchema,
+  capabilityExecutionRequest,
+} from "./capability-execution";
 
 const uuid = z.string().uuid();
 
@@ -126,7 +130,7 @@ const GoSupportThreadConversationSchema = SupportConversationSchema.extend({
   customerId: uuid.nullable(),
   customerEmail: z.string().nullable(),
 }).strict();
-const GoCapabilityEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const GoCapabilityEnvelopeSchema = CapabilityExecutionSuccessSchema;
 
 export type SupportCannedResponseRetryScope = { actorId: string | null; organizationId: string | null };
 export type SupportConversationWriteRetryScope = SupportCannedResponseRetryScope;
@@ -405,7 +409,7 @@ async function readGoSupportCapability<T>(
     method: "POST",
     cache: "no-store",
     headers: { "X-Organization-ID": orgId },
-    body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
+    body: JSON.stringify(capabilityExecutionRequest(capabilityId, input, crypto.randomUUID())),
   }, signal);
   if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
   const envelope = GoCapabilityEnvelopeSchema.safeParse(body);
@@ -734,7 +738,7 @@ export async function submitSupportTicket(
       method: "POST",
       cache: "no-store",
       headers: supportOrganizationHeader(scope.organizationId),
-      body: JSON.stringify({ capabilityId: "support.createTicket", input: attempt.record.input, intentId: attempt.record.intentId }),
+      body: JSON.stringify(capabilityExecutionRequest("support.createTicket", attempt.record.input, attempt.record.intentId)),
     }, signal));
   } catch {
     throw new SupportApiError(0, "The Go support service could not confirm this ticket. Retry its exact saved details to recover the result.");
@@ -978,7 +982,7 @@ export async function submitSupportConversationAction<Action extends SupportWrit
       method: "POST",
       cache: "no-store",
       headers: supportOrganizationHeader(scope.organizationId),
-      body: JSON.stringify({ capabilityId: attempt.record.capabilityId, input: attempt.record.input, intentId: attempt.record.intentId }),
+      body: JSON.stringify(capabilityExecutionRequest(attempt.record.capabilityId, attempt.record.input, attempt.record.intentId)),
     }, signal));
   } catch {
     throw new SupportApiError(0, "The Go support service could not confirm this conversation action. Retry its exact saved details to recover the result.");
@@ -1012,7 +1016,7 @@ export async function submitSupportCannedResponse(
       method: "POST",
       cache: "no-store",
       headers: supportOrganizationHeader(scope.organizationId),
-      body: JSON.stringify({ capabilityId: "support.createCannedResponse", input: attempt.record.input, intentId: attempt.record.intentId }),
+      body: JSON.stringify(capabilityExecutionRequest("support.createCannedResponse", attempt.record.input, attempt.record.intentId)),
     }, signal));
   } catch {
     throw new SupportApiError(0, "The Go support service could not confirm this canned-response save. Retry the exact saved details to recover its result.");
@@ -1052,7 +1056,7 @@ export async function submitSupportKbArticle(
       method: "POST",
       cache: "no-store",
       headers: supportOrganizationHeader(scope.organizationId),
-      body: JSON.stringify({ capabilityId: "support.createKbArticle", input: attempt.record.input, intentId: attempt.record.intentId }),
+      body: JSON.stringify(capabilityExecutionRequest("support.createKbArticle", attempt.record.input, attempt.record.intentId)),
     }, signal));
   } catch {
     throw new SupportApiError(0, "The Go support service could not confirm this article save. Retry the exact saved details to recover its result.");

@@ -15,7 +15,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
@@ -100,11 +102,7 @@ func isInventoryImportCapability(capabilityID string) bool {
 	return capabilityID == "inventory.importItems" || capabilityID == "inventory.undoItemImport" || capabilityID == "inventory.restoreItemImport"
 }
 
-type sessionCapabilityInput struct {
-	CapabilityID string          `json:"capabilityId"`
-	Input        json.RawMessage `json:"input"`
-	IntentID     string          `json:"intentId"`
-}
+type sessionCapabilityInput = businesscontract.CapabilityExecutionRequest
 
 // NewSessionCapabilityHandler exposes the governed executor directly to
 // authenticated clients. Identity and permissions are resolved from the
@@ -155,7 +153,15 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
 	decoder.DisallowUnknownFields()
 	var body sessionCapabilityInput
-	if decoder.Decode(&body) != nil || body.CapabilityID == "" || len(body.CapabilityID) > 200 || len(body.Input) == 0 || !json.Valid(body.Input) || len(body.IntentID) > 200 || strings.ContainsAny(body.IntentID, "\r\n\x00") {
+	if decoder.Decode(&body) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	intentID := ""
+	if body.IntentId != nil {
+		intentID = *body.IntentId
+	}
+	if body.CapabilityId == "" || utf8.RuneCountInString(body.CapabilityId) > 200 || len(body.Input) == 0 || !json.Valid(body.Input) || utf8.RuneCountInString(intentID) > 200 || strings.ContainsAny(intentID, "\r\n\x00") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
@@ -164,21 +170,21 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	if int64(len(bodyBytes)) > capabilityBodyLimitFor(body.CapabilityID) {
+	if int64(len(bodyBytes)) > capabilityBodyLimitFor(body.CapabilityId) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	if _, disabled := h.disabledCapabilities[body.CapabilityID]; disabled {
+	if _, disabled := h.disabledCapabilities[body.CapabilityId]; disabled {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "capability is disabled on this Go route"})
 		return
 	}
-	if isInventoryImportCapability(body.CapabilityID) {
+	if isInventoryImportCapability(body.CapabilityId) {
 		if !resolved.HasPermission("inventory.write") && !resolved.HasPermission("*") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 			return
 		}
 		var parseErr error
-		switch body.CapabilityID {
+		switch body.CapabilityId {
 		case "inventory.importItems":
 			_, parseErr = capability.ParseInventoryImportItemsInput(body.Input)
 		case "inventory.undoItemImport":
@@ -187,7 +193,10 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			_, parseErr = capability.ParseInventoryRestoreItemImportInput(body.Input)
 		}
 		if parseErr != nil {
-			writeJSON(w, http.StatusUnprocessableEntity, capability.Result{OK: false, Error: parseErr.Error()})
+			errorMessage := parseErr.Error()
+			writeJSON(w, http.StatusUnprocessableEntity, businesscontract.CapabilityExecutionRefusal{
+				Ok: businesscontract.CapabilityExecutionRefusalOkFalse, Error: &errorMessage,
+			})
 			return
 		}
 		allowed, retryAfter := h.inventoryImportLimit.allow(*resolved.OrgID)
@@ -220,17 +229,17 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		Audience:       "go.capability.execute",
 		Subject:        resolved.UserID,
 		OrganizationID: *resolved.OrgID,
-		CapabilityID:   body.CapabilityID,
+		CapabilityID:   body.CapabilityId,
 		InputSHA256:    inputHash,
 		ActorID:        &actorID,
 		ActorType:      "human",
 		Permissions:    permissions,
 		AuthSessionID:  resolved.AuthSessionID,
-		IntentID:       body.IntentID,
+		IntentID:       intentID,
 		IssuedAt:       now.Unix(),
 		ExpiresAt:      now.Add(30 * time.Second).Unix(),
 	}
-	result, err := h.executor.Execute(r.Context(), claims, body.CapabilityID, body.Input)
+	result, err := h.executor.Execute(r.Context(), claims, body.CapabilityId, body.Input)
 	if err != nil {
 		switch {
 		case errors.Is(err, capability.ErrSessionInvalid), errors.Is(err, capability.ErrScopeMismatch):
@@ -240,24 +249,24 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		default:
 			var domainError capability.AccountingDomainError
 			if errors.As(err, &domainError) {
-				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": domainError.Error()})
+				writeJSON(w, http.StatusUnprocessableEntity, businesscontract.ErrorResponse{Error: domainError.Error()})
 				return
 			}
 			var manufacturingError capability.ManufacturingDomainError
 			if errors.As(err, &manufacturingError) {
-				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": manufacturingError.Error()})
+				writeJSON(w, http.StatusUnprocessableEntity, businesscontract.ErrorResponse{Error: manufacturingError.Error()})
 				return
 			}
 			var creatorError capability.CreatorDomainError
 			if errors.As(err, &creatorError) {
-				writeJSON(w, http.StatusUnprocessableEntity, struct {
-					OK    bool   `json:"ok"`
-					Error string `json:"error"`
-				}{OK: false, Error: creatorError.Error()})
+				errorMessage := creatorError.Error()
+				writeJSON(w, http.StatusUnprocessableEntity, businesscontract.CapabilityExecutionRefusal{
+					Ok: businesscontract.CapabilityExecutionRefusalOkFalse, Error: &errorMessage,
+				})
 				return
 			}
 			if h.logger != nil {
-				h.logger.Error("Go direct capability execution failed", "capabilityId", body.CapabilityID, "error", err)
+				h.logger.Error("Go direct capability execution failed", "capabilityId", body.CapabilityId, "error", err)
 			}
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		}
@@ -268,22 +277,42 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		if reason == "" {
 			reason = result.Error
 		}
-		writeJSON(w, http.StatusAccepted, struct {
-			OK              bool   `json:"ok"`
-			PendingApproval bool   `json:"pendingApproval"`
-			Reason          string `json:"reason"`
-			ApprovalID      string `json:"approvalId,omitempty"`
-		}{OK: false, PendingApproval: true, Reason: reason, ApprovalID: result.ApprovalID})
+		pending := businesscontract.CapabilityExecutionPending{
+			Ok:              businesscontract.CapabilityExecutionPendingOkFalse,
+			PendingApproval: businesscontract.CapabilityExecutionPendingPendingApprovalTrue,
+			Reason:          reason,
+		}
+		if result.ApprovalID != "" {
+			pending.ApprovalId = &result.ApprovalID
+		}
+		writeJSON(w, http.StatusAccepted, pending)
 		return
 	}
 	if !result.OK {
-		writeJSON(w, http.StatusUnprocessableEntity, result)
+		refusal := businesscontract.CapabilityExecutionRefusal{Ok: businesscontract.CapabilityExecutionRefusalOkFalse}
+		if len(result.Data) > 0 {
+			rawData := json.RawMessage(result.Data)
+			refusal.Data = &rawData
+		}
+		if result.Error != "" {
+			refusal.Error = &result.Error
+		}
+		if result.ApprovalID != "" {
+			refusal.ApprovalId = &result.ApprovalID
+		}
+		if result.ApprovalRationale != "" {
+			refusal.ApprovalRationale = &result.ApprovalRationale
+		}
+		if result.Replayed {
+			refusal.Replayed = &result.Replayed
+		}
+		writeJSON(w, http.StatusUnprocessableEntity, refusal)
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
-		OK   bool            `json:"ok"`
-		Data json.RawMessage `json:"data"`
-	}{OK: true, Data: result.Data})
+	writeJSON(w, http.StatusOK, businesscontract.CapabilityExecutionSuccess{
+		Ok:   businesscontract.CapabilityExecutionSuccessOkTrue,
+		Data: json.RawMessage(result.Data),
+	})
 }
 
 func (h *SessionCapabilityHandler) resolve(r *http.Request) (*session.ResolvedUser, bool, bool) {

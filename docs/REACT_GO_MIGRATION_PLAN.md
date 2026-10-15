@@ -606,11 +606,13 @@ new owners and the manifest shows zero legacy runtime paths.
 4. (In progress) Define versioned internal and public HTTP contracts and the
   auth bridge contract, then prove each Go endpoint under existing session,
   permission, and RLS policies. OpenAPI 3.1 covers `GET /__go/policy`,
-  `GET /__go/ledger`, and the public Support channel GET/POST operations.
-  Generated Go and TypeScript models are checked for drift, and the Support
-  handler and Vite client consume the generated request/response types alongside
+  `GET /__go/ledger`, Support channel GET/POST, and the generic
+  `POST /api/capabilities/execute` envelope. The generic capability input and
+  output remain open-ended; capability-specific shapes are checked by runtime
+  validators. Generated Go and TypeScript models are checked for drift, and
+  Vite Support consumes generated request and success-envelope types alongside
   runtime validation. Business API contract coverage remains incomplete and
-  must expand to every Go-owned route before migration completion.
+  must expand across Go-owned routes before migration completion.
 5. Port the kernel trust spine and the customer-to-payment slice; do not
    switch any write before its parity and rollback gates pass.
 6. (Done) Bridge only `POST /api/accounting` invoice creation to the existing Go

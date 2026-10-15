@@ -78,13 +78,20 @@ func directCapabilityRequest(method, body string) *http.Request {
 
 func TestSessionCapabilityHandlerBuildsClaimsFromResolvedSession(t *testing.T) {
 	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
-	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"created":true}`)}}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"minorUnits":9007199254740993}`)}}
 	handler := NewSessionCapabilityHandler(resolver, executor, nil)
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"sales.createOrder","input":{"customerId":"x"},"intentId":"intent-123"}`))
+	handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"sales.createOrder","input":{"minorUnits":9007199254740993},"intentId":"intent-123"}`))
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var success struct {
+		OK   bool            `json:"ok"`
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(response.Body.Bytes(), &success) != nil || !success.OK || string(success.Data) != `{"minorUnits":9007199254740993}` || string(executor.input) != `{"minorUnits":9007199254740993}` {
+		t.Fatalf("generated contract changed raw JSON data: request=%s response=%s", executor.input, response.Body.String())
 	}
 	if resolver.resolveCalls != 1 || resolver.cookie != "session-cookie" || resolver.activeOrg != "11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("session resolution calls=%d cookie=%q activeOrg=%q", resolver.resolveCalls, resolver.cookie, resolver.activeOrg)
@@ -100,6 +107,30 @@ func TestSessionCapabilityHandlerBuildsClaimsFromResolvedSession(t *testing.T) {
 	}
 	if response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("cache policy=%q", response.Header().Get("Cache-Control"))
+	}
+}
+
+func TestSessionCapabilityHandlerUsesContractCharacterLimits(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		capabilityID string
+		intentID     string
+		wantStatus   int
+	}{
+		{name: "multibyte values within 200 characters", capabilityID: strings.Repeat("界", 150), intentID: strings.Repeat("意", 150), wantStatus: http.StatusOK},
+		{name: "capability id over 200 characters", capabilityID: strings.Repeat("界", 201), intentID: "intent", wantStatus: http.StatusBadRequest},
+		{name: "intent over 200 characters", capabilityID: "sales.createOrder", intentID: strings.Repeat("意", 201), wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+			executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+			body := `{"capabilityId":"` + test.capabilityID + `","input":{},"intentId":"` + test.intentID + `"}`
+			response := httptest.NewRecorder()
+			NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+			if response.Code != test.wantStatus {
+				t.Fatalf("status=%d want=%d calls=%d body=%s", response.Code, test.wantStatus, executor.calls, response.Body.String())
+			}
+		})
 	}
 }
 
@@ -138,7 +169,11 @@ func TestSessionCapabilityHandlerDispatchesInventoryBarcodeLookupThroughExecutor
 	if string(executor.input) != `{"barcode":"MUG-CODE"}` || executor.claims.OrganizationID != *identity.OrgID || executor.claims.Subject != identity.UserID {
 		t.Fatalf("input=%s claims=%+v, want session-scoped barcode lookup", executor.input, executor.claims)
 	}
-	if strings.TrimSpace(response.Body.String()) != `{"ok":true,"data":{"item":{"sku":"MUG-1","name":"Ceramic mug"}}}` {
+	var success struct {
+		OK   bool            `json:"ok"`
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(response.Body.Bytes(), &success) != nil || !success.OK || string(success.Data) != `{"item":{"sku":"MUG-1","name":"Ceramic mug"}}` {
 		t.Fatalf("body=%s, want the governed item lookup envelope", response.Body.String())
 	}
 }
@@ -528,8 +563,7 @@ func TestSessionCapabilityHandlerRejectsInvalidAuthOriginAndCallerClaims(t *test
 		if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil {
 			t.Fatalf("decode refusal: %v body=%s", err, response.Body.String())
 		}
-		if response.Code != http.StatusUnprocessableEntity || refusal.OK || refusal.Error != "proposal lacks valid isolated candidate evidence" ||
-			strings.TrimSpace(response.Body.String()) != `{"ok":false,"error":"proposal lacks valid isolated candidate evidence"}` {
+		if response.Code != http.StatusUnprocessableEntity || refusal.OK || refusal.Error != "proposal lacks valid isolated candidate evidence" {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
 	})
@@ -546,8 +580,7 @@ func TestSessionCapabilityHandlerRejectsInvalidAuthOriginAndCallerClaims(t *test
 		if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil {
 			t.Fatalf("decode refusal: %v body=%s", err, response.Body.String())
 		}
-		if response.Code != http.StatusUnprocessableEntity || refusal.OK || !strings.HasPrefix(refusal.Error, "conflict:") ||
-			strings.TrimSpace(response.Body.String()) != `{"ok":false,"error":"conflict: proposal already decided or no longer in review"}` {
+		if response.Code != http.StatusUnprocessableEntity || refusal.OK || !strings.HasPrefix(refusal.Error, "conflict:") {
 			t.Fatalf("status=%d refusal=%+v body=%s", response.Code, refusal, response.Body.String())
 		}
 	})
@@ -577,6 +610,28 @@ func TestSessionCapabilityHandlerReturnsApprovalPendingEnvelope(t *testing.T) {
 	NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"sales.createOrder","input":{},"intentId":"intent-123"}`))
 	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"pendingApproval":true`) || !strings.Contains(response.Body.String(), `"approvalId":"approval-1"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestSessionCapabilityHandlerReturnsGeneratedRefusalEnvelopeWithoutInventingFields(t *testing.T) {
+	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{
+		OK: false, Data: json.RawMessage(`{"retryAfterVersion":9007199254740993}`), Replayed: true,
+	}}
+	response := httptest.NewRecorder()
+	NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"sales.createOrder","input":{},"intentId":"intent-123"}`))
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode refusal: %v body=%s", err, response.Body.String())
+	}
+	if response.Code != http.StatusUnprocessableEntity || string(body["ok"]) != "false" || string(body["data"]) != `{"retryAfterVersion":9007199254740993}` || string(body["replayed"]) != "true" {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, exists := body["error"]; exists {
+		t.Fatalf("empty optional error was serialized: %s", response.Body.String())
+	}
+	if _, exists := body["pendingApproval"]; exists {
+		t.Fatalf("422 refusal included a 202-only field: %s", response.Body.String())
 	}
 }
 

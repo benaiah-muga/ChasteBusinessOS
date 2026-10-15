@@ -4,8 +4,72 @@
 package businesscontract
 
 import (
+	"encoding/json"
+
+	apicontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract"
+	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// Defines values for CapabilityExecutionPendingOk.
+const (
+	CapabilityExecutionPendingOkFalse CapabilityExecutionPendingOk = false
+)
+
+// Valid indicates whether the value is a known member of the CapabilityExecutionPendingOk enum.
+func (e CapabilityExecutionPendingOk) Valid() bool {
+	switch e {
+	case CapabilityExecutionPendingOkFalse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CapabilityExecutionPendingPendingApproval.
+const (
+	CapabilityExecutionPendingPendingApprovalTrue CapabilityExecutionPendingPendingApproval = true
+)
+
+// Valid indicates whether the value is a known member of the CapabilityExecutionPendingPendingApproval enum.
+func (e CapabilityExecutionPendingPendingApproval) Valid() bool {
+	switch e {
+	case CapabilityExecutionPendingPendingApprovalTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CapabilityExecutionRefusalOk.
+const (
+	CapabilityExecutionRefusalOkFalse CapabilityExecutionRefusalOk = false
+)
+
+// Valid indicates whether the value is a known member of the CapabilityExecutionRefusalOk enum.
+func (e CapabilityExecutionRefusalOk) Valid() bool {
+	switch e {
+	case CapabilityExecutionRefusalOkFalse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CapabilityExecutionSuccessOk.
+const (
+	CapabilityExecutionSuccessOkTrue CapabilityExecutionSuccessOk = true
+)
+
+// Valid indicates whether the value is a known member of the CapabilityExecutionSuccessOk enum.
+func (e CapabilityExecutionSuccessOk) Valid() bool {
+	switch e {
+	case CapabilityExecutionSuccessOkTrue:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for PendingApprovalResponsePendingApproval.
 const (
@@ -36,6 +100,57 @@ func (e SupportChannelsPatchRegenerateToken) Valid() bool {
 		return false
 	}
 }
+
+// CapabilityExecutionPending defines model for CapabilityExecutionPending.
+type CapabilityExecutionPending struct {
+	ApprovalId      *string                                   `json:"approvalId,omitempty"`
+	Ok              CapabilityExecutionPendingOk              `json:"ok"`
+	PendingApproval CapabilityExecutionPendingPendingApproval `json:"pendingApproval"`
+	Reason          string                                    `json:"reason"`
+}
+
+// CapabilityExecutionPendingOk defines model for CapabilityExecutionPending.Ok.
+type CapabilityExecutionPendingOk bool
+
+// CapabilityExecutionPendingPendingApproval defines model for CapabilityExecutionPending.PendingApproval.
+type CapabilityExecutionPendingPendingApproval bool
+
+// CapabilityExecutionRefusal defines model for CapabilityExecutionRefusal.
+type CapabilityExecutionRefusal struct {
+	ApprovalId        *string `json:"approvalId,omitempty"`
+	ApprovalRationale *string `json:"approvalRationale,omitempty"`
+
+	// Data Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients.
+	Data     *apicontract.RawJSON         `json:"data,omitempty"`
+	Error    *string                      `json:"error,omitempty"`
+	Ok       CapabilityExecutionRefusalOk `json:"ok"`
+	Replayed *bool                        `json:"replayed,omitempty"`
+}
+
+// CapabilityExecutionRefusalOk defines model for CapabilityExecutionRefusal.Ok.
+type CapabilityExecutionRefusalOk bool
+
+// CapabilityExecutionRequest defines model for CapabilityExecutionRequest.
+type CapabilityExecutionRequest struct {
+	// CapabilityId Capability registry identifier, limited to 200 Unicode code points by the server. Capability-specific input is validated by its runtime parser.
+	CapabilityId string `json:"capabilityId"`
+
+	// Input Arbitrary JSON value. The Go implementation retains the raw JSON bytes for exact capability parsing and hashing.
+	Input apicontract.RawJSON `json:"input"`
+
+	// IntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+	IntentId *string `json:"intentId,omitempty"`
+}
+
+// CapabilityExecutionSuccess defines model for CapabilityExecutionSuccess.
+type CapabilityExecutionSuccess struct {
+	// Data Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients.
+	Data apicontract.RawJSON          `json:"data"`
+	Ok   CapabilityExecutionSuccessOk `json:"ok"`
+}
+
+// CapabilityExecutionSuccessOk defines model for CapabilityExecutionSuccess.Ok.
+type CapabilityExecutionSuccessOk bool
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
@@ -69,11 +184,87 @@ type SupportChannelsResponse struct {
 	Greeting         string  `json:"greeting"`
 }
 
+// ExecuteCapabilityParams defines parameters for ExecuteCapability.
+type ExecuteCapabilityParams struct {
+	// XOrganizationID Selects the active organization when the authenticated identity belongs to more than one organization.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// ExecuteCapability422JSONResponseBody defines parameters for ExecuteCapability.
+type ExecuteCapability422JSONResponseBody struct {
+	union json.RawMessage
+}
+
 // UpdateSupportChannelsParams defines parameters for UpdateSupportChannels.
 type UpdateSupportChannelsParams struct {
 	// IdempotencyKey UUID for this exact settings update. Reuse it with the same body after an uncertain result.
 	IdempotencyKey openapi_types.UUID `json:"Idempotency-Key"`
 }
 
+// ExecuteCapabilityJSONRequestBody defines body for ExecuteCapability for application/json ContentType.
+type ExecuteCapabilityJSONRequestBody = CapabilityExecutionRequest
+
 // UpdateSupportChannelsJSONRequestBody defines body for UpdateSupportChannels for application/json ContentType.
 type UpdateSupportChannelsJSONRequestBody = SupportChannelsPatch
+
+// AsCapabilityExecutionRefusal returns the union data inside the ExecuteCapability422JSONResponseBody as a CapabilityExecutionRefusal
+func (t ExecuteCapability422JSONResponseBody) AsCapabilityExecutionRefusal() (CapabilityExecutionRefusal, error) {
+	var body CapabilityExecutionRefusal
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCapabilityExecutionRefusal overwrites any union data inside the ExecuteCapability422JSONResponseBody as the provided CapabilityExecutionRefusal
+func (t *ExecuteCapability422JSONResponseBody) FromCapabilityExecutionRefusal(v CapabilityExecutionRefusal) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCapabilityExecutionRefusal performs a merge with any union data inside the ExecuteCapability422JSONResponseBody, using the provided CapabilityExecutionRefusal
+func (t *ExecuteCapability422JSONResponseBody) MergeCapabilityExecutionRefusal(v CapabilityExecutionRefusal) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsErrorResponse returns the union data inside the ExecuteCapability422JSONResponseBody as a ErrorResponse
+func (t ExecuteCapability422JSONResponseBody) AsErrorResponse() (ErrorResponse, error) {
+	var body ErrorResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromErrorResponse overwrites any union data inside the ExecuteCapability422JSONResponseBody as the provided ErrorResponse
+func (t *ExecuteCapability422JSONResponseBody) FromErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeErrorResponse performs a merge with any union data inside the ExecuteCapability422JSONResponseBody, using the provided ErrorResponse
+func (t *ExecuteCapability422JSONResponseBody) MergeErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ExecuteCapability422JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ExecuteCapability422JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
