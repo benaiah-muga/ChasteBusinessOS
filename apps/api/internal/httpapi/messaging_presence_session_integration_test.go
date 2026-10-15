@@ -136,7 +136,7 @@ func TestMessagingPresenceHTTPUsesOrgScopedMembershipAndEphemeralState(t *testin
 		t.Fatal(err)
 	}
 
-	identity := &session.ResolvedUser{UserID: userID, OrgID: &orgID, EmailVerified: true, AuthSessionID: authSessionID, Permissions: map[string]bool{"messaging.write": true}}
+	identity := &session.ResolvedUser{UserID: userID, OrgID: &orgID, EmailVerified: true, AuthSessionID: authSessionID, Permissions: map[string]bool{"messaging.read": true, "messaging.write": true}}
 	resolver := &fakeDirectSessionResolver{resolved: identity}
 	executor := capability.NewExecutor(runtime, "", "", "")
 	handler := MountGoMessagingPresenceRoute(http.NotFoundHandler(), NewMessagingPresenceHandler(runtime, resolver, executor, nil))

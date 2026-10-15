@@ -4840,3 +4840,23 @@ new owners and the manifest shows zero legacy runtime paths.
      dispatcher remains in source for Next compatibility producers; this does
      not claim that the wider TypeScript worker is retired. Independent review
      found no remaining authorization or fencing issue.
+
+454. (Security fix) Go Messaging presence reads require `messaging.read` and
+     an enabled Messaging module.
+     Documents editor workspace reads require `documents.read` and all
+     workspace operations require `documents.write` and an enabled Documents
+     module. The Go document assistant requires
+     `documents.read` for document chat and template prefill, and
+     `documents.write` for selection editing and continuation. Permission and
+     module denials happen before workspace database access, assistant data
+     reads, or model calls. Focused verification is recorded with this change.
+
+455. (Tenant-scope fix, runtime verified) Vite CRM now requires a valid
+     organization ID for every Go request and forces it into the request header.
+     CRM hides and clears old-scope rows, views, profiles, timelines, and drafts
+     while the next organization loads; failed collection reads do not retain
+     previous-scope data. The focused API and page suites pass 127 tests, Vite
+     typecheck and focused lint pass, and an authenticated agent-browser load
+     returned four Go capability reads with HTTP 200 and no console or page
+     errors. The component suite covers populated-data switches and in-flight
+     writes across organization changes.

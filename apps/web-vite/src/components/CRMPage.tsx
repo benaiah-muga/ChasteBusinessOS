@@ -163,8 +163,10 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [deals, setDeals] = useState<CrmDeal[]>([]);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [tasks, setTasks] = useState<CrmTask[]>([]);
+  const [loadedOrganizationId, setLoadedOrganizationId] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [membersLoaded, setMembersLoaded] = useState(false);
+  const [membersOrganizationId, setMembersOrganizationId] = useState<string | null>(null);
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [membersRetry, setMembersRetry] = useState(0);
@@ -304,28 +306,39 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     if (!isCurrent()) return;
     setError(null);
     setLoading(true);
-    const results = await Promise.allSettled([fetchCrmDeals(signal), fetchCrmCustomers(signal), fetchCrmTasks(signal)]);
+    const results = await Promise.allSettled([
+      fetchCrmDeals(organizationId, signal),
+      fetchCrmCustomers(organizationId, signal),
+      fetchCrmTasks(organizationId, signal),
+    ]);
     if (signal?.aborted || !isCurrent()) return;
     const failed = results.find((result) => result.status === "rejected");
     if (failed?.status === "rejected") setError(friendlyError(failed.reason));
-    if (results[0]?.status === "fulfilled") setDeals(results[0].value);
-    if (results[1]?.status === "fulfilled") setCustomers(results[1].value);
-    if (results[2]?.status === "fulfilled") setTasks(results[2].value);
+    setDeals(results[0]?.status === "fulfilled" ? results[0].value : []);
+    setCustomers(results[1]?.status === "fulfilled" ? results[1].value : []);
+    setTasks(results[2]?.status === "fulfilled" ? results[2].value : []);
+    setLoadedOrganizationId(organizationId?.trim().toLowerCase() ?? null);
     setLoading(false);
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();
     const query = new URLSearchParams(window.location.search);
     const requested = query.get("dealFilter");
     if (requested === "all" || requested === "open" || requested === "won" || requested === "lost") setDealFilter(requested);
+    setViews([]);
+    setSelected(null);
+    setTimeline([]);
+    setDraftState({ status: "idle" });
     void load(controller.signal);
-    void fetchCrmViews(controller.signal).then(setViews).catch(() => undefined);
+    void fetchCrmViews(organizationId, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setViews(result);
+    }).catch(() => undefined);
     return () => {
       timelineRequest.current += 1;
       controller.abort();
     };
-  }, [load]);
+  }, [load, organizationId]);
 
   useEffect(() => {
     if (!savedViewScopeIdentity || !actorId?.trim() || !organizationId?.trim()) {
@@ -578,15 +591,18 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }, [actorId, dealCreateScopeIdentity, organizationId]);
 
   useEffect(() => {
-    if ((tab !== "customers" && tab !== "tasks" && tab !== "pipeline") || membersLoaded) return;
+    if ((tab !== "customers" && tab !== "tasks" && tab !== "pipeline") || (membersLoaded && membersOrganizationId === organizationId)) return;
     const controller = new AbortController();
     setMembersLoading(true);
     setMembersError(null);
-    void fetchCrmTeamMembers(controller.signal)
+    setMembers([]);
+    setMembersLoaded(false);
+    void fetchCrmTeamMembers(organizationId, controller.signal)
       .then((result) => {
         if (!controller.signal.aborted) {
           setMembers(result);
           setMembersLoaded(true);
+          setMembersOrganizationId(organizationId ?? null);
         }
       })
       .catch((reason: unknown) => {
@@ -596,7 +612,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
         if (!controller.signal.aborted) setMembersLoading(false);
       });
     return () => controller.abort();
-  }, [tab, membersLoaded, membersRetry]);
+  }, [tab, membersLoaded, membersOrganizationId, membersRetry, organizationId]);
 
   useEffect(() => {
     if (tab !== "tasks" || !focusedTaskId) return;
@@ -639,12 +655,12 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     setTimeline([]);
     setDraftState({ status: "idle" }); setDraftCopied(false);
     try {
-      const entries = await fetchCrmTimeline(customer.id);
+      const entries = await fetchCrmTimeline(customer.id, organizationId);
       if (requestId === timelineRequest.current) setTimeline(entries);
     } catch (reason) {
       if (requestId === timelineRequest.current) setNotice({ tone: "error", text: friendlyError(reason) });
     }
-  }, [profileUpdateAction]);
+  }, [organizationId, profileUpdateAction]);
 
   async function mutate(onDone: ((data: Record<string, unknown>) => void) | undefined, submitAction: () => Promise<CrmActionOutcome>, isCurrent: () => boolean = () => true, busyOwner: "shared" | "customer-create" | "deal-create" | "saved-view" = "shared"): Promise<boolean> {
     const setOperationBusy = busyOwner === "customer-create" ? setCustomerCreateBusy : busyOwner === "deal-create" ? setDealCreateBusy : setSharedBusy;
@@ -662,7 +678,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       await load(undefined, isCurrent);
       if (!isCurrent()) return false;
       if (selected) {
-        const refreshed = (await fetchCrmCustomers()).find((customer) => customer.id === selected.id);
+        const refreshed = (await fetchCrmCustomers(organizationId)).find((customer) => customer.id === selected.id);
         if (!isCurrent()) return false;
         if (refreshed) await openProfile(refreshed, profileTab);
       }
@@ -897,7 +913,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       await load(undefined, isCurrent);
       if (!isCurrent()) return false;
       if (selected && action.customerIds.includes(selected.id)) {
-        const refreshed = (await fetchCrmCustomers()).find((customer) => customer.id === selected.id);
+        const refreshed = (await fetchCrmCustomers(organizationId)).find((customer) => customer.id === selected.id);
         if (!isCurrent()) return false;
         if (refreshed) await openProfile(refreshed, profileTab);
       }
@@ -937,7 +953,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       setNotice({ tone: "success", text: `Restored ${outcome.data.updatedCount} customer profile${outcome.data.updatedCount === 1 ? "" : "s"}.` });
       await load(undefined, isCurrent);
       if (isCurrent() && selected && profiles.profiles.some((profile) => profile.customerId === selected.id)) {
-        const refreshed = (await fetchCrmCustomers()).find((customer) => customer.id === selected.id);
+        const refreshed = (await fetchCrmCustomers(organizationId)).find((customer) => customer.id === selected.id);
         if (isCurrent() && refreshed) await openProfile(refreshed, profileTab);
       }
     } catch (reason) {
@@ -1055,7 +1071,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }
 
   async function refreshViews() {
-    try { setViews(await fetchCrmViews()); } catch (reason) { setNotice({ tone: "error", text: friendlyError(reason) }); }
+    try { setViews(await fetchCrmViews(organizationId)); } catch (reason) { setNotice({ tone: "error", text: friendlyError(reason) }); }
   }
 
   async function saveView(name = saveViewName, view?: { id?: string; name: string; filters: CustomerFilter; isShared: boolean; isPinned: boolean }) {
@@ -1169,7 +1185,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     if (!selected || selected.doNotContact) return;
     setDraftState({ status: "loading" }); setDraftCopied(false);
     try {
-      const draft = await fetchCrmFollowUpDraft(selected.id);
+      const draft = await fetchCrmFollowUpDraft(selected.id, organizationId);
       setDraftState({ status: "ready", draft, subject: `Following up with ${selected.name}`, body: draft.draft });
     } catch (reason) { setDraftState({ status: "failed", message: friendlyError(reason) }); }
   }
@@ -1239,8 +1255,9 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const importPageSize = 40;
   const visibleImportRows = importRows.slice(importPage * importPageSize, (importPage + 1) * importPageSize);
   const selectedImportCount = importRows.filter((row) => row.include && !row.error).length;
+  const currentOrganizationId = organizationId?.trim().toLowerCase() ?? null;
 
-  if (loading && !deals.length && !customers.length) return <main className="crm-page"><p role="status">Loading CRM…</p></main>;
+  if (loadedOrganizationId !== currentOrganizationId || (loading && !deals.length && !customers.length)) return <main className="crm-page"><p role="status">Loading CRM…</p></main>;
   return <main className="crm-page">
     <header className="crm-header"><div><p className="crm-eyebrow">Customer relationships</p><h1>CRM</h1><p>Keep customer history, deal progress, and follow-up work together.</p></div><button type="button" onClick={() => void load()}>Refresh</button></header>
     {notice && <div className={`crm-notice crm-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}><span>{notice.text}</span><button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}>×</button></div>}

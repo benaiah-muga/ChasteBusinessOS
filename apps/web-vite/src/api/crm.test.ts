@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, CrmCustomerSchema, CrmDealSchema, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readCrmCustomerProfileUndo, readPendingCrmCustomerProfileRestore, readPendingCrmDealCreate, readPendingCrmLeadConversion, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmCustomerProfileUndo, submitCrmDealCreate, submitCrmDealStageMove, submitCrmLeadConversion, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, CrmCustomerSchema, CrmDealSchema, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTeamMembers, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readCrmCustomerProfileUndo, readPendingCrmCustomerProfileRestore, readPendingCrmDealCreate, readPendingCrmLeadConversion, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmCustomerProfileUndo, submitCrmDealCreate, submitCrmDealStageMove, submitCrmLeadConversion, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -44,20 +44,20 @@ describe("CRM API client", () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { deals: [deal] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchCrmDeals()).resolves.toEqual([deal]);
+    await expect(fetchCrmDeals(dealId)).resolves.toEqual([deal]);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
-      method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json", "content-type": "application/json" }, signal: expect.any(AbortSignal),
+      method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": dealId }, signal: expect.any(AbortSignal),
       body: expect.stringContaining("crm.listDeals"),
     }));
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deals: [{ id: dealId }] } })));
-    await expect(fetchCrmDeals()).rejects.toBeInstanceOf(CrmApiError);
+    await expect(fetchCrmDeals(dealId)).rejects.toBeInstanceOf(CrmApiError);
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deals: [{ ...deal, valueMinor: Number.MAX_SAFE_INTEGER + 1 }] } })));
-    await expect(fetchCrmDeals()).rejects.toThrow("unexpected format");
+    await expect(fetchCrmDeals(dealId)).rejects.toThrow("unexpected format");
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deals: [{ ...deal, debug: true }] } })));
-    await expect(fetchCrmDeals()).rejects.toThrow("unexpected format");
+    await expect(fetchCrmDeals(dealId)).rejects.toThrow("unexpected format");
   });
 
   it("keeps the Go customer and deal response contracts closed and reports session errors", async () => {
@@ -67,9 +67,9 @@ describe("CRM API client", () => {
     expect(CrmDealSchema.safeParse({ id: dealId, title: "Renewal", stage: "proposal", valueMinor: 100, updatedAt: "2026-10-01T00:00:00.000Z", debug: true }).success).toBe(false);
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "unauthorized" }, { status: 401 })));
-    await expect(fetchCrmDeals()).rejects.toMatchObject({ status: 401, message: "Your session has expired. Sign in again to continue." });
+    await expect(fetchCrmDeals(dealId)).rejects.toMatchObject({ status: 401, message: "Your session has expired. Sign in again to continue." });
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden" }, { status: 403 })));
-    await expect(fetchCrmCustomers()).rejects.toMatchObject({ status: 403, message: "Your account does not have access to this CRM information." });
+    await expect(fetchCrmCustomers(dealId)).rejects.toMatchObject({ status: 403, message: "Your account does not have access to this CRM information." });
   });
 
   it("uses Go capabilities for customer collection, tasks, and saved views", async () => {
@@ -80,10 +80,10 @@ describe("CRM API client", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { views: [{ id: dealId, name: "Active", filters: { status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" } }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchCrmCustomers()).resolves.toHaveLength(1);
-    await expect(fetchCrmTasks()).resolves.toHaveLength(1);
-    await expect(fetchCrmTasks(undefined, { openOnly: true })).resolves.toHaveLength(1);
-    await expect(fetchCrmViews()).resolves.toHaveLength(1);
+    await expect(fetchCrmCustomers(dealId)).resolves.toHaveLength(1);
+    await expect(fetchCrmTasks(dealId)).resolves.toHaveLength(1);
+    await expect(fetchCrmTasks(dealId, undefined, { openOnly: true })).resolves.toHaveLength(1);
+    await expect(fetchCrmViews(dealId)).resolves.toHaveLength(1);
     expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
       expect.objectContaining({ capabilityId: "crm.listCustomerCollection", input: {}, intentId: expect.any(String) }),
       expect.objectContaining({ capabilityId: "crm.listTasks", input: {}, intentId: expect.any(String) }),
@@ -91,6 +91,8 @@ describe("CRM API client", () => {
       expect.objectContaining({ capabilityId: "crm.listCustomerViews", input: {}, intentId: expect.any(String) }),
     ]);
     for (const [, init] of fetchMock.mock.calls) expect(init?.credentials).toBe("same-origin");
+    expect(fetchMock.mock.calls.map(([, init]) => (init?.headers as Record<string, string>)["X-Organization-ID"]))
+      .toEqual([dealId, dealId, dealId, dealId]);
   });
 
   it("does not fall back to the legacy customer endpoint when Go CRM reads are disabled", async () => {
@@ -98,7 +100,7 @@ describe("CRM API client", () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { customers: [{ id: customerId, name: "Northwind" }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchCrmCustomers()).resolves.toHaveLength(1);
+    await expect(fetchCrmCustomers(dealId)).resolves.toHaveLength(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
   });
 
@@ -110,19 +112,39 @@ describe("CRM API client", () => {
       .mockImplementationOnce(async () => Response.json({ ok: true, data: { views: [{ id: dealId, name: "Active", filters: { status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" } }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchCrmDeals()).resolves.toHaveLength(1);
-    await expect(fetchCrmCustomers()).resolves.toHaveLength(1);
-    await expect(fetchCrmViews()).resolves.toHaveLength(1);
+    await expect(fetchCrmDeals(dealId)).resolves.toHaveLength(1);
+    await expect(fetchCrmCustomers(dealId)).resolves.toHaveLength(1);
+    await expect(fetchCrmViews(dealId)).resolves.toHaveLength(1);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(Array(3).fill("/api/capabilities/execute"));
   });
 
   it("encodes the customer timeline identifier and validates the timeline result", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { entries: [{ kind: "invoice", date: "2026-09-29T12:00:00.000Z", refId: dealId, summary: "Invoice #1" }] } }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(fetchCrmTimeline(customerId)).resolves.toHaveLength(1);
+    await expect(fetchCrmTimeline(customerId, dealId)).resolves.toHaveLength(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.customerTimeline", input: { customerId }, intentId: expect.any(String) });
-    await expect(fetchCrmTimeline("bad-id")).rejects.toMatchObject({ name: "CrmApiError" });
+    await expect(fetchCrmTimeline("bad-id", dealId)).rejects.toMatchObject({ name: "CrmApiError" });
+  });
+
+  it("fails closed before fetch when a CRM read has no valid organization scope", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCrmCustomers(null)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    await expect(fetchCrmDeals("not-a-uuid")).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("binds the team lookup to the CRM page organization", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ members: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCrmTeamMembers(dealId)).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/team", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json", "X-Organization-ID": dealId },
+    }));
   });
 
   it("surfaces pending approvals without treating them as completed writes", async () => {
@@ -436,6 +458,7 @@ describe("CRM API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     await submitCrmDealCreate(input, undefined, false, { actorId: customerId, organizationId: dealId });
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect((fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>)["X-Organization-ID"]).toBe(dealId);
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createDeal", input, intentId: expect.any(String) });
   });
 
@@ -1140,16 +1163,16 @@ describe("CRM API client", () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json(draft));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchCrmFollowUpDraft(customerId)).resolves.toEqual(draft);
-    expect(fetchMock).toHaveBeenCalledWith("/api/crm/follow-up-draft", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
+    await expect(fetchCrmFollowUpDraft(customerId, dealId)).resolves.toEqual(draft);
+    expect(fetchMock).toHaveBeenCalledWith("/api/crm/follow-up-draft", expect.objectContaining({ method: "POST", credentials: "same-origin", headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": dealId } }));
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ customerId });
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/crm")).toBe(false);
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ draft: "Only a draft" })));
-    await expect(fetchCrmFollowUpDraft(customerId)).rejects.toMatchObject({ name: "CrmApiError" });
+    await expect(fetchCrmFollowUpDraft(customerId, dealId)).rejects.toMatchObject({ name: "CrmApiError" });
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...draft, unexpected: true })));
-    await expect(fetchCrmFollowUpDraft(customerId)).rejects.toMatchObject({ name: "CrmApiError" });
+    await expect(fetchCrmFollowUpDraft(customerId, dealId)).rejects.toMatchObject({ name: "CrmApiError" });
   });
 
   it("routes profile updates through Go and strictly validates previous snapshots", async () => {

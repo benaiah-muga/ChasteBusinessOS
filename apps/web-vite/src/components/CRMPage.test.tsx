@@ -260,12 +260,16 @@ describe("Vite CRM page", () => {
     vi.stubGlobal("__GO_CRM_DEAL_CREATE__", false);
     let finishDeal!: (response: Response) => void;
     const dealResponse = new Promise<Response>((resolve) => { finishDeal = resolve; });
+    let holdNextOrganizationReads = false;
+    let releaseNextOrganizationReads!: () => void;
+    const nextOrganizationReads = new Promise<void>((resolve) => { releaseNextOrganizationReads = resolve; });
     const otherOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (holdNextOrganizationReads && (isDealsRead(path) || isCustomersRead(path) || path.startsWith("/api/crm?tasks=") || isCustomerViewsRead(path))) await nextOrganizationReads;
       if (path === "/api/capabilities/execute" && init?.method === "POST") return dealResponse;
-      if (isDealsRead(path)) return Response.json({ deals: [] });
-      if (isCustomersRead(path)) return Response.json({ customers: [] });
+      if (isDealsRead(path)) return Response.json({ deals: [deal("lead")] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (isCustomerViewsRead(path)) return Response.json({ views: [] });
       return new Response(null, { status: 404 });
@@ -274,20 +278,28 @@ describe("Vite CRM page", () => {
     const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    expect(await screen.findByText("Annual renewal")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: "Long-running deal" } });
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: "125" } });
     fireEvent.click(screen.getByRole("button", { name: "Add deal" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/capabilities/execute" && init?.method === "POST")).toBe(true));
 
+    holdNextOrganizationReads = true;
     view.rerender(<CRMPage actorId={customerId} organizationId={otherOrganizationId} />);
-    expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((await screen.findByText("Loading CRM…")).textContent).toBe("Loading CRM…");
+    expect(screen.queryByText("Annual renewal")).toBeNull();
+    const scopedWrite = fetchMock.mock.calls.find(([url, init]) => String(url) === "/api/capabilities/execute" && init?.method === "POST");
+    expect(new Headers(scopedWrite?.[1]?.headers).get("X-Organization-ID")).toBe(dealId);
 
     await act(async () => {
       finishDeal(Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 }));
     });
 
     expect(screen.queryByText("Manager approval required")).toBeNull();
+    releaseNextOrganizationReads();
+    holdNextOrganizationReads = false;
     await waitFor(() => expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(await screen.findByText("Annual renewal")).toBeTruthy();
   });
 
   it("keeps a Go deal draft locked and retries the same payload and intent after approval is pending", async () => {
@@ -512,9 +524,13 @@ describe("Vite CRM page", () => {
     let finishFirst!: (response: Response) => void;
     const firstResponse = new Promise<Response>((resolve) => { finishFirst = resolve; });
     let writes = 0;
+    let holdNextOrganizationReads = false;
+    let releaseNextOrganizationReads!: () => void;
+    const nextOrganizationReads = new Promise<void>((resolve) => { releaseNextOrganizationReads = resolve; });
     const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if (holdNextOrganizationReads && (isDealsRead(path) || isCustomersRead(path) || path.startsWith("/api/crm?tasks=") || isCustomerViewsRead(path))) await nextOrganizationReads;
       if (isDealsRead(path)) return Response.json({ deals: [] });
       if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
@@ -534,14 +550,18 @@ describe("Vite CRM page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save current view" }));
     await waitFor(() => expect(writes).toBe(1));
 
+    holdNextOrganizationReads = true;
     view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
-    const viewName = screen.getByLabelText("Saved view name") as HTMLInputElement;
-    fireEvent.change(viewName, { target: { value: "New organization view" } });
-    expect(screen.getByRole("button", { name: "Save current view" })).toHaveProperty("disabled", true);
+    expect((await screen.findByText("Loading CRM…")).textContent).toBe("Loading CRM…");
+    expect(screen.queryByLabelText("Saved view name")).toBeNull();
 
     await act(async () => {
       finishFirst(Response.json({ ok: true, data: { viewId: "8ea6ef66-d321-4be4-a4ee-32fa0b13e5f9", previous: null } }));
     });
+    releaseNextOrganizationReads();
+    holdNextOrganizationReads = false;
+    const viewName = await screen.findByLabelText("Saved view name") as HTMLInputElement;
+    fireEvent.change(viewName, { target: { value: "New organization view" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "Save current view" })).toHaveProperty("disabled", false));
     expect(viewName.value).toBe("New organization view");
     expect(screen.queryByText("CRM changes saved.")).toBeNull();
@@ -1435,7 +1455,7 @@ describe("Vite CRM page", () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     vi.stubGlobal("fetch", routeGoCrmReadsToFixtures(fetchMock));
     try {
-      render(<CRMPage />);
+      render(<CRMPage actorId={customerId} organizationId={dealId} />);
       fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
       fireEvent.click(await screen.findByRole("checkbox", { name: "Select =1+1" }));
       fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));

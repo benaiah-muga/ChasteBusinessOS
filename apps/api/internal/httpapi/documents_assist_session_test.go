@@ -26,18 +26,22 @@ type documentsAssistTestStore struct {
 	document documentsAssistDocument
 	found    bool
 	orgID    string
+	reads    int
 }
 
 func (store *documentsAssistTestStore) LoadTemplate(_ context.Context, orgID, _ string) (documentsAssistTemplate, bool, error) {
 	store.orgID = orgID
+	store.reads++
 	return store.template, store.found, nil
 }
 func (store *documentsAssistTestStore) LoadProfileFacts(_ context.Context, orgID string) ([]string, error) {
 	store.orgID = orgID
+	store.reads++
 	return []string{"Business name: Chaste"}, nil
 }
 func (store *documentsAssistTestStore) LoadDocument(_ context.Context, orgID, _ string) (documentsAssistDocument, bool, error) {
 	store.orgID = orgID
+	store.reads++
 	return store.document, store.found, nil
 }
 
@@ -104,6 +108,7 @@ func TestDocumentsAssistPrefillFiltersModelValuesAndScopesReads(t *testing.T) {
 	model := &documentsAssistTestModel{text: `{"company":"Chaste","unknown":"leak","contact":7}`}
 	handler := newDocumentsAssistSessionHandler(documentsAssistTestResolver{user: &session.ResolvedUser{
 		UserID: userID, OrgID: &orgID, EmailVerified: true, AuthSessionID: "session",
+		Permissions: map[string]bool{"documents.read": true},
 	}}, store, config, model, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	r := httptest.NewRequest(http.MethodPost, "https://app.example.test/api/docs/assist", strings.NewReader(`{"kind":"prefill","templateId":"44444444-4444-4444-8444-444444444444"}`))
 	r.Header.Set("Origin", "https://app.example.test")
@@ -119,6 +124,47 @@ func TestDocumentsAssistPrefillFiltersModelValuesAndScopesReads(t *testing.T) {
 	}
 	if !strings.Contains(model.prompt, "Business name: Chaste") || !strings.Contains(model.prompt, "Placeholders: company, contact") {
 		t.Fatalf("model prompt=%q", model.prompt)
+	}
+}
+
+func TestDocumentsAssistRequiresPermissionAndEnabledModuleBeforeReadsOrGeneration(t *testing.T) {
+	orgID := "11111111-1111-4111-8111-111111111111"
+	userID := "22222222-2222-4222-8222-222222222222"
+	tests := []struct {
+		name        string
+		kind        string
+		permissions map[string]bool
+		restricted  bool
+		modules     []string
+	}{
+		{name: "selection requires write", kind: `"selection"`, permissions: map[string]bool{"documents.read": true}},
+		{name: "continue requires write", kind: `"continue"`, permissions: map[string]bool{"documents.read": true}},
+		{name: "chat requires read", kind: `"chat"`, permissions: map[string]bool{"documents.write": true}},
+		{name: "prefill requires read", kind: `"prefill"`, permissions: map[string]bool{"documents.write": true}},
+		{name: "disabled documents module", kind: `"chat"`, permissions: map[string]bool{"documents.read": true}, restricted: true, modules: []string{"crm"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &documentsAssistTestStore{found: true, template: documentsAssistTemplate{Name: "Letter", Placeholders: []string{"name"}}, document: documentsAssistDocument{Title: "Doc", Content: []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Body"}]}]}`)}}
+			config := &documentsAssistTestConfig{value: myWorkSummaryConfig{provider: "openai", baseURL: "https://api.example.test/v1", apiKey: "test-key", fastModel: "fast-model"}}
+			model := &documentsAssistTestModel{text: "generated"}
+			handler := newDocumentsAssistSessionHandler(documentsAssistTestResolver{user: &session.ResolvedUser{
+				UserID: userID, OrgID: &orgID, EmailVerified: true, AuthSessionID: "session",
+				Permissions: test.permissions, ModulesRestricted: test.restricted, EnabledModules: test.modules,
+			}}, store, config, model, nil, nil)
+			body := `{"kind":` + test.kind + `,"action":"grammar","text":"Draft","before":"Draft","templateId":"44444444-4444-4444-8444-444444444444","documentId":"44444444-4444-4444-8444-444444444444","question":"What is this?"}`
+			r := httptest.NewRequest(http.MethodPost, "https://app.example.test/api/docs/assist", strings.NewReader(body))
+			r.Header.Set("Origin", "https://app.example.test")
+			r.AddCookie(&http.Cookie{Name: session.ActiveOrgCookieName, Value: orgID})
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, r)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if store.reads != 0 || config.loadedOrg != "" || model.prompt != "" {
+				t.Fatalf("denied request reached dependencies: reads=%d config=%q model=%q", store.reads, config.loadedOrg, model.prompt)
+			}
+		})
 	}
 }
 
@@ -152,6 +198,7 @@ func TestDocumentsAssistFailsClosedWhenProviderConfigIsIncomplete(t *testing.T) 
 	model := &documentsAssistTestModel{text: "unexpected"}
 	handler := newDocumentsAssistSessionHandler(documentsAssistTestResolver{user: &session.ResolvedUser{
 		UserID: userID, OrgID: &orgID, EmailVerified: true, AuthSessionID: "session",
+		Permissions: map[string]bool{"documents.write": true},
 	}}, &documentsAssistTestStore{}, &documentsAssistTestConfig{}, model, nil, nil)
 	r := httptest.NewRequest(http.MethodPost, "https://app.example.test/api/docs/assist", strings.NewReader(`{"kind":"selection","action":"grammar","text":"Fix this."}`))
 	r.Header.Set("Origin", "https://app.example.test")

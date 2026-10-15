@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -108,8 +109,20 @@ func (h *documentsAssistSessionHandler) ServeHTTP(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
+	if resolved.ModulesRestricted && !slices.Contains(resolved.EnabledModules, "documents") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: Documents module is disabled"})
+		return
+	}
 	input, ok := decodeDocumentsAssistInput(w, r)
 	if !ok {
+		return
+	}
+	permission := "documents.read"
+	if input.Kind == "selection" || input.Kind == "continue" {
+		permission = "documents.write"
+	}
+	if !resolved.HasPermission(permission) && !resolved.HasPermission("*") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: missing " + permission})
 		return
 	}
 	h.handle(w, r, resolved, input)

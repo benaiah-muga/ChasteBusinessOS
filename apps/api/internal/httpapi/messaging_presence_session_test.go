@@ -49,6 +49,15 @@ func TestMessagingPresenceHandlerRequiresVerifiedSessionAndSameOriginWrites(t *t
 
 	resolver.resolved = directTestIdentity()
 	resolver.resolved.Permissions["messaging.write"] = true
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, routinesSessionRequest(http.MethodGet, "/api/conversations/44444444-4444-4444-8444-444444444444/presence", ""))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("read without permission status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	resolver.resolved = directTestIdentity()
+	resolver.resolved.Permissions["messaging.read"] = true
+	resolver.resolved.Permissions["messaging.write"] = true
 	request := routinesSessionRequest(http.MethodPost, "/api/conversations/44444444-4444-4444-8444-444444444444/presence", `{"typing":true,"intentId":"test-intent"}`)
 	request.Header.Set("Origin", "https://evil.example.test")
 	response = httptest.NewRecorder()
@@ -57,11 +66,29 @@ func TestMessagingPresenceHandlerRequiresVerifiedSessionAndSameOriginWrites(t *t
 		t.Fatalf("cross-origin post status=%d body=%s", response.Code, response.Body.String())
 	}
 
+	resolver.resolved.Permissions["messaging.read"] = false
 	resolver.resolved.Permissions["messaging.write"] = false
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, routinesSessionRequest(http.MethodPost, "/api/conversations/44444444-4444-4444-8444-444444444444/presence", `{"typing":true,"intentId":"test-intent"}`))
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("write without permission status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMessagingPresenceReadRequiresEnabledModuleBeforeDatabaseAccess(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["messaging.read"] = true
+	identity.ModulesRestricted = true
+	identity.EnabledModules = []string{"crm"}
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	handler := NewMessagingPresenceHandler(&pgxpool.Pool{}, resolver, nil, routinesTestLogger())
+	request := routinesSessionRequest(http.MethodGet, "/api/conversations/44444444-4444-4444-8444-444444444444/presence", "")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

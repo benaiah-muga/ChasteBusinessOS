@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -116,6 +117,20 @@ func (h *documentsEditorWorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *ht
 	}
 	if !sameOriginCapabilityRequest(r, h.trustedProxyCIDRs) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	permissions := []string{"documents.write"}
+	if r.Method == http.MethodPost {
+		permissions = append(permissions, "documents.read")
+	}
+	for _, permission := range permissions {
+		if !resolved.HasPermission(permission) && !resolved.HasPermission("*") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: missing " + permission})
+			return
+		}
+	}
+	if resolved.ModulesRestricted && !slices.Contains(resolved.EnabledModules, "documents") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: Documents module is disabled"})
 		return
 	}
 	documentID := r.PathValue("id")

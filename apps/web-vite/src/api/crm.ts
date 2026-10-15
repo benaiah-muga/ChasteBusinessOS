@@ -132,13 +132,22 @@ function messageFor(status: number, body: unknown): string {
   return "The CRM service is unavailable. Try again.";
 }
 
-async function request(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
+function validatedOrganizationId(value: string | null | undefined): string {
+  const parsed = uuid.safeParse(value?.trim());
+  if (!parsed.success) {
+    throw new CrmApiError(0, "CRM is waiting for your organization details. Wait for your organization to finish loading, then try again.");
+  }
+  return parsed.data.toLowerCase();
+}
+
+async function request(path: string, init: RequestInit, signal: AbortSignal | undefined, organizationId: string | null | undefined): Promise<{ response: Response; body: unknown }> {
+  const requestedOrganizationId = validatedOrganizationId(organizationId);
   let response: Response;
   try {
     response = await fetch(path, {
       ...init,
       credentials: "same-origin",
-      headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
+      headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers, "X-Organization-ID": requestedOrganizationId },
       signal: requestSignal(signal, init.method === "POST" ? 20_000 : 15_000),
     });
   } catch (error) {
@@ -150,8 +159,8 @@ async function request(path: string, init: RequestInit = {}, signal?: AbortSigna
   return { response, body };
 }
 
-async function get<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
-  const { response, body } = await request(path, {}, signal);
+async function get<T>(path: string, schema: z.ZodType<T>, signal: AbortSignal | undefined, organizationId: string | null | undefined): Promise<T> {
+  const { response, body } = await request(path, {}, signal, organizationId);
   if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned data in an unexpected format.");
@@ -162,13 +171,14 @@ async function executeCrmRead<T>(
   capabilityId: "crm.listDeals" | "crm.listCustomerCollection" | "crm.listTasks" | "crm.customerTimeline" | "crm.listCustomerViews",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  organizationId: string | null | undefined,
 ): Promise<T> {
   const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
     cache: "no-store",
     body: JSON.stringify({ capabilityId, input, intentId: crypto.randomUUID() }),
-  }, signal);
+  }, signal, organizationId);
   if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
   if (response.status !== 200) throw new CrmApiError(response.status, "The Go CRM service returned an unexpected response.");
   const envelope = z.object({ ok: z.literal(true), data: z.unknown() }).strict().safeParse(body);
@@ -178,29 +188,29 @@ async function executeCrmRead<T>(
   return parsed.data;
 }
 
-export async function fetchCrmDeals(signal?: AbortSignal): Promise<CrmDeal[]> {
-  const result = await executeCrmRead("crm.listDeals", {}, z.object({ deals: z.array(CrmDealSchema).max(200) }).strict(), signal);
+export async function fetchCrmDeals(organizationId: string | null | undefined, signal?: AbortSignal): Promise<CrmDeal[]> {
+  const result = await executeCrmRead("crm.listDeals", {}, z.object({ deals: z.array(CrmDealSchema).max(200) }).strict(), signal, organizationId);
   return result.deals;
 }
 
-export async function fetchCrmCustomers(signal?: AbortSignal): Promise<CrmCustomer[]> {
-  const result = await executeCrmRead("crm.listCustomerCollection", {}, z.object({ customers: z.array(CrmCustomerSchema).max(500) }).strict(), signal);
+export async function fetchCrmCustomers(organizationId: string | null | undefined, signal?: AbortSignal): Promise<CrmCustomer[]> {
+  const result = await executeCrmRead("crm.listCustomerCollection", {}, z.object({ customers: z.array(CrmCustomerSchema).max(500) }).strict(), signal, organizationId);
   return result.customers;
 }
 
-export async function fetchCrmTimeline(customerId: string, signal?: AbortSignal): Promise<CrmTimelineEntry[]> {
+export async function fetchCrmTimeline(customerId: string, organizationId: string | null | undefined, signal?: AbortSignal): Promise<CrmTimelineEntry[]> {
   if (!uuid.safeParse(customerId).success) throw new CrmApiError(0, "Choose a valid customer to view history.");
-  const result = await executeCrmRead("crm.customerTimeline", { customerId }, z.object({ entries: z.array(CrmTimelineEntrySchema) }).strict(), signal);
+  const result = await executeCrmRead("crm.customerTimeline", { customerId }, z.object({ entries: z.array(CrmTimelineEntrySchema) }).strict(), signal, organizationId);
   return result.entries;
 }
 
-export async function fetchCrmTasks(signal?: AbortSignal, options: { openOnly?: boolean } = {}): Promise<CrmTask[]> {
-  const result = await executeCrmRead("crm.listTasks", options.openOnly ? { openOnly: true } : {}, z.object({ tasks: z.array(CrmTaskSchema).max(200) }).strict(), signal);
+export async function fetchCrmTasks(organizationId: string | null | undefined, signal?: AbortSignal, options: { openOnly?: boolean } = {}): Promise<CrmTask[]> {
+  const result = await executeCrmRead("crm.listTasks", options.openOnly ? { openOnly: true } : {}, z.object({ tasks: z.array(CrmTaskSchema).max(200) }).strict(), signal, organizationId);
   return result.tasks;
 }
 
-export async function fetchCrmViews(signal?: AbortSignal): Promise<SavedCustomerView[]> {
-  const result = await executeCrmRead("crm.listCustomerViews", {}, z.object({ views: z.array(SavedCustomerViewSchema) }).strict(), signal);
+export async function fetchCrmViews(organizationId: string | null | undefined, signal?: AbortSignal): Promise<SavedCustomerView[]> {
+  const result = await executeCrmRead("crm.listCustomerViews", {}, z.object({ views: z.array(SavedCustomerViewSchema) }).strict(), signal, organizationId);
   return result.views;
 }
 
@@ -232,7 +242,7 @@ export async function submitCrmDealStageMove(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.moveDealStage", input: parsedInput.data, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, organizationId);
     const outcome = parseCrmDealStageMoveOutcome(response, body, parsedInput.data.stage);
     if (outcome.kind === "completed") await clearCrmDealStageAttempt(attempt.storageKey);
     return outcome;
@@ -553,9 +563,8 @@ export async function submitCrmTaskMutation(
     try {
       const { response, body } = await request("/api/capabilities/execute", {
         method: "POST",
-        headers: { "X-Organization-ID": scope.organizationId },
         body: JSON.stringify({ capabilityId, input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
-      }, signal);
+      }, signal, scope.organizationId);
       if (response.status === 404) throw new CrmApiError(404, "The Go CRM task route is unavailable. Ask an administrator to check the Go task route configuration.", true);
       const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
       if (outcome.kind === "pending") return outcome;
@@ -743,7 +752,7 @@ export async function submitCrmDealCreate(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.createDeal", input, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -791,7 +800,7 @@ export async function submitCrmLeadConversion(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.convertLead", input: parsedInput.data, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 404) throw new CrmApiError(404, "The Go CRM conversion route is unavailable. Check the Go session capability route configuration.", true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -829,7 +838,7 @@ export async function submitCrmCustomerCreate(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.createCustomer", input, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -860,7 +869,7 @@ export async function submitCrmCustomerDeactivate(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.deactivateCustomer", input, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -961,7 +970,7 @@ export async function submitCrmCustomerMerge(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.mergeCustomers", input: parsedInput.data, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -1007,7 +1016,7 @@ export async function submitCrmCustomerMergeUndo(
         duplicateCustomerId: parsedInput.data.duplicateCustomerId,
         mergeIntentId: parsedInput.data.mergeIntentId,
       }, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -1076,7 +1085,7 @@ export async function submitCrmCustomerProfileUpdate(
       const { response, body } = await request("/api/capabilities/execute", {
         method: "POST",
         body: JSON.stringify({ capabilityId: "crm.updateCustomerProfiles", input: Object.fromEntries(Object.entries(input).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
-      }, signal);
+      }, signal, scope.organizationId);
       if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
       const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
       if (outcome.kind === "pending") return outcome;
@@ -1148,7 +1157,7 @@ export async function submitCrmCustomerProfileUndo(
       const { response, body } = await request("/api/capabilities/execute", {
         method: "POST",
         body: JSON.stringify({ capabilityId: "crm.restoreCustomerProfiles", input: { profiles: undoState.profiles, expectedCurrent: undoState.expectedCurrent }, intentId: attempt.intentId }),
-      }, signal);
+      }, signal, scope.organizationId);
       if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
       const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
       if (outcome.kind === "pending") return outcome;
@@ -1241,7 +1250,7 @@ export async function submitCrmSavedViewWrite(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.saveCustomerView", input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 404) throw new CrmApiError(404, "The Go CRM saved-view route is unavailable. Check the Go session capability route configuration.", true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -1557,7 +1566,7 @@ export async function importCrmCustomers(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.importCustomers", input: { rows: parsedRows.data }, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -1615,7 +1624,7 @@ export async function undoCrmImport(
     const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.undoCustomerImport", input: { customerIds: parsedIds.data, importIntentId }, intentId: attempt.intentId }),
-    }, signal);
+    }, signal, scope.organizationId);
     if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -1638,9 +1647,9 @@ export async function undoCrmImport(
   }
 }
 
-export async function fetchCrmTeamMembers(signal?: AbortSignal): Promise<Array<{ userId: string; name: string | null; email: string }>> {
+export async function fetchCrmTeamMembers(organizationId: string | null | undefined, signal?: AbortSignal): Promise<Array<{ userId: string; name: string | null; email: string }>> {
   const member = z.object({ userId: uuid, name: z.string().nullable(), email: z.string() }).passthrough();
-  const result = await get("/api/team", z.object({ members: z.array(member) }), signal);
+  const result = await get("/api/team", z.object({ members: z.array(member) }), signal, organizationId);
   return result.members;
 }
 
@@ -1655,9 +1664,9 @@ export const CrmFollowUpDraftSchema = z.object({
 }).strict();
 export type CrmFollowUpDraft = z.infer<typeof CrmFollowUpDraftSchema>;
 
-export async function fetchCrmFollowUpDraft(customerId: string, signal?: AbortSignal): Promise<CrmFollowUpDraft> {
+export async function fetchCrmFollowUpDraft(customerId: string, organizationId: string | null | undefined, signal?: AbortSignal): Promise<CrmFollowUpDraft> {
   if (!uuid.safeParse(customerId).success) throw new CrmApiError(0, "Choose a valid customer before drafting a follow-up.");
-  const { response, body } = await request("/api/crm/follow-up-draft", { method: "POST", body: JSON.stringify({ customerId }) }, signal);
+  const { response, body } = await request("/api/crm/follow-up-draft", { method: "POST", body: JSON.stringify({ customerId }) }, signal, organizationId);
   if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
   const parsed = CrmFollowUpDraftSchema.safeParse(body);
   if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected follow-up draft.");

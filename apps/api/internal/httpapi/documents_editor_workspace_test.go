@@ -40,6 +40,7 @@ func TestDocumentsEditorWorkspaceBodyValidationAndIgnoredIntent(t *testing.T) {
 
 func TestDocumentsEditorWorkspaceHandlerRequiresAuthenticatedSameOriginSession(t *testing.T) {
 	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+	resolver.resolved.Permissions["documents.write"] = true
 	handler := &documentsEditorWorkspaceHandler{pool: &pgxpool.Pool{}, resolver: resolver, logger: routinesTestLogger()}
 	resolver.resolved = nil
 	response := httptest.NewRecorder()
@@ -49,12 +50,52 @@ func TestDocumentsEditorWorkspaceHandlerRequiresAuthenticatedSameOriginSession(t
 	}
 
 	resolver.resolved = directTestIdentity()
+	resolver.resolved.Permissions["documents.write"] = true
 	request := routinesSessionRequest(http.MethodDelete, "/api/docs/44444444-4444-4444-8444-444444444444/workspace", "")
 	request.Header.Set("Origin", "https://evil.example.test")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("cross-origin delete status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestDocumentsEditorWorkspaceHandlerRequiresPermissionAndEnabledModule(t *testing.T) {
+	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+	handler := &documentsEditorWorkspaceHandler{pool: &pgxpool.Pool{}, resolver: resolver, logger: routinesTestLogger()}
+	for _, test := range []struct {
+		name   string
+		method string
+		grant  bool
+		module bool
+	}{
+		{name: "missing write permission", method: http.MethodPost},
+		{name: "missing write permission on release", method: http.MethodDelete},
+		{name: "workspace draft requires read permission", method: http.MethodPost, grant: true},
+		{name: "disabled module", method: http.MethodPost, grant: true, module: true},
+		{name: "disabled module on release", method: http.MethodDelete, grant: true, module: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			identity := directTestIdentity()
+			if test.grant {
+				identity.Permissions["documents.write"] = true
+			}
+			if test.name == "workspace draft requires read permission" {
+				identity.Permissions["documents.read"] = false
+			}
+			if test.module {
+				identity.Permissions["documents.read"] = true
+				identity.ModulesRestricted = true
+				identity.EnabledModules = []string{"crm"}
+			}
+			resolver.resolved = identity
+			request := routinesSessionRequest(test.method, "/api/docs/44444444-4444-4444-8444-444444444444/workspace", `{}`)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

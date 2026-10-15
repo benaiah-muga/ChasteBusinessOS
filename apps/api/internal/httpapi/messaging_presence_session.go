@@ -91,11 +91,17 @@ func (h *messagingPresenceHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
+	permission := "messaging.read"
 	if r.Method == http.MethodPost {
-		if !resolved.HasPermission("messaging.write") && !resolved.HasPermission("*") {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-			return
-		}
+		permission = "messaging.write"
+	}
+	if !resolved.HasPermission(permission) && !resolved.HasPermission("*") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if resolved.ModulesRestricted && !slices.Contains(resolved.EnabledModules, "messaging") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: Messaging module is disabled"})
+		return
 	}
 	switch r.Method {
 	case http.MethodGet:

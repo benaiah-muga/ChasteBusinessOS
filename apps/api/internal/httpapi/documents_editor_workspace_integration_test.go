@@ -51,6 +51,11 @@ func TestDocumentsEditorWorkspaceRuntimeRLSAutosaveAndRelease(t *testing.T) {
 		t.Fatalf("runtime database role is unsafe: %v", err)
 	}
 	fixture := seedOrgParityFixture(t, owner, secret)
+	workspaceWriteRole := seedRole(t, owner, fixture.orgA, "documents-workspace-write", "documents.write")
+	workspaceReadRole := seedRole(t, owner, fixture.orgA, "documents-workspace-read", "documents.read")
+	if _, err := owner.Exec(ctx, `INSERT INTO user_roles (user_id, role_id, org_id) VALUES ($1::uuid, $2::uuid, $3::uuid), ($1::uuid, $4::uuid, $3::uuid)`, fixture.userID, workspaceWriteRole, fixture.orgA, workspaceReadRole); err != nil {
+		t.Fatal(err)
+	}
 	insertDoc := func(orgID, title string) string {
 		t.Helper()
 		var id string
