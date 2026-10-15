@@ -304,12 +304,12 @@ func aiConfigSessionClaims(resolved *session.ResolvedUser, intentID string, inpu
 
 func validAIConfigBody(body aiConfigBody) bool {
 	providers := []string{"nvidia", "openrouter", "groq", "mistral", "zai", "openai", "custom"}
-	if !slices.Contains(providers, body.Provider) || len(body.BaseURL) == 0 || len(body.BaseURL) > 500 ||
+	if !slices.Contains(providers, body.Provider) || len(body.BaseURL) == 0 || utf16Length(body.BaseURL) > 500 ||
 		strings.TrimSpace(body.Models.Primary) == "" || strings.TrimSpace(body.Models.Fast) == "" ||
 		strings.TrimSpace(body.Models.Reasoning) == "" || strings.TrimSpace(body.Models.Embeddings) == "" {
 		return false
 	}
-	if body.APIKey != nil && (len(strings.TrimSpace(*body.APIKey)) == 0 || len(strings.TrimSpace(*body.APIKey)) > 1000) {
+	if body.APIKey != nil && (utf16Length(strings.TrimSpace(*body.APIKey)) == 0 || utf16Length(strings.TrimSpace(*body.APIKey)) > 1000) {
 		return false
 	}
 	return true

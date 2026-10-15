@@ -99,6 +99,77 @@ func TestAIConfigSessionHandlerWritesOnlyThroughGovernedCapability(t *testing.T)
 	}
 }
 
+func TestAIConfigSessionHandlerAcceptsMaximumUTF16ProviderKey(t *testing.T) {
+	t.Setenv("AI_CONFIG_ENCRYPTION_KEY", "test-ai-config-encryption-secret")
+	identity := directTestIdentity()
+	identity.Permissions["iam.admin"] = true
+	const intentID = "44444444-4444-4444-8444-444444444444"
+	providerKey := strings.Repeat("😀", 500)
+	reader := &fakeAIConfigReader{}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true}}
+	handler := &AIConfigSessionHandler{resolver: &fakeDirectSessionResolver{resolved: identity}, executor: executor, reader: reader, logger: routinesTestLogger()}
+	body, err := json.Marshal(map[string]any{
+		"provider": "custom", "baseUrl": "https://models.example/v1",
+		"models": map[string]string{"primary": "p", "fast": "f", "reasoning": "r", "embeddings": "e"},
+		"apiKey": providerKey, "intentId": intentID, "updatedAt": "2026-10-11T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, routinesSessionRequest(http.MethodPost, "/api/ai-config", string(body)))
+	if response.Code != http.StatusOK || executor.calls != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, executor.calls, response.Body.String())
+	}
+	parsed, err := capability.ParseSettingsConfigureAiProviderInput(executor.input)
+	if err != nil || parsed.Config == nil || parsed.Config.EncryptedAPIKey == nil {
+		t.Fatalf("capability input did not parse: input bytes=%d err=%v", len(executor.input), err)
+	}
+	if got, err := decryptAIProviderKey(*parsed.Config.EncryptedAPIKey); err != nil || got != providerKey {
+		t.Fatalf("decrypted key length=%d err=%v, want 500 emoji", len([]rune(got)), err)
+	}
+	if len(*parsed.Config.EncryptedAPIKey) <= 2000 || len(*parsed.Config.EncryptedAPIKey) > 3000 {
+		t.Fatalf("encrypted key length=%d, want between 2001 and 3000", len(*parsed.Config.EncryptedAPIKey))
+	}
+}
+
+func TestAIConfigSessionHandlerAcceptsMaximumBMPProviderKey(t *testing.T) {
+	t.Setenv("AI_CONFIG_ENCRYPTION_KEY", "test-ai-config-encryption-secret")
+	identity := directTestIdentity()
+	identity.Permissions["iam.admin"] = true
+	const intentID = "44444444-4444-4444-8444-444444444444"
+	providerKey := strings.Repeat("漢", 1000)
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true}}
+	handler := &AIConfigSessionHandler{
+		resolver: &fakeDirectSessionResolver{resolved: identity}, executor: executor,
+		reader: &fakeAIConfigReader{}, logger: routinesTestLogger(),
+	}
+	body, err := json.Marshal(map[string]any{
+		"provider": "custom", "baseUrl": "https://models.example/v1",
+		"models": map[string]string{"primary": "p", "fast": "f", "reasoning": "r", "embeddings": "e"},
+		"apiKey": providerKey, "intentId": intentID, "updatedAt": "2026-10-11T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, routinesSessionRequest(http.MethodPost, "/api/ai-config", string(body)))
+	if response.Code != http.StatusOK || executor.calls != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, executor.calls, response.Body.String())
+	}
+	parsed, err := capability.ParseSettingsConfigureAiProviderInput(executor.input)
+	if err != nil || parsed.Config == nil || parsed.Config.EncryptedAPIKey == nil {
+		t.Fatalf("capability input did not parse: err=%v", err)
+	}
+	if got, err := decryptAIProviderKey(*parsed.Config.EncryptedAPIKey); err != nil || got != providerKey {
+		t.Fatalf("decrypted key length=%d err=%v, want 1000 CJK characters", len([]rune(got)), err)
+	}
+	const maxEncodedKeyLength = 3 + 16 + 1 + 22 + 1 + 4000
+	if got := len(*parsed.Config.EncryptedAPIKey); got != maxEncodedKeyLength {
+		t.Fatalf("encrypted key length=%d, want the exact maximum", got)
+	}
+}
+
 func TestAIConfigSessionHandlerRejectsCrossOriginAndPreservesClearKey(t *testing.T) {
 	t.Setenv("AI_CONFIG_ENCRYPTION_KEY", "test-ai-config-encryption-secret")
 	identity := directTestIdentity()
@@ -220,5 +291,30 @@ func TestMountGoAIConfigRouteFallsThroughUnsupportedMethodsAndPaths(t *testing.T
 		if owner := response.Header().Get("X-Route-Owner"); owner != test.owner {
 			t.Errorf("%s %s owner=%q want=%q", test.method, test.path, owner, test.owner)
 		}
+	}
+}
+
+func TestValidAIConfigBodyUsesJavaScriptStringLengthLimits(t *testing.T) {
+	body := aiConfigBody{
+		Provider: "custom",
+		BaseURL:  "https://example.com/" + strings.Repeat("é", 480),
+		Models:   aiConfigModels{Primary: "p", Fast: "f", Reasoning: "r", Embeddings: "e"},
+	}
+	key := strings.Repeat("😀", 500)
+	body.APIKey = &key
+	if !validAIConfigBody(body) {
+		t.Fatal("500 UTF-16 unit URL and 1000 UTF-16 unit key boundaries should be accepted even when UTF-8 byte lengths are larger")
+	}
+
+	tooLongKey := strings.Repeat("😀", 501)
+	body.APIKey = &tooLongKey
+	if validAIConfigBody(body) {
+		t.Fatal("API keys over 1000 UTF-16 units should be rejected")
+	}
+
+	body.APIKey = nil
+	body.BaseURL += "é"
+	if validAIConfigBody(body) {
+		t.Fatal("base URLs over 500 UTF-16 units should be rejected")
 	}
 }

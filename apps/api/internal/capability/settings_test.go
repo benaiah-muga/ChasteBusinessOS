@@ -194,12 +194,13 @@ func TestSettingsConfigureAiProviderInputParserParity(t *testing.T) {
 	valid := settingsCanaryConfig("opaque-credential")
 	models := `"models":{"primary":"a","fast":"b","reasoning":"c","embeddings":"d"}`
 	accepted := map[string]json.RawMessage{
-		"config object":       json.RawMessage(`{"config":` + valid + `}`),
-		"unknown sibling key": json.RawMessage(`{"config":` + valid + `,"force":true}`),
-		"empty key hint":      json.RawMessage(`{"config":{"provider":"custom","baseUrl":"https://models.example/v1",` + models + `,"encryptedApiKey":null,"keyHint":"","updatedAt":"2026-01-01T00:00:00Z"}}`),
-		"opaque credential":   json.RawMessage(`{"config":{"provider":"openai","baseUrl":"https://api.openai.com/v1",` + models + `,"encryptedApiKey":"not-an-aes-ciphertext","keyHint":null,"updatedAt":"2026-01-01T00:00:00.123456Z"}}`),
-		"non-http url scheme": json.RawMessage(`{"config":{"provider":"custom","baseUrl":"ftp://models.example/v1",` + models + `,"encryptedApiKey":null,"keyHint":null,"updatedAt":"2026-01-01T00:00Z"}}`),
-		"leap day timestamp":  json.RawMessage(`{"config":{"provider":"groq","baseUrl":"https://api.groq.com/openai/v1",` + models + `,"encryptedApiKey":null,"keyHint":null,"updatedAt":"2024-02-29T23:59:59.999Z"}}`),
+		"config object":                json.RawMessage(`{"config":` + valid + `}`),
+		"unknown sibling key":          json.RawMessage(`{"config":` + valid + `,"force":true}`),
+		"maximum encrypted credential": json.RawMessage(`{"config":{"provider":"custom","baseUrl":"https://models.example/v1",` + models + `,"encryptedApiKey":"` + strings.Repeat("k", settingsMaxEncryptedAPIKeyLength) + `","keyHint":null,"updatedAt":"2026-01-01T00:00:00Z"}}`),
+		"empty key hint":               json.RawMessage(`{"config":{"provider":"custom","baseUrl":"https://models.example/v1",` + models + `,"encryptedApiKey":null,"keyHint":"","updatedAt":"2026-01-01T00:00:00Z"}}`),
+		"opaque credential":            json.RawMessage(`{"config":{"provider":"openai","baseUrl":"https://api.openai.com/v1",` + models + `,"encryptedApiKey":"not-an-aes-ciphertext","keyHint":null,"updatedAt":"2026-01-01T00:00:00.123456Z"}}`),
+		"non-http url scheme":          json.RawMessage(`{"config":{"provider":"custom","baseUrl":"ftp://models.example/v1",` + models + `,"encryptedApiKey":null,"keyHint":null,"updatedAt":"2026-01-01T00:00Z"}}`),
+		"leap day timestamp":           json.RawMessage(`{"config":{"provider":"groq","baseUrl":"https://api.groq.com/openai/v1",` + models + `,"encryptedApiKey":null,"keyHint":null,"updatedAt":"2024-02-29T23:59:59.999Z"}}`),
 	}
 	for name, raw := range accepted {
 		parsed, err := ParseSettingsConfigureAiProviderInput(raw)
@@ -259,7 +260,7 @@ func TestSettingsConfigureAiProviderInputParserParity(t *testing.T) {
 		"model role not string": json.RawMessage(`{"config":{"provider":"nvidia","baseUrl":"https://a.example","models":{"primary":1,"fast":"b","reasoning":"c","embeddings":"d"},"encryptedApiKey":null,"keyHint":null,"updatedAt":"2026-01-01T00:00:00Z"}}`),
 		"missing credential":    json.RawMessage(`{"config":{"provider":"nvidia","baseUrl":"https://a.example",` + models + `,"keyHint":null,"updatedAt":"2026-01-01T00:00:00Z"}}`),
 		"empty credential":      json.RawMessage(`{"config":{"provider":"nvidia","baseUrl":"https://a.example",` + models + `,"encryptedApiKey":"","keyHint":null,"updatedAt":"2026-01-01T00:00:00Z"}}`),
-		"oversized credential":  json.RawMessage(`{"config":{"provider":"nvidia","baseUrl":"https://a.example","models":{"primary":"a","fast":"b","reasoning":"c","embeddings":"d"},"encryptedApiKey":"` + strings.Repeat("k", 2001) + `","keyHint":null,"updatedAt":"2026-01-01T00:00:00Z"}}`),
+		"oversized credential":  json.RawMessage(`{"config":{"provider":"nvidia","baseUrl":"https://a.example","models":{"primary":"a","fast":"b","reasoning":"c","embeddings":"d"},"encryptedApiKey":"` + strings.Repeat("k", settingsMaxEncryptedAPIKeyLength+1) + `","keyHint":null,"updatedAt":"2026-01-01T00:00:00Z"}}`),
 		"missing key hint":      json.RawMessage(`{"config":{"provider":"nvidia","baseUrl":"https://a.example",` + models + `,"encryptedApiKey":null,"updatedAt":"2026-01-01T00:00:00Z"}}`),
 		"oversized key hint":    json.RawMessage(`{"config":{"provider":"nvidia","baseUrl":"https://a.example",` + models + `,"encryptedApiKey":null,"keyHint":"1234567890123","updatedAt":"2026-01-01T00:00:00Z"}}`),
 		"missing updated at":    json.RawMessage(`{"config":{"provider":"nvidia","baseUrl":"https://a.example",` + models + `,"encryptedApiKey":null,"keyHint":null}}`),

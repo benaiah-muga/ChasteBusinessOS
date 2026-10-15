@@ -18,11 +18,14 @@ export const aiModelsSchema = z.object({
   embeddings: z.string().trim().min(1).max(200),
 });
 
+// AES-GCM v1 can encode 3000 UTF-8 bytes as a 4043-character raw-base64 value.
+const MAX_ENCRYPTED_AI_KEY_LENGTH = 4043;
+
 export const storedAiProviderConfigSchema = z.object({
   provider: aiProviderIdSchema,
   baseUrl: z.string().url().max(500),
   models: aiModelsSchema,
-  encryptedApiKey: z.string().min(1).max(2000).nullable(),
+  encryptedApiKey: z.string().min(1).max(MAX_ENCRYPTED_AI_KEY_LENGTH).nullable(),
   keyHint: z.string().max(12).nullable(),
   updatedAt: z.string().datetime(),
   codingAgentUserId: z.string().uuid().nullable().optional(),

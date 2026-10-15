@@ -68,6 +68,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Go AI settings now count input limits in JavaScript-compatible UTF-16 units and accept the full encrypted representation of a maximum-length provider key.
 - Go Messaging presence reads now require `messaging.read` and an enabled Messaging module. Go Documents editor workspace reads require `documents.read`, all workspace operations require `documents.write`, and assistant actions enforce the appropriate Documents permission and module state before accessing workspace data or AI services.
 - Vite CRM now gives actionable sign-in and permission messages for Go 401 and 403 responses instead of displaying raw authorization codes.
 - Vite CRM binds every read and write to the active organization, rejects missing or malformed organization IDs before sending, and hides old-organization CRM data while the next scope loads.

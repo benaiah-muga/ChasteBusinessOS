@@ -23,6 +23,9 @@ import (
 const (
 	settingsConfigureAiProviderCapabilityID = "settings.configureAiProvider"
 	settingsRestoreAiProviderCapabilityID   = "settings.restoreAiProvider"
+	// 1000 UTF-16 units can contain 3000 UTF-8 bytes. AES-GCM v1 stores
+	// raw-base64 nonce, tag, and ciphertext with three separators: 3 + 16 + 1 + 22 + 1 + 4000.
+	settingsMaxEncryptedAPIKeyLength = 4043
 )
 
 var settingsAIProviderIDs = []string{"nvidia", "openrouter", "groq", "mistral", "zai", "openai", "custom"}
@@ -161,8 +164,8 @@ func settingsParseStoredConfig(raw json.RawMessage) (*SettingsAIProviderConfig, 
 		if err != nil {
 			return nil, errors.New("encryptedApiKey must be a string")
 		}
-		if length := utf16Length(*encrypted); length < 1 || length > 2000 {
-			return nil, errors.New("encryptedApiKey must be between 1 and 2000 characters")
+		if length := utf16Length(*encrypted); length < 1 || length > settingsMaxEncryptedAPIKeyLength {
+			return nil, fmt.Errorf("encryptedApiKey must be between 1 and %d characters", settingsMaxEncryptedAPIKeyLength)
 		}
 		config.EncryptedAPIKey = encrypted
 	}
