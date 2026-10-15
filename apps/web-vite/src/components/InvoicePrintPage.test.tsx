@@ -13,6 +13,7 @@ const invoice: PrintInvoice = {
   order: {
     number: 1042,
     status: "sent",
+    note: null,
     createdAt: "2026-03-04T10:00:00.000Z",
     customerName: "Acme",
     customerEmail: null,
@@ -20,7 +21,7 @@ const invoice: PrintInvoice = {
     orgName: "Acme Trading",
   },
   lines: [{ description: "Widget", quantity: 2000, unitPriceMinor: 1250, taxMinor: 100 }],
-  branding: { accentColor: "#112233", invoiceFooter: "Thanks", layout: "modern" },
+  branding: { logoDataUrl: null, accentColor: "#112233", invoiceFooter: "Thanks", layout: "modern" },
 };
 
 describe("InvoicePrintPage", () => {

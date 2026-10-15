@@ -3,36 +3,54 @@ import { currencyMinorUnits } from "@chaste/erp-core";
 import { normalizeRetryActorId } from "./retry-scope";
 
 const ProductSchema = z.object({
+  id: z.string().uuid(),
   sku: z.string().min(1),
   name: z.string(),
   kind: z.enum(["goods", "service"]),
   unitLabel: z.string(),
-  salePriceMinor: z.number().int().safe().default(0),
-  imageUrl: z.string().nullable().optional(),
-  tags: z.array(z.string()).default([]),
-  barcode: z.string().nullable().optional(),
+  salePriceMinor: z.number().int().safe(),
+  imageUrl: z.string().nullable(),
+  tags: z.array(z.string()),
+  barcode: z.string().nullable(),
   onHandThousandths: z.number().int().safe(),
   valueMinor: z.number().int().safe(),
+  totalValueMinor: z.number().int().safe(),
   avgUnitCostMinor: z.number().int().safe(),
+  reservedThousandths: z.number().int().safe(),
+  availableThousandths: z.number().int().safe(),
   reorderPointThousandths: z.number().int().safe(),
   reorderNeeded: z.boolean(),
-}).passthrough();
+}).strict();
 
 const CatalogSchema = z.object({
   items: z.array(ProductSchema),
-  reorderAlerts: z.array(z.object({ sku: z.string(), name: z.string(), shortfallThousandths: z.number().int().safe() }).passthrough()).default([]),
+  reorderAlerts: z.array(z.object({
+    sku: z.string(),
+    name: z.string(),
+    onHandThousandths: z.number().int().safe(),
+    reorderPointThousandths: z.number().int().safe(),
+    shortfallThousandths: z.number().int().safe(),
+    avgUnitCostMinor: z.number().int().safe(),
+  }).strict()),
   totalValueMinor: z.number().int().safe(),
 });
 const ModuleSwitchboardSchema = z.object({
-  catalog: z.array(z.object({ id: z.string() })),
+  catalog: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    description: z.string(),
+    href: z.string().nullable(),
+    protected: z.boolean().optional(),
+  }).strict()),
   enabledModules: z.array(z.string()),
-});
+  usingDefaults: z.boolean(),
+}).strict();
 const ProductDefaultsSchema = z.object({
   module: z.literal("inventory"),
   settings: z.object({
-    defaultUnitLabel: z.string().max(20).optional(),
-    defaultReorderPointUnits: z.number().finite().nonnegative().optional(),
-  }).passthrough(),
+    defaultUnitLabel: z.string().min(1).max(20).optional(),
+    defaultReorderPointUnits: z.number().int().nonnegative().max(1_000_000).optional(),
+  }).strict(),
 }).strict();
 
 const CreateSchema = z.object({
@@ -59,7 +77,7 @@ const ProductUpdatePriorSchema = z.object({
   tags: z.array(z.string()),
   barcode: z.string().nullable(),
   unitLabel: z.string().optional(),
-}).passthrough();
+}).strict();
 const ProductActionOutputSchemas = {
   createItem: z.object({ itemId: z.string().uuid() }).strict(),
   updateItem: z.object({ sku: z.string().min(1), prior: ProductUpdatePriorSchema }).strict(),

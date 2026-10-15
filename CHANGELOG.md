@@ -13,6 +13,8 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vite Sales quotes, Products, and invoice printing validate Go response contracts, including nullable fields and action-specific receipts; malformed write responses retain their retry intent.
+
 - Vite Accounting, HR, Marketing, and POS collection actions now execute through session-authenticated Go handlers and the governed capability pipeline.
 - Vite Support can quick-create customers through the authenticated Go CRM capability without relying on a client-only rollout flag.
 - Vite Documents can start drafts from Go-backed reusable templates, with matching Go and Vite validation for ProseMirror content and canonical JSON limits.

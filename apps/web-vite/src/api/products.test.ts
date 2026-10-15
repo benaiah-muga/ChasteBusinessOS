@@ -11,13 +11,13 @@ afterEach(() => {
 
 describe("products API", () => {
   it("validates and returns the catalog response", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ totalValueMinor: 800, reorderAlerts: [], items: [{ sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", onHandThousandths: 2000, valueMinor: 800, avgUnitCostMinor: 400, reorderPointThousandths: 1000, reorderNeeded: false }] })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ totalValueMinor: 800, reorderAlerts: [], items: [{ id: "20000000-0000-4000-8000-000000000001", sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", salePriceMinor: 0, imageUrl: null, tags: [], barcode: null, onHandThousandths: 2000, valueMinor: 800, totalValueMinor: 800, avgUnitCostMinor: 400, reservedThousandths: 0, availableThousandths: 2000, reorderPointThousandths: 1000, reorderNeeded: false }] })));
     await expect(fetchProducts(undefined, retryScope.organizationId)).resolves.toMatchObject({ items: [{ sku: "MUG-1", salePriceMinor: 0, tags: [] }], totalValueMinor: 800 });
     expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).toEqual({ "X-Organization-ID": retryScope.organizationId });
   });
 
   it("uses the Go inventory reader for the Products catalog", async () => {
-    const catalog = { items: [{ sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", salePriceMinor: 500, tags: ["kitchen"], barcode: null, imageUrl: null, onHandThousandths: 500, valueMinor: 200, totalValueMinor: 200, avgUnitCostMinor: 400, reorderPointThousandths: 1000, reorderNeeded: true, reservedThousandths: 0, availableThousandths: 500 }], reorderAlerts: [{ sku: "MUG-1", name: "Mug", onHandThousandths: 500, reorderPointThousandths: 1000, shortfallThousandths: 500, avgUnitCostMinor: 400 }], totalValueMinor: 200, locations: [], lots: [], cycleCounts: [], transfers: [], reservations: [] };
+    const catalog = { items: [{ id: "20000000-0000-4000-8000-000000000001", sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", salePriceMinor: 500, tags: ["kitchen"], barcode: null, imageUrl: null, onHandThousandths: 500, valueMinor: 200, totalValueMinor: 200, avgUnitCostMinor: 400, reorderPointThousandths: 1000, reorderNeeded: true, reservedThousandths: 0, availableThousandths: 500 }], reorderAlerts: [{ sku: "MUG-1", name: "Mug", onHandThousandths: 500, reorderPointThousandths: 1000, shortfallThousandths: 500, avgUnitCostMinor: 400 }], totalValueMinor: 200, locations: [], lots: [], cycleCounts: [], transfers: [], reservations: [] };
     const fetchMock = vi.fn().mockResolvedValue(Response.json(catalog));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -31,8 +31,32 @@ describe("products API", () => {
   });
 
   it("checks the inventory module switchboard before displaying products", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ catalog: [{ id: "inventory" }], enabledModules: [] })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ catalog: [{ id: "inventory", label: "Inventory", description: "Stock", href: "/inventory" }], enabledModules: [], usingDefaults: true })));
     await expect(fetchProductsEnabled()).resolves.toBe(false);
+  });
+
+  it("rejects incomplete or extended Go product item and reorder alert shapes", async () => {
+    const item = { id: "20000000-0000-4000-8000-000000000001", sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "unit", salePriceMinor: 500, imageUrl: null, tags: [], barcode: null, onHandThousandths: 500, valueMinor: 200, totalValueMinor: 200, avgUnitCostMinor: 400, reservedThousandths: 0, availableThousandths: 500, reorderPointThousandths: 1000, reorderNeeded: true };
+    const alert = { sku: "MUG-1", name: "Mug", onHandThousandths: 500, reorderPointThousandths: 1000, shortfallThousandths: 500, avgUnitCostMinor: 400 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ items: [{ ...item, unexpected: true }], reorderAlerts: [], totalValueMinor: 200 }))
+      .mockResolvedValueOnce(Response.json({ items: [Object.fromEntries(Object.entries(item).filter(([key]) => key !== "id"))], reorderAlerts: [], totalValueMinor: 200 }))
+      .mockResolvedValueOnce(Response.json({ items: [item], reorderAlerts: [{ ...alert, unexpected: true }], totalValueMinor: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchProducts()).rejects.toBeInstanceOf(ProductsApiError);
+    await expect(fetchProducts()).rejects.toBeInstanceOf(ProductsApiError);
+    await expect(fetchProducts()).rejects.toBeInstanceOf(ProductsApiError);
+  });
+
+  it("rejects malformed Go module switchboard and defaults extensions", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ catalog: [{ id: "inventory" }], enabledModules: [], usingDefaults: true }))
+      .mockResolvedValueOnce(Response.json({ catalog: [{ id: "inventory", label: "Inventory", description: "Stock", href: "/inventory", unexpected: true }], enabledModules: [], usingDefaults: true }))
+      .mockResolvedValueOnce(Response.json({ module: "inventory", settings: { defaultUnitLabel: "carton", unknown: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchProductsEnabled()).rejects.toBeInstanceOf(ProductsApiError);
+    await expect(fetchProductsEnabled()).rejects.toBeInstanceOf(ProductsApiError);
+    await expect(fetchProductDefaults()).rejects.toBeInstanceOf(ProductsApiError);
   });
 
   it("validates inventory module defaults", async () => {
@@ -374,6 +398,7 @@ describe("products API", () => {
     const priorWithUnit = { ...priorWithoutUnit, unitLabel: "unit" };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", prior: { sku: "MUG-1" } } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", prior: { ...priorWithoutUnit, unexpected: true } } }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", prior: priorWithoutUnit } }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", prior: { ...priorWithUnit, salePriceMinor: "500" } } }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { sku: "MUG-1", prior: priorWithUnit } }));
@@ -382,9 +407,10 @@ describe("products API", () => {
     await expect(submitProductAction(action, retryScope)).rejects.toThrow("unexpected action response");
     await expect(submitProductAction(action, retryScope)).rejects.toThrow("unexpected action response");
     await expect(submitProductAction(action, retryScope)).rejects.toThrow("unexpected action response");
+    await expect(submitProductAction(action, retryScope)).rejects.toThrow("unexpected action response");
     await expect(submitProductAction(action, retryScope)).resolves.toEqual({ kind: "completed" });
     const intentIds = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).intentId as string);
-    expect(intentIds).toHaveLength(4);
+    expect(intentIds).toHaveLength(5);
     expect(new Set(intentIds).size).toBe(1);
   });
 

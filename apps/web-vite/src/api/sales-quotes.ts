@@ -11,9 +11,9 @@ const QuoteSchema = z.object({
   status: QuoteStatusSchema,
   totalMinor: integer.nonnegative(),
   customerId: uuid,
-  createdAt: z.string().datetime({ offset: true }).nullable().optional(),
-  expiresAt: z.string().datetime({ offset: true }).nullable().optional(),
-  invoiceId: uuid.nullable().optional(),
+  createdAt: z.string().datetime({ offset: true }).nullable(),
+  expiresAt: z.string().datetime({ offset: true }).nullable(),
+  invoiceId: uuid.nullable(),
 }).strict();
 const CustomerSchema = z.object({ id: uuid, name: z.string().min(1).max(500), email: z.string().max(500).nullable() }).strict();
 const DealSchema = z.object({

@@ -120,6 +120,20 @@ describe("fetchPrintInvoice", () => {
     expect(result.status).toBe("error");
   });
 
+  it("requires nullable fields that the Go invoice handler always emits", async () => {
+    const orderWithoutNote = Object.fromEntries(Object.entries(validInvoice.order).filter(([key]) => key !== "note"));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...validInvoice, order: orderWithoutNote })));
+    expect((await fetchPrintInvoice("order-1")).status).toBe("error");
+
+    const invoiceWithoutBranding = Object.fromEntries(Object.entries(validInvoice).filter(([key]) => key !== "branding"));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(invoiceWithoutBranding)));
+    expect((await fetchPrintInvoice("order-1")).status).toBe("error");
+
+    const brandingWithoutLayout = Object.fromEntries(Object.entries(validInvoice.branding).filter(([key]) => key !== "layout"));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...validInvoice, branding: brandingWithoutLayout })));
+    expect((await fetchPrintInvoice("order-1")).status).toBe("error");
+  });
+
   it("fails closed on a fractional money value", async () => {
     const broken = structuredClone(validInvoice);
     broken.lines[0]!.unitPriceMinor = 12.5;

@@ -17,25 +17,25 @@ const PrintLineSchema = z.object({
 const PrintOrderSchema = z.object({
   number: z.number().int().safe().positive(),
   status: z.string().min(1),
-  note: z.string().nullable().optional(),
+  note: z.string().nullable(),
   createdAt: z.string().datetime({ offset: true }),
   customerName: z.string(),
-  customerEmail: z.string().nullable().optional(),
-  paymentTermDays: z.number().int().safe().nonnegative().nullable().optional(),
+  customerEmail: z.string().nullable(),
+  paymentTermDays: z.number().int().safe().nonnegative().nullable(),
   orgName: z.string(),
 }).strict();
 
 const PrintBrandingSchema = z.object({
-  logoDataUrl: z.string().regex(/^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/=]+$/).max(300_000).nullable().optional(),
-  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
-  invoiceFooter: z.string().max(300).nullable().optional(),
-  layout: z.enum(["classic", "modern"]).nullable().optional(),
+  logoDataUrl: z.string().regex(/^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/=]+$/).max(300_000).nullable(),
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable(),
+  invoiceFooter: z.string().max(300).nullable(),
+  layout: z.enum(["classic", "modern"]).nullable(),
 }).strict();
 
 const PrintInvoiceSchema = z.object({
   order: PrintOrderSchema,
   lines: z.array(PrintLineSchema),
-  branding: PrintBrandingSchema.nullable().optional(),
+  branding: PrintBrandingSchema.nullable(),
 }).strict();
 
 export type PrintLine = z.infer<typeof PrintLineSchema>;

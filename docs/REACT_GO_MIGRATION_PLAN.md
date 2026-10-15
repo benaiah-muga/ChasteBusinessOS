@@ -4774,3 +4774,8 @@ new owners and the manifest shows zero legacy runtime paths.
      Settings reject malformed policy approval values. The focused suites pass
      68 tests, targeted lint and Vite typecheck pass, and independent review
      confirmed the client shapes match the Go handlers.
+
+448. (Contract verified) Vite Sales quotes, Products, and invoice printing
+     validate Go's nullable fields and action-specific receipts. Malformed
+     write responses preserve retry identity. Focused suites, targeted lint,
+     Vite typecheck, and independent contract review pass.

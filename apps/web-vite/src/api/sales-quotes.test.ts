@@ -66,6 +66,11 @@ describe("Vite Sales quote Go APIs", () => {
     await expect(fetchSalesQuotes()).rejects.toMatchObject({ name: "SalesQuoteApiError", status: 200 });
   });
 
+  it("rejects Go quote rows that omit nullable response fields", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ quotes: [{ id: quoteId, number: 1, status: "sent", totalMinor: 1, customerId }] })));
+    await expect(fetchSalesQuotes()).rejects.toMatchObject({ name: "SalesQuoteApiError", status: 200 });
+  });
+
   it("reuses scoped exact create intent after an unknown result and accepts valid Go output", async () => {
     const intentIds: string[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -154,6 +159,13 @@ describe("Vite Sales quote Go APIs", () => {
   it("does not clear exact retry state after malformed success data", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ quoteId: "invalid", quoteNumber: 27, totalMinor: 15000 })));
     await expect(createSalesQuote({ customerId, lines: [{ description: "Work", quantity: 1000, unitPriceMinor: 5000 }] }, scope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    expect(Object.keys(localStorage).some((key) => key.startsWith("chaste:sales-quotes:"))).toBe(true);
+  });
+
+  it("retains exact quote write intent when a Go success omits required output fields", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ quoteId, quoteNumber: 27 })));
+    await expect(createSalesQuote({ customerId, lines: [{ description: "Work", quantity: 1000, unitPriceMinor: 5000 }] }, scope))
+      .rejects.toMatchObject({ requestMayHaveReachedServer: true });
     expect(Object.keys(localStorage).some((key) => key.startsWith("chaste:sales-quotes:"))).toBe(true);
   });
 });
