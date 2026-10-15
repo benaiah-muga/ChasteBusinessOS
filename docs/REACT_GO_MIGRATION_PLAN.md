@@ -4808,3 +4808,13 @@ new owners and the manifest shows zero legacy runtime paths.
      continuity, and live business proof checks. These broader checks remain
      required while their Go replacements are pending. CI no longer requires a
      Next.js production build.
+
+452. (Boundary verified) Go workspace onboarding now rejects undeclared top-
+     level fields, unsupported or repeated deferred setup steps, and step lists
+     larger than the supported set before workspace bootstrap. Vite validates
+     the same step contract before sending. Focused Go and Vite tests pass, Vite
+     typecheck passes, and independent review confirmed session, organization,
+     and field boundaries. An active Vite audit found its Settings, onboarding,
+     public widget, portal, Dashboard, and agent requests already route through
+     Go; no duplicate endpoints were added. Widget and Dashboard Go routing
+     setup guidance was corrected.

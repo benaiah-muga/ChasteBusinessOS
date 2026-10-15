@@ -428,6 +428,15 @@ func decodeOnboardingRequest(w http.ResponseWriter, r *http.Request) (onboarding
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return result, "", "Could not read that request.", errors.New("onboarding request has trailing JSON")
 	}
+	allowedFields := map[string]bool{
+		"orgName": true, "businessDescription": true, "baseCurrency": true,
+		"path": true, "deferredSteps": true, "intentId": true,
+	}
+	for field := range raw {
+		if !allowedFields[field] {
+			return result, field, "The request contains an unsupported field.", errors.New("unknown onboarding field")
+		}
+	}
 
 	orgName, err := requiredOnboardingString(raw, "orgName")
 	if err != nil || utf16Length(orgName) < 2 || utf16Length(orgName) > 80 {
@@ -454,8 +463,15 @@ func decodeOnboardingRequest(w http.ResponseWriter, r *http.Request) (onboarding
 	}
 	steps := []string{}
 	if value, exists := raw["deferredSteps"]; exists {
-		if err := json.Unmarshal(value, &steps); err != nil || steps == nil {
+		if err := json.Unmarshal(value, &steps); err != nil || steps == nil || len(steps) > len(onboardingStepKeys) {
 			return result, "deferredSteps", "deferredSteps must be an array of strings", errors.New("invalid deferredSteps")
+		}
+		seen := make(map[string]bool, len(steps))
+		for _, step := range steps {
+			if !onboardingStepKeys[step] || seen[step] {
+				return result, "deferredSteps", "deferredSteps must contain unique, supported setup steps", errors.New("invalid deferredSteps")
+			}
+			seen[step] = true
 		}
 	}
 	value, exists := raw["intentId"]

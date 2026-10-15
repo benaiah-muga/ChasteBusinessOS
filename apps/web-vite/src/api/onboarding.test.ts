@@ -10,14 +10,15 @@ import {
   readOnboardingState,
   recoveryFor,
   undoOnboardingImport,
+  type CreateWorkspaceInput,
 } from "./onboarding";
 
 const stateBody = { state: { path: "import", steps: { import_customers: "skipped" }, startedAt: "2026-01-01T00:00:00.000Z" } };
-const workspace = {
+const workspace: CreateWorkspaceInput = {
   orgName: "Glow Works",
   businessDescription: "We design and sell handmade lighting fixtures online and to interior designers.",
   baseCurrency: "USD",
-path: "import" as const,
+  path: "import",
   deferredSteps: ["import_customers", "import_products"],
   intentId: "11111111-2222-4333-8444-555555555555",
 };
@@ -64,6 +65,9 @@ describe("onboarding API", () => {
   it("refuses to send a profile the server would reject anyway", async () => {
     const fetchMock = stubFetch();
     await expect(createWorkspace({ ...workspace, businessDescription: "too short" })).rejects.toBeInstanceOf(OnboardingApiError);
+    const invalidSteps = { ...workspace, deferredSteps: ["erase_workspace"] } as unknown as CreateWorkspaceInput;
+    await expect(createWorkspace(invalidSteps)).rejects.toBeInstanceOf(OnboardingApiError);
+    await expect(createWorkspace({ ...workspace, deferredSteps: ["import_customers", "import_customers"] })).rejects.toBeInstanceOf(OnboardingApiError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

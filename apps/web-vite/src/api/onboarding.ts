@@ -60,7 +60,9 @@ const CreateWorkspaceSchema = z.object({
   businessDescription: z.string().trim().min(20).max(8000),
   baseCurrency: z.string().length(3),
   path: PathSchema,
-  deferredSteps: z.array(z.string()).max(20),
+  deferredSteps: z.array(z.enum(ONBOARDING_STEPS))
+    .max(ONBOARDING_STEPS.length)
+    .refine((steps) => new Set(steps).size === steps.length, "Setup steps must be unique."),
   intentId: z.string().min(8).max(100),
 }).strict();
 

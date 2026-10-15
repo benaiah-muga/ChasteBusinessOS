@@ -692,18 +692,17 @@ trust is explicit through `GO_SAML_TRUST_VERIFIED_EMAIL=true`; the handler
 rejects untrusted email linking. Go mounts `/api/auth/sign-in/saml` and
 `/api/auth/callback/saml` only when both flags are enabled.
 
-`GO_SUPPORT_PUBLIC_ROUTE=1` opts the Go API into the public
-`/api/support/public` widget endpoint. It uses NVIDIA embeddings for published
-knowledge search, so `NVIDIA_API_KEY` and `GO_SUPPORT_EMBEDDING_MODEL` must be
+The Go API mounts the public `/api/support/public` widget endpoint by default;
+set `GO_SUPPORT_PUBLIC_ROUTE=0` to unmount it. It uses NVIDIA embeddings for
+published knowledge search, so `NVIDIA_API_KEY` and `GO_SUPPORT_EMBEDDING_MODEL` must be
 configured. Run the jobs worker with `GO_SUPPORT_EMBEDDING_WORKER=1` to index
 published articles. Tenant candidates are discovered through a bounded,
 least-privilege worker function; article reads and writes run inside
-`dbx.WithOrgTx`. To exercise this route from the Vite widget, pair it with
-`CHASTE_GO_SUPPORT_PUBLIC_ROUTE=1`; the proxy selects only the exact widget
-endpoint and preserves request methods, bodies, cookies, query parameters, and
-streamed responses. Both route flags and the embedding worker default to off,
-so production route ownership stays unchanged unless both route flags are
-deliberately enabled. Set `GO_SUPPORT_TRUSTED_PROXY_CIDRS` only to trusted
+`dbx.WithOrgTx`. The Vite proxy sends widget requests to Go by default and
+selects only the exact widget endpoint. The API route and Vite proxy are
+independent processes, so unmounting the API route returns an unavailable
+response from Go rather than falling back to the legacy app. Set
+`GO_SUPPORT_TRUSTED_PROXY_CIDRS` only to trusted
 reverse proxy networks; forwarded addresses from other peers are ignored.
 
 When Go auth is enabled, the Vite development proxy sends every method and path
@@ -727,9 +726,10 @@ GET selectors. Set both
 handler during local rollback. Vite's selectors apply only to its development
 server; production reverse-proxy ownership is configured separately. Go also
 implements the work brief at
-`POST /api/my-work/summarize` behind `GO_MY_WORK_SUMMARY_ROUTE=1`. Its paired
-Vite method/path selector is pending; leave `CHASTE_GO_MY_WORK_SUMMARY_ROUTE=0`
-until that selector is wired. The handler uses the authenticated user's own
+`POST /api/my-work/summarize` behind `GO_MY_WORK_SUMMARY_ROUTE=1`. The paired
+Vite method/path selector is enabled by default when
+`CHASTE_GO_MY_WORK_SUMMARY_ROUTE=1`, and selects only that exact POST route.
+The handler uses the authenticated user's own
 default OpenCode connection with tools disabled, or the same user's isolated
 Codex home and read-only CLI mode. Codex requires a persistent home shared with
 the connection setup runtime. Missing runtimes, unsupported providers, and
