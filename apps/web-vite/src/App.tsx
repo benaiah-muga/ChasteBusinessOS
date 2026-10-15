@@ -250,7 +250,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
         <PageErrorBoundary key={pathname}>
           <Suspense fallback={<main className="auth-wait" role="status">Loading workspace page…</main>}>
             {approvalsPage
-              ? <ApprovalsPage key={organizationRevision} baseCurrency={baseCurrency} />
+              ? <ApprovalsPage key={organizationRevision} baseCurrency={baseCurrency} organizationId={activeOrgId} />
               : ledgerPage
                 ? <LedgerPage key={organizationRevision} />
                 : sessionsPage

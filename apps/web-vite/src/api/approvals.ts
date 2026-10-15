@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const OrganizationIdSchema = z.string().uuid();
+
 const ApprovalSchema = z.object({
   id: z.string().uuid(),
   orgId: z.string().uuid(),
@@ -46,6 +48,7 @@ const ErrorResponseSchema = z.object({
 
 export type Approval = z.infer<typeof ApprovalSchema>;
 export type ApprovalList = z.infer<typeof ApprovalListSchema>;
+export type ApprovalDecision = z.infer<typeof DecisionResponseSchema>;
 
 export class ApprovalApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -95,12 +98,22 @@ async function errorMessage(response: Response): Promise<string> {
       : "The approval request could not be completed. Try again.";
 }
 
-export async function fetchApprovals(signal?: AbortSignal): Promise<ApprovalList> {
+function normalizedOrganizationId(organizationId: string | null | undefined): string {
+  const normalized = organizationId?.trim() ?? "";
+  if (!OrganizationIdSchema.safeParse(normalized).success) {
+    throw new ApprovalApiError(0, "Wait for the active organization to finish loading before viewing approvals.");
+  }
+  return normalized;
+}
+
+export async function fetchApprovals(organizationId: string | null | undefined, signal?: AbortSignal): Promise<ApprovalList> {
+  const orgId = normalizedOrganizationId(organizationId);
   let response: Response;
   try {
     response = await fetch("/api/approvals", {
       credentials: "same-origin",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "X-Organization-ID": orgId },
+      cache: "no-store",
       signal: requestSignal(signal),
     });
   } catch (error) {
@@ -111,17 +124,24 @@ export async function fetchApprovals(signal?: AbortSignal): Promise<ApprovalList
   if (!response.ok) throw new ApprovalApiError(response.status, await errorMessage(response));
   const parsed = ApprovalListSchema.safeParse(await parseJson(response));
   if (!parsed.success) throw new ApprovalApiError(response.status, "The approvals service returned data in an unexpected format.");
+  if ([...parsed.data.approvals, ...parsed.data.history].some((approval) => approval.orgId !== orgId)) {
+    throw new ApprovalApiError(response.status, "The approvals service returned data for a different organization.");
+  }
   return parsed.data;
 }
 
-export async function submitApprovalDecision(id: string, decision: "approve" | "reject"): Promise<void> {
+export async function submitApprovalDecision(id: string, decision: "approve" | "reject", organizationId: string | null | undefined): Promise<ApprovalDecision> {
+  const orgId = normalizedOrganizationId(organizationId);
+  if (!z.string().uuid().safeParse(id).success) {
+    throw new ApprovalApiError(0, "This approval has an invalid identifier. Refresh the list before deciding.");
+  }
   const query = new URLSearchParams({ id });
   let response: Response;
   try {
     response = await fetch(`/api/approvals?${query.toString()}`, {
       method: "POST",
       credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": orgId },
       body: JSON.stringify({ decision }),
       signal: requestSignal(undefined, 20_000),
     });
@@ -132,4 +152,5 @@ export async function submitApprovalDecision(id: string, decision: "approve" | "
   if (!response.ok) throw new ApprovalApiError(response.status, await errorMessage(response));
   const parsed = DecisionResponseSchema.safeParse(await parseJson(response));
   if (!parsed.success) throw new ApprovalApiError(response.status, "The approvals service returned an unexpected decision response.");
+  return parsed.data;
 }

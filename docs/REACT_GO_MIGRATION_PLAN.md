@@ -4948,3 +4948,15 @@ new owners and the manifest shows zero legacy runtime paths.
      matching the maximum encoding of 1000 UTF-16-unit plaintext. Focused
      handler tests post a maximum CJK key, pass the encrypted configuration
      through the capability parser, and decrypt it back to the original value.
+
+464. (Focused verified) Vite Approvals now reads and submits through Go's
+     session-owned routes with explicit organization scope, strict response
+     validation, and stale-load suppression. Completed decisions leave the
+     actionable inbox immediately, including when the refresh read fails, and
+     follow-on approvals are not reported as executed. Vite Dashboard keeps
+     work queue failures visible instead of presenting a false empty state.
+
+465. (Focused verified) Go routine and public support consumers validate
+     stored AI configuration through the bounded parser and reject malformed
+     or oversized organization settings before using provider credentials.
+     Focused worker and public support parser tests pass in Docker.

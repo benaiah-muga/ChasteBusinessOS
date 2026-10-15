@@ -32,13 +32,14 @@ import (
 )
 
 const (
-	publicSupportBodyLimit    = 16 << 10
-	publicSupportMessageMax   = 2000
-	publicSupportWindow       = time.Minute
-	publicSupportPollLimit    = 120
-	publicSupportWriteLimit   = 12
-	publicSupportIngressLimit = 600
-	publicSupportRatePrefix   = "go-support-public-rate-v1:"
+	publicSupportBodyLimit              = 16 << 10
+	publicSupportMessageMax             = 2000
+	publicSupportWindow                 = time.Minute
+	publicSupportPollLimit              = 120
+	publicSupportWriteLimit             = 12
+	publicSupportIngressLimit           = 600
+	publicSupportRatePrefix             = "go-support-public-rate-v1:"
+	publicSupportStoredAIConfigMaxBytes = 16 << 10
 )
 
 var supportUUIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -519,6 +520,41 @@ type publicSupportAIConfig struct {
 	EncryptedAPIKey *string `json:"encryptedApiKey"`
 }
 
+func parseStoredPublicSupportAIConfig(raw []byte) (publicSupportAIConfig, bool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return publicSupportAIConfig{}, false, nil
+	}
+	if len(trimmed) > publicSupportStoredAIConfigMaxBytes {
+		return publicSupportAIConfig{}, true, errors.New("stored workspace model provider configuration exceeds size limit")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &fields); err != nil || fields == nil {
+		return publicSupportAIConfig{}, true, errors.New("stored workspace model provider configuration is invalid")
+	}
+	var config publicSupportAIConfig
+	if rawOwner, ok := fields["codingAgentUserId"]; ok {
+		if err := json.Unmarshal(rawOwner, &config.CodingAgentUserID); err != nil || !isUUID(config.CodingAgentUserID) {
+			return publicSupportAIConfig{}, true, errors.New("configured support coding-agent owner is invalid")
+		}
+	}
+	if _, hasProvider := fields["provider"]; !hasProvider {
+		if config.CodingAgentUserID != "" && len(fields) == 1 {
+			return config, true, nil
+		}
+		return publicSupportAIConfig{}, true, errors.New("stored workspace model provider configuration is invalid")
+	}
+	parsed, err := parsePublicAIConfig(trimmed)
+	if err != nil || parsed == nil {
+		return publicSupportAIConfig{}, true, errors.New("stored workspace model provider configuration is invalid")
+	}
+	config.Provider = parsed.Provider
+	config.BaseURL = parsed.BaseURL
+	config.Models.Primary = parsed.Models.Primary
+	config.EncryptedAPIKey = parsed.EncryptedAPIKey
+	return config, true, nil
+}
+
 type publicSupportCompletion struct {
 	Choices []struct {
 		Message struct {
@@ -665,23 +701,23 @@ func completePublicSupportDraft(
 }
 
 func (h *supportPublicHandler) draftAutoReply(ctx context.Context, orgID, conversationID string) (string, error) {
-	var config publicSupportAIConfig
+	var configRaw []byte
+	var configSize int
 	var transcript []publicSupportTranscriptMessage
-	storedConfig := false
+	var rootSettingsType string
 	_, err := dbx.WithOrgTx(ctx, h.pool, orgID, func(tx pgx.Tx) (struct{}, error) {
-		var settings []byte
-		if err := tx.QueryRow(ctx, `SELECT settings FROM organizations WHERE id = $1::uuid`, orgID).Scan(&settings); err != nil {
+		if err := tx.QueryRow(ctx, `
+			SELECT jsonb_typeof(settings),
+			       CASE WHEN octet_length((settings->'ai')::text) > $2 THEN NULL ELSE settings->'ai' END,
+			       COALESCE(octet_length((settings->'ai')::text), 0)
+			FROM organizations WHERE id = $1::uuid`, orgID, publicSupportStoredAIConfigMaxBytes).Scan(&rootSettingsType, &configRaw, &configSize); err != nil {
 			return struct{}{}, err
 		}
-		var orgSettings struct {
-			AI *publicSupportAIConfig `json:"ai"`
+		if rootSettingsType != "object" && rootSettingsType != "null" {
+			return struct{}{}, errors.New("stored organization settings are invalid")
 		}
-		if err := json.Unmarshal(settings, &orgSettings); err != nil {
-			return struct{}{}, err
-		}
-		if orgSettings.AI != nil {
-			storedConfig = true
-			config = *orgSettings.AI
+		if configSize > publicSupportStoredAIConfigMaxBytes {
+			return struct{}{}, errors.New("stored workspace model provider configuration exceeds size limit")
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT sender_type, body FROM support_messages
@@ -706,6 +742,10 @@ func (h *supportPublicHandler) draftAutoReply(ctx context.Context, orgID, conver
 		}
 		return struct{}{}, nil
 	})
+	if err != nil {
+		return "", err
+	}
+	config, storedConfig, err := parseStoredPublicSupportAIConfig(configRaw)
 	if err != nil {
 		return "", err
 	}

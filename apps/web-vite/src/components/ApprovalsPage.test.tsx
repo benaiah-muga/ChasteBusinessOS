@@ -70,7 +70,7 @@ function approvalsResponse(approvals: unknown[] = [pending], history: unknown[] 
 describe("Vite approvals page", () => {
   it("shows pending decisions and history while redacting sensitive payload values", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => approvalsResponse()));
-    render(<ApprovalsPage baseCurrency="USD" />);
+    render(<ApprovalsPage baseCurrency="USD" organizationId={organizationId} />);
 
     expect(await screen.findByRole("heading", { name: "Approvals" })).not.toBeNull();
     expect(await screen.findByText(/A payment needs a human review\./)).not.toBeNull();
@@ -106,7 +106,7 @@ describe("Vite approvals page", () => {
     expect(details?.textContent).not.toContain("also-secret");
   });
 
-  it("approves through the legacy endpoint and reloads the decision history", async () => {
+  it("approves through the Go endpoint and reloads the decision history", async () => {
     let listReads = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
@@ -121,7 +121,7 @@ describe("Vite approvals page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<ApprovalsPage />);
+    render(<ApprovalsPage organizationId={organizationId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Approve & execute/ }));
 
@@ -135,6 +135,7 @@ describe("Vite approvals page", () => {
     const post = fetchMock.mock.calls.find(([input]) => String(input).startsWith("/api/approvals?"));
     expect(post?.[0]).toBe(`/api/approvals?id=${pendingApprovalId}`);
     expect(JSON.parse(String((post?.[1] as RequestInit).body))).toMatchObject({ decision: "approve" });
+    expect(new Headers((post?.[1] as RequestInit).headers).get("X-Organization-ID")).toBe(organizationId);
   });
 
   it("does not claim an action executed after a 422 response and keeps it pending", async () => {
@@ -146,7 +147,7 @@ describe("Vite approvals page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<ApprovalsPage />);
+    render(<ApprovalsPage organizationId={organizationId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Approve & execute/ }));
 
@@ -170,7 +171,7 @@ describe("Vite approvals page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<ApprovalsPage />);
+    render(<ApprovalsPage organizationId={organizationId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
 
@@ -182,18 +183,71 @@ describe("Vite approvals page", () => {
     await waitFor(() => expect(listReads).toBe(2));
   });
 
-  it("shows a recoverable load error and retries the legacy read endpoint", async () => {
+  it("shows a recoverable load error and retries the Go read endpoint", async () => {
     let reads = 0;
     const fetchMock = vi.fn(async () => {
       reads += 1;
       return reads === 1 ? new Response(null, { status: 503 }) : approvalsResponse([], []);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<ApprovalsPage />);
+    render(<ApprovalsPage organizationId={organizationId} />);
 
     expect(await screen.findByText("The approvals service is unavailable. Try again.")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "Inbox zero" })).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not claim execution when Go returns an approved follow-on action", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/approvals") return approvalsResponse();
+      if (init?.method === "POST") return Response.json({ ok: true, status: "approved", result: { ok: false, pendingApproval: true } });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ApprovalsPage organizationId={organizationId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Approve & execute/ }));
+
+    expect(await screen.findByText("Approved. The follow-on action is waiting for another approval.")).not.toBeNull();
+    expect(screen.queryByRole("link", { name: "View in the ledger" })).toBeNull();
+  });
+
+  it("removes a completed decision from the actionable inbox when its refresh fails", async () => {
+    let listReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/approvals") {
+        listReads += 1;
+        return listReads === 1 ? approvalsResponse() : new Response(null, { status: 503 });
+      }
+      if (init?.method === "POST") return Response.json({ ok: true, status: "executed", result: { ok: true } });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ApprovalsPage organizationId={organizationId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Approve & execute/ }));
+
+    expect(await screen.findByText("Approved and executed, the result is in the ledger.")).not.toBeNull();
+    expect(await screen.findByText("The approvals service is unavailable. Try again.")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve & execute/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+  });
+
+  it("does not display the previous organization's approvals after a scope change", async () => {
+    const otherOrganizationId = "4a147d76-91f0-44ea-85ad-86ae4cac8e31";
+    let resolveFirst: ((response: Response) => void) | undefined;
+    const firstRead = new Promise<Response>((resolve) => { resolveFirst = resolve; });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const requestedOrgId = new Headers(init?.headers).get("X-Organization-ID");
+      if (requestedOrgId === organizationId) return firstRead;
+      return Response.json({ approvals: [], history: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<ApprovalsPage organizationId={organizationId} />);
+    rerender(<ApprovalsPage organizationId={otherOrganizationId} />);
+    expect(await screen.findByRole("heading", { name: "Inbox zero" })).not.toBeNull();
+    resolveFirst?.(approvalsResponse());
+    await waitFor(() => expect(screen.queryByText(/A payment needs a human review\./)).toBeNull());
   });
 });

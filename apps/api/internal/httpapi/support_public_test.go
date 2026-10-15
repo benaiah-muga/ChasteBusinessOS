@@ -217,3 +217,40 @@ func TestSupportPublicProviderKeyRejectsMalformedCiphertext(t *testing.T) {
 		t.Fatal("malformed encrypted provider key was accepted")
 	}
 }
+
+func TestParseStoredPublicSupportAIConfigValidatesAndBoundsSnapshot(t *testing.T) {
+	const codingAgentUserID = "b9a1dd58-e5d4-4f76-bff7-7b9f7fa5f5ec"
+	valid := []byte(`{"provider":"openai","baseUrl":"https://api.openai.com/v1","models":{"primary":"primary-model","fast":"fast-model","reasoning":"reasoning-model","embeddings":"embedding-model"},"encryptedApiKey":null,"keyHint":"legacy hint","updatedAt":"2026-01-01T00:00:00Z","codingAgentUserId":"` + codingAgentUserID + `"}`)
+	config, present, err := parseStoredPublicSupportAIConfig(valid)
+	if err != nil || !present || config.Provider != "openai" || config.Models.Primary != "primary-model" || config.CodingAgentUserID != codingAgentUserID {
+		t.Fatalf("parsed config=%+v present=%v err=%v", config, present, err)
+	}
+
+	ownerOnly, present, err := parseStoredPublicSupportAIConfig([]byte(`{"codingAgentUserId":"` + codingAgentUserID + `"}`))
+	if err != nil || !present || ownerOnly.CodingAgentUserID != codingAgentUserID {
+		t.Fatalf("owner-only config=%+v present=%v err=%v", ownerOnly, present, err)
+	}
+
+	for _, test := range []struct {
+		name string
+		raw  []byte
+	}{
+		{name: "malformed", raw: []byte(`{"provider":"openai"}`)},
+		{name: "wrong shape", raw: []byte(`[]`)},
+		{name: "trailing JSON", raw: append(append([]byte(nil), valid...), []byte(` {}`)...)},
+		{name: "invalid coding-agent owner", raw: []byte(`{"codingAgentUserId":"not-a-uuid"}`)},
+		{name: "oversized", raw: []byte(`{"payload":"` + strings.Repeat("x", publicSupportStoredAIConfigMaxBytes) + `"}`)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, present, err := parseStoredPublicSupportAIConfig(test.raw); err == nil || !present {
+				t.Fatalf("malformed stored config present=%v err=%v, want fail closed", present, err)
+			}
+		})
+	}
+	if _, present, err := parseStoredPublicSupportAIConfig(nil); err != nil || present {
+		t.Fatalf("missing config present=%v err=%v, want absent without error", present, err)
+	}
+	if _, present, err := parseStoredPublicSupportAIConfig([]byte("null")); err != nil || present {
+		t.Fatalf("null config present=%v err=%v, want absent without error", present, err)
+	}
+}

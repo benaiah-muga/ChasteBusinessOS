@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApprovalApiError, fetchApprovals, submitApprovalDecision, type Approval, type ApprovalList } from "../api/approvals";
 import "./ApprovalsPage.css";
 
@@ -224,54 +224,74 @@ function RecentDecisions({ history }: { history: Approval[] }) {
   );
 }
 
-export function ApprovalsPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
-  const [list, setList] = useState<ApprovalList | null>(null);
+export function ApprovalsPage({ baseCurrency = null, organizationId = null }: { baseCurrency?: string | null; organizationId?: string | null }) {
+  const [list, setList] = useState<{ organizationId: string; data: ApprovalList } | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const listRequestGeneration = useRef(0);
+  const currentOrganizationId = useRef(organizationId);
+  currentOrganizationId.current = organizationId?.trim() || null;
   const currency = useMemo(() => currencyFor(baseCurrency), [baseCurrency]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const scope = organizationId?.trim() ?? "";
+    if (scope !== (currentOrganizationId.current?.trim() ?? "")) return;
+    const generation = ++listRequestGeneration.current;
     setLoadError(null);
     setLoading(true);
     try {
-      const result = await fetchApprovals(signal);
-      if (!signal?.aborted) setList(result);
+      const result = await fetchApprovals(organizationId, signal);
+      if (!signal?.aborted && generation === listRequestGeneration.current && currentOrganizationId.current === scope) {
+        setList({ organizationId: scope, data: result });
+      }
     } catch (error) {
-      if (!signal?.aborted) setLoadError(friendlyError(error));
+      if (!signal?.aborted && generation === listRequestGeneration.current && currentOrganizationId.current === scope) setLoadError(friendlyError(error));
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && generation === listRequestGeneration.current && currentOrganizationId.current === scope) setLoading(false);
     }
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
+    setList(null);
+    setNotice(null);
+    setBusyId(null);
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [load, organizationId]);
 
   async function decide(id: string, decision: "approve" | "reject") {
+    const scope = organizationId;
     setBusyId(id);
     setNotice(null);
     try {
-      await submitApprovalDecision(id, decision);
-      setNotice({
-        tone: "success",
-        message: decision === "approve"
-          ? "Approved and executed, the result is in the ledger."
-          : "Rejected. The action was not executed and the decision is on record.",
-        linkToLedger: decision === "approve",
-      });
+      const result = await submitApprovalDecision(id, decision, scope);
+      if (currentOrganizationId.current === scope) {
+        setList((current) => current?.organizationId === scope
+          ? { ...current, data: { ...current.data, approvals: current.data.approvals.filter((approval) => approval.id !== id) } }
+          : current);
+        setNotice({
+          tone: "success",
+          message: decision === "reject"
+            ? "Rejected. The action was not executed and the decision is on record."
+            : result.status === "executed"
+              ? "Approved and executed, the result is in the ledger."
+              : "Approved. The follow-on action is waiting for another approval.",
+          linkToLedger: decision === "approve" && result.status === "executed",
+        });
+      }
     } catch (error) {
-      setNotice({ tone: "error", message: friendlyError(error) });
+      if (currentOrganizationId.current === scope) setNotice({ tone: "error", message: friendlyError(error) });
     }
-    await load();
-    setBusyId(null);
+    if (currentOrganizationId.current === scope) await load();
+    if (currentOrganizationId.current === scope) setBusyId(null);
   }
 
-  const approvals = list?.approvals ?? [];
-  const history = list?.history ?? [];
+  const scopedList = list?.organizationId === (organizationId?.trim() ?? "") ? list.data : null;
+  const approvals = scopedList?.approvals ?? [];
+  const history = scopedList?.history ?? [];
 
   return (
     <main className="approvals-page" aria-labelledby="approvals-title">
@@ -281,7 +301,7 @@ export function ApprovalsPage({ baseCurrency = null }: { baseCurrency?: string |
           <h1 id="approvals-title">Approvals</h1>
           <p>Actions that need human authority, money above thresholds, identity changes, destructive operations. Nothing executes until you decide.</p>
         </div>
-        {list && approvals.length > 0 && <span className="approval-waiting-count">{approvals.length} waiting</span>}
+        {scopedList && approvals.length > 0 && <span className="approval-waiting-count">{approvals.length} waiting</span>}
       </header>
 
       {notice && <div className={`approval-notice approval-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
@@ -289,7 +309,7 @@ export function ApprovalsPage({ baseCurrency = null }: { baseCurrency?: string |
       </div>}
 
       {loadError && <div className="approval-load-error" role="alert"><span>{loadError}</span><button type="button" onClick={() => void load()}>Try again</button></div>}
-      {loading && !list ? <p className="approval-loading" role="status">Loading approvals…</p> : list ? (
+      {loading && !scopedList ? <p className="approval-loading" role="status">Loading approvals…</p> : scopedList ? (
         <>
           {approvals.length === 0
             ? <section className="approval-empty"><span aria-hidden="true">✓</span><h2>Inbox zero</h2><p>The agent is within policy, nothing is waiting on your authority.</p></section>

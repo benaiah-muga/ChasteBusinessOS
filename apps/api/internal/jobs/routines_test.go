@@ -548,6 +548,36 @@ func TestStoredProviderConfigDoesNotFallBackToGlobalCredential(t *testing.T) {
 	}
 }
 
+func TestParseRoutineStoredAIConfigValidatesAndBoundsSnapshot(t *testing.T) {
+	valid := []byte(`{"provider":"openai","baseUrl":"https://api.openai.com/v1","models":{"primary":"primary-model","fast":"fast-model","reasoning":"reasoning-model","embeddings":"embedding-model"},"encryptedApiKey":"v1:nonce:tag:ciphertext","keyHint":"••••key","updatedAt":"2026-01-01T00:00:00Z"}`)
+	config, present, err := parseRoutineStoredAIConfig(valid)
+	if err != nil || !present || config.Provider != "openai" || config.Models.Primary != "primary-model" || config.APIKey == nil || *config.APIKey != "v1:nonce:tag:ciphertext" {
+		t.Fatalf("parsed config=%+v present=%v err=%v", config, present, err)
+	}
+
+	for _, test := range []struct {
+		name string
+		raw  []byte
+	}{
+		{name: "malformed", raw: []byte(`{"provider":"openai"}`)},
+		{name: "wrong shape", raw: []byte(`[]`)},
+		{name: "trailing JSON", raw: append(append([]byte(nil), valid...), []byte(` {}`)...)},
+		{name: "oversized", raw: []byte(`{"payload":"` + strings.Repeat("x", routineStoredAIConfigMaxBytes) + `"}`)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, present, err := parseRoutineStoredAIConfig(test.raw); err == nil || !present {
+				t.Fatalf("malformed stored config present=%v err=%v, want fail closed", present, err)
+			}
+		})
+	}
+	if _, present, err := parseRoutineStoredAIConfig(nil); err != nil || present {
+		t.Fatalf("missing config present=%v err=%v, want absent without error", present, err)
+	}
+	if _, present, err := parseRoutineStoredAIConfig([]byte("null")); err != nil || present {
+		t.Fatalf("null config present=%v err=%v, want absent without error", present, err)
+	}
+}
+
 func TestRoutineProviderUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {

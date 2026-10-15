@@ -67,10 +67,14 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Documents can delete ingested records through Go with confirmation and scope-pinned exact-retry recovery.
 - Vite Accounting can match bank lines to exact remaining payments or whole journal entries through Go.
 - Vite Support can insert organization-scoped saved replies into inbox drafts without sending them.
+- Vite Approvals reads and submits decisions through the Go session routes with explicit organization scope and strict response validation.
 
 ### Fixed
 
 - Go AI settings now count input limits in JavaScript-compatible UTF-16 units and accept the full encrypted representation of a maximum-length provider key.
+- Go routine and public support workers validate stored AI configuration with a bounded parser and fail closed on malformed settings.
+- Vite Approvals removes completed decisions from its actionable inbox immediately, including when the follow-up read is unavailable, and distinguishes follow-on approvals from executed actions.
+- Vite Dashboard keeps a failed Go work queue visibly unavailable instead of displaying a false empty state.
 - Go Messaging presence reads now require `messaging.read` and an enabled Messaging module. Go Documents editor workspace reads require `documents.read`, all workspace operations require `documents.write`, and assistant actions enforce the appropriate Documents permission and module state before accessing workspace data or AI services.
 - Vite CRM now gives actionable sign-in and permission messages for Go 401 and 403 responses instead of displaying raw authorization codes.
 - Vite CRM binds every read and write to the active organization, rejects missing or malformed organization IDs before sending, and hides old-organization CRM data while the next scope loads.

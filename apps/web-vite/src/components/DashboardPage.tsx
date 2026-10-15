@@ -288,14 +288,22 @@ function SetupChecklist({
 function NeedsYou({ data, count, currency }: { data: DashboardData; count: number; currency: CurrencyStyle }) {
   const items: { key: string; text: string; href: string; action: string; level: "high" | "medium" | "low" }[] = [];
   const [workCards, setWorkCards] = useState<WorkCard[] | null>(null);
+  const [workQueueState, setWorkQueueState] = useState<"loading" | "ready" | "unavailable">("loading");
   const [brief, setBrief] = useState<string | null>(null);
   const [briefState, setBriefState] = useState<"idle" | "loading" | "unavailable">("idle");
 
   useEffect(() => {
     const controller = new AbortController();
     void fetchMyWork(controller.signal)
-      .then((cards) => { if (!controller.signal.aborted) setWorkCards(cards); })
-      .catch(() => { if (!controller.signal.aborted) setWorkCards([]); });
+      .then((cards) => {
+        if (!controller.signal.aborted) {
+          setWorkCards(cards);
+          setWorkQueueState("ready");
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setWorkQueueState("unavailable");
+      });
     return () => controller.abort();
   }, []);
 
@@ -339,16 +347,18 @@ function NeedsYou({ data, count, currency }: { data: DashboardData; count: numbe
       <div className="section-heading">
         <p className="section-kicker">Needs you {queueCount > 0 && <span className="attention-count">{queueCount}</span>}</p>
         <div className="needs-you-actions">
-          {items.length === 0 && <span className="quiet-state">All clear</span>}
-          <button className="brief-button" type="button" onClick={() => void summarize()} disabled={!workCards || workCards.length === 0 || briefState === "loading"}>
+          {items.length === 0 && workQueueState === "ready" && <span className="quiet-state">All clear</span>}
+          <button className="brief-button" type="button" onClick={() => void summarize()} disabled={workQueueState !== "ready" || !workCards?.length || briefState === "loading"}>
             {briefState === "loading" ? "Summarizing…" : "Brief me"}
           </button>
         </div>
       </div>
       {brief && <p className={`work-brief ${briefState === "unavailable" ? "work-brief-unavailable" : ""}`} role={briefState === "unavailable" ? "status" : undefined}>{brief}</p>}
-      {items.length === 0
+      {items.length === 0 && workQueueState === "ready"
         ? <div className="empty-attention"><span aria-hidden="true">✳</span><p>Nothing needs you right now.<br />The business is running itself.</p></div>
-        : <ol className="attention-list">{items.map((item) => <li key={item.key}><a href={dashboardHref(item.href)}><i className={`attention-dot attention-${item.level}`} /><span>{item.text}</span><strong>{item.action} <span aria-hidden="true">›</span></strong></a></li>)}</ol>}
+        : items.length > 0 && <ol className="attention-list">{items.map((item) => <li key={item.key}><a href={dashboardHref(item.href)}><i className={`attention-dot attention-${item.level}`} /><span>{item.text}</span><strong>{item.action} <span aria-hidden="true">›</span></strong></a></li>)}</ol>}
+      {workQueueState === "loading" && <p className="setup-unavailable" role="status">Loading your ranked work queue…</p>}
+      {workQueueState === "unavailable" && <p className="setup-unavailable" role="status">Your ranked work queue could not load. Other dashboard items are still available.</p>}
     </section>
   );
 }

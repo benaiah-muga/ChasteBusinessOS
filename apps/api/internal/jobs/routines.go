@@ -25,6 +25,8 @@ import (
 
 const routineJobType = "routines.executeRoutine"
 
+const routineStoredAIConfigMaxBytes = 16 << 10
+
 type routineAgent struct {
 	db       dbx.Beginner
 	executor SystemCapabilityExecutor
@@ -152,20 +154,33 @@ func (a *routineAgent) loadRoutine(ctx context.Context, orgID, id string) (routi
 
 func (a *routineAgent) loadConfig(ctx context.Context, orgID string) (routineConfig, error) {
 	var settings []byte
+	var configSize int
+	var settingsType string
 	if err := routineTx(ctx, a.db, orgID, func(txCtx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(txCtx, `SELECT settings FROM organizations WHERE id=$1::uuid`, orgID).Scan(&settings)
+		return tx.QueryRow(txCtx, `
+			SELECT jsonb_typeof(settings),
+			       CASE WHEN octet_length((settings->'ai')::text) > $2 THEN NULL ELSE settings->'ai' END,
+			       COALESCE(octet_length((settings->'ai')::text), 0)
+			FROM organizations WHERE id=$1::uuid`, orgID, routineStoredAIConfigMaxBytes).Scan(&settingsType, &settings, &configSize)
 	}); err != nil {
 		return routineConfig{}, err
 	}
-	var stored struct {
-		AI *routineConfig `json:"ai"`
+	if settingsType != "object" && settingsType != "null" {
+		return routineConfig{}, errors.New("stored organization settings are invalid")
 	}
-	_ = json.Unmarshal(settings, &stored)
-	if c := stored.AI; c != nil && c.Provider != "" && c.BaseURL != "" && c.Models.Primary != "" {
-		if err := decryptStoredProviderKey(c); err != nil {
+	if configSize > routineStoredAIConfigMaxBytes {
+		return routineConfig{}, errors.New("stored workspace model provider configuration exceeds size limit")
+	}
+	storedConfig, present, err := parseRoutineStoredAIConfig(settings)
+	if err != nil {
+		return routineConfig{}, err
+	}
+	if present {
+		c := storedConfig
+		if err := decryptStoredProviderKey(&c); err != nil {
 			return routineConfig{}, err
 		}
-		return *c, nil
+		return c, nil
 	}
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv("MODEL_PROVIDER")))
 	if provider == "" {
@@ -180,6 +195,23 @@ func (a *routineAgent) loadConfig(ctx context.Context, orgID string) (routineCon
 	c := routineConfig{Provider: provider, BaseURL: strings.TrimRight(base, "/"), APIKey: &key}
 	c.Models.Primary = model
 	return c, nil
+}
+
+func parseRoutineStoredAIConfig(raw []byte) (routineConfig, bool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return routineConfig{}, false, nil
+	}
+	if len(trimmed) > routineStoredAIConfigMaxBytes {
+		return routineConfig{}, true, errors.New("stored workspace model provider configuration exceeds size limit")
+	}
+	config, err := capability.ParseStoredAIProviderConfig(json.RawMessage(trimmed))
+	if err != nil || config == nil {
+		return routineConfig{}, true, errors.New("stored workspace model provider configuration is invalid")
+	}
+	result := routineConfig{Provider: config.Provider, BaseURL: config.BaseURL, APIKey: config.EncryptedAPIKey}
+	result.Models.Primary = config.Models.Primary
+	return result, true, nil
 }
 
 func decryptStoredProviderKey(config *routineConfig) error {

@@ -49,7 +49,7 @@ describe("Vite home dashboard", () => {
     expect(screen.getByRole("region", { name: "Recent ledger activity" })).not.toBeNull();
   });
 
-  it("shows a recoverable dashboard failure and retries the legacy API", async () => {
+  it("shows a recoverable dashboard failure and retries the Go-backed route on request", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === "/api/dashboard" && fetchMock.mock.calls.filter(([path]) => String(path) === "/api/dashboard").length === 1) {
         return new Response(null, { status: 503 });
@@ -67,6 +67,31 @@ describe("Vite home dashboard", () => {
       credentials: "same-origin",
       headers: { accept: "application/json" },
     }));
+    expect(fetchMock.mock.calls.filter(([path]) => String(path).startsWith("/api/dashboard"))).toHaveLength(2);
+  });
+
+  it("keeps Go work queue failures visible instead of showing a false empty state", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/my-work") return new Response(null, { status: 503 });
+      if (String(input) === "/api/dashboard") {
+        return Response.json({
+          ...dashboardFixture,
+          signals: [],
+          workingCapital: { ...dashboardFixture.workingCapital, overdueCount: 0, overdueAmountMinor: 0, apOutstandingMinor: 0 },
+          ops: { ...dashboardFixture.ops, pendingLeave: 0, lowStock: [], pendingApprovals: 0 },
+        });
+      }
+      return responseFor(String(input));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DashboardPage />);
+
+    const workError = await screen.findByText(/Your ranked work queue could not load\./);
+    expect(workError.getAttribute("role")).toBe("status");
+    expect(screen.queryByText("Nothing needs you right now.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Brief me" }).hasAttribute("disabled")).toBe(true);
+    expect(fetchMock.mock.calls.filter(([path]) => String(path) === "/api/my-work")).toHaveLength(1);
   });
 
   it("links workspace setup failures to Vite onboarding", async () => {
