@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
@@ -23,12 +24,7 @@ type NotificationReadHandler struct {
 	trustedProxyCIDRs []*net.IPNet
 }
 
-type notificationReadRequest struct {
-	ID       string `json:"id"`
-	IntentID string `json:"intentId,omitempty"`
-}
-
-// NewNotificationReadHandler handles the legacy POST /api/notifications mark-read contract.
+// NewNotificationReadHandler handles POST /api/notifications mark-read requests.
 func NewNotificationReadHandler(resolver DirectCapabilitySessionResolver, executor CapabilityExecutor, logger *slog.Logger, trustedProxyCIDRs ...[]*net.IPNet) http.Handler {
 	var trusted []*net.IPNet
 	if len(trustedProxyCIDRs) > 0 {
@@ -75,8 +71,9 @@ func (h *NotificationReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	r.Body = http.MaxBytesReader(w, r.Body, notificationReadBodyLimit)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	var body notificationReadRequest
-	if decoder.Decode(&body) != nil || !isUUID(body.ID) || len(body.IntentID) > 200 || strings.ContainsAny(body.IntentID, "\r\n\x00") {
+	var body businesscontract.NotificationReadRequest
+	if decoder.Decode(&body) != nil || !isUUID(body.Id) ||
+		(body.IntentId != nil && (len(*body.IntentId) > 200 || strings.ContainsAny(*body.IntentId, "\r\n\x00"))) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
@@ -87,7 +84,7 @@ func (h *NotificationReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 	input, err := json.Marshal(struct {
 		ID string `json:"id"`
-	}{ID: body.ID})
+	}{ID: body.Id})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
@@ -101,7 +98,10 @@ func (h *NotificationReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	claims := authbridge.CapabilityClaims{
 		Audience: "go.capability.execute", Subject: resolved.UserID, OrganizationID: *resolved.OrgID,
 		CapabilityID: "notifications.markRead", InputSHA256: inputHash, ActorID: &actorID,
-		ActorType: "human", AuthSessionID: resolved.AuthSessionID, IntentID: body.IntentID,
+		ActorType: "human", AuthSessionID: resolved.AuthSessionID,
+	}
+	if body.IntentId != nil {
+		claims.IntentID = *body.IntentId
 	}
 	result, err := h.executor.Execute(r.Context(), claims, claims.CapabilityID, input)
 	if err != nil {
@@ -119,7 +119,7 @@ func (h *NotificationReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !result.OK {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": result.Error})
+		writeJSON(w, http.StatusUnprocessableEntity, businesscontract.NotificationReadFailure{Error: result.Error})
 		return
 	}
 	var outcome struct {
@@ -133,7 +133,7 @@ func (h *NotificationReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, businesscontract.NotificationReadSuccess{Ok: businesscontract.NotificationReadSuccessOkTrue})
 }
 
 func (h *NotificationReadHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, bool, bool) {

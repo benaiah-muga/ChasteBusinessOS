@@ -1,10 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchNotifications, NotificationsApiError, safeNotificationHref } from "../api/notifications";
+import { fetchNotifications, markNotificationRead, NotificationsApiError, safeNotificationHref } from "../api/notifications";
 import { NotificationsBell } from "./NotificationsBell";
 
 const row = {
-  id: "notice-1",
+  id: "44444444-4444-4444-8444-444444444444",
   kind: "approval",
   title: "An approval needs your attention",
   href: "/approvals?state=pending",
@@ -41,6 +41,21 @@ describe("notifications API client", () => {
     expect(safeNotificationHref("https://evil.example/path")).toBeNull();
     expect(safeNotificationHref(null)).toBeNull();
   });
+
+  it("validates the generated mark-read success envelope", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(markNotificationRead(row.id)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith("/api/notifications", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ id: row.id }),
+    }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false })));
+    await expect(markNotificationRead(row.id)).rejects.toMatchObject({
+      message: "The notifications service returned data in an unexpected format.",
+    });
+  });
 });
 
 describe("NotificationsBell", () => {
@@ -55,7 +70,7 @@ describe("NotificationsBell", () => {
       getCount += 1;
       if (getCount === 2) return new Promise<Response>((resolve) => { pendingGet.resolve = resolve; });
       return Response.json({
-        notifications: [row, { ...row, id: "notice-2", href: "https://evil.example/phishing", title: "Unsafe destination" }],
+        notifications: [row, { ...row, id: "55555555-5555-4555-8555-555555555555", href: "https://evil.example/phishing", title: "Unsafe destination" }],
         unreadCount: 2,
       });
     });
@@ -75,7 +90,7 @@ describe("NotificationsBell", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/notifications", expect.objectContaining({
       method: "POST",
       credentials: "same-origin",
-      body: JSON.stringify({ id: "notice-1" }),
+      body: JSON.stringify({ id: "44444444-4444-4444-8444-444444444444" }),
     })));
     expect(navigate).not.toHaveBeenCalled();
     await act(async () => {
@@ -83,7 +98,7 @@ describe("NotificationsBell", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
     expect(screen.getByRole("button", { name: "Notifications, 1 unread" })).toBeTruthy();
-    pendingPost.resolve?.(new Response(null, { status: 204 }));
+    pendingPost.resolve?.(Response.json({ ok: true }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/approvals?state=pending"));
   });
 
@@ -103,7 +118,7 @@ describe("NotificationsBell", () => {
   });
 
   it("reloads after a failed read even when another read is still pending", async () => {
-    const secondRow = { ...row, id: "notice-2", href: "/sessions", title: "A session needs review" };
+    const secondRow = { ...row, id: "55555555-5555-4555-8555-555555555555", href: "/sessions", title: "A session needs review" };
     const pendingPosts: Record<string, (response: Response) => void> = {};
     let getCount = 0;
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -127,14 +142,14 @@ describe("NotificationsBell", () => {
     fireEvent.click(await screen.findByRole("link", { name: /An approval needs your attention/ }));
     fireEvent.click(await screen.findByRole("link", { name: /A session needs review/ }));
     await waitFor(() => {
-      expect(pendingPosts["notice-1"]).toBeTruthy();
-      expect(pendingPosts["notice-2"]).toBeTruthy();
+      expect(pendingPosts["44444444-4444-4444-8444-444444444444"]).toBeTruthy();
+      expect(pendingPosts["55555555-5555-4555-8555-555555555555"]).toBeTruthy();
     });
 
-    pendingPosts["notice-1"]?.(Response.json({ error: "unavailable" }, { status: 503 }));
+    pendingPosts["44444444-4444-4444-8444-444444444444"]?.(Response.json({ error: "unavailable" }, { status: 503 }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/approvals?state=pending"));
     expect(getCount).toBe(2);
-    pendingPosts["notice-2"]?.(new Response(null, { status: 204 }));
+    pendingPosts["55555555-5555-4555-8555-555555555555"]?.(Response.json({ ok: true }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
     expect(screen.getByRole("button", { name: "Notifications, 1 unread" })).toBeTruthy();

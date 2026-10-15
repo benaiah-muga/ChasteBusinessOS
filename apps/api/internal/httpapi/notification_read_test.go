@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
@@ -20,7 +21,7 @@ func TestNotificationReadHandlerUsesVerifiedSessionAndGovernedExecutor(t *testin
 	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
 	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"id":"44444444-4444-4444-8444-444444444444","receiptCreated":true,"found":true}`)}}
 	response := httptest.NewRecorder()
-	NewNotificationReadHandler(resolver, executor, nil).ServeHTTP(response, makeNotificationReadRequest(`{"id":"44444444-4444-4444-8444-444444444444"}`))
+	NewNotificationReadHandler(resolver, executor, nil).ServeHTTP(response, makeNotificationReadRequest(`{"id":"44444444-4444-4444-8444-444444444444","intentId":"mark-notice-1"}`))
 	if response.Code != http.StatusOK || response.Body.String() != "{\"ok\":true}\n" {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -29,6 +30,9 @@ func TestNotificationReadHandlerUsesVerifiedSessionAndGovernedExecutor(t *testin
 	}
 	if executor.claims.Subject != directTestIdentity().UserID || executor.claims.OrganizationID != *directTestIdentity().OrgID || executor.claims.AuthSessionID != directTestIdentity().AuthSessionID {
 		t.Fatalf("claims were not derived from resolved session: %+v", executor.claims)
+	}
+	if executor.claims.IntentID != "mark-notice-1" {
+		t.Fatalf("intent id was not forwarded to governed execution: %q", executor.claims.IntentID)
 	}
 }
 
@@ -42,6 +46,8 @@ func TestNotificationReadHandlerRejectsUnsupportedRequests(t *testing.T) {
 		{name: "wrong method", method: http.MethodGet, body: `{}`, status: http.StatusMethodNotAllowed},
 		{name: "invalid id", method: http.MethodPost, body: `{"id":"x"}`, status: http.StatusBadRequest},
 		{name: "unknown field", method: http.MethodPost, body: `{"id":"44444444-4444-4444-8444-444444444444","unexpected":true}`, status: http.StatusBadRequest},
+		{name: "intent too long", method: http.MethodPost, body: `{"id":"44444444-4444-4444-8444-444444444444","intentId":"` + strings.Repeat("a", 201) + `"}`, status: http.StatusBadRequest},
+		{name: "intent control character", method: http.MethodPost, body: `{"id":"44444444-4444-4444-8444-444444444444","intentId":"bad\nintent"}`, status: http.StatusBadRequest},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -53,6 +59,36 @@ func TestNotificationReadHandlerRejectsUnsupportedRequests(t *testing.T) {
 				t.Fatalf("status=%d executor calls=%d body=%s", response.Code, executor.calls, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestNotificationReadHandlerEnforcesBodyLimitAndCookieOrigin(t *testing.T) {
+	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"found":true}`)}}
+	handler := NewNotificationReadHandler(resolver, executor, nil)
+
+	oversized := makeNotificationReadRequest(`{"id":"44444444-4444-4444-8444-444444444444"}` + strings.Repeat(" ", notificationReadBodyLimit))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, oversized)
+	if response.Code != http.StatusBadRequest || executor.calls != 0 {
+		t.Fatalf("oversized request status=%d executor calls=%d body=%s", response.Code, executor.calls, response.Body.String())
+	}
+
+	missingOrigin := makeNotificationReadRequest(`{"id":"44444444-4444-4444-8444-444444444444"}`)
+	missingOrigin.Header.Del("Origin")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, missingOrigin)
+	if response.Code != http.StatusForbidden || executor.calls != 0 {
+		t.Fatalf("cookie request without origin status=%d executor calls=%d", response.Code, executor.calls)
+	}
+
+	bearerRequest := makeNotificationReadRequest(`{"id":"44444444-4444-4444-8444-444444444444"}`)
+	bearerRequest.Header.Del("Origin")
+	bearerRequest.Header.Set("Authorization", "Bearer opaque-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, bearerRequest)
+	if response.Code != http.StatusOK || resolver.bearerCalls != 1 || executor.calls != 1 {
+		t.Fatalf("bearer request without origin status=%d bearer calls=%d executor calls=%d body=%s", response.Code, resolver.bearerCalls, executor.calls, response.Body.String())
 	}
 }
 

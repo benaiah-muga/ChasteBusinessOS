@@ -253,6 +253,21 @@ func (e ModuleSwitchboardPendingPendingApproval) Valid() bool {
 	}
 }
 
+// Defines values for NotificationReadSuccessOk.
+const (
+	NotificationReadSuccessOkTrue NotificationReadSuccessOk = true
+)
+
+// Valid indicates whether the value is a known member of the NotificationReadSuccessOk enum.
+func (e NotificationReadSuccessOk) Valid() bool {
+	switch e {
+	case NotificationReadSuccessOkTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OrganizationSwitchSuccessOk.
 const (
 	OrganizationSwitchSuccessOkTrue OrganizationSwitchSuccessOk = true
@@ -571,6 +586,49 @@ type ModuleSwitchboardResponse struct {
 	UsingDefaults  bool         `json:"usingDefaults"`
 }
 
+// NotificationReadFailure defines model for NotificationReadFailure.
+type NotificationReadFailure struct {
+	// Error Governed capability refusal message.
+	Error string `json:"error"`
+}
+
+// NotificationReadRequest defines model for NotificationReadRequest.
+type NotificationReadRequest struct {
+	Id string `json:"id"`
+
+	// IntentId Optional idempotency intent. Null is treated as omitted. The server enforces 200 UTF-8 bytes and rejects CR, LF, and NUL characters.
+	IntentId *string `json:"intentId,omitempty"`
+}
+
+// NotificationReadSuccess defines model for NotificationReadSuccess.
+type NotificationReadSuccess struct {
+	Ok NotificationReadSuccessOk `json:"ok"`
+}
+
+// NotificationReadSuccessOk defines model for NotificationReadSuccess.Ok.
+type NotificationReadSuccessOk bool
+
+// NotificationRow defines model for NotificationRow.
+type NotificationRow struct {
+	// CreatedAt UTC timestamp formatted to millisecond precision.
+	CreatedAt string  `json:"createdAt"`
+	Href      *string `json:"href"`
+	Id        string  `json:"id"`
+	Kind      string  `json:"kind"`
+
+	// ReadAt Nullable UTC timestamp formatted to millisecond precision.
+	ReadAt *string `json:"readAt"`
+	Title  string  `json:"title"`
+}
+
+// NotificationsResponse defines model for NotificationsResponse.
+type NotificationsResponse struct {
+	Notifications []NotificationRow `json:"notifications"`
+
+	// UnreadCount Count of all unread notifications visible to this user, independent of the list limit.
+	UnreadCount int `json:"unreadCount"`
+}
+
 // OrganizationListResponse defines model for OrganizationListResponse.
 type OrganizationListResponse struct {
 	ActiveOrgId *openapi_types.UUID   `json:"activeOrgId"`
@@ -704,6 +762,21 @@ type SetModuleSwitchboardParams struct {
 	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
 }
 
+// GetNotificationsParams defines parameters for GetNotifications.
+type GetNotificationsParams struct {
+	// Limit Requested result count. Values are parsed as numbers and floored; values below 1 clamp to 1, above 100 clamp to 100, and invalid or non-finite values use the default of 30. An explicitly empty value clamps to 1.
+	Limit *string `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XOrganizationID Selects an organization membership for the request.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// MarkNotificationReadParams defines parameters for MarkNotificationRead.
+type MarkNotificationReadParams struct {
+	// XOrganizationID Selects an organization membership for the request.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
 // UpdateSupportChannelsParams defines parameters for UpdateSupportChannels.
 type UpdateSupportChannelsParams struct {
 	// IdempotencyKey UUID for this exact settings update. Reuse it with the same body after an uncertain result.
@@ -718,6 +791,9 @@ type ExecuteCapabilityJSONRequestBody = CapabilityExecutionRequest
 
 // SetModuleSwitchboardJSONRequestBody defines body for SetModuleSwitchboard for application/json ContentType.
 type SetModuleSwitchboardJSONRequestBody = ModuleSwitchboardRequest
+
+// MarkNotificationReadJSONRequestBody defines body for MarkNotificationRead for application/json ContentType.
+type MarkNotificationReadJSONRequestBody = NotificationReadRequest
 
 // UpdateOrganizationAgentSoulJSONRequestBody defines body for UpdateOrganizationAgentSoul for application/json ContentType.
 type UpdateOrganizationAgentSoulJSONRequestBody = OrganizationSoulPatchRequest

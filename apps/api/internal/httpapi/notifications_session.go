@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 	"github.com/jackc/pgx/v5"
@@ -155,19 +156,19 @@ func (handler *NotificationsSessionHandler) ServeHTTP(w http.ResponseWriter, r *
 	if notifications == nil {
 		notifications = []notificationSessionRow{}
 	}
-	responseRows := make([]map[string]any, len(notifications))
+	responseRows := make([]businesscontract.NotificationRow, len(notifications))
 	for i, row := range notifications {
 		var readAt *string
 		if row.ReadAt != nil {
 			formatted := legacySessionTime(*row.ReadAt)
 			readAt = &formatted
 		}
-		responseRows[i] = map[string]any{
-			"id": row.ID, "kind": row.Kind, "title": row.Title, "href": row.Href,
-			"readAt": readAt, "createdAt": legacySessionTime(row.CreatedAt),
+		responseRows[i] = businesscontract.NotificationRow{
+			Id: row.ID, Kind: row.Kind, Title: row.Title, Href: row.Href,
+			ReadAt: readAt, CreatedAt: legacySessionTime(row.CreatedAt),
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"notifications": responseRows, "unreadCount": unreadCount})
+	writeJSON(w, http.StatusOK, businesscontract.NotificationsResponse{Notifications: responseRows, UnreadCount: unreadCount})
 }
 
 func (handler *NotificationsSessionHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, error) {

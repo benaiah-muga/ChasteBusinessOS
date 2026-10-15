@@ -1053,6 +1053,317 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/notifications:
+    get:
+      operationId: getNotifications
+      summary: List notifications for the authenticated user
+      description: >-
+        Returns notifications visible to the authenticated user in the resolved
+        organization, newest first, with an unread count across the full visible
+        feed. Cookie sessions use their active organization unless
+        X-Organization-ID is provided; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        membership. Cookie and bearer authentication are supported. Reads
+        include Cache-Control: no-store and Pragma: no-cache. Query limit
+        defaults to 30, is clamped to 1 through 100, and invalid numeric values
+        fall back to 30. If Authorization is present, it must contain a valid
+        Bearer token; an invalid Authorization value does not fall back to the
+        session cookie.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for the request.
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: >-
+            Requested result count. Values are parsed as numbers and floored;
+            values below 1 clamp to 1, above 100 clamp to 100, and invalid or
+            non-finite values use the default of 30. An explicitly empty value
+            clamps to 1.
+          schema:
+            type: string
+            example: "20"
+      responses:
+        "200":
+          description: Notifications and unread count.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationsResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: No valid verified session is available for an organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the resolved membership.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Notification feed retrieval failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The notification service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: >-
+            The mounted Go route received an unsupported method. The exact-path
+            method guard runs before authentication. With the default full
+            route, GET and POST are mounted; disabled methods continue to the
+            base owner.
+          headers:
+            Allow:
+              description: Configured methods on the exact Go-owned path.
+              schema:
+                type: string
+                const: GET, POST
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: markNotificationRead
+      summary: Mark a notification as read
+      description: >-
+        Marks a visible notification as read through the governed
+        notifications.markRead capability. Cookie and bearer authentication
+        are supported. Cookie-authenticated requests must include a same-origin
+        Origin header; bearer-authenticated requests do not require Origin.
+        If Authorization is present, it must contain a valid Bearer token; an
+        invalid Authorization value does not fall back to the session cookie.
+        Cookie sessions use their active organization unless X-Organization-ID
+        is provided; bearer tokens are resolved against the selected
+        organization. A supplied selector must match the resolved membership.
+        The strict JSON body is limited to 8192 bytes and rejects unknown
+        properties. The optional intentId is carried to the capability executor
+        as the idempotency key. Repeated marks are safe: the endpoint returns
+        the same {ok:true} success envelope when an existing receipt is reused.
+        Responses include Cache-Control: no-store.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for the request.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        description: Strict JSON body limited to 8192 bytes.
+        x-maxBodyBytes: 8192
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationReadRequest"
+      responses:
+        "200":
+          description: The notification was found and marked as read, including when already read.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationReadSuccess"
+        "400":
+          description: The organization selector or strict request body is invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: No valid verified session is available for an organization, or the capability session is invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The selector does not match membership, or cookie request origin is not same-origin.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No visible notification exists with the supplied ID.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The governed capability rejected the requested mutation.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationReadFailure"
+        "500":
+          description: Capability execution or result validation failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The notification service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: >-
+            The mounted Go route received an unsupported method. The exact-path
+            method guard runs before authentication. With the default full
+            route, GET and POST are mounted; disabled methods continue to the
+            base owner.
+          headers:
+            Allow:
+              description: Configured methods on the exact Go-owned path.
+              schema:
+                type: string
+                const: GET, POST
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/support/channels:
     get:
       operationId: getSupportChannels
@@ -1765,6 +2076,75 @@ components:
           const: false
         error:
           type: string
+    NotificationsResponse:
+      type: object
+      additionalProperties: false
+      required: [notifications, unreadCount]
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationRow"
+        unreadCount:
+          type: integer
+          minimum: 0
+          description: Count of all unread notifications visible to this user, independent of the list limit.
+    NotificationRow:
+      type: object
+      additionalProperties: false
+      required: [id, kind, title, href, readAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          x-go-type: string
+        kind:
+          type: string
+        title:
+          type: string
+        href:
+          type: [string, "null"]
+        readAt:
+          type: [string, "null"]
+          format: date-time
+          x-go-type: string
+          description: Nullable UTC timestamp formatted to millisecond precision.
+        createdAt:
+          type: string
+          format: date-time
+          x-go-type: string
+          description: UTC timestamp formatted to millisecond precision.
+    NotificationReadRequest:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+          x-go-type: string
+        intentId:
+          type: [string, "null"]
+          x-maxBytes: 200
+          description: >-
+            Optional idempotency intent. Null is treated as omitted. The server
+            enforces 200 UTF-8 bytes and rejects CR, LF, and NUL characters.
+    NotificationReadSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
+    NotificationReadFailure:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Governed capability refusal message.
     ErrorResponse:
       type: object
       additionalProperties: false

@@ -137,7 +137,7 @@ func TestDurableRunCreateHTTPDispatchesWithResolvedSessionAndPersistsTenantRows(
 		t.Fatal("create Better Auth session resolver")
 	}
 	durableRuns := NewDurableRunsSessionHandler(runtime, resolver, nil)
-	route := MountGoSessionReadRoutes(http.NotFoundHandler(), nil, nil, durableRuns, nil)
+	route := MountGoSessionReadRoutes(http.NotFoundHandler(), nil, nil, durableRuns)
 	body := fmt.Sprintf(`{"runId":%q,"goal":"Read customer records for the review","harnessCompositionId":%q,"harnessCompositionDigest":%q,"compositionApprovalId":%q,"steps":[{"capabilityId":"crm.listCustomers","input":{}}]}`,
 		runID, compositionID, durableHTTPCompositionDigest, compositionApprovalID)
 	request := httptest.NewRequest(http.MethodPost, "/api/durable-runs", strings.NewReader(body))

@@ -124,6 +124,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List notifications for the authenticated user
+         * @description Returns notifications visible to the authenticated user in the resolved organization, newest first, with an unread count across the full visible feed. Cookie sessions use their active organization unless X-Organization-ID is provided; bearer tokens are resolved against the selected organization. A supplied selector must match the resolved membership. Cookie and bearer authentication are supported. Reads include Cache-Control: no-store and Pragma: no-cache. Query limit defaults to 30, is clamped to 1 through 100, and invalid numeric values fall back to 30. If Authorization is present, it must contain a valid Bearer token; an invalid Authorization value does not fall back to the session cookie.
+         */
+        get: operations["getNotifications"];
+        put?: never;
+        /**
+         * Mark a notification as read
+         * @description Marks a visible notification as read through the governed notifications.markRead capability. Cookie and bearer authentication are supported. Cookie-authenticated requests must include a same-origin Origin header; bearer-authenticated requests do not require Origin. If Authorization is present, it must contain a valid Bearer token; an invalid Authorization value does not fall back to the session cookie. Cookie sessions use their active organization unless X-Organization-ID is provided; bearer tokens are resolved against the selected organization. A supplied selector must match the resolved membership. The strict JSON body is limited to 8192 bytes and rejects unknown properties. The optional intentId is carried to the capability executor as the idempotency key. Repeated marks are safe: the endpoint returns the same {ok:true} success envelope when an existing receipt is reused. Responses include Cache-Control: no-store.
+         */
+        post: operations["markNotificationRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/support/channels": {
         parameters: {
             query?: never;
@@ -404,6 +428,42 @@ export interface components {
         ApprovalDecisionFailure: {
             /** @constant */
             ok: false;
+            error: string;
+        };
+        NotificationsResponse: {
+            notifications: components["schemas"]["NotificationRow"][];
+            /** @description Count of all unread notifications visible to this user, independent of the list limit. */
+            unreadCount: number;
+        };
+        NotificationRow: {
+            /** Format: uuid */
+            id: string;
+            kind: string;
+            title: string;
+            href: string | null;
+            /**
+             * Format: date-time
+             * @description Nullable UTC timestamp formatted to millisecond precision.
+             */
+            readAt: string | null;
+            /**
+             * Format: date-time
+             * @description UTC timestamp formatted to millisecond precision.
+             */
+            createdAt: string;
+        };
+        NotificationReadRequest: {
+            /** Format: uuid */
+            id: string;
+            /** @description Optional idempotency intent. Null is treated as omitted. The server enforces 200 UTF-8 bytes and rejects CR, LF, and NUL characters. */
+            intentId?: string | null;
+        };
+        NotificationReadSuccess: {
+            /** @constant */
+            ok: true;
+        };
+        NotificationReadFailure: {
+            /** @description Governed capability refusal message. */
             error: string;
         };
         ErrorResponse: {
@@ -1337,6 +1397,218 @@ export interface operations {
                 };
             };
             /** @description The approval decision service is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getNotifications: {
+        parameters: {
+            query?: {
+                /** @description Requested result count. Values are parsed as numbers and floored; values below 1 clamp to 1, above 100 clamp to 100, and invalid or non-finite values use the default of 30. An explicitly empty value clamps to 1. */
+                limit?: string;
+            };
+            header?: {
+                /** @description Selects an organization membership for the request. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notifications and unread count. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationsResponse"];
+                };
+            };
+            /** @description The organization selector is malformed or repeated. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No valid verified session is available for an organization. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The explicit organization selector does not match the resolved membership. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The mounted Go route received an unsupported method. The exact-path method guard runs before authentication. With the default full route, GET and POST are mounted; disabled methods continue to the base owner. */
+            405: {
+                headers: {
+                    /** @description Configured methods on the exact Go-owned path. */
+                    Allow?: "GET, POST";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Notification feed retrieval failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The notification service is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    markNotificationRead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects an organization membership for the request. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Strict JSON body limited to 8192 bytes. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationReadRequest"];
+            };
+        };
+        responses: {
+            /** @description The notification was found and marked as read, including when already read. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationReadSuccess"];
+                };
+            };
+            /** @description The organization selector or strict request body is invalid. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No valid verified session is available for an organization, or the capability session is invalid. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The selector does not match membership, or cookie request origin is not same-origin. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No visible notification exists with the supplied ID. */
+            404: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The mounted Go route received an unsupported method. The exact-path method guard runs before authentication. With the default full route, GET and POST are mounted; disabled methods continue to the base owner. */
+            405: {
+                headers: {
+                    /** @description Configured methods on the exact Go-owned path. */
+                    Allow?: "GET, POST";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The governed capability rejected the requested mutation. */
+            422: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationReadFailure"];
+                };
+            };
+            /** @description Capability execution or result validation failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The notification service is unavailable. */
             503: {
                 headers: {
                     "Cache-Control"?: "no-store";

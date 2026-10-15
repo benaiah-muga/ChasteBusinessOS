@@ -437,12 +437,11 @@ func TestMountGoSessionReadRoutesUseExactMethodsAndUUIDPaths(t *testing.T) {
 	sessionsList := routeMarker("sessions-list")
 	sessionsDetail := routeMarker("sessions-detail")
 	durableRuns := routeMarker("durable-runs")
-	notifications := routeMarker("notifications")
-	handler := MountGoSessionReadRoutes(legacy, sessionsList, sessionsDetail, durableRuns, notifications)
+	handler := MountGoSessionReadRoutes(legacy, sessionsList, sessionsDetail, durableRuns)
 	sessionID := "aaaaaaaa-0000-4000-8000-000000000001"
 	runID := "bbbbbbbb-0000-4000-8000-000000000002"
 
-	for _, path := range []string{"/api/sessions", "/api/sessions/" + sessionID, "/api/sessions/" + sessionID + "/replay", "/api/durable-runs", "/api/durable-runs/" + runID, "/api/notifications"} {
+	for _, path := range []string{"/api/sessions", "/api/sessions/" + sessionID, "/api/sessions/" + sessionID + "/replay", "/api/durable-runs", "/api/durable-runs/" + runID} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 		if response.Body.String() == "legacy" {
@@ -477,28 +476,75 @@ func TestMountGoSessionReadRoutesUseExactMethodsAndUUIDPaths(t *testing.T) {
 		}
 	}
 
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/notifications", nil))
-	if got := response.Body.String(); got != "legacy" {
-		t.Fatalf("notification write did not reach fallback: got %q", got)
-	}
-
-	withReadMutation := MountGoNotificationReadRoute(handler, routeMarker("notification-read"))
-	response = httptest.NewRecorder()
-	withReadMutation.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/notifications", nil))
-	if got := response.Body.String(); got != "notification-read" {
-		t.Fatalf("notification write did not reach Go handler: got %q", got)
-	}
-	response = httptest.NewRecorder()
-	withReadMutation.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/notifications/extra", nil))
-	if got := response.Body.String(); got != "legacy" {
-		t.Fatalf("notification suffix route did not reach fallback: got %q", got)
-	}
-
-	disabled := MountGoSessionReadRoutes(legacy, nil, nil, nil, nil)
+	disabled := MountGoSessionReadRoutes(legacy, nil, nil, nil)
 	response = httptest.NewRecorder()
 	disabled.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/sessions", nil))
 	if got := response.Body.String(); got != "legacy" {
 		t.Fatalf("disabled Go route did not reach fallback: got %q", got)
+	}
+}
+
+func TestMountGoNotificationsRouteOwnsExactPathAndReturnsConfiguredMethodAllow(t *testing.T) {
+	legacy := routeMarker("legacy")
+	get := routeMarker("notifications-get")
+	post := routeMarker("notifications-post")
+	full := MountGoNotificationsRoute(legacy, get, post)
+
+	for _, test := range []struct {
+		method string
+		want   string
+	}{
+		{method: http.MethodGet, want: "notifications-get"},
+		{method: http.MethodPost, want: "notifications-post"},
+	} {
+		response := httptest.NewRecorder()
+		full.ServeHTTP(response, httptest.NewRequest(test.method, "/api/notifications", nil))
+		if response.Code != http.StatusOK || response.Body.String() != test.want {
+			t.Errorf("%s exact route status=%d body=%q, want %q", test.method, response.Code, response.Body.String(), test.want)
+		}
+	}
+
+	response := httptest.NewRecorder()
+	full.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/notifications", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "GET, POST" ||
+		response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("full mount unsupported method status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	full.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/notifications/extra", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
+		t.Fatalf("suffix path status=%d body=%q, want legacy fallback", response.Code, response.Body.String())
+	}
+
+	getOnly := MountGoNotificationsRoute(legacy, get, nil)
+	response = httptest.NewRecorder()
+	getOnly.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/notifications", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
+		t.Fatalf("disabled POST did not reach fallback: status=%d body=%q", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	getOnly.ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/api/notifications", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "GET" {
+		t.Fatalf("GET-only mount unsupported method status=%d allow=%q", response.Code, response.Header().Get("Allow"))
+	}
+
+	postOnly := MountGoNotificationsRoute(legacy, nil, post)
+	response = httptest.NewRecorder()
+	postOnly.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/notifications", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
+		t.Fatalf("disabled GET did not reach fallback: status=%d body=%q", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	postOnly.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/notifications", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "POST" {
+		t.Fatalf("POST-only mount unsupported method status=%d allow=%q", response.Code, response.Header().Get("Allow"))
+	}
+
+	disabled := MountGoNotificationsRoute(legacy, nil, nil)
+	response = httptest.NewRecorder()
+	disabled.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/notifications", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
+		t.Fatalf("fully disabled route did not preserve fallback: status=%d body=%q", response.Code, response.Body.String())
 	}
 }

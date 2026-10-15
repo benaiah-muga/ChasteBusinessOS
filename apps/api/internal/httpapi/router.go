@@ -820,7 +820,7 @@ func MountGoTeamSSORoute(base, route http.Handler) http.Handler {
 
 // MountGoSessionReadRoutes mounts session reads and durable-run reads and
 // creates only when their handlers are explicitly enabled by API configuration.
-func MountGoSessionReadRoutes(base, sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute http.Handler) http.Handler {
+func MountGoSessionReadRoutes(base, sessionsListRoute, sessionsDetailRoute, durableRunsRoute http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/durable-runs" && durableRunsRoute != nil {
 			durableRunsRoute.ServeHTTP(w, r)
@@ -839,9 +839,6 @@ func MountGoSessionReadRoutes(base, sessionsListRoute, sessionsDetailRoute, dura
 				return
 			case durableRunsRoute != nil && durableRunDetailRoutePath(r.URL.Path):
 				durableRunsRoute.ServeHTTP(w, r)
-				return
-			case r.URL.Path == "/api/notifications" && notificationsRoute != nil:
-				notificationsRoute.ServeHTTP(w, r)
 				return
 			}
 		}
@@ -871,12 +868,43 @@ func durableRunDetailRoutePath(path string) bool {
 	return isUUID(strings.TrimPrefix(path, "/api/durable-runs/"))
 }
 
-func MountGoNotificationReadRoute(base, notificationReadRoute http.Handler) http.Handler {
-	if notificationReadRoute == nil {
+func MountGoNotificationsRoute(base, notificationsRoute, notificationReadRoute http.Handler) http.Handler {
+	if notificationsRoute == nil && notificationReadRoute == nil {
 		return base
 	}
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/notifications", notificationReadRoute)
+	methods := make([]string, 0, 2)
+	if notificationsRoute != nil {
+		methods = append(methods, http.MethodGet)
+	}
+	if notificationReadRoute != nil {
+		methods = append(methods, http.MethodPost)
+	}
+	mux.HandleFunc("/api/notifications", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if notificationsRoute != nil {
+				notificationsRoute.ServeHTTP(w, r)
+				return
+			}
+		case http.MethodPost:
+			if notificationReadRoute != nil {
+				notificationReadRoute.ServeHTTP(w, r)
+				return
+			}
+		default:
+			w.Header().Set("Allow", strings.Join(methods, ", "))
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
 	if base != nil {
 		mux.Handle("/", base)
 	}

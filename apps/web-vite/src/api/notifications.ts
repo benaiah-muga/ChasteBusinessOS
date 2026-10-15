@@ -1,21 +1,26 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 
-const NotificationSchema = z.object({
-  id: z.string().min(1),
+const NotificationSchema: z.ZodType<components["schemas"]["NotificationRow"]> = z.object({
+  id: z.string().uuid(),
   kind: z.string(),
   title: z.string(),
   href: z.string().nullable(),
   readAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
-});
+}).strict();
 
-const NotificationsResponseSchema = z.object({
+const NotificationsResponseSchema: z.ZodType<components["schemas"]["NotificationsResponse"]> = z.object({
   notifications: z.array(NotificationSchema),
   unreadCount: z.number().int().nonnegative(),
-});
+}).strict();
 
-export type Notification = z.infer<typeof NotificationSchema>;
-export type NotificationsResponse = z.infer<typeof NotificationsResponseSchema>;
+const NotificationReadSuccessSchema: z.ZodType<components["schemas"]["NotificationReadSuccess"]> = z.object({
+  ok: z.literal(true),
+}).strict();
+
+export type Notification = components["schemas"]["NotificationRow"];
+export type NotificationsResponse = components["schemas"]["NotificationsResponse"];
 
 export class NotificationsApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -66,7 +71,7 @@ export async function markNotificationRead(id: string, signal?: AbortSignal): Pr
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id } satisfies components["schemas"]["NotificationReadRequest"]),
       signal,
     });
   } catch (error) {
@@ -74,6 +79,15 @@ export async function markNotificationRead(id: string, signal?: AbortSignal): Pr
     throw new NotificationsApiError(0, "Could not update this notification. Check your connection and try again.");
   }
   if (!response.ok) throw new NotificationsApiError(response.status, await errorMessage(response));
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new NotificationsApiError(response.status, "The notifications service returned an unreadable response.");
+  }
+  if (!NotificationReadSuccessSchema.safeParse(body).success) {
+    throw new NotificationsApiError(response.status, "The notifications service returned data in an unexpected format.");
+  }
 }
 
 export function safeNotificationHref(href: string | null): string | null {

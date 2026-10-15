@@ -5026,3 +5026,12 @@ new owners and the manifest shows zero legacy runtime paths.
      consume generated types while retaining strict runtime validation.
      Resolver infrastructure failures are logged and return a generic 500;
      missing sessions remain 401 and short secrets remain 503.
+
+471. (Focused verified) The public business OpenAPI contract now describes
+     Go GET and POST `/api/notifications`, including cookie and bearer auth,
+     org selection, GET cache behavior and limit coercion, strict bounded
+     mark-read input, and governed success/refusal/not-found results. Go
+     handlers and the Vite client consume generated models while retaining
+     runtime validation. The exact-path mount preserves per-method flag
+     fallback and returns 405 with the configured `Allow` methods for other
+     methods once either Go method owns the path.
