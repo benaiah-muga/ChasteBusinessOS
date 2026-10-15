@@ -13,9 +13,7 @@ const VendorSchema = z.object({
   paymentTermDays: SafeIntegerSchema.nullable(),
   deactivatedAt: TimestampSchema.nullable(),
   createdAt: TimestampSchema,
-  // The legacy route returns whole vendor rows, so a later column must not
-  // blank the page out; every field this page reads is still validated.
-}).passthrough();
+}).strict();
 
 const PurchaseOrderLineSchema = z.object({
   lineNumber: z.number().int().safe().positive(),
@@ -124,7 +122,7 @@ const PurchasingWorkspaceSchema = z.object({
   vendors: z.array(VendorSchema),
   orders: z.array(PurchaseOrderSchema),
   bills: z.array(BillSchema),
-  apAging: z.object({ buckets: AgingBucketsSchema.optional() }).passthrough().optional(),
+  apAging: z.object({ buckets: AgingBucketsSchema }).strict(),
   priceHistory: z.object({ rows: z.array(PriceHistoryRowSchema) }).strict().optional(),
   supplierPerformance: z.object({ vendors: z.array(SupplierPerformanceRowSchema) }).strict().optional(),
   requests: z.array(PurchaseRequestSchema).default([]),

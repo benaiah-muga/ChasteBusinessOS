@@ -202,6 +202,31 @@ describe("purchasing workspace reads", () => {
     await expect(fetchPurchasingWorkspace("org-test")).resolves.toMatchObject({ requests: [] });
   });
 
+  it("rejects vendor and aging fields outside the Go workspace contract", async () => {
+    const malformedWorkspaces = [
+      {
+        ...workspace,
+        vendors: [{ ...workspace.vendors[0]!, legacyAlias: "Harbor" }],
+      },
+      {
+        ...workspace,
+        apAging: { buckets: workspace.apAging.buckets, generatedAt: "2026-08-14T10:00:00.000Z" },
+      },
+      {
+        ...workspace,
+        apAging: {},
+      },
+    ];
+
+    for (const malformed of malformedWorkspaces) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: malformed })));
+      await expect(fetchPurchasingWorkspace("org-test")).rejects.toMatchObject({
+        status: 200,
+        message: "The Go Purchasing service returned the purchasing workspace in an unexpected format.",
+      });
+    }
+  });
+
   it("keeps stocked products that carry more columns than the form reads", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({
       items: [

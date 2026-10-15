@@ -4743,3 +4743,9 @@ new owners and the manifest shows zero legacy runtime paths.
      preserve the original retry intent. Focused API and component tests pass
      21 cases, and independent review confirmed output bounds and retry
      behavior against the Go executor.
+
+443. (Contract verified) Vite Purchasing strictly validates Go vendor rows and
+     AP aging buckets, including required bucket totals. Unknown fields and
+     incomplete aging payloads fail closed. The focused Purchasing API suite
+     passes 62 tests, and independent review confirmed the schemas match Go's
+     workspace response types.
