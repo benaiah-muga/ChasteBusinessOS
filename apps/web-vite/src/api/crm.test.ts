@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readCrmCustomerProfileUndo, readPendingCrmCustomerProfileRestore, readPendingCrmDealCreate, readPendingCrmLeadConversion, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmCustomerProfileUndo, submitCrmDealCreate, submitCrmDealStageMove, submitCrmLeadConversion, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, CrmCustomerSchema, CrmDealSchema, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerImportUndos, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readCrmCustomerProfileUndo, readPendingCrmCustomerProfileRestore, readPendingCrmDealCreate, readPendingCrmLeadConversion, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmCustomerProfileUndo, submitCrmDealCreate, submitCrmDealStageMove, submitCrmLeadConversion, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -55,6 +55,21 @@ describe("CRM API client", () => {
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deals: [{ ...deal, valueMinor: Number.MAX_SAFE_INTEGER + 1 }] } })));
     await expect(fetchCrmDeals()).rejects.toThrow("unexpected format");
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deals: [{ ...deal, debug: true }] } })));
+    await expect(fetchCrmDeals()).rejects.toThrow("unexpected format");
+  });
+
+  it("keeps the Go customer and deal response contracts closed and reports session errors", async () => {
+    const customer = { id: customerId, name: "Northwind", email: null, ownerUserId: null, ownerName: null, ownerEmail: null, phone: null, preferredContactMethod: "email", doNotContact: false, updatedByUserId: null, updatedByName: null, updatedByEmail: null, tags: [], notes: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z", deactivatedAt: null, mergedRecords: [], purchaseCount: 0, lifetimeSpendMinor: 0, lastActivityAt: "2026-10-01T00:00:00.000Z", nextStep: null };
+    expect(CrmCustomerSchema.safeParse(customer).success).toBe(true);
+    expect(CrmCustomerSchema.safeParse({ ...customer, debug: true }).success).toBe(false);
+    expect(CrmDealSchema.safeParse({ id: dealId, title: "Renewal", stage: "proposal", valueMinor: 100, updatedAt: "2026-10-01T00:00:00.000Z", debug: true }).success).toBe(false);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "unauthorized" }, { status: 401 })));
+    await expect(fetchCrmDeals()).rejects.toMatchObject({ status: 401, message: "Your session has expired. Sign in again to continue." });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden" }, { status: 403 })));
+    await expect(fetchCrmCustomers()).rejects.toMatchObject({ status: 403, message: "Your account does not have access to this CRM information." });
   });
 
   it("uses Go capabilities for customer collection, tasks, and saved views", async () => {

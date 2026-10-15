@@ -101,6 +101,10 @@ func goDocumentsAssistRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goDocumentsCapabilityReadsEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goMessagingPresenceRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -350,13 +354,13 @@ func run(logger *slog.Logger) error {
 		for capabilityID := range httpapi.PurchasingWorkflowDisabledCapabilities(os.Getenv("GO_PURCHASING_WORKFLOW_READS") == "1") {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}
-		for capabilityID := range httpapi.DocumentsIngestedDisabledCapabilities(os.Getenv("GO_DOCUMENT_INGESTED_READS") == "1") {
+		for capabilityID := range httpapi.DocumentsIngestedDisabledCapabilities(goDocumentsCapabilityReadsEnabledFromEnv(os.Getenv("GO_DOCUMENT_INGESTED_READS"))) {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}
-		for capabilityID := range httpapi.DocumentsVersionDisabledCapabilities(os.Getenv("GO_DOCUMENTS_VERSION_READS") == "1") {
+		for capabilityID := range httpapi.DocumentsVersionDisabledCapabilities(goDocumentsCapabilityReadsEnabledFromEnv(os.Getenv("GO_DOCUMENTS_VERSION_READS"))) {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}
-		for capabilityID := range httpapi.DocumentsEditorDisabledCapabilities(os.Getenv("GO_DOCUMENTS_EDITOR_READS") == "1") {
+		for capabilityID := range httpapi.DocumentsEditorDisabledCapabilities(goDocumentsCapabilityReadsEnabledFromEnv(os.Getenv("GO_DOCUMENTS_EDITOR_READS"))) {
 			disabledCapabilities[capabilityID] = struct{}{}
 		}
 		for capabilityID := range httpapi.MessagingPeopleDisabledCapabilities(os.Getenv("GO_MESSAGING_PEOPLE_READS") != "0") {

@@ -2082,6 +2082,22 @@ func TestMessagingRefusesCrossOrganizationConversations(t *testing.T) {
 	}
 }
 
+func TestMessagingListRequiresResolvedReadPermission(t *testing.T) {
+	fx := newMessagingFixture(t)
+	input := json.RawMessage(`{"limit":100}`)
+	claims := fx.humanClaims(input, "messaging-list-without-read-permission")
+	claims.CapabilityID = messagingListConversationsCapabilityID
+	claims.Permissions = []string{"messaging.write"}
+
+	result, err := fx.executor.Execute(fx.ctx, claims, messagingListConversationsCapabilityID, input)
+	if err != nil {
+		t.Fatalf("execute messaging list without read permission: %v", err)
+	}
+	if result.OK || !strings.Contains(result.Error, "forbidden: missing permission: messaging.read") {
+		t.Fatalf("messaging list result=%+v, want messaging.read authorization refusal", result)
+	}
+}
+
 func TestMessagingReadMessagesReturnsLatestWindowInDisplayOrder(t *testing.T) {
 	fx := newMessagingFixture(t)
 	channel := fx.createChannel(t, fx.userID, "ordering")

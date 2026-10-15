@@ -63,6 +63,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Vite CRM now gives actionable sign-in and permission messages for Go 401 and 403 responses instead of displaying raw authorization codes.
+- Go Documents ingested, editor detail, and version reads now run by default to match Vite's unconditional Go client path; operators can explicitly disable each read group with its API flag set to `0`.
+- Go CRM customer and deal reads now reject undeclared response fields, matching the exact DTOs served by the capability API.
+- Go CRM customer collections no longer expose owner or editor names and emails for users who are not members of the customer’s organization.
 - Vite Purchasing keeps receipt drafts bound to the selected order while Go history loads or retries, preserving edited quantities and reasons.
 - Go standalone vendor payment reversals now persist reversal evidence on the payment; refreshed Purchasing bills no longer offer a second reversal for the same payment.
 - Vite Expenses serializes actor and organization scoped retry marker reservations across tabs and only clears the exact completed intent, preserving newer unresolved actions.

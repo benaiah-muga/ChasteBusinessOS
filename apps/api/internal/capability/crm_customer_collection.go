@@ -31,8 +31,10 @@ func listCRMCustomerCollection(ctx context.Context, tx pgx.Tx, orgID string, _ L
 			c.updated_by_user_id::text, editor.name, editor.email, c.tags, c.notes,
 			c.created_at, c.updated_at, c.deactivated_at
 		FROM customers c
-		LEFT JOIN users owner ON owner.id = c.owner_user_id
-		LEFT JOIN users editor ON editor.id = c.updated_by_user_id
+		LEFT JOIN memberships owner_membership ON owner_membership.org_id = c.org_id AND owner_membership.user_id = c.owner_user_id
+		LEFT JOIN users owner ON owner.id = owner_membership.user_id
+		LEFT JOIN memberships editor_membership ON editor_membership.org_id = c.org_id AND editor_membership.user_id = c.updated_by_user_id
+		LEFT JOIN users editor ON editor.id = editor_membership.user_id
 		WHERE c.org_id = $1::uuid AND c.merged_into_customer_id IS NULL
 		ORDER BY c.name
 		LIMIT 500`, orgID)

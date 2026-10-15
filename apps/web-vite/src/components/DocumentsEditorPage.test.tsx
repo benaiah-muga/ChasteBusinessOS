@@ -365,8 +365,6 @@ describe("authored document editor", () => {
   }, TIMEOUT);
 
   it("loads editor detail and version history from Go and sends workspace ticks through the selected route", async () => {
-    vi.stubGlobal("__GO_DOCUMENTS_EDITOR_READS__", true);
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
     const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
     window.history.replaceState(null, "", `/documents/editor/${documentId}`);
     const calls: RecordedCall[] = [];

@@ -4700,7 +4700,7 @@ new owners and the manifest shows zero legacy runtime paths.
      Authenticated agent-browser proof
      verifies the routes through the Vite proxy with no browser errors.
 
-437. (Implementation verified; authenticated browser proof pending) Go now owns
+437. (Runtime verified) Go now owns
      Vite's Accounting and HR collection reads/actions, Marketing reads/actions,
      and POS collection writes. Writes resolve the Go session, enforce same
      origin for cookie requests, validate exact request/output contracts, and
@@ -4709,10 +4709,11 @@ new owners and the manifest shows zero legacy runtime paths.
      action. Focused Go handler/router tests, Vite proxy tests, the full
      TypeScript gate, and `pnpm go:verify` pass. The live Vite and Go endpoints
      both returned 401 without a session, confirming the proxy and auth boundary.
-     The installed `agent-browser` command is a dangling symlink and the
-     in-app browser registry is empty, so an authenticated browser proof remains
-     open. Route ownership checks pass at 94 files, 162 methods (85 Go, 75
-     legacy, 2 auth), and 30 pages.
+     Authenticated agent-browser proof loaded Accounting and HR, created a
+     Marketing segment, and opened a POS register through Go with successful
+     responses and no browser errors. No legacy API requests were used.
+     Route ownership checks pass at 94 files, 162 methods (85 Go, 75 legacy,
+     2 auth), and 30 pages.
 
 438. (Ownership verified) Active Vite's `/api/health` request reaches Go's
      health handler, and `/api/docs/assist` reaches the session-authenticated
@@ -4721,13 +4722,16 @@ new owners and the manifest shows zero legacy runtime paths.
      match that runtime. Route ownership checks pass at 94 files, 162 methods
      (87 Go, 73 legacy, 2 auth), and 30 pages.
 
-439. (Runtime path verified; browser proof pending) Support quick-create now
+439. (Runtime verified) Support quick-create now
      submits `crm.createCustomer` through Go's session capability API even when
      the obsolete client rollout selector is false. Go still resolves the
      session and organization, enforces `crm.write` and policy approval, and
      returns validated output; errors do not fall back to a legacy endpoint.
      The 58 focused Support API tests, targeted lint, and an independent
-     authorization-path review pass. The browser launcher remains unavailable.
+     authorization-path review pass. Authenticated agent-browser proof created
+     a synthetic customer from the New support conversation flow. The Go
+     `crm.createCustomer` capability request returned HTTP 200, the new
+     customer appeared in the selector, and the browser reported no errors.
 
 440. (Contract verified) Vite Sales now strictly validates the Go create-order,
      deliver-order, and cancel-order response shapes. Malformed success payloads

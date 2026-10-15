@@ -254,7 +254,6 @@ describe("Vite documents page", () => {
   });
 
   it("shows the library and preview from Go with uploaded content links owned by the Go route", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const goRow = { ...rows[0]!, id: goDocumentId };
     const goDocument = {
       ...goRow,
@@ -419,8 +418,7 @@ describe("Vite documents page", () => {
     expect(screen.queryByRole("heading", { name: "Previous deletion needs confirmation" })).toBeNull();
   });
 
-  it("shows selected Go list errors without retrying the legacy document route", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+  it("shows Go list errors without falling back to another route", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return modulesResponse(["documents"]);
       const request = JSON.parse(String(init?.body)) as { capabilityId: string };
@@ -434,8 +432,7 @@ describe("Vite documents page", () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
   });
 
-  it("shows a selected Go preview error without retrying the legacy detail route", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+  it("shows Go preview errors without falling back to another route", async () => {
     const goRow = { ...rows[0]!, id: goDocumentId };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/modules") return modulesResponse(["documents"]);

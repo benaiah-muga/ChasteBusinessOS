@@ -31,7 +31,7 @@ export const CrmDealSchema = z.object({
   customerName: z.string().nullable().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string(),
-}).passthrough();
+}).strict();
 export type CrmDeal = z.infer<typeof CrmDealSchema>;
 
 export const CrmCustomerSchema = z.object({
@@ -44,18 +44,20 @@ export const CrmCustomerSchema = z.object({
   ownerUserId: uuid.nullable().optional(),
   ownerName: z.string().nullable().optional(),
   ownerEmail: z.string().nullable().optional(),
+  updatedByUserId: uuid.nullable().optional(),
   updatedByName: z.string().nullable().optional(),
   updatedByEmail: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
   tags: z.array(z.string()).optional(),
   notes: z.string().nullable().optional(),
-  nextStep: z.object({ kind: z.enum(["invoice", "quote", "task"]), summary: z.string(), refId: z.string(), amountMinor: z.number().int().safe().optional() }).nullable().optional(),
+  nextStep: z.object({ kind: z.enum(["invoice", "quote", "task"]), summary: z.string(), refId: z.string(), amountMinor: z.number().int().safe().optional() }).strict().nullable().optional(),
   lastActivityAt: z.string().optional(),
   deactivatedAt: z.string().nullable().optional(),
-  mergedRecords: z.array(z.object({ id: uuid, name: z.string(), mergedAt: z.string().nullable() })).optional(),
+  mergedRecords: z.array(z.object({ id: uuid, name: z.string(), mergedAt: z.string().nullable() }).strict()).optional(),
   purchaseCount: z.number().int().safe().nonnegative().optional(),
   lifetimeSpendMinor: z.number().int().safe().nonnegative().optional(),
-}).passthrough();
+}).strict();
 export type CrmCustomer = z.infer<typeof CrmCustomerSchema>;
 
 export const CrmTimelineEntrySchema = z.object({
@@ -123,10 +125,10 @@ async function readJson(response: Response): Promise<unknown> {
 }
 
 function messageFor(status: number, body: unknown): string {
-  if (body && typeof body === "object" && "error" in body && typeof body.error === "string") return body.error;
   if (status === 401) return "Your session has expired. Sign in again to continue.";
   if (status === 403) return "Your account does not have access to this CRM information.";
   if (status === 428) return "Finish setting up your workspace to use CRM.";
+  if (body && typeof body === "object" && "error" in body && typeof body.error === "string") return body.error;
   return "The CRM service is unavailable. Try again.";
 }
 

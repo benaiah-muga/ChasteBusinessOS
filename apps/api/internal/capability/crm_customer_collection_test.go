@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -33,6 +34,25 @@ func TestCRMCustomerCollectionCapabilityPreservesWebProfileSemantics(t *testing.
 	inactiveID := seedCRMReadCustomer(t, fx, fx.orgID, "Inactive canonical", "inactive@fixture.test", &inactiveAt, nil)
 	mergedID := seedCRMReadCustomer(t, fx, fx.orgID, "Merged source", "merged@fixture.test", nil, &canonicalID)
 	foreignID := seedCRMReadCustomer(t, fx, fx.otherOrgID, "Foreign canonical", "foreign@fixture.test", nil, nil)
+	foreignMemberID := executorUUID(t)
+	foreignMemberEmail := "crm-foreign-profile-" + foreignMemberID[:8] + "@fixture.test"
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO users (id, email, name) VALUES ($1::uuid, $2, 'Foreign organization member')`, foreignMemberID, foreignMemberEmail); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO memberships (org_id, user_id) VALUES ($1::uuid, $2::uuid)`, fx.otherOrgID, foreignMemberID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(context.Background(), `UPDATE customers SET owner_user_id = NULL, updated_by_user_id = NULL WHERE owner_user_id = $1::uuid OR updated_by_user_id = $1::uuid`, foreignMemberID); err != nil {
+			t.Errorf("clear foreign CRM profile fixture references: %v", err)
+		}
+		if _, err := fx.owner.Exec(context.Background(), `DELETE FROM memberships WHERE user_id = $1::uuid`, foreignMemberID); err != nil {
+			t.Errorf("delete foreign CRM profile membership fixture: %v", err)
+		}
+		if _, err := fx.owner.Exec(context.Background(), `DELETE FROM users WHERE id = $1::uuid`, foreignMemberID); err != nil {
+			t.Errorf("delete foreign CRM profile user fixture: %v", err)
+		}
+	})
 	mergedAt := time.Date(2026, 1, 2, 3, 4, 5, 678_000_000, time.UTC)
 	if _, err := fx.owner.Exec(fx.ctx, `UPDATE customers SET merged_at=$2 WHERE id=$1::uuid`, mergedID, mergedAt); err != nil {
 		t.Fatal(err)
@@ -44,7 +64,7 @@ func TestCRMCustomerCollectionCapabilityPreservesWebProfileSemantics(t *testing.
 		WHERE id=$1::uuid`, canonicalID, fx.userID, profileUpdatedAt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fx.owner.Exec(fx.ctx, `UPDATE customers SET updated_by_user_id=$2::uuid WHERE id=$1::uuid`, inactiveID, fx.userID); err != nil {
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE customers SET owner_user_id=$2::uuid, updated_by_user_id=$2::uuid WHERE id=$1::uuid`, inactiveID, foreignMemberID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,6 +133,10 @@ func TestCRMCustomerCollectionCapabilityPreservesWebProfileSemantics(t *testing.
 	inactive, ok := byID[inactiveID]
 	if !ok || inactive.DeactivatedAt == nil || *inactive.DeactivatedAt != "2025-02-03T04:05:06.789Z" || inactive.MergedRecords == nil {
 		t.Fatalf("inactive canonical record=%+v present=%t", inactive, ok)
+	}
+	if inactive.OwnerUserID == nil || *inactive.OwnerUserID != foreignMemberID || inactive.OwnerName != nil || inactive.OwnerEmail != nil ||
+		inactive.UpdatedByUserID == nil || *inactive.UpdatedByUserID != foreignMemberID || inactive.UpdatedByName != nil || inactive.UpdatedByEmail != nil {
+		t.Fatalf("customer collection exposed profile details for a nonmember owner/editor: %+v", inactive)
 	}
 	if _, exists := byID[mergedID]; exists {
 		t.Fatal("merged source was returned as a canonical customer")

@@ -39,7 +39,7 @@ function routeGoCrmReadsToFixtures(fetchMock: CrmFetchMock): CrmFetchMock {
 }
 
 function customer(name = "Northwind") {
-  return { id: customerId, name, email: "contact@northwind.test", phone: null, preferredContactMethod: "email", doNotContact: false, ownerUserId: null, ownerName: null, tags: ["renewal"], notes: "Priority account", nextStep: null, lastActivityAt: "2026-09-28T12:00:00.000Z", deactivatedAt: null };
+  return { id: customerId, name, email: "contact@northwind.test", phone: null, preferredContactMethod: "email", doNotContact: false, ownerUserId: null, ownerName: null, ownerEmail: null, updatedByUserId: null, updatedByName: null, updatedByEmail: null, createdAt: "2026-09-27T12:00:00.000Z", updatedAt: "2026-09-28T12:00:00.000Z", tags: ["renewal"], notes: "Priority account", nextStep: null, lastActivityAt: "2026-09-28T12:00:00.000Z", deactivatedAt: null, mergedRecords: [], purchaseCount: 0, lifetimeSpendMinor: 0 };
 }
 function profileSnapshot(item: ReturnType<typeof customer>) {
   return {
@@ -828,7 +828,16 @@ describe("Vite CRM page", () => {
           currentCustomer = { ...currentCustomer, name: body.input.name ?? currentCustomer.name };
         } else if (body.capabilityId === "crm.restoreCustomerProfiles") {
           const profile = body.input.profiles?.[0];
-          if (profile) currentCustomer = { ...currentCustomer, ...profile };
+          if (profile) currentCustomer = {
+            ...currentCustomer,
+            name: profile.name,
+            ownerUserId: profile.ownerUserId,
+            tags: profile.tags,
+            notes: profile.notes,
+            phone: profile.phone,
+            preferredContactMethod: profile.preferredContactMethod,
+            doNotContact: profile.doNotContact,
+          };
         } else {
           return new Response(null, { status: 404 });
         }

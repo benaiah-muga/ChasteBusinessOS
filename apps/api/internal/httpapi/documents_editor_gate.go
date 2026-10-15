@@ -1,7 +1,7 @@
 package httpapi
 
 // DocumentsEditorDisabledCapabilities keeps the editor detail read closed on
-// the direct session route until its API rollout flag is explicitly enabled.
+// the direct session route only when its API opt-out flag is explicitly set.
 func DocumentsEditorDisabledCapabilities(enabled bool) map[string]struct{} {
 	if enabled {
 		return map[string]struct{}{}

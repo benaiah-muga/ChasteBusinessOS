@@ -118,8 +118,6 @@ describe("editor route matching", () => {
 
 describe("authored document reads", () => {
   it("loads document content and version history through Go regardless of old selectors", async () => {
-    vi.stubGlobal("__GO_DOCUMENTS_EDITOR_READS__", false);
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", false);
     const { calls } = recorder((call) => {
       const body = bodyOf(call);
       if (body.capabilityId === "documents.getDoc") return Response.json({ ok: true, data: { document: goAuthoredDocument } });
@@ -147,7 +145,7 @@ describe("authored document reads", () => {
     expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.listDocVersions", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
   });
 
-  it("does not fall back to a legacy route after Go getDoc failure or malformed output", async () => {
+  it("uses Go exclusively and rejects getDoc failures or malformed output", async () => {
     const documentId = goAuthoredDocument.id;
     for (const response of [
       () => Response.json({ error: "not found" }, { status: 404 }),
@@ -183,7 +181,6 @@ describe("authored document reads", () => {
   });
 
   it("reads archived versions through Go even when old selectors are false", async () => {
-    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", false);
     const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
     const { calls } = recorder(() => Response.json({ ok: true, data: {
       version: 2,

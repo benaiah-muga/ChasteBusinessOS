@@ -335,17 +335,16 @@ into the signed Go `documents.listDocs` capability. It requires `pnpm dev:api`;
 template reads remain on the legacy executor, and the combined response is
 preserved. Unavailable or invalid Go results fail closed. TypeScript remains
 the default; the flag defaults to `0`.
-`GO_DOCUMENT_INGESTED_READS=1` opts ingested document list and detail reads in
+Ingested document list and detail reads in
 `GET /api/documents` into the signed Go
 `documents.listIngestedDocuments` capability. It requires `pnpm dev:api`,
 preserves the list, vendors, detail, and `preview=1` projections, and excludes
 stored raw text and base64 content. Unavailable or invalid Go results fail
-closed. TypeScript remains the default; the flag defaults to `0`.
-The Vite library can select the direct session-capability route by setting
-`CHASTE_GO_DOCUMENT_INGESTED_READS=1` and
-`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API feature flag above is enforced
-inside the capability route for all callers. List and preview detail keep the
-same projections, and uploaded-content links remain on their existing path.
+closed. The Go API serves these reads by default; set
+`GO_DOCUMENT_INGESTED_READS=0` to disable them. Vite always calls the Go
+session-capability route and does not have a client-side legacy selector. List
+and preview detail keep the same projections, and uploaded-content links
+remain on their existing path.
 Vite mention and add-member people lookups always use the authenticated Go
 `messaging.listPeople` capability through the session capability route, which
 must be enabled with `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` and
@@ -367,19 +366,12 @@ capability route. Go trims and bounds the query, scopes results to the active
 organization and joined conversations, excludes deleted records, escapes SQL
 wildcards, and returns the newest 50 matches with the existing snippets and
 sender metadata. A Go failure is shown in Vite without retrying through Next.
-The Vite authored-document editor can separately select Go for version history
-and archived compare previews with `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
-`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API must also set
-`GO_DOCUMENTS_VERSION_READS=1`; Go enforces that gate for both capabilities and
-all callers. Document content, collaboration, and editor writes retain their
-existing routes.
-For the editor's primary detail read, set `CHASTE_GO_DOCUMENTS_EDITOR_READS=1`
-as well as the version-read selector above. Go then supplies both `getDoc` and
-`listDocVersions`, gated by `GO_DOCUMENTS_EDITOR_READS=1` and
-`GO_DOCUMENTS_VERSION_READS=1` on the API. This avoids a legacy detail request
-for version rows while Go supplies the primary body. A selected Go detail error
-fails closed; workspace, presence, autosave, collaboration, and writes keep
-their existing routes.
+The Vite authored-document editor always uses Go for its primary detail read,
+version history, and archived compare previews. The API enables these
+capabilities by default; set `GO_DOCUMENTS_EDITOR_READS=0` or
+`GO_DOCUMENTS_VERSION_READS=0` to disable the corresponding reads. Invalid or
+unavailable Go responses fail closed. Document content, collaboration, and
+editor writes keep their separate routes.
 The editor's presence, autosave draft, and soft-lock session endpoint is
 available in Go at `POST` and `DELETE /api/docs/:id/workspace`. It writes the
 RLS-guarded `doc_presence` and `doc_drafts` tables directly as specified by
@@ -387,12 +379,12 @@ ADR 0056, without adding autosave traffic to the capability ledger. The API
 mounts this endpoint by default when `GO_DOCUMENTS_EDITOR_WORKSPACE` is unset;
 set it to `0` to roll back to the legacy route. Browser writes require the
 authenticated Go session and same-origin checks.
-`GO_DOCUMENTS_VERSION_READS=1` opts authored document version history and
+Authored document version history and
 single-version reads on `GET /api/docs/:id` into the signed Go
 `documents.listDocVersions` and `documents.getDocVersion` capabilities. It
 requires `pnpm dev:api`, preserves the current document read and public
-response projections, and fails closed after Go dispatch. TypeScript remains
-the default; the flag defaults to `0`.
+response projections, and fails closed after Go dispatch. The API enables
+these reads by default; set `GO_DOCUMENTS_VERSION_READS=0` to disable them.
 `GO_ACCOUNTING_QUOTES_WRITE=1` opts quote creation, acceptance, decline, and
 expiry sweeps into the signed Go capability bridge. It requires `pnpm
 dev:api`; the dedicated quotes route and other accounting actions remain on

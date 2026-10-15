@@ -64,7 +64,6 @@ describe("documents API client", () => {
   });
 
   it("keeps document reads on Go even when the former selector is false", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", false);
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { documents: [goRow] } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -82,7 +81,6 @@ describe("documents API client", () => {
   });
 
   it("loads the list through the Go capability with exact input and validates its envelope", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { documents: [goRow, goEarlierRow], vendors: [{ id: "vendor-1", name: "Vendor" }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -99,7 +97,6 @@ describe("documents API client", () => {
   });
 
   it("treats omitted Go list arrays as empty in an empty workspace", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -109,7 +106,6 @@ describe("documents API client", () => {
   });
 
   it("loads detail and coding suggestions through Go without requesting file content", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const detailWithSuggestions = { ...goDetail, suggestions: [goSuggestion] };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { document: detailWithSuggestions } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -121,7 +117,6 @@ describe("documents API client", () => {
   });
 
   it("treats an omitted Go suggestions field as an empty collection", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const detailWithoutSuggestions = { ...goDetail } as Record<string, unknown>;
     delete detailWithoutSuggestions.suggestions;
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { document: detailWithoutSuggestions } })));
@@ -129,8 +124,7 @@ describe("documents API client", () => {
     await expect(fetchDocumentDetail(goDocumentId)).resolves.toMatchObject({ suggestions: [] });
   });
 
-  it("does not fall back to the legacy documents route after a selected Go error or malformed output", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+  it("uses Go exclusively and rejects errors or malformed output", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "capability is disabled on this Go route" }, { status: 503 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { documents: [goRow], vendors: [] }, extra: true }))
@@ -145,7 +139,6 @@ describe("documents API client", () => {
   });
 
   it("rejects malformed Go coding suggestions and extra fields", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { document: { ...goDetail, suggestions: [{ ...goSuggestion, suggestedAccountCode: 6000 }] } } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -158,7 +151,6 @@ describe("documents API client", () => {
   });
 
   it("rejects Go minor-unit values that JavaScript cannot represent exactly", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({
       ok: true,
       data: { document: { ...goDetail, suggestions: [{ ...goSuggestion, unitPriceMinor: Number.MAX_SAFE_INTEGER + 1 }] } },
@@ -172,7 +164,6 @@ describe("documents API client", () => {
   });
 
   it("rejects malformed matched-on metadata from Go", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { document: { ...goDetail, suggestions: [{ ...goSuggestion, matchedOn: { unexpected: "object" } }] } } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -184,8 +175,7 @@ describe("documents API client", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("keeps selected Go detail failures on the capability route without a legacy retry", async () => {
-    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+  it("keeps Go detail failures on the capability route without fallback", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "not found" }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
