@@ -68,6 +68,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read pending approvals and recent decisions
+         * @description Reads the authenticated organization's approval queue and recent history. Cookie sessions use the active organization from session context unless X-Organization-ID is supplied; bearer tokens are resolved against the selected organization. An explicit selector must match the authenticated membership. Cookie reads do not require an Origin header. Responses include Cache-Control: no-store and Pragma: no-cache.
+         */
+        get: operations["getApprovalInbox"];
+        put?: never;
+        /**
+         * Approve or reject a pending action
+         * @description Decides one pending approval in the authenticated organization. Supply exactly one non-empty approval id in the id query parameter. The handler reports malformed or non-existent IDs as not found. Cookie-authenticated requests must pass the server's same-origin Origin check; bearer requests do not use that browser check. An explicit X-Organization-ID is used to resolve the organization and resolution failures return 401 with a Bearer challenge. Approval execution requires the permission for the approved capability. Request bodies are limited to 16 KiB.
+         */
+        post: operations["decideApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/support/channels": {
         parameters: {
             query?: never;
@@ -246,6 +270,75 @@ export interface components {
             /** @constant */
             pendingApproval: true;
             hint: string;
+        };
+        ApprovalInboxResponse: {
+            approvals: components["schemas"]["ApprovalInboxRow"][];
+            history: components["schemas"]["ApprovalInboxRow"][];
+        };
+        ApprovalInboxRow: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            orgId: string;
+            /** Format: uuid */
+            sessionId: string | null;
+            /** Format: uuid */
+            requestedByUserId: string | null;
+            capabilityId: string;
+            riskClass: string;
+            /** @description Arbitrary approval input, retained as raw JSON by Go. */
+            payload: unknown;
+            rationale: string | null;
+            /** @enum {string} */
+            status: "pending" | "executed" | "approved" | "rejected" | "expired";
+            /** Format: uuid */
+            decidedByUserId: string | null;
+            decisionComment: string | null;
+            /** Format: date-time */
+            expiresAt: string | null;
+            /** Format: date-time */
+            decidedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            raisedBy: {
+                name: string;
+                /** @enum {string} */
+                kind: "agent" | "human";
+            };
+            decidedBy: string | null;
+            relatedDocuments: {
+                /** Format: uuid */
+                id: string;
+                title: string;
+            }[];
+        };
+        ApprovalDecisionRequest: {
+            /** @enum {string} */
+            decision: "approve" | "reject";
+            /** @description Optional reviewer comment. The server counts UTF-16 code units, while OpenAPI maxLength counts Unicode code points, so this is an approximate schema bound and the server limit is authoritative. If provided, comment must be a string; null is rejected. */
+            comment?: string;
+        };
+        ApprovalDecisionSuccess: {
+            /** @constant */
+            ok: true;
+            /** @enum {string} */
+            status: "rejected" | "executed" | "approved";
+            result?: components["schemas"]["ApprovalExecutionResult"];
+        };
+        ApprovalExecutionResult: {
+            ok: boolean;
+            /** @description Arbitrary result JSON retained as raw JSON by Go. */
+            data?: unknown;
+            error?: string;
+            pendingApproval?: boolean;
+            approvalId?: string;
+            approvalRationale?: string;
+            replayed?: boolean;
+        };
+        ApprovalDecisionFailure: {
+            /** @constant */
+            ok: false;
+            error: string;
         };
         ErrorResponse: {
             error: string;
@@ -649,6 +742,234 @@ export interface operations {
             /** @description The module write service is unavailable. */
             503: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApprovalInbox: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects an organization membership for the request. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to 100 pending approvals and up to 25 recent decisions. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalInboxResponse"];
+                };
+            };
+            /** @description The organization selector is malformed or repeated. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor has no valid verified session for an organization. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The explicit organization selector does not match the resolved membership. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Only GET is supported. */
+            405: {
+                headers: {
+                    Allow?: "GET";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The organization-scoped inbox read failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The approval inbox service is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    decideApproval: {
+        parameters: {
+            query: {
+                /** @description Approval ID to decide. The handler requires exactly one non-empty value; malformed IDs are reported as not found. */
+                id: string;
+            };
+            header?: {
+                /** @description Selects the active organization and must match membership. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Approval was rejected or approved and its action executed. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalDecisionSuccess"];
+                };
+            };
+            /** @description The ID query or decision body is malformed. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"] | components["schemas"]["ApprovalDecisionFailure"];
+                };
+            };
+            /** @description Authentication is invalid, the actor is not a verified organization member, or organization selection failed. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"] | components["schemas"]["ApprovalDecisionFailure"];
+                };
+            };
+            /** @description The cookie request origin is disallowed or the actor lacks authority over this capability. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"] | components["schemas"]["ApprovalDecisionFailure"];
+                };
+            };
+            /** @description No approval with this ID exists in the authenticated organization. */
+            404: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalDecisionFailure"];
+                };
+            };
+            /** @description Only POST is supported. */
+            405: {
+                headers: {
+                    Allow?: "POST";
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description This approval has already been handled or is being executed elsewhere. */
+            409: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalDecisionFailure"];
+                };
+            };
+            /** @description The approval expired before it could be decided. */
+            410: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalDecisionFailure"];
+                };
+            };
+            /** @description The approved capability is unsupported or refused execution. */
+            422: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalDecisionFailure"];
+                };
+            };
+            /** @description The decision or approved action failed unexpectedly. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"] | components["schemas"]["ApprovalDecisionFailure"];
+                };
+            };
+            /** @description The approval decision service is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {

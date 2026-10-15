@@ -386,6 +386,317 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/approvals:
+    get:
+      operationId: getApprovalInbox
+      summary: Read pending approvals and recent decisions
+      description: >-
+        Reads the authenticated organization's approval queue and recent
+        history. Cookie sessions use the active organization from session
+        context unless X-Organization-ID is supplied; bearer tokens are
+        resolved against the selected organization. An explicit selector must
+        match the authenticated membership. Cookie reads do not require an
+        Origin header. Responses include Cache-Control: no-store and
+        Pragma: no-cache.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for the request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Up to 100 pending approvals and up to 25 recent decisions.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalInboxResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The actor has no valid verified session for an organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the resolved membership.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The organization-scoped inbox read failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The approval inbox service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: decideApproval
+      summary: Approve or reject a pending action
+      description: >-
+        Decides one pending approval in the authenticated organization. Supply
+        exactly one non-empty approval id in the id query parameter. The
+        handler reports malformed or non-existent IDs as not found. Cookie-authenticated
+        requests must pass the server's same-origin Origin check; bearer
+        requests do not use that browser check. An explicit X-Organization-ID
+        is used to resolve the organization and resolution failures return 401
+        with a Bearer challenge. Approval execution requires the permission for
+        the approved capability. Request bodies are limited to 16 KiB.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: Approval ID to decide. The handler requires exactly one non-empty value; malformed IDs are reported as not found.
+          schema:
+            type: string
+            minLength: 1
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the active organization and must match membership.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecisionRequest"
+      responses:
+        "200":
+          description: Approval was rejected or approved and its action executed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionSuccess"
+        "400":
+          description: The ID query or decision body is malformed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "401":
+          description: Authentication is invalid, the actor is not a verified organization member, or organization selection failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "403":
+          description: The cookie request origin is disallowed or the actor lacks authority over this capability.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "404":
+          description: No approval with this ID exists in the authenticated organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "405":
+          description: Only POST is supported.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: POST
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: This approval has already been handled or is being executed elsewhere.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "410":
+          description: The approval expired before it could be decided.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "422":
+          description: The approved capability is unsupported or refused execution.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "500":
+          description: The decision or approved action failed unexpectedly.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "503":
+          description: The approval decision service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/support/channels:
     get:
       operationId: getSupportChannels
@@ -890,6 +1201,148 @@ components:
           type: boolean
           const: true
         hint:
+          type: string
+    ApprovalInboxResponse:
+      type: object
+      additionalProperties: false
+      required: [approvals, history]
+      properties:
+        approvals:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalInboxRow"
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalInboxRow"
+    ApprovalInboxRow:
+      type: object
+      additionalProperties: false
+      required: [id, orgId, sessionId, requestedByUserId, capabilityId, riskClass, payload, rationale, status, decidedByUserId, decisionComment, expiresAt, decidedAt, createdAt, raisedBy, decidedBy, relatedDocuments]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orgId:
+          type: string
+          format: uuid
+        sessionId:
+          type: [string, "null"]
+          format: uuid
+        requestedByUserId:
+          type: [string, "null"]
+          format: uuid
+        capabilityId:
+          type: string
+        riskClass:
+          type: string
+        payload:
+          description: Arbitrary approval input, retained as raw JSON by Go.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        rationale:
+          type: [string, "null"]
+        status:
+          type: string
+          enum: [pending, executed, approved, rejected, expired]
+        decidedByUserId:
+          type: [string, "null"]
+          format: uuid
+        decisionComment:
+          type: [string, "null"]
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        decidedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        raisedBy:
+          type: object
+          additionalProperties: false
+          required: [name, kind]
+          properties:
+            name:
+              type: string
+            kind:
+              type: string
+              enum: [agent, human]
+        decidedBy:
+          type: [string, "null"]
+        relatedDocuments:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, title]
+            properties:
+              id:
+                type: string
+                format: uuid
+              title:
+                type: string
+    ApprovalDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        comment:
+          type: string
+          maxLength: 2000
+          x-maxLength-unit: UTF-16 code units
+          description: Optional reviewer comment. The server counts UTF-16 code units, while OpenAPI maxLength counts Unicode code points, so this is an approximate schema bound and the server limit is authoritative. If provided, comment must be a string; null is rejected.
+    ApprovalDecisionSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, status]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        status:
+          type: string
+          enum: [rejected, executed, approved]
+        result:
+          $ref: "#/components/schemas/ApprovalExecutionResult"
+    ApprovalExecutionResult:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        data:
+          description: Arbitrary result JSON retained as raw JSON by Go.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        error:
+          type: string
+        pendingApproval:
+          type: boolean
+        approvalId:
+          type: string
+        approvalRationale:
+          type: string
+        replayed:
+          type: boolean
+    ApprovalDecisionFailure:
+      type: object
+      additionalProperties: false
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        error:
           type: string
     ErrorResponse:
       type: object

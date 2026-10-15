@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -62,6 +63,23 @@ func TestApprovalDecisionSessionHandlerBindsVerifiedSessionAndParsesDecision(t *
 		len(decider.permissions) != 1 || decider.permissions[0] != "accounting.post" || decider.input.ApprovalID != approvalDecisionID ||
 		decider.input.Decision != "reject" || decider.input.Comment == nil || *decider.input.Comment != "Reviewed evidence" {
 		t.Fatalf("decider calls=%d user=%q org=%q session=%q permissions=%v input=%+v", decider.calls, decider.userID, decider.orgID, decider.authSessionID, decider.permissions, decider.input)
+	}
+}
+
+func TestApprovalDecisionSessionHandlerPreservesRawJSONInGeneratedResponse(t *testing.T) {
+	identity := directApprovalDecisionIdentity()
+	decider := &fakeApprovalSessionDecider{result: capability.ApprovalDecisionResult{
+		OK:         true,
+		Status:     "executed",
+		Result:     &capability.Result{OK: true, Data: json.RawMessage(`{"exact":9007199254740993}`)},
+		HTTPStatus: http.StatusOK,
+	}}
+	handler := NewApprovalDecisionSessionHandler(&fakeDirectSessionResolver{resolved: identity}, decider, nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, directApprovalDecisionRequest(`{"decision":"approve"}`))
+
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"exact":9007199254740993`) {
+		t.Fatalf("status=%d body=%q, want generated response to preserve raw integer JSON", response.Code, response.Body.String())
 	}
 }
 

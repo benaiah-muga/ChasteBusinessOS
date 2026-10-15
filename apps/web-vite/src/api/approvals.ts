@@ -1,8 +1,9 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 
 const OrganizationIdSchema = z.string().uuid();
 
-const ApprovalSchema = z.object({
+const ApprovalSchema: z.ZodType<components["schemas"]["ApprovalInboxRow"]> = z.object({
   id: z.string().uuid(),
   orgId: z.string().uuid(),
   sessionId: z.string().uuid().nullable(),
@@ -11,7 +12,7 @@ const ApprovalSchema = z.object({
   riskClass: z.string().min(1),
   payload: z.unknown(),
   rationale: z.string().nullable(),
-  status: z.enum(["pending", "executing", "executed", "approved", "failed", "rejected", "expired"]),
+  status: z.enum(["pending", "executed", "approved", "rejected", "expired"]),
   decidedByUserId: z.string().uuid().nullable(),
   decisionComment: z.string().nullable(),
   expiresAt: z.string().datetime({ offset: true }).nullable(),
@@ -22,12 +23,12 @@ const ApprovalSchema = z.object({
   relatedDocuments: z.array(z.object({ id: z.string().uuid(), title: z.string() }).strict()),
 }).strict();
 
-const ApprovalListSchema = z.object({
+const ApprovalListSchema: z.ZodType<components["schemas"]["ApprovalInboxResponse"]> = z.object({
   approvals: z.array(ApprovalSchema),
   history: z.array(ApprovalSchema),
 }).strict();
 
-const DecisionResponseSchema = z.object({
+const DecisionResponseSchema: z.ZodType<components["schemas"]["ApprovalDecisionSuccess"]> = z.object({
   ok: z.literal(true),
   status: z.enum(["rejected", "executed", "approved"]),
   result: z.object({
@@ -46,9 +47,9 @@ const ErrorResponseSchema = z.object({
   message: z.string().optional(),
 });
 
-export type Approval = z.infer<typeof ApprovalSchema>;
-export type ApprovalList = z.infer<typeof ApprovalListSchema>;
-export type ApprovalDecision = z.infer<typeof DecisionResponseSchema>;
+export type Approval = components["schemas"]["ApprovalInboxRow"];
+export type ApprovalList = components["schemas"]["ApprovalInboxResponse"];
+export type ApprovalDecision = components["schemas"]["ApprovalDecisionSuccess"];
 
 export class ApprovalApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -136,13 +137,14 @@ export async function submitApprovalDecision(id: string, decision: "approve" | "
     throw new ApprovalApiError(0, "This approval has an invalid identifier. Refresh the list before deciding.");
   }
   const query = new URLSearchParams({ id });
+  const body: components["schemas"]["ApprovalDecisionRequest"] = { decision };
   let response: Response;
   try {
     response = await fetch(`/api/approvals?${query.toString()}`, {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json", "X-Organization-ID": orgId },
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify(body),
       signal: requestSignal(undefined, 20_000),
     });
   } catch {

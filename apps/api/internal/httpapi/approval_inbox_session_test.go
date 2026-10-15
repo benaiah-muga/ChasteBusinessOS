@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
@@ -34,6 +35,33 @@ func TestApprovalInboxSessionHandlerBindsVerifiedSessionAndOrganization(t *testi
 		reader.claims.ActorType != "human" || reader.claims.ActorID == nil || *reader.claims.ActorID != identity.UserID ||
 		len(reader.claims.Permissions) != 1 || reader.claims.Permissions[0] != "accounting.post" {
 		t.Fatalf("reader calls=%d claims=%+v capabilities=%v", reader.calls, reader.claims, reader.capabilities)
+	}
+}
+
+func TestApprovalInboxSessionHandlerPreservesRawJSONInGeneratedResponse(t *testing.T) {
+	identity := directTestIdentity()
+	reader := &fakeApprovalInboxReader{response: ApprovalInboxResponse{
+		Approvals: []ApprovalInboxRow{{
+			ID:               approvalDecisionID,
+			OrgID:            *identity.OrgID,
+			CapabilityID:     "accounting.recordPayment",
+			RiskClass:        "money",
+			Payload:          []byte(`{"amountMinor":9007199254740993}`),
+			Status:           "pending",
+			CreatedAt:        "2026-10-16T00:00:00.000Z",
+			RaisedBy:         RaisedBy{Name: "Reviewer", Kind: "human"},
+			RelatedDocuments: []RelatedDocument{},
+		}},
+		History: []ApprovalInboxRow{},
+	}}
+	handler := NewApprovalInboxSessionHandler(&fakeDirectSessionResolver{resolved: identity}, reader, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/approvals", nil)
+	request.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: "verified-session-cookie"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"amountMinor":9007199254740993`) {
+		t.Fatalf("status=%d body=%q, want generated response to preserve raw integer JSON", response.Code, response.Body.String())
 	}
 }
 

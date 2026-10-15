@@ -12,6 +12,120 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for ApprovalDecisionFailureOk.
+const (
+	ApprovalDecisionFailureOkFalse ApprovalDecisionFailureOk = false
+)
+
+// Valid indicates whether the value is a known member of the ApprovalDecisionFailureOk enum.
+func (e ApprovalDecisionFailureOk) Valid() bool {
+	switch e {
+	case ApprovalDecisionFailureOkFalse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApprovalDecisionRequestDecision.
+const (
+	Approve ApprovalDecisionRequestDecision = "approve"
+	Reject  ApprovalDecisionRequestDecision = "reject"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalDecisionRequestDecision enum.
+func (e ApprovalDecisionRequestDecision) Valid() bool {
+	switch e {
+	case Approve:
+		return true
+	case Reject:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApprovalDecisionSuccessOk.
+const (
+	ApprovalDecisionSuccessOkTrue ApprovalDecisionSuccessOk = true
+)
+
+// Valid indicates whether the value is a known member of the ApprovalDecisionSuccessOk enum.
+func (e ApprovalDecisionSuccessOk) Valid() bool {
+	switch e {
+	case ApprovalDecisionSuccessOkTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApprovalDecisionSuccessStatus.
+const (
+	ApprovalDecisionSuccessStatusApproved ApprovalDecisionSuccessStatus = "approved"
+	ApprovalDecisionSuccessStatusExecuted ApprovalDecisionSuccessStatus = "executed"
+	ApprovalDecisionSuccessStatusRejected ApprovalDecisionSuccessStatus = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalDecisionSuccessStatus enum.
+func (e ApprovalDecisionSuccessStatus) Valid() bool {
+	switch e {
+	case ApprovalDecisionSuccessStatusApproved:
+		return true
+	case ApprovalDecisionSuccessStatusExecuted:
+		return true
+	case ApprovalDecisionSuccessStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApprovalInboxRowRaisedByKind.
+const (
+	Agent ApprovalInboxRowRaisedByKind = "agent"
+	Human ApprovalInboxRowRaisedByKind = "human"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalInboxRowRaisedByKind enum.
+func (e ApprovalInboxRowRaisedByKind) Valid() bool {
+	switch e {
+	case Agent:
+		return true
+	case Human:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApprovalInboxRowStatus.
+const (
+	ApprovalInboxRowStatusApproved ApprovalInboxRowStatus = "approved"
+	ApprovalInboxRowStatusExecuted ApprovalInboxRowStatus = "executed"
+	ApprovalInboxRowStatusExpired  ApprovalInboxRowStatus = "expired"
+	ApprovalInboxRowStatusPending  ApprovalInboxRowStatus = "pending"
+	ApprovalInboxRowStatusRejected ApprovalInboxRowStatus = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalInboxRowStatus enum.
+func (e ApprovalInboxRowStatus) Valid() bool {
+	switch e {
+	case ApprovalInboxRowStatusApproved:
+		return true
+	case ApprovalInboxRowStatusExecuted:
+		return true
+	case ApprovalInboxRowStatusExpired:
+		return true
+	case ApprovalInboxRowStatusPending:
+		return true
+	case ApprovalInboxRowStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CapabilityExecutionPendingOk.
 const (
 	CapabilityExecutionPendingOkFalse CapabilityExecutionPendingOk = false
@@ -167,6 +281,92 @@ func (e SupportChannelsPatchRegenerateToken) Valid() bool {
 		return false
 	}
 }
+
+// ApprovalDecisionFailure defines model for ApprovalDecisionFailure.
+type ApprovalDecisionFailure struct {
+	Error string                    `json:"error"`
+	Ok    ApprovalDecisionFailureOk `json:"ok"`
+}
+
+// ApprovalDecisionFailureOk defines model for ApprovalDecisionFailure.Ok.
+type ApprovalDecisionFailureOk bool
+
+// ApprovalDecisionRequest defines model for ApprovalDecisionRequest.
+type ApprovalDecisionRequest struct {
+	// Comment Optional reviewer comment. The server counts UTF-16 code units, while OpenAPI maxLength counts Unicode code points, so this is an approximate schema bound and the server limit is authoritative. If provided, comment must be a string; null is rejected.
+	Comment  *string                         `json:"comment,omitempty"`
+	Decision ApprovalDecisionRequestDecision `json:"decision"`
+}
+
+// ApprovalDecisionRequestDecision defines model for ApprovalDecisionRequest.Decision.
+type ApprovalDecisionRequestDecision string
+
+// ApprovalDecisionSuccess defines model for ApprovalDecisionSuccess.
+type ApprovalDecisionSuccess struct {
+	Ok     ApprovalDecisionSuccessOk     `json:"ok"`
+	Result *ApprovalExecutionResult      `json:"result,omitempty"`
+	Status ApprovalDecisionSuccessStatus `json:"status"`
+}
+
+// ApprovalDecisionSuccessOk defines model for ApprovalDecisionSuccess.Ok.
+type ApprovalDecisionSuccessOk bool
+
+// ApprovalDecisionSuccessStatus defines model for ApprovalDecisionSuccess.Status.
+type ApprovalDecisionSuccessStatus string
+
+// ApprovalExecutionResult defines model for ApprovalExecutionResult.
+type ApprovalExecutionResult struct {
+	ApprovalId        *string `json:"approvalId,omitempty"`
+	ApprovalRationale *string `json:"approvalRationale,omitempty"`
+
+	// Data Arbitrary result JSON retained as raw JSON by Go.
+	Data            *apicontract.RawJSON `json:"data,omitempty"`
+	Error           *string              `json:"error,omitempty"`
+	Ok              bool                 `json:"ok"`
+	PendingApproval *bool                `json:"pendingApproval,omitempty"`
+	Replayed        *bool                `json:"replayed,omitempty"`
+}
+
+// ApprovalInboxResponse defines model for ApprovalInboxResponse.
+type ApprovalInboxResponse struct {
+	Approvals []ApprovalInboxRow `json:"approvals"`
+	History   []ApprovalInboxRow `json:"history"`
+}
+
+// ApprovalInboxRow defines model for ApprovalInboxRow.
+type ApprovalInboxRow struct {
+	CapabilityId    string              `json:"capabilityId"`
+	CreatedAt       time.Time           `json:"createdAt"`
+	DecidedAt       *time.Time          `json:"decidedAt"`
+	DecidedBy       *string             `json:"decidedBy"`
+	DecidedByUserId *openapi_types.UUID `json:"decidedByUserId"`
+	DecisionComment *string             `json:"decisionComment"`
+	ExpiresAt       *time.Time          `json:"expiresAt"`
+	Id              openapi_types.UUID  `json:"id"`
+	OrgId           openapi_types.UUID  `json:"orgId"`
+
+	// Payload Arbitrary approval input, retained as raw JSON by Go.
+	Payload  apicontract.RawJSON `json:"payload"`
+	RaisedBy struct {
+		Kind ApprovalInboxRowRaisedByKind `json:"kind"`
+		Name string                       `json:"name"`
+	} `json:"raisedBy"`
+	Rationale        *string `json:"rationale"`
+	RelatedDocuments []struct {
+		Id    openapi_types.UUID `json:"id"`
+		Title string             `json:"title"`
+	} `json:"relatedDocuments"`
+	RequestedByUserId *openapi_types.UUID    `json:"requestedByUserId"`
+	RiskClass         string                 `json:"riskClass"`
+	SessionId         *openapi_types.UUID    `json:"sessionId"`
+	Status            ApprovalInboxRowStatus `json:"status"`
+}
+
+// ApprovalInboxRowRaisedByKind defines model for ApprovalInboxRow.RaisedBy.Kind.
+type ApprovalInboxRowRaisedByKind string
+
+// ApprovalInboxRowStatus defines model for ApprovalInboxRow.Status.
+type ApprovalInboxRowStatus string
 
 // CapabilityExecutionPending defines model for CapabilityExecutionPending.
 type CapabilityExecutionPending struct {
@@ -362,6 +562,41 @@ type SupportChannelsResponse struct {
 	Greeting         string  `json:"greeting"`
 }
 
+// GetApprovalInboxParams defines parameters for GetApprovalInbox.
+type GetApprovalInboxParams struct {
+	// XOrganizationID Selects an organization membership for the request.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// DecideApprovalParams defines parameters for DecideApproval.
+type DecideApprovalParams struct {
+	// Id Approval ID to decide. The handler requires exactly one non-empty value; malformed IDs are reported as not found.
+	Id string `form:"id" json:"id"`
+
+	// XOrganizationID Selects the active organization and must match membership.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// DecideApproval400JSONResponseBody defines parameters for DecideApproval.
+type DecideApproval400JSONResponseBody struct {
+	union json.RawMessage
+}
+
+// DecideApproval401JSONResponseBody defines parameters for DecideApproval.
+type DecideApproval401JSONResponseBody struct {
+	union json.RawMessage
+}
+
+// DecideApproval403JSONResponseBody defines parameters for DecideApproval.
+type DecideApproval403JSONResponseBody struct {
+	union json.RawMessage
+}
+
+// DecideApproval500JSONResponseBody defines parameters for DecideApproval.
+type DecideApproval500JSONResponseBody struct {
+	union json.RawMessage
+}
+
 // ExecuteCapabilityParams defines parameters for ExecuteCapability.
 type ExecuteCapabilityParams struct {
 	// XOrganizationID Selects the active organization when the authenticated identity belongs to more than one organization.
@@ -397,6 +632,9 @@ type UpdateSupportChannelsParams struct {
 	IdempotencyKey openapi_types.UUID `json:"Idempotency-Key"`
 }
 
+// DecideApprovalJSONRequestBody defines body for DecideApproval for application/json ContentType.
+type DecideApprovalJSONRequestBody = ApprovalDecisionRequest
+
 // ExecuteCapabilityJSONRequestBody defines body for ExecuteCapability for application/json ContentType.
 type ExecuteCapabilityJSONRequestBody = CapabilityExecutionRequest
 
@@ -405,6 +643,254 @@ type SetModuleSwitchboardJSONRequestBody = ModuleSwitchboardRequest
 
 // UpdateSupportChannelsJSONRequestBody defines body for UpdateSupportChannels for application/json ContentType.
 type UpdateSupportChannelsJSONRequestBody = SupportChannelsPatch
+
+// AsErrorResponse returns the union data inside the DecideApproval400JSONResponseBody as a ErrorResponse
+func (t DecideApproval400JSONResponseBody) AsErrorResponse() (ErrorResponse, error) {
+	var body ErrorResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromErrorResponse overwrites any union data inside the DecideApproval400JSONResponseBody as the provided ErrorResponse
+func (t *DecideApproval400JSONResponseBody) FromErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeErrorResponse performs a merge with any union data inside the DecideApproval400JSONResponseBody, using the provided ErrorResponse
+func (t *DecideApproval400JSONResponseBody) MergeErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsApprovalDecisionFailure returns the union data inside the DecideApproval400JSONResponseBody as a ApprovalDecisionFailure
+func (t DecideApproval400JSONResponseBody) AsApprovalDecisionFailure() (ApprovalDecisionFailure, error) {
+	var body ApprovalDecisionFailure
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromApprovalDecisionFailure overwrites any union data inside the DecideApproval400JSONResponseBody as the provided ApprovalDecisionFailure
+func (t *DecideApproval400JSONResponseBody) FromApprovalDecisionFailure(v ApprovalDecisionFailure) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeApprovalDecisionFailure performs a merge with any union data inside the DecideApproval400JSONResponseBody, using the provided ApprovalDecisionFailure
+func (t *DecideApproval400JSONResponseBody) MergeApprovalDecisionFailure(v ApprovalDecisionFailure) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DecideApproval400JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DecideApproval400JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsErrorResponse returns the union data inside the DecideApproval401JSONResponseBody as a ErrorResponse
+func (t DecideApproval401JSONResponseBody) AsErrorResponse() (ErrorResponse, error) {
+	var body ErrorResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromErrorResponse overwrites any union data inside the DecideApproval401JSONResponseBody as the provided ErrorResponse
+func (t *DecideApproval401JSONResponseBody) FromErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeErrorResponse performs a merge with any union data inside the DecideApproval401JSONResponseBody, using the provided ErrorResponse
+func (t *DecideApproval401JSONResponseBody) MergeErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsApprovalDecisionFailure returns the union data inside the DecideApproval401JSONResponseBody as a ApprovalDecisionFailure
+func (t DecideApproval401JSONResponseBody) AsApprovalDecisionFailure() (ApprovalDecisionFailure, error) {
+	var body ApprovalDecisionFailure
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromApprovalDecisionFailure overwrites any union data inside the DecideApproval401JSONResponseBody as the provided ApprovalDecisionFailure
+func (t *DecideApproval401JSONResponseBody) FromApprovalDecisionFailure(v ApprovalDecisionFailure) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeApprovalDecisionFailure performs a merge with any union data inside the DecideApproval401JSONResponseBody, using the provided ApprovalDecisionFailure
+func (t *DecideApproval401JSONResponseBody) MergeApprovalDecisionFailure(v ApprovalDecisionFailure) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DecideApproval401JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DecideApproval401JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsErrorResponse returns the union data inside the DecideApproval403JSONResponseBody as a ErrorResponse
+func (t DecideApproval403JSONResponseBody) AsErrorResponse() (ErrorResponse, error) {
+	var body ErrorResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromErrorResponse overwrites any union data inside the DecideApproval403JSONResponseBody as the provided ErrorResponse
+func (t *DecideApproval403JSONResponseBody) FromErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeErrorResponse performs a merge with any union data inside the DecideApproval403JSONResponseBody, using the provided ErrorResponse
+func (t *DecideApproval403JSONResponseBody) MergeErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsApprovalDecisionFailure returns the union data inside the DecideApproval403JSONResponseBody as a ApprovalDecisionFailure
+func (t DecideApproval403JSONResponseBody) AsApprovalDecisionFailure() (ApprovalDecisionFailure, error) {
+	var body ApprovalDecisionFailure
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromApprovalDecisionFailure overwrites any union data inside the DecideApproval403JSONResponseBody as the provided ApprovalDecisionFailure
+func (t *DecideApproval403JSONResponseBody) FromApprovalDecisionFailure(v ApprovalDecisionFailure) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeApprovalDecisionFailure performs a merge with any union data inside the DecideApproval403JSONResponseBody, using the provided ApprovalDecisionFailure
+func (t *DecideApproval403JSONResponseBody) MergeApprovalDecisionFailure(v ApprovalDecisionFailure) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DecideApproval403JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DecideApproval403JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsErrorResponse returns the union data inside the DecideApproval500JSONResponseBody as a ErrorResponse
+func (t DecideApproval500JSONResponseBody) AsErrorResponse() (ErrorResponse, error) {
+	var body ErrorResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromErrorResponse overwrites any union data inside the DecideApproval500JSONResponseBody as the provided ErrorResponse
+func (t *DecideApproval500JSONResponseBody) FromErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeErrorResponse performs a merge with any union data inside the DecideApproval500JSONResponseBody, using the provided ErrorResponse
+func (t *DecideApproval500JSONResponseBody) MergeErrorResponse(v ErrorResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsApprovalDecisionFailure returns the union data inside the DecideApproval500JSONResponseBody as a ApprovalDecisionFailure
+func (t DecideApproval500JSONResponseBody) AsApprovalDecisionFailure() (ApprovalDecisionFailure, error) {
+	var body ApprovalDecisionFailure
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromApprovalDecisionFailure overwrites any union data inside the DecideApproval500JSONResponseBody as the provided ApprovalDecisionFailure
+func (t *DecideApproval500JSONResponseBody) FromApprovalDecisionFailure(v ApprovalDecisionFailure) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeApprovalDecisionFailure performs a merge with any union data inside the DecideApproval500JSONResponseBody, using the provided ApprovalDecisionFailure
+func (t *DecideApproval500JSONResponseBody) MergeApprovalDecisionFailure(v ApprovalDecisionFailure) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DecideApproval500JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DecideApproval500JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsCapabilityExecutionRefusal returns the union data inside the ExecuteCapability422JSONResponseBody as a CapabilityExecutionRefusal
 func (t ExecuteCapability422JSONResponseBody) AsCapabilityExecutionRefusal() (CapabilityExecutionRefusal, error) {

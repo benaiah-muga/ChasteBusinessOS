@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
@@ -32,8 +34,8 @@ type ApprovalDecisionSessionHandler struct {
 }
 
 type approvalDecisionSessionBody struct {
-	Decision string          `json:"decision"`
-	Comment  json.RawMessage `json:"comment"`
+	Decision businesscontract.ApprovalDecisionRequestDecision `json:"decision"`
+	Comment  json.RawMessage                                  `json:"comment"`
 }
 
 func NewApprovalDecisionSessionHandler(resolver approvalDecisionSessionResolver, decider approvalSessionDecisionDecider, logger *slog.Logger, trustedProxyCIDRs ...[]*net.IPNet) http.Handler {
@@ -84,7 +86,7 @@ func (h *ApprovalDecisionSessionHandler) ServeHTTP(w http.ResponseWriter, r *htt
 		return
 	}
 	var trailing any
-	if decoder.Decode(&trailing) != io.EOF || (body.Decision != "approve" && body.Decision != "reject") {
+	if decoder.Decode(&trailing) != io.EOF || !body.Decision.Valid() {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
@@ -114,7 +116,7 @@ func (h *ApprovalDecisionSessionHandler) ServeHTTP(w http.ResponseWriter, r *htt
 	}
 	result, err := h.decider.DecideForSession(r.Context(), resolved.UserID, *resolved.OrgID, resolved.AuthSessionID, permissions, capability.ApprovalDecisionInput{
 		ApprovalID: ids[0],
-		Decision:   body.Decision,
+		Decision:   string(body.Decision),
 		Comment:    comment,
 	})
 	if err != nil {
@@ -128,7 +130,40 @@ func (h *ApprovalDecisionSessionHandler) ServeHTTP(w http.ResponseWriter, r *htt
 	if status < http.StatusOK || status > 599 {
 		status = http.StatusInternalServerError
 	}
-	writeJSON(w, status, result)
+	contract, err := approvalDecisionContractResult(result)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Error("Go approval decision response did not match its generated API contract", "approvalId", ids[0], "error", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, status, contract)
+}
+
+func approvalDecisionContractResult(result capability.ApprovalDecisionResult) (any, error) {
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return nil, err
+	}
+	if result.OK {
+		var contract businesscontract.ApprovalDecisionSuccess
+		if err := json.Unmarshal(encoded, &contract); err != nil {
+			return nil, err
+		}
+		if !contract.Ok.Valid() || !contract.Status.Valid() {
+			return nil, errors.New("approval decision success is outside the generated API contract")
+		}
+		return contract, nil
+	}
+	var contract businesscontract.ApprovalDecisionFailure
+	if err := json.Unmarshal(encoded, &contract); err != nil {
+		return nil, err
+	}
+	if contract.Ok != businesscontract.ApprovalDecisionFailureOkFalse || contract.Error == "" {
+		return nil, errors.New("approval decision failure is outside the generated API contract")
+	}
+	return contract, nil
 }
 
 func (h *ApprovalDecisionSessionHandler) resolve(r *http.Request) (*session.ResolvedUser, bool, bool) {

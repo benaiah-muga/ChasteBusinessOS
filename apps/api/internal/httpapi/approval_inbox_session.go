@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
@@ -88,7 +91,30 @@ func (h *ApprovalInboxSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 	if result.History == nil {
 		result.History = []ApprovalInboxRow{}
 	}
-	writeJSON(w, http.StatusOK, result)
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		h.writeContractError(w, "Go approvals inbox response could not be encoded", err)
+		return
+	}
+	var contract businesscontract.ApprovalInboxResponse
+	if err := json.Unmarshal(encoded, &contract); err != nil {
+		h.writeContractError(w, "Go approvals inbox response did not match its generated API contract", err)
+		return
+	}
+	for _, row := range append(contract.Approvals, contract.History...) {
+		if !row.Status.Valid() || !row.RaisedBy.Kind.Valid() {
+			h.writeContractError(w, "Go approvals inbox response did not match its generated API contract", errors.New("approval row contains an unsupported enum value"))
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, contract)
+}
+
+func (h *ApprovalInboxSessionHandler) writeContractError(w http.ResponseWriter, message string, err error) {
+	if h.logger != nil {
+		h.logger.Error(message, "error", err)
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 }
 
 func (h *ApprovalInboxSessionHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, error) {
