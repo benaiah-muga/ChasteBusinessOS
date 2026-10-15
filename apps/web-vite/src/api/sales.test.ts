@@ -201,6 +201,16 @@ describe("sales order writes", () => {
     expect(requests[1]?.body).toEqual(requests[0]?.body);
   });
 
+  it.each(goWrite404Cases)("rejects extra fields in the Go %s response and preserves the retry marker", async (_name, action, output) => {
+    const malformedOutput = { ...(output as Record<string, unknown>), unexpected: true };
+    const fetchMock = vi.fn().mockResolvedValue(success(malformedOutput));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitSalesOrderWrite(action, scope)).rejects.toThrow(/unexpected (?:order|draft update) response/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(Object.keys(window.localStorage).some((key) => key.startsWith("chaste:sales-order-write-attempt:"))).toBe(true);
+  });
+
   it("always uses the Go action when the old Go selector is off", async () => {
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", false);
     const fetchMock = vi.fn().mockResolvedValue(success({ status: "cancelled", releasedThousandths: 0 }));

@@ -67,6 +67,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Accounting clears an in-flight revaluation confirmation when the active actor or organization changes, preventing a stale dialog from posting under the new scope.
 - Go CRM rejects stale profile undo or reapply snapshots atomically when another client has changed any included customer.
 - Vite Support clears a ticket retry marker after definitive authorization and request rejections, while preserving exact retries for uncertain outcomes and Go's 422 intent-conflict response.
+- Vite Sales rejects unexpected fields in Go create, deliver, and cancel responses, preserving retry markers when a response violates the exact contract.
 
 ### Changed
 

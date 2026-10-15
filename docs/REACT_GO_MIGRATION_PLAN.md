@@ -4722,3 +4722,9 @@ new owners and the manifest shows zero legacy runtime paths.
      returns validated output; errors do not fall back to a legacy endpoint.
      The 58 focused Support API tests, targeted lint, and an independent
      authorization-path review pass. The browser launcher remains unavailable.
+
+440. (Contract verified) Vite Sales now strictly validates the Go create-order,
+     deliver-order, and cancel-order response shapes. Malformed success payloads
+     fail closed and retain the scoped retry marker, avoiding a duplicate write
+     after an uncertain response. The focused Sales API suite passes 38 tests,
+     and independent review confirmed each schema matches its Go output struct.

@@ -78,12 +78,12 @@ const PendingWriteSchema = z.object({
   approvalId: z.string().uuid().optional(),
 }).passthrough();
 const SalesWriteEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
-const CreateOrderOutputSchema = z.object({ orderId: z.string().uuid(), orderNumber: z.number().int().positive().safe() }).passthrough();
+const CreateOrderOutputSchema = z.object({ orderId: z.string().uuid(), orderNumber: z.number().int().positive().safe() }).strict();
 const DeliverOrderOutputSchema = z.object({
   invoiceId: z.string().uuid(), invoiceNumber: z.number().int().positive().safe(),
   invoiceTotalMinor: z.number().int().nonnegative().safe(), orderStatus: z.enum(["confirmed", "delivered"]),
-}).passthrough();
-const CancelOrderOutputSchema = z.object({ status: z.literal("cancelled"), releasedThousandths: z.number().int().nonnegative().safe() }).passthrough();
+}).strict();
+const CancelOrderOutputSchema = z.object({ status: z.literal("cancelled"), releasedThousandths: z.number().int().nonnegative().safe() }).strict();
 const UpdateDraftOrderOutputSchema = z.object({ orderId: z.string().uuid(), before: z.object({ customerId: z.string().uuid(), note: z.string().nullable().optional(), lines: z.array(SalesWriteLineSchema).min(1).max(100) }).strict() }).strict();
 const SalesOrderAttemptPrefix = "chaste:sales-order-write-attempt:";
 
