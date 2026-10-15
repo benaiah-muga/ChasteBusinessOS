@@ -121,7 +121,8 @@ export type HrLeaveAction =
   | { action: "cancelLeave"; requestId: string };
 export type HrTimeAction =
   | { action: "log"; employeeId: string; workDate: string; minutes: number; note?: string }
-  | { action: "decide"; entryId: string; decision: "approve" | "reject" };
+  | { action: "decide"; entryId: string; decision: "approve" | "reject" }
+  | { action: "clockIn" | "clockOut"; employeeId: string };
 export type HrRetryScope = { actorId: string | null; organizationId: string | null };
 
 export class HrApiError extends Error {
@@ -148,11 +149,14 @@ const GoLeaveOutputSchemas = {
 } as const;
 const GoTimeLogActionSchema = z.object({ action: z.literal("log"), employeeId: z.string().uuid(), workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), minutes: z.number().int().positive().max(1440), note: z.string().max(300).optional() }).strict();
 const GoTimeDecisionActionSchema = z.object({ action: z.literal("decide"), entryId: z.string().uuid(), decision: z.enum(["approve", "reject"]) }).strict();
-const GoTimeActionSchema = z.discriminatedUnion("action", [GoTimeLogActionSchema, GoTimeDecisionActionSchema]);
+const GoTimeClockActionSchema = z.object({ action: z.enum(["clockIn", "clockOut"]), employeeId: z.string().uuid() }).strict();
+const GoTimeActionSchema = z.discriminatedUnion("action", [GoTimeLogActionSchema, GoTimeDecisionActionSchema, GoTimeClockActionSchema]);
 const GoTimeAttemptSchema = z.object({ intentId: z.string().uuid(), fingerprint: z.string().length(64), action: GoTimeActionSchema }).strict();
 const GoTimeOutputSchemas = {
   log: z.object({ entryId: z.string().uuid(), status: z.literal("submitted") }).strict(),
   decide: z.object({ entryId: z.string().uuid(), status: z.enum(["approved", "rejected"]) }).strict(),
+  clockIn: z.object({ entryId: z.string().uuid(), late: z.boolean() }).strict(),
+  clockOut: z.object({ entryId: z.string().uuid(), minutes: z.number().int().safe().positive() }).strict(),
 } as const;
 const GoHrPayrollCreateSchema = z.object({ action: z.literal("createPayrollRun"), year: z.number().int().min(2020).max(2100), month: z.number().int().min(1).max(12) }).strict();
 const GoHrPayrollExecuteSchema = z.object({ action: z.literal("executePayrollRun"), runId: z.string().uuid(), expectedTotalNetMinor: z.number().int().safe().nonnegative() }).strict();
@@ -962,7 +966,11 @@ function goHrTimeCapabilityInput(action: HrTimeAction): { capabilityId: string; 
     const { action: _action, ...input } = action;
     return { capabilityId: "hr.logTime", input };
   }
-  return { capabilityId: "hr.decideTimeEntry", input: { entryId: action.entryId, decision: action.decision === "approve" ? "approved" : "rejected" } };
+  if (action.action === "decide") {
+    return { capabilityId: "hr.decideTimeEntry", input: { entryId: action.entryId, decision: action.decision === "approve" ? "approved" : "rejected" } };
+  }
+  const { action: clockAction, ...input } = action;
+  return { capabilityId: `hr.${clockAction}`, input };
 }
 
 async function request(path: string, init: RequestInit, signal: AbortSignal | undefined, organizationId: string): Promise<Response> {

@@ -317,8 +317,8 @@ other unported CRM writes and read modes retain their existing route owners.
 The Go metrics reader matches the newest-200-session aggregate,
 null-rate, rounding, and organization-scope behavior. Its short-lived signed
 HTTP adapter is opt-in through `GO_METRICS_READ=1`; the public route remains
-legacy-owned by default. The current route manifest has 162 API methods: 66 business methods are
-Go-owned and verified, 94 are legacy-owned, and two Better Auth methods are
+legacy-owned by default. The current route manifest has 162 API methods: 87 business methods are
+Go-owned and verified, 73 are legacy-owned, and two Better Auth methods are
 assigned to Go auth with endpoint compatibility parity still open. Vite owns all 30 page entries as
 verified.
 
@@ -334,7 +334,7 @@ backup behavior. Phase 0 records exact manifests from these sources.
 Method-level owner and parity changes belong in
 `route-ownership-overrides.json`; the generator rejects duplicate or stale
 keys and prevents a route from moving to Go or Vite before parity is verified.
-The current manifest records 66 verified Go-owned business API methods, 94
+The current manifest records 87 verified Go-owned business API methods, 73
 legacy-owned methods, and two auth methods assigned to Go with
 compatibility parity pending. All 30 page entries are Vite-owned and verified.
 Owner changes are recorded after their implementation and runtime evidence is
@@ -4885,3 +4885,14 @@ new owners and the manifest shows zero legacy runtime paths.
      proof loaded 100 descending events, fetched 53 older events through Go,
      and showed 153 unique descending rows with no page, console, alert, or
      request errors.
+
+458. (Runtime verified) Vite People can clock active employees in and out
+     through Go's `hr.clockIn` and `hr.clockOut` capabilities. Go scopes employee
+     and attendance access to the active organization and enforces `hr.write`.
+     Focused API and page suites pass 73 tests, Vite typecheck and targeted lint
+     pass, and independent review found no authorization or retry issue. An
+     authenticated browser proof hired one synthetic employee, clocked in and
+     out through Go, reloaded to confirm the clocked-out state, rejected the
+     resulting test time entry, and deactivated the employee. All requests
+     returned HTTP 200 with no page or console errors; the inactive employee's
+     historical record remains because the UI has no delete workflow.

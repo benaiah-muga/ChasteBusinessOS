@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { HrReport } from "../api/hr";
 import { HrPage } from "./HrPage";
 
 const employee = {
@@ -804,6 +805,42 @@ describe("Vite People page", () => {
     expect(intents[1]).toBe(intents[0]);
     expect(fetchMock.mock.calls.every(([path]) => path !== "/api/time" && !String(path).startsWith("/api/time?"))).toBe(true);
     expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
+  });
+
+  it("lets an administrator clock employees in and out through Go", async () => {
+    window.history.replaceState(null, "", "/hr?tab=time");
+    stubHrWriteLocks();
+    const actorId = "33333333-3333-4333-8333-333333333333";
+    const organizationId = "44444444-4444-4444-8444-444444444444";
+    let attendance: HrReport["attendance"] = [];
+    const writes: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { capabilityId: string; input: Record<string, unknown> };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: { ...report, attendance } });
+        if (body.capabilityId === "hr.timeReport") return Response.json({ ok: true, data: { rows: [] } });
+        if (body.capabilityId === "hr.pendingTimeEntries") return Response.json({ ok: true, data: { entries: [] } });
+        writes.push(body);
+        if (body.capabilityId === "hr.clockIn") {
+          attendance = [{ employeeId: employee.id, clockedInAt: "2026-10-15T08:00:00.000Z", late: false }];
+          return Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", late: false } });
+        }
+        attendance = [];
+        return Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", minutes: 480 } });
+      }
+      throw new Error(`Unexpected route: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<HrPage actorId={actorId} organizationId={organizationId} />);
+    const clockInButton = await screen.findByRole("button", { name: "Clock in" });
+    fireEvent.click(clockInButton);
+    const clockOutButton = await screen.findByRole("button", { name: "Clock out" });
+    fireEvent.click(clockOutButton);
+    await waitFor(() => expect(writes.map((write) => write.capabilityId)).toEqual(["hr.clockIn", "hr.clockOut"]));
+    expect(writes.map((write) => write.input)).toEqual([{ employeeId: employee.id }, { employeeId: employee.id }]);
   });
 
   it("routes People, time, and employee writes through Go", async () => {

@@ -797,6 +797,29 @@ describe("Vite People API", () => {
     expect(intents[1]).toBe(intents[0]);
   });
 
+  it("routes attendance clock actions to the existing Go HR capabilities", async () => {
+    stubHrWriteLocks();
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const employeeId = "11111111-1111-4111-8111-111111111111";
+    const calls: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      calls.push(body);
+      return body.capabilityId === "hr.clockIn"
+        ? Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", late: false } })
+        : Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", minutes: 480 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrTimeAction({ action: "clockIn", employeeId }, scope)).resolves.toMatchObject({ kind: "success" });
+    await expect(submitHrTimeAction({ action: "clockOut", employeeId }, scope)).resolves.toMatchObject({ kind: "success" });
+    expect(calls.map(({ capabilityId, input }) => ({ capabilityId, input }))).toEqual([
+      { capabilityId: "hr.clockIn", input: { employeeId } },
+      { capabilityId: "hr.clockOut", input: { employeeId } },
+    ]);
+    expect(calls[0]?.intentId).not.toBe(calls[1]?.intentId);
+  });
+
   it("serializes cross-tab Go time reservations for one actor and organization", async () => {
     stubHrWriteLocks();
     const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
