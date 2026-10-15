@@ -363,8 +363,10 @@ organization-scoped transaction. POST resolves the Go session and then runs
 preserving intent receipts, inverses, permissions, and the Messaging module
 gate. Mutations require same-origin requests. Set
 `GO_MESSAGING_PRESENCE_ROUTE=0` on the API or
-`CHASTE_GO_MESSAGING_PRESENCE=0` in Vite for a legacy rollback. Conversation
-and thread reads retain their current routes. Vite global message search uses
+`CHASTE_GO_MESSAGING_PRESENCE=0` in Vite to disable the specialized Go route.
+Vite's `/api` catch-all still sends presence requests to Go, so the disabled
+route returns 404 instead of falling back to Next.js. Conversation and thread
+reads continue through Go capabilities. Vite global message search uses
 the Go `messaging.searchMessages` capability through the authenticated session
 capability route. Go trims and bounds the query, scopes results to the active
 organization and joined conversations, excludes deleted records, escapes SQL
@@ -718,20 +720,21 @@ with unsupported Better Auth endpoints. Setting `CHASTE_GO_AUTH_ROUTE=0`
 disables the specialized selector, but the Vite `/api` catch-all still sends
 these requests to Go. Set `CHASTE_GO_AUTH_OIDC_ROUTE=1` or
 `CHASTE_GO_AUTH_SAML_ROUTE=1` alongside the matching Go auth feature flag to
-route those optional federation paths to Go. Most other Go route flags are opt-in
-and evaluated against the request method and exact path before the legacy
-`/api` catch-all; unmatched requests continue to the legacy server. Request and
-response streams, headers, query strings, and bodies pass through unchanged.
+route those optional federation paths to Go. The temporary Next compatibility
+app has its own legacy fallback behavior. Vite sends unmatched API requests to
+Go and does not forward them to Next.js. Request and response streams, headers,
+query strings, and bodies pass through unchanged.
 Pair `GO_MY_WORK_ROUTE=1` with `CHASTE_GO_MY_WORK_ROUTE=1` to send only
 `GET /api/my-work` to Go. Vite routes analytics discovery, previews, and report
 generation to Go by default through the authenticated Analytics session
-handler. Set both `GO_ANALYTICS_REPORT_ROUTE=0` and
-`CHASTE_GO_ANALYTICS_REPORT_ROUTE=0` to restore legacy report generation. GET
-discovery and preview ownership remains controlled by the existing analytics
-GET selectors. Set both
-`GO_ANALYTICS_ROUTE=0` and `CHASTE_GO_ANALYTICS_ROUTE=0` to use the legacy
-handler during local rollback. Vite's selectors apply only to its development
-server; production reverse-proxy ownership is configured separately. Go also
+handler. Setting both `GO_ANALYTICS_REPORT_ROUTE=0` and
+`CHASTE_GO_ANALYTICS_REPORT_ROUTE=0` disables the Go report handler, but Vite
+continues sending the request to Go, where it returns 404. GET discovery and
+preview ownership remains controlled by the existing analytics GET selectors.
+Setting both `GO_ANALYTICS_ROUTE=0` and `CHASTE_GO_ANALYTICS_ROUTE=0` has the
+same fail-closed behavior for analytics routes; neither setting restores a
+legacy handler in Vite. Vite's selectors apply only to its development server;
+production reverse-proxy ownership is configured separately. Go also
 implements the work brief at
 `POST /api/my-work/summarize` behind `GO_MY_WORK_SUMMARY_ROUTE=1`. The paired
 Vite method/path selector is enabled by default when
