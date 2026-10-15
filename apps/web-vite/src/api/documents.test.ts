@@ -35,14 +35,18 @@ const goSuggestion = {
   status: "open",
   createdAt: "2026-09-28T10:00:00.000Z",
 };
+const moduleCatalogRow = { id: "documents", label: "Documents", description: "Ingestion and authored documents", href: "/documents" };
 
 describe("documents API client", () => {
   it("checks the Documents module before loading protected records", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ catalog: [{ id: "documents" }], enabledModules: [] }));
+    const fetchMock = vi.fn(async () => Response.json({ catalog: [moduleCatalogRow], enabledModules: [], usingDefaults: false }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchDocumentsEnabled()).resolves.toBe(false);
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({ method: "GET", credentials: "same-origin" }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ catalog: [{ ...moduleCatalogRow, unexpected: true }], enabledModules: [], usingDefaults: false })));
+    await expect(fetchDocumentsEnabled()).rejects.toEqual(new DocumentsApiError(200, "The module switchboard returned an unexpected response."));
   });
 
   it("loads the document library through Go when no route selector is present", async () => {
@@ -151,6 +155,20 @@ describe("documents API client", () => {
       message: expect.stringContaining("unexpected format"),
     });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects Go minor-unit values that JavaScript cannot represent exactly", async () => {
+    vi.stubGlobal("__GO_DOCUMENT_INGESTED_READS__", true);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ok: true,
+      data: { document: { ...goDetail, suggestions: [{ ...goSuggestion, unitPriceMinor: Number.MAX_SAFE_INTEGER + 1 }] } },
+    })));
+
+    await expect(fetchDocumentDetail(goDocumentId)).rejects.toMatchObject({
+      name: "DocumentsApiError",
+      status: 200,
+      message: expect.stringContaining("unexpected format"),
+    });
   });
 
   it("rejects malformed matched-on metadata from Go", async () => {

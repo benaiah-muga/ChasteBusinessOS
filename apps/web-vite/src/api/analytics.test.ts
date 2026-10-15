@@ -40,6 +40,9 @@ describe("analytics API client", () => {
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(switchboard(["unknown"]))));
     await expect(fetchAnalyticsEnabled()).rejects.toEqual(new AnalyticsApiError(200, "The module switchboard returned an unknown module."));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...switchboard(["analytics"]), catalog: [{ ...switchboard(["analytics"]).catalog[0], futureField: true }] })));
+    await expect(fetchAnalyticsEnabled()).rejects.toEqual(new AnalyticsApiError(200, "The module switchboard returned data in an unexpected format."));
   });
 
   it("loads only the server-permitted dataset list through the authenticated same-origin route", async () => {
@@ -52,10 +55,13 @@ describe("analytics API client", () => {
       credentials: "same-origin",
       headers: { accept: "application/json" },
     }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ datasets: [{ ...datasets[0], extra: true }] })));
+    await expect(fetchAnalyticsDatasets()).rejects.toEqual(new AnalyticsApiError(200, "The analytics service returned data in an unexpected format."));
   });
 
   it("requests governed previews with the dataset query value encoded", async () => {
-    const preview = { columns: ["stage", "valueMinor"], rows: [{ stage: "won", valueMinor: 1250 }] };
+    const preview = { region: null, columns: ["stage", "valueMinor"], rows: [{ stage: "won", valueMinor: 1250 }] };
     const fetchMock = vi.fn(async () => Response.json(preview));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -64,6 +70,15 @@ describe("analytics API client", () => {
       credentials: "same-origin",
       headers: { accept: "application/json" },
     }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...preview, extra: true })));
+    await expect(fetchAnalyticsPreview("analytics.pipelineByStage")).rejects.toEqual(new AnalyticsApiError(200, "The analytics preview returned data in an unexpected format."));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ...preview,
+      rows: [{ stage: "won", details: { exactAmount: Number.MAX_SAFE_INTEGER + 1 } }],
+    })));
+    await expect(fetchAnalyticsPreview("analytics.pipelineByStage")).rejects.toEqual(new AnalyticsApiError(200, "The analytics preview returned data in an unexpected format."));
 
     await expect(fetchAnalyticsPreview("bad/id")).rejects.toEqual(new AnalyticsApiError(0, "Choose a valid analytics dataset to preview."));
   });
@@ -83,6 +98,9 @@ describe("analytics API client", () => {
     }));
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ sections: [{ heading: "Broken", citations: [], lines: [3] }], proposedAction: null })));
+    await expect(askAnalytics("pipeline")).rejects.toEqual(new AnalyticsApiError(200, "The analytics insight returned data in an unexpected format."));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ sections: [{ heading: "Unexpected", citations: [], lines: [], extra: true }], proposedAction: null })));
     await expect(askAnalytics("pipeline")).rejects.toEqual(new AnalyticsApiError(200, "The analytics insight returned data in an unexpected format."));
   });
 
@@ -135,6 +153,24 @@ describe("analytics API client", () => {
     })).rejects.toEqual(new AnalyticsApiError(0, "Choose valid, non-empty comparison periods."));
   });
 
+  it("rejects minor-unit totals that JavaScript cannot represent exactly", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      priorTotalMinor: Number.MAX_SAFE_INTEGER + 1,
+      currentTotalMinor: 1500,
+      deltaMinor: 500,
+      contributions: [],
+      drill: [],
+    })));
+
+    await expect(explainAnalyticsChange({
+      dimension: "customer",
+      periodAFrom: "2026-01-01T00:00:00.000Z",
+      periodATo: "2026-02-01T00:00:00.000Z",
+      periodBFrom: "2026-02-01T00:00:00.000Z",
+      periodBTo: "2026-03-01T00:00:00.000Z",
+    })).rejects.toEqual(new AnalyticsApiError(200, "The metric change analysis returned data in an unexpected format."));
+  });
+
   it("posts the exact governed report contract to the existing endpoint and preserves returned values", async () => {
     const result = {
       region: "africa-east",
@@ -167,6 +203,15 @@ describe("analytics API client", () => {
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify(input),
     }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...result, sections: [{ ...result.sections[0], extra: true }] })));
+    await expect(generateAnalyticsReport(input)).rejects.toEqual(new AnalyticsApiError(200, "The analytics report returned data in an unexpected format."));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ...result,
+      sections: [{ ...result.sections[0], rows: [{ month: "Sep", nested: [Number.MAX_SAFE_INTEGER + 1] }] }],
+    })));
+    await expect(generateAnalyticsReport(input)).rejects.toEqual(new AnalyticsApiError(200, "The analytics report returned data in an unexpected format."));
   });
 
   it("omits an optional blank narrative and reports permission failures clearly", async () => {

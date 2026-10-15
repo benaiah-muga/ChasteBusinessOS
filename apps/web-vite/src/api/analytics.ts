@@ -1,17 +1,34 @@
 import { z } from "zod";
 
+const SafeIntegerSchema = z.number().int().refine(Number.isSafeInteger);
+
+function hasOnlySafeIntegerNumbers(value: unknown): boolean {
+  if (typeof value === "number") return !Number.isInteger(value) || Number.isSafeInteger(value);
+  if (Array.isArray(value)) return value.every(hasOnlySafeIntegerNumbers);
+  if (value !== null && typeof value === "object") return Object.values(value).every(hasOnlySafeIntegerNumbers);
+  return true;
+}
+
+const JsonDataSchema = z.unknown().refine(hasOnlySafeIntegerNumbers);
+
 const DatasetSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   description: z.string(),
-});
+  params: z.array(z.object({
+    key: z.string(),
+    type: z.string(),
+    default: z.number().int(),
+  }).strict()).optional(),
+}).strict();
 
-const DatasetListSchema = z.object({ datasets: z.array(DatasetSchema) });
+const DatasetListSchema = z.object({ datasets: z.array(DatasetSchema) }).strict();
 
 const DatasetPreviewSchema = z.object({
+  region: z.string().nullable(),
   columns: z.array(z.string()),
-  rows: z.array(z.record(z.string(), z.unknown())),
-});
+  rows: z.array(z.record(z.string(), JsonDataSchema)),
+}).strict();
 
 const ChartSchema = z.object({
   type: z.enum(["bar", "line", "area", "pie"]),
@@ -35,14 +52,14 @@ const ReportSectionSchema = z.object({
   heading: z.string(),
   svg: z.string().nullable(),
   columns: z.array(z.string()),
-  rows: z.array(z.record(z.string(), z.unknown())),
-});
+  rows: z.array(z.record(z.string(), JsonDataSchema)),
+}).strict();
 
 const ReportSchema = z.object({
   region: z.string().nullable(),
   html: z.string(),
   sections: z.array(ReportSectionSchema),
-});
+}).strict();
 
 const AnalyticsQuestionSchema = z.object({
   sections: z.array(z.object({
@@ -58,14 +75,14 @@ const AnalyticsQuestionSchema = z.object({
 }).strict();
 
 const AnalyticsExplainChangeSchema = z.object({
-  priorTotalMinor: z.number(),
-  currentTotalMinor: z.number(),
-  deltaMinor: z.number(),
+  priorTotalMinor: SafeIntegerSchema,
+  currentTotalMinor: SafeIntegerSchema,
+  deltaMinor: SafeIntegerSchema,
   contributions: z.array(z.object({
     key: z.string(),
-    priorMinor: z.number(),
-    currentMinor: z.number(),
-    deltaMinor: z.number(),
+    priorMinor: SafeIntegerSchema,
+    currentMinor: SafeIntegerSchema,
+    deltaMinor: SafeIntegerSchema,
     shareOfDelta: z.number().nullable(),
   }).strict()),
   drill: z.array(z.object({ key: z.string(), invoiceIds: z.array(z.string()) }).strict()),
@@ -77,10 +94,11 @@ const ModuleSwitchboardSchema = z.object({
     label: z.string().min(1),
     description: z.string(),
     href: z.string().nullable(),
-  })),
+    protected: z.boolean().optional(),
+  }).strict()),
   enabledModules: z.array(z.string().min(1)),
   usingDefaults: z.boolean(),
-});
+}).strict();
 
 const ApiErrorBodySchema = z.object({ error: z.string().optional(), message: z.string().optional() });
 

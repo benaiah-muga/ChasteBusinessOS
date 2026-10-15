@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const SafeIntegerSchema = z.number().int().refine(Number.isSafeInteger);
+
 const DocumentRowSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
@@ -15,10 +17,10 @@ const DocumentCodingSuggestionSchema = z.object({
   orgId: z.string().uuid(),
   documentId: z.string().uuid(),
   description: z.string(),
-  quantityThousandths: z.number().int().nonnegative(),
-  unitPriceMinor: z.number().int().nonnegative(),
+  quantityThousandths: SafeIntegerSchema.nonnegative(),
+  unitPriceMinor: SafeIntegerSchema.nonnegative(),
   suggestedAccountCode: z.string().min(1),
-  matchScore: z.number().int(),
+  matchScore: SafeIntegerSchema,
   matchedOn: z.array(z.string()),
   status: z.string().min(1),
   createdAt: z.string().datetime(),
@@ -34,7 +36,7 @@ const GoDocumentDetailOutputSchema = z.object({
     status: z.string().min(1),
     sourceType: z.string().min(1),
     mimeType: z.string().nullable(),
-    sizeBytes: z.number().int().nonnegative().nullable(),
+    sizeBytes: SafeIntegerSchema.nonnegative().nullable(),
     parseError: z.string().nullable(),
     parsedMarkdown: z.string().nullable(),
     createdAt: z.string().datetime(),
@@ -43,9 +45,16 @@ const GoDocumentDetailOutputSchema = z.object({
   }).strict(),
 }).strict();
 const ModuleSwitchboardSchema = z.object({
-  catalog: z.array(z.object({ id: z.string().min(1) })),
+  catalog: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string(),
+    href: z.string().nullable(),
+    protected: z.boolean().optional(),
+  }).strict()),
   enabledModules: z.array(z.string().min(1)),
-});
+  usingDefaults: z.boolean(),
+}).strict();
 
 const ErrorResponseSchema = z.object({ error: z.string().optional(), message: z.string().optional() });
 

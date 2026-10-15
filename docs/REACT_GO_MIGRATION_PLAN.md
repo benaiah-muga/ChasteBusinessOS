@@ -4760,3 +4760,10 @@ new owners and the manifest shows zero legacy runtime paths.
      write receipts. Focused Support and Dashboard tests pass 70 cases, targeted
      lint and the Vite package typecheck pass, and independent review found no
      contract or retry regressions.
+
+446. (Contract verified) Vite Analytics now validates the Go dataset, preview,
+     and report response contracts and recursively rejects unsafe integer
+     values in nested result rows before JavaScript can round int64 money or
+     quantities. Documents API response contracts remain strict and match Go.
+     Focused Documents and Analytics tests pass 98 cases, targeted lint passes,
+     and an independent review verified the numeric precision guard.

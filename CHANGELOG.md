@@ -73,6 +73,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Purchasing rejects vendor and AP aging payloads that do not match Go's exact workspace contract.
 - Vite Sales narrows recovered write results by action before reading delivery status, keeping its confirmed-order message correctly typed.
 - Vite Support and Dashboard reject Go responses that contain malformed IDs, unsupported values, or undeclared fields, and preserve retry intents after malformed write receipts.
+- Vite Analytics rejects unsafe integer values in Go preview and report data and strictly validates module, dataset, preview, and report contracts.
 
 ### Changed
 
