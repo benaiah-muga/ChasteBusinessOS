@@ -13,6 +13,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Docker Compose now runs the static React/Vite client, Go API, capability jobs worker, and webhook outbox worker; it provisions least-privilege database roles and requires a PostgreSQL 16 snapshot before applying migrations.
 - Vite Inventory now displays lot balances from the Go inventory read, including zero balances, with a strict validated response contract.
 - Vite Expenses validates Go claims, policies, payment IDs, and pending approval receipts, and preserves retry identity after malformed successful responses.
 - Vite Projects validates Go project action receipts with required fields while preserving separately typed legacy receipts during migration.

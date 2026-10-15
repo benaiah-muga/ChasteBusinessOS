@@ -755,17 +755,45 @@ routes when the SAML provider configuration is present; Vite forwards those
 routes when `CHASTE_GO_AUTH_SAML_ROUTE=1`. OIDC sign-in can be enabled with
 the provider configuration above.
 
-For a production-shaped local Docker run, use the full Compose stack instead:
+For a production-shaped local Docker run, use the Vite and Go Compose stack:
 
 ```sh
-cp .env.example .env       # set BETTER_AUTH_SECRET
+cp .env.example .env       # set BETTER_AUTH_SECRET and GO_INTERNAL_AUTH_SECRET
 docker compose up -d --build
 curl http://localhost:3000/api/health
 ```
 
-The app runs migrations during production boot and connects to Compose Postgres
-at `db:5432`. `node scripts/verify-docker.mjs` performs the same flow on
-isolated ports and cleans up afterward.
+Compose builds the React/Vite client as static assets served by nginx and the
+Go API, capability jobs worker, and webhook outbox worker as standalone Go
+services. A one-shot setup step creates the least-privilege Go app role
+principal, then a second applies Drizzle migrations and requires a matching
+PostgreSQL 16 `pg_dump` snapshot. Final role grants are provisioned after
+migrations, before the API and workers start. The API
+connects to Compose Postgres at `db:5432` as `chaste_app`; nginx serves the
+client and forwards `/api/*` to Go on the private Compose network. The
+development database is published on port 5433 by default. Set
+`CHASTE_POSTGRES_PASSWORD` and `CHASTE_APP_DB_PASSWORD` together if you change
+the local credentials. Set `CHASTE_STRICT_MIGRATION_BACKUP=0` only when
+intentionally running migrations on disposable data without a snapshot.
+
+Local Compose defaults Go auth to `GO_AUTH_MODE=development` and trusts
+`http://localhost:3000`. For a production deployment, set
+`GO_AUTH_MODE=production`, `GO_AUTH_PUBLIC_ORIGIN` to the HTTPS browser origin,
+and `GO_AUTH_SECURE_COOKIE=true`. When TLS terminates upstream, configure
+`GO_AUTH_TRUSTED_PROXY_CIDRS`, `GO_API_TRUSTED_PROXY_CIDRS`, and
+`GO_SUPPORT_TRUSTED_PROXY_CIDRS` with only the exact proxy networks used in
+your topology. Provide a fresh `GO_INTERNAL_AUTH_SECRET` of at least 32 random
+bytes in every environment.
+
+Migration snapshots persist in the `chaste-pg-backups` named volume and remain
+available after the migrator container is recreated. Export backups to your
+deployment's durable backup store; `docker compose down -v` deletes this volume
+along with the local database volume.
+
+`node scripts/verify-docker.mjs` builds and starts this stack on isolated ports,
+checks a pre-migration snapshot, the Vite page, both proxied and direct Go
+health endpoints, and an auth request's same-origin handling through nginx.
+It then removes the containers and temporary database volume.
 
 Sign up, describe your business in two sentences, and the workspace builds itself: chart of accounts seeded, description embedded into org memory, owner role granted to you.
 

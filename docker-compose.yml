@@ -1,27 +1,17 @@
-# Full local stack: Postgres 16 + pgvector, and the Next.js web app.
+# Local production-shaped stack: PostgreSQL, a one-shot schema/role migrator,
+# the Go business API, and the static React/Vite client.
 #
-#   docker compose up -d --build   start everything (builds the app image)
-#   docker compose logs -f app     watch boot (migrations run on boot)
-#   docker compose down            stop (data survives in the named volume)
-#   docker compose down -v         stop and delete the data
-#   docker compose up -d db        database only (host-side `pnpm dev` flow)
-#
-# The app container talks to Postgres over compose networking (`db:5432`).
-# Your shell/.env DATABASE_URL (localhost:5433) stays correct for host-side
-# commands (psql, pnpm demo:*, pnpm test fixtures); only the container gets
-# the internal hostname, hardcoded below on purpose.
-#
-# BETTER_AUTH_SECRET is required: compose refuses to start the app without
-# it (`cp .env.example .env` and fill it, same as the host quickstart).
-# NVIDIA_API_KEY / OPENROUTER_API_KEY / MODEL_* are optional - the app
-# degrades honestly without a model key (no AI briefs, no agent runs).
+#   docker compose up -d --build
+#   docker compose logs -f api
+#   docker compose down                 # keeps the named database volume
+#   docker compose down -v              # also removes local database data
 
 services:
   db:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: chaste
-      POSTGRES_PASSWORD: chaste_dev
+      POSTGRES_PASSWORD: ${CHASTE_POSTGRES_PASSWORD:-chaste_dev}
       POSTGRES_DB: chaste_os_v2
     ports:
       - "${CHASTE_DB_PORT:-5433}:5432"
@@ -35,23 +25,78 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  app:
+  migrate:
     build:
       context: .
-      dockerfile: apps/web/Dockerfile
-      args:
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      dockerfile: apps/web-vite/Dockerfile
+      target: workspace
+    command: ["pnpm", "db:provision-runtime:cmd"]
+    depends_on:
+      migrate-schema:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://chaste:${CHASTE_POSTGRES_PASSWORD:-chaste_dev}@db:5432/chaste_os_v2
+      MIGRATION_DATABASE_URL: postgresql://chaste:${CHASTE_POSTGRES_PASSWORD:-chaste_dev}@db:5432/chaste_os_v2
+      CHASTE_APP_DB_PASSWORD: ${CHASTE_APP_DB_PASSWORD:-chaste_app_dev_only}
+      CHASTE_JOBS_WORKER_DB_PASSWORD: ${CHASTE_JOBS_WORKER_DB_PASSWORD:-chaste_jobs_worker_dev_only}
+      CHASTE_OUTBOX_WORKER_DB_PASSWORD: ${CHASTE_OUTBOX_WORKER_DB_PASSWORD:-chaste_outbox_worker_dev_only}
+    restart: "no"
+
+  migrate-schema:
+    build:
+      context: .
+      dockerfile: apps/web-vite/Dockerfile
+      target: workspace
+    command: ["pnpm", "--filter", "@chaste/db", "db:migrate"]
+    depends_on:
+      role-principals:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://chaste:${CHASTE_POSTGRES_PASSWORD:-chaste_dev}@db:5432/chaste_os_v2
+      MIGRATION_DATABASE_URL: postgresql://chaste:${CHASTE_POSTGRES_PASSWORD:-chaste_dev}@db:5432/chaste_os_v2
+      CHASTE_MIGRATIONS_FOLDER: /repo/packages/db/drizzle
+      AUTO_MIGRATE_ON_BOOT: "0"
+      CHASTE_STRICT_MIGRATION_BACKUP: ${CHASTE_STRICT_MIGRATION_BACKUP:-1}
+      CHASTE_SKIP_MIGRATION_BACKUP: "0"
+    volumes:
+      - chaste-pg-backups:/repo/packages/db/backups
+    restart: "no"
+
+  role-principals:
+    image: pgvector/pgvector:pg16
+    entrypoint: ["sh", "-ec"]
+    command: ["psql \"$$MIGRATION_DATABASE_URL\" --set=ON_ERROR_STOP=1 --set=app_password=\"$$CHASTE_APP_DB_PASSWORD\" --file=/run/provision-runtime-role-principals.sql"]
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "${CHASTE_WEB_PORT:-3000}:3000"
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://chaste:chaste_dev@db:5432/chaste_os_v2
-      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-postgresql://chaste:chaste_dev@db:5432/chaste_os_v2}
+      MIGRATION_DATABASE_URL: postgresql://chaste:${CHASTE_POSTGRES_PASSWORD:-chaste_dev}@db:5432/chaste_os_v2
+      CHASTE_APP_DB_PASSWORD: ${CHASTE_APP_DB_PASSWORD:-chaste_app_dev_only}
+    volumes:
+      - ./scripts/provision-runtime-role-principals.sql:/run/provision-runtime-role-principals.sql:ro
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${CHASTE_API_PORT:-8080}:8080"
+    environment:
+      GO_API_ADDR: 0.0.0.0:8080
+      GO_DATABASE_URL: postgresql://chaste_app:${CHASTE_APP_DB_PASSWORD:-chaste_app_dev_only}@db:5432/chaste_os_v2
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required - copy .env.example to .env and fill it}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      GO_AUTH_MODE: ${GO_AUTH_MODE:-development}
+      GO_AUTH_PUBLIC_ORIGIN: ${GO_AUTH_PUBLIC_ORIGIN:-http://localhost:3000}
+      GO_AUTH_SECURE_COOKIE: ${GO_AUTH_SECURE_COOKIE:-false}
+      GO_AUTH_TRUSTED_PROXY_CIDRS: ${GO_AUTH_TRUSTED_PROXY_CIDRS:-}
+      GO_INTERNAL_AUTH_SECRET: ${GO_INTERNAL_AUTH_SECRET:?GO_INTERNAL_AUTH_SECRET is required - generate at least 32 random bytes}
+      GO_PUBLIC_APP_URL: ${GO_PUBLIC_APP_URL:-http://localhost:3000}
+      GO_API_TRUSTED_PROXY_CIDRS: ${GO_API_TRUSTED_PROXY_CIDRS:-}
+      GO_SUPPORT_TRUSTED_PROXY_CIDRS: ${GO_SUPPORT_TRUSTED_PROXY_CIDRS:-}
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
       NIM_BASE_URL: ${NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
@@ -67,11 +112,7 @@ services:
       MODEL_OCR: ${MODEL_OCR:-}
       MODEL_NL: ${MODEL_NL:-}
       MODEL_NL_FALLBACK: ${MODEL_NL_FALLBACK:-}
-      CHASTE_MIGRATIONS_FOLDER: /app/apps/web/node_modules/@chaste/db/drizzle
       DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
-      AUTO_MIGRATE_ON_BOOT: ${AUTO_MIGRATE_ON_BOOT:-1}
-      CHASTE_STRICT_MIGRATION_BACKUP: ${CHASTE_STRICT_MIGRATION_BACKUP:-0}
-      CHASTE_SKIP_MIGRATION_BACKUP: ${CHASTE_SKIP_MIGRATION_BACKUP:-0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       NOTIFICATION_WEBHOOK_URL: ${NOTIFICATION_WEBHOOK_URL:-}
       SMTP_HOST: ${SMTP_HOST:-}
@@ -82,14 +123,91 @@ services:
       SMTP_FROM: ${SMTP_FROM:-chaste@localhost}
       SMTP_TO: ${SMTP_TO:-}
     healthcheck:
-      # No curl in the slim runtime; the anonymous health route also verifies
-      # that the app can reach the database after boot migrations.
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(async r=>{const b=await r.json();if(r.status!==200||b.status!=='ok'||b.db!=='connected')process.exit(1)}).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 90s
+      start_period: 30s
+    restart: unless-stopped
+
+  jobs-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["/usr/local/bin/chaste-jobs-worker"]
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    environment:
+      GO_DATABASE_URL: postgresql://chaste_app:${CHASTE_APP_DB_PASSWORD:-chaste_app_dev_only}@db:5432/chaste_os_v2
+      JOBS_WORKER_DATABASE_URL: postgresql://chaste_jobs_worker:${CHASTE_JOBS_WORKER_DB_PASSWORD:-chaste_jobs_worker_dev_only}@db:5432/chaste_os_v2
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NIM_BASE_URL: ${NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      ZAI_API_KEY: ${ZAI_API_KEY:-}
+      ZAI_BASE_URL: ${ZAI_BASE_URL:-https://api.z.ai/api/paas/v4}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-}
+      MODEL_PRIMARY: ${MODEL_PRIMARY:-}
+      MODEL_FAST: ${MODEL_FAST:-}
+      MODEL_REASONING: ${MODEL_REASONING:-}
+      MODEL_EMBEDDINGS: ${MODEL_EMBEDDINGS:-}
+      MODEL_OCR: ${MODEL_OCR:-}
+      MODEL_NL: ${MODEL_NL:-}
+      MODEL_NL_FALLBACK: ${MODEL_NL_FALLBACK:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NOTIFICATION_WEBHOOK_URL: ${NOTIFICATION_WEBHOOK_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-chaste@localhost}
+      SMTP_TO: ${SMTP_TO:-}
+      GO_ROUTINE_SCHEDULER: ${GO_ROUTINE_SCHEDULER:-1}
+      GO_ROUTINE_AGENT_RUNNER: ${GO_ROUTINE_AGENT_RUNNER:-0}
+      GO_RECURRING_INVOICE_SCHEDULER: ${GO_RECURRING_INVOICE_SCHEDULER:-1}
+      GO_SUPPORT_EMBEDDING_WORKER: ${GO_SUPPORT_EMBEDDING_WORKER:-0}
+    restart: unless-stopped
+
+  outbox-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["/usr/local/bin/chaste-outbox-worker"]
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    environment:
+      OUTBOX_WORKER_DATABASE_URL: postgresql://chaste_outbox_worker:${CHASTE_OUTBOX_WORKER_DB_PASSWORD:-chaste_outbox_worker_dev_only}@db:5432/chaste_os_v2
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web-vite/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${CHASTE_WEB_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
     restart: unless-stopped
 
 volumes:
   chaste-pgdata:
+  chaste-pg-backups:
