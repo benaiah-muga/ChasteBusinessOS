@@ -86,7 +86,7 @@ beforeEach(() => {
         history: [],
       });
     }
-    if (path === "/api/ledger?limit=100") {
+    if (path === "/api/ledger?limit=101") {
       return Response.json({ events: [{
         seq: 24,
         kind: activeOrgId === firstOrgId ? "invoice.created" : "payment.recorded",
@@ -728,13 +728,13 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "Event Ledger" })).not.toBeNull();
     expect(await screen.findByText("invoice.created")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Ledger" }).getAttribute("aria-current")).toBe("page");
-    expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=100", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=101", expect.objectContaining({ credentials: "same-origin" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: "Active organization" }), { target: { value: secondOrgId } });
 
     expect(await screen.findByText("payment.recorded")).not.toBeNull();
     expect(screen.queryByText("invoice.created")).toBeNull();
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/ledger?limit=100")).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/ledger?limit=101")).toHaveLength(2);
   });
 
   it("routes Sessions to Vite and loads its Go-owned read APIs", async () => {

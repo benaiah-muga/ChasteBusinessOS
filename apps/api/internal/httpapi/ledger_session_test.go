@@ -93,6 +93,30 @@ func TestLedgerSessionHandlerSupportsBearerAndOrganizationSelection(t *testing.T
 	}
 }
 
+func TestLedgerSessionHandlerReadsOlderPageBeforeSequence(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["accounting.read"] = true
+	reader := &fakeLedgerReader{events: []ledger.Event{{Seq: 99}}}
+	response := httptest.NewRecorder()
+	NewLedgerSessionHandler(&fakeDirectSessionResolver{resolved: identity}, reader, nil).
+		ServeHTTP(response, ledgerSessionRequest("/api/ledger?limit=101&before=100"))
+	if response.Code != http.StatusOK || reader.orgID != *identity.OrgID || reader.before != 100 || reader.limit != 101 || reader.calls != 1 {
+		t.Fatalf("status=%d reader=%+v body=%s, want organization-scoped page before sequence 100", response.Code, reader, response.Body.String())
+	}
+}
+
+func TestLedgerSessionHandlerRejectsInvalidCursorBeforeRead(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["accounting.read"] = true
+	reader := &fakeLedgerReader{}
+	response := httptest.NewRecorder()
+	NewLedgerSessionHandler(&fakeDirectSessionResolver{resolved: identity}, reader, nil).
+		ServeHTTP(response, ledgerSessionRequest("/api/ledger?before=-1"))
+	if response.Code != http.StatusBadRequest || reader.calls != 0 {
+		t.Fatalf("status=%d reader calls=%d body=%s, want bad request without querying", response.Code, reader.calls, response.Body.String())
+	}
+}
+
 func TestLedgerSessionHandlerRejectsInvalidIdentityAndOrganizationMembership(t *testing.T) {
 	tests := []struct {
 		name     string

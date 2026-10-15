@@ -60,7 +60,12 @@ func (h *LedgerSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	limit := parseLedgerLimit(r.URL.Query().Get("limit"), r.URL.Query().Has("limit"))
-	events, err := h.reader.RecentForOrg(r.Context(), *resolved.OrgID, limit)
+	before, valid := parseLedgerCursor(r.URL.Query().Get("before"), r.URL.Query().Has("before"))
+	if !valid {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ledger cursor"})
+		return
+	}
+	events, err := readLedgerPage(r.Context(), h.reader, *resolved.OrgID, before, limit)
 	if err != nil {
 		if h.logger != nil {
 			h.logger.Error("ledger read failed", "error", err)

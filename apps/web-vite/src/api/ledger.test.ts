@@ -17,15 +17,23 @@ const event = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ledger API client", () => {
-  it("requests the latest 100 events through the same-origin session and validates chain fields", async () => {
+  it("requests the latest page plus a lookahead event through the same-origin session and validates chain fields", async () => {
     const fetchMock = vi.fn(async () => Response.json({ events: [event] }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchLedgerEvents()).resolves.toEqual([event]);
-    expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=100", expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=101", expect.objectContaining({
       credentials: "same-origin",
       headers: { accept: "application/json" },
     }));
+  });
+
+  it("requests an older page before a validated sequence cursor", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ events: [event] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchLedgerEvents(undefined, 100)).resolves.toEqual([event]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=101&before=100", expect.any(Object));
+    await expect(fetchLedgerEvents(undefined, 0)).rejects.toMatchObject({ status: 0 });
   });
 
   it("preserves forbidden and expired-session states as explicit API errors", async () => {

@@ -44,10 +44,15 @@ async function parseJson(response: Response): Promise<unknown> {
   }
 }
 
-export async function fetchLedgerEvents(signal?: AbortSignal): Promise<LedgerEvent[]> {
+export async function fetchLedgerEvents(signal?: AbortSignal, before?: number): Promise<LedgerEvent[]> {
+  if (before !== undefined && (!Number.isSafeInteger(before) || before <= 0)) {
+    throw new LedgerApiError(0, "The ledger cursor is invalid. Reload the ledger and try again.");
+  }
+  const query = new URLSearchParams({ limit: "101" });
+  if (before !== undefined) query.set("before", String(before));
   let response: Response;
   try {
-    response = await fetch("/api/ledger?limit=100", {
+    response = await fetch(`/api/ledger?${query.toString()}`, {
       credentials: "same-origin",
       headers: { accept: "application/json" },
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),

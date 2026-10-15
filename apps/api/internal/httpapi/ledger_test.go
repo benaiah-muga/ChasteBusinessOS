@@ -16,8 +16,17 @@ import (
 type fakeLedgerReader struct {
 	orgID  string
 	limit  int
+	before int64
 	calls  int
 	events []ledger.Event
+}
+
+func (r *fakeLedgerReader) BeforeForOrg(_ context.Context, orgID string, before int64, limit int) ([]ledger.Event, error) {
+	r.calls++
+	r.orgID = orgID
+	r.before = before
+	r.limit = limit
+	return r.events, nil
 }
 
 func (r *fakeLedgerReader) RecentForOrg(_ context.Context, orgID string, limit int) ([]ledger.Event, error) {

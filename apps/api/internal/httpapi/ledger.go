@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 	"net/http"
@@ -16,6 +17,10 @@ import (
 
 type LedgerReader interface {
 	RecentForOrg(context.Context, string, int) ([]ledger.Event, error)
+}
+
+type ledgerCursorReader interface {
+	BeforeForOrg(context.Context, string, int64, int) ([]ledger.Event, error)
 }
 
 type GoLedgerHandler struct {
@@ -44,7 +49,12 @@ func (h *GoLedgerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := parseLedgerLimit(r.URL.Query().Get("limit"), r.URL.Query().Has("limit"))
-	events, err := h.reader.RecentForOrg(r.Context(), claims.OrganizationID, limit)
+	before, valid := parseLedgerCursor(r.URL.Query().Get("before"), r.URL.Query().Has("before"))
+	if !valid {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ledger cursor"})
+		return
+	}
+	events, err := readLedgerPage(r.Context(), h.reader, claims.OrganizationID, before, limit)
 	if err != nil {
 		if h.logger != nil {
 			h.logger.Error("Go ledger read failed", "error", err)
@@ -69,6 +79,25 @@ func (h *GoLedgerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func readLedgerPage(ctx context.Context, reader LedgerReader, orgID string, before int64, limit int) ([]ledger.Event, error) {
+	if before == 0 {
+		return reader.RecentForOrg(ctx, orgID, limit)
+	}
+	cursorReader, ok := reader.(ledgerCursorReader)
+	if !ok {
+		return nil, errors.New("ledger reader does not support cursors")
+	}
+	return cursorReader.BeforeForOrg(ctx, orgID, before, limit)
+}
+
+func parseLedgerCursor(value string, present bool) (int64, bool) {
+	if !present {
+		return 0, true
+	}
+	cursor, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	return cursor, err == nil && cursor > 0
 }
 
 func parseLedgerLimit(value string, present bool) int {

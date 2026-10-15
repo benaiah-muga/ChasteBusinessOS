@@ -7,6 +7,8 @@ type PageState =
   | { status: "failed"; error: LedgerApiError }
   | { status: "ready"; events: LedgerEvent[] };
 
+const ledgerPageSize = 100;
+
 function timeAgo(iso: string): string {
   const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (seconds < 45) return "just now";
@@ -92,12 +94,19 @@ function LedgerTable({ events }: { events: LedgerEvent[] }) {
 export function LedgerPage() {
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [search, setSearch] = useState("");
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+  const [hasOlder, setHasOlder] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
     try {
-      const events = await fetchLedgerEvents(signal);
-      if (!signal?.aborted) setState({ status: "ready", events });
+      const response = await fetchLedgerEvents(signal);
+      if (!signal?.aborted) {
+        setState({ status: "ready", events: response.slice(0, ledgerPageSize) });
+        setHasOlder(response.length > ledgerPageSize);
+        setOlderError(null);
+      }
     } catch (error) {
       if (signal?.aborted) return;
       setState({
@@ -108,6 +117,25 @@ export function LedgerPage() {
       });
     }
   }, []);
+
+  const loadOlder = useCallback(async () => {
+    if (state.status !== "ready" || loadingOlder) return;
+    const cursor = state.events.at(-1)?.seq;
+    if (cursor === undefined) return;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const older = await fetchLedgerEvents(undefined, cursor);
+      setState((current) => current.status === "ready"
+        ? { status: "ready", events: [...current.events, ...older.slice(0, ledgerPageSize)] }
+        : current);
+      setHasOlder(older.length > ledgerPageSize);
+    } catch (error) {
+      setOlderError(error instanceof LedgerApiError ? error.message : "Could not load older ledger events.");
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [loadingOlder, state]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -168,6 +196,14 @@ export function LedgerPage() {
         </section>
       )}
       {state.status === "ready" && filtered.length > 0 && <LedgerTable events={filtered} />}
+      {state.status === "ready" && state.events.length > 0 && hasOlder && (
+        <div className="ledger-older-controls">
+          <button type="button" onClick={() => void loadOlder()} disabled={loadingOlder}>
+            {loadingOlder ? "Loading older events…" : "Load older events"}
+          </button>
+        </div>
+      )}
+      {state.status === "ready" && olderError && <p className="ledger-older-error" role="alert">{olderError}</p>}
     </main>
   );
 }

@@ -111,6 +111,13 @@ func TestPostgresReaderPreservesLedgerRowsAndScopesOrganizations(t *testing.T) {
 	if len(limited) != 1 || limited[0].Seq != secondSeq {
 		t.Fatalf("limited events = %+v, want only latest seq %d", limited, secondSeq)
 	}
+	older, err := reader.BeforeForOrg(ctx, orgID, secondSeq, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(older) != 1 || older[0].Seq != firstSeq {
+		t.Fatalf("older events = %+v, want sequence %d before %d", older, firstSeq, secondSeq)
+	}
 }
 
 func insertEvent(t *testing.T, ctx context.Context, pool *pgxpool.Pool, orgID, actorType, kind string, actorID, capabilityID *string, payload string, prevHash *string, hash string, occurredAt time.Time) int64 {

@@ -4871,3 +4871,17 @@ new owners and the manifest shows zero legacy runtime paths.
      delivery through the local SMTP sink remain unverified because Docker Go
      compilation stalled while host swap was exhausted. Independent review
      found no authorization or fencing issues.
+
+457. (Port and runtime verified) Vite Event Ledger now loads history in
+     100-entry pages from Go. The Go
+     session route accepts a positive sequence cursor and reads only events
+     before that cursor inside the resolved organization's transaction. The
+     page fetches one lookahead row to show the older-events control only when
+     more history is available, and its search spans every loaded page. Focused
+     Go handler, ledger reader, Vite API, and Vite page checks cover cursor
+     validation, tenant scope, ordering, and continued search behavior. Vite
+     typecheck and targeted lint pass, and the App organization-switch test
+     passes with the updated 101-event request. An authenticated agent-browser
+     proof loaded 100 descending events, fetched 53 older events through Go,
+     and showed 153 unique descending rows with no page, console, alert, or
+     request errors.

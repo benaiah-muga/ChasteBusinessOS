@@ -45,7 +45,7 @@ describe("Vite ledger page", () => {
     expect(screen.getByText("approval.decided")).not.toBeNull();
     expect(screen.getByText("s·sessio").getAttribute("title")).toBe("Agent session session-abcdefgh acting for user user-1");
     expect(screen.queryByText("not displayed in the ledger")).toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=100", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=101", expect.any(Object));
 
     fireEvent.click(screen.getByLabelText("Show hash chain details for event 24"));
     const firstEvent = events.at(0);
@@ -67,6 +67,26 @@ describe("Vite ledger page", () => {
     fireEvent.change(filter, { target: { value: "human" } });
     expect(screen.getByText("approval.decided")).not.toBeNull();
     expect(screen.queryByText("invoice.created")).toBeNull();
+  });
+
+  it("loads the next Go-backed page before the oldest visible sequence", async () => {
+    const makeEvent = (seq: number) => ({ ...events[0], seq, kind: `event-${seq}`, hash: String(seq).padStart(32, "0") });
+    const firstPage = Array.from({ length: 101 }, (_, index) => makeEvent(200 - index));
+    const olderPage = Array.from({ length: 101 }, (_, index) => makeEvent(100 - index));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes("before=")
+      ? Response.json({ events: olderPage })
+      : Response.json({ events: firstPage }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<LedgerPage />);
+
+    expect(await screen.findByText("event-101")).not.toBeNull();
+    expect(screen.queryByText("event-100")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Load older events" }));
+    expect(await screen.findByText("event-100")).not.toBeNull();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/ledger?limit=101&before=101", expect.any(Object));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter ledger events" }), { target: { value: "event-100" } });
+    expect(screen.getByText("event-100")).not.toBeNull();
+    expect(screen.queryByText("event-101")).toBeNull();
   });
 
   it("shows loading and an empty ledger as status updates", async () => {

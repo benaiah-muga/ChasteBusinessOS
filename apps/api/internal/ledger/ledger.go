@@ -28,6 +28,10 @@ type Reader interface {
 	RecentForOrg(context.Context, string, int) ([]Event, error)
 }
 
+type CursorReader interface {
+	BeforeForOrg(context.Context, string, int64, int) ([]Event, error)
+}
+
 type PostgresReader struct {
 	pool dbx.Beginner
 }
@@ -37,14 +41,34 @@ func NewPostgresReader(pool dbx.Beginner) *PostgresReader {
 }
 
 func (r *PostgresReader) RecentForOrg(ctx context.Context, orgID string, limit int) ([]Event, error) {
+	return r.readForOrg(ctx, orgID, 0, limit)
+}
+
+func (r *PostgresReader) BeforeForOrg(ctx context.Context, orgID string, beforeSeq int64, limit int) ([]Event, error) {
+	return r.readForOrg(ctx, orgID, beforeSeq, limit)
+}
+
+func (r *PostgresReader) readForOrg(ctx context.Context, orgID string, beforeSeq int64, limit int) ([]Event, error) {
 	return dbx.WithOrgTx(ctx, r.pool, orgID, func(tx pgx.Tx) ([]Event, error) {
-		rows, err := tx.Query(ctx, `
+		query := `
 			SELECT seq, kind, capability_id, actor_type, actor_id, session_id, auth_session_id,
 			       payload, hash, prev_hash, occurred_at
 			FROM ledger_events
 			WHERE org_id = $1
 			ORDER BY seq DESC
-			LIMIT $2`, orgID, limit)
+			LIMIT $2`
+		args := []any{orgID, limit}
+		if beforeSeq > 0 {
+			query = `
+				SELECT seq, kind, capability_id, actor_type, actor_id, session_id, auth_session_id,
+				       payload, hash, prev_hash, occurred_at
+				FROM ledger_events
+				WHERE org_id = $1 AND seq < $2
+				ORDER BY seq DESC
+				LIMIT $3`
+			args = []any{orgID, beforeSeq, limit}
+		}
+		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return nil, err
 		}

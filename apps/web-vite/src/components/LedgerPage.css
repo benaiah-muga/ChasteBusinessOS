@@ -23,6 +23,12 @@
 .ledger-filter input:focus-visible, .ledger-error button:focus-visible, .ledger-error a:focus-visible, .ledger-chain summary:focus-visible { outline: 2px solid #967942; outline-offset: 3px; }
 
 .ledger-table-shell { overflow: auto; border: 1px solid #e5e3da; border-radius: 10px; background: #fffefa; box-shadow: 0 5px 18px rgb(44 40 29 / 3%); }
+.ledger-older-controls { display: flex; justify-content: center; padding: 18px 0 4px; }
+.ledger-older-controls button { min-height: 38px; border: 1px solid #d9d7cd; border-radius: 7px; padding: 0 16px; background: #fffefa; color: #465347; cursor: pointer; font: inherit; font-size: 11px; font-weight: 650; }
+.ledger-older-controls button:hover:not(:disabled) { border-color: #b9c4b8; background: #f4f6f1; }
+.ledger-older-controls button:focus-visible { outline: 2px solid #967942; outline-offset: 3px; }
+.ledger-older-controls button:disabled { cursor: wait; opacity: .65; }
+.ledger-older-error { color: #85473b; font-size: 11px; text-align: center; }
 .ledger-table { width: 100%; border-collapse: collapse; text-align: left; }
 .ledger-table th { border-bottom: 1px solid #e9e7df; padding: 11px 13px; background: #faf9f5; color: #85867c; font-size: 9px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
 .ledger-table td { border-bottom: 1px solid #f0eee8; padding: 11px 13px; color: #686d64; font-size: 11px; vertical-align: middle; }
