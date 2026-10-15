@@ -37,7 +37,7 @@ describe("Go auth browser client", () => {
         return Response.json({ token: null, user: goUser });
       }
       if (pathnameOf(input).endsWith("/sign-in/email")) {
-        return Response.json({ token: null, user: goUser });
+        return Response.json({ redirect: false, token: null, url: null, user: goUser });
       }
       if (pathnameOf(input).endsWith("/sign-out")) return Response.json({ success: true });
       if (pathnameOf(input).endsWith("/send-verification-email") || pathnameOf(input).endsWith("/reset-password")) return Response.json({ status: true });
@@ -100,6 +100,7 @@ describe("Go auth browser client", () => {
     const result = await authClient.signIn.email({ email: "ada@example.test", password: "long-password" });
 
     expect(result.data?.user.email).toBe("ada@example.test");
+    expect(result.data).toMatchObject({ redirect: false, token: null, url: null });
     expect(requests).toEqual([{
       path: "/api/auth/sign-in/email",
       method: "POST",
@@ -179,7 +180,40 @@ describe("Go auth browser client", () => {
   });
 
   it("rejects a bearer token in a browser sign-in response", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ token: "must-not-reach-javascript", user: goUser })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ redirect: false, token: "must-not-reach-javascript", url: null, user: goUser })));
+    const { authClient } = await import("./auth");
+
+    await expect(authClient.signIn.email({ email: "ada@example.test", password: "long-password" }))
+      .resolves.toEqual({ data: null, error: { message: "The Go authentication service returned an unexpected response" } });
+  });
+
+  it("does not expose a token embedded in the session response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      user: goUser,
+      session: {
+        id: "session-id",
+        userId: goUser.id,
+        expiresAt: "2026-09-09T10:00:00Z",
+        createdAt: "2026-09-02T10:00:00Z",
+        updatedAt: "2026-09-02T10:00:00Z",
+        token: "unexpected-session-token",
+      },
+    })));
+    const { authClient } = await import("./auth");
+
+    await expect(authClient.getSession()).resolves.toEqual({
+      data: null,
+      error: { message: "The Go authentication service returned an unexpected response" },
+    });
+  });
+
+  it("rejects unexpected auth response fields instead of silently discarding them", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      redirect: false,
+      token: null,
+      url: null,
+      user: { ...goUser, accessToken: "unexpected-secret" },
+    })));
     const { authClient } = await import("./auth");
 
     await expect(authClient.signIn.email({ email: "ada@example.test", password: "long-password" }))

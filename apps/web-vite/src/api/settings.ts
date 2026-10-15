@@ -147,9 +147,7 @@ export async function fetchModuleSettings(module: string, signal?: AbortSignal):
 const PolicySchema = z.object({
   maxRiskAutonomous: z.string(),
   moneyThresholdMinor: z.number().int(),
-  // The Go policy bridge types this as unknown values; keep the wire loose and
-  // hand the editor a clean string list.
-  requiresApprovalFor: z.array(z.unknown()).transform((values) => values.filter((value): value is string => typeof value === "string")),
+  requiresApprovalFor: z.array(z.string()),
 }).strict();
 
 const PolicyReadSchema = z.object({

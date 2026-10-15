@@ -8,7 +8,7 @@ const UserSchema = z.object({
   image: z.string().nullable(),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
-});
+}).strict();
 
 const SessionSchema = z.object({
   id: z.string().min(1),
@@ -16,16 +16,21 @@ const SessionSchema = z.object({
   expiresAt: z.string().datetime({ offset: true }),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
-});
+}).strict();
 
-const SessionResponseSchema = z.object({ user: UserSchema, session: SessionSchema }).nullable();
+const SessionResponseSchema = z.object({ user: UserSchema, session: SessionSchema }).strict().nullable();
 // Vite is a browser client. Go must set the HttpOnly session cookie and must
 // never return a bearer token that application JavaScript could retain.
-const SignInResponseSchema = z.object({ token: z.null(), user: UserSchema });
-const SignUpResponseSchema = z.object({ token: z.null(), user: UserSchema });
-const StatusResponseSchema = z.object({ status: z.literal(true) });
-const RecoveryRequestResponseSchema = z.object({ status: z.literal(true), message: z.string() });
-const SignOutResponseSchema = z.object({ success: z.literal(true) });
+const SignInResponseSchema = z.object({
+  redirect: z.boolean(),
+  token: z.null(),
+  url: z.string().nullable(),
+  user: UserSchema,
+}).strict();
+const SignUpResponseSchema = z.object({ token: z.null(), user: UserSchema }).strict();
+const StatusResponseSchema = z.object({ status: z.literal(true) }).strict();
+const RecoveryRequestResponseSchema = z.object({ status: z.literal(true), message: z.string() }).strict();
+const SignOutResponseSchema = z.object({ success: z.literal(true) }).strict();
 
 type AuthResult<T> = { data: T | null; error: { message: string } | null };
 type Credentials = { email: string; password: string };
@@ -49,7 +54,7 @@ async function request<T>(path: string, schema: z.ZodType<T>, body?: unknown): P
 
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const error = z.object({ message: z.string().optional(), code: z.string().optional() }).safeParse(payload);
+    const error = z.object({ message: z.string().optional(), code: z.string().optional() }).strict().safeParse(payload);
     const code = error.success ? error.data.code : undefined;
     const message = code === "EMAIL_NOT_VERIFIED"
       ? "Email not verified"

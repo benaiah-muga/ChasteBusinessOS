@@ -37,12 +37,17 @@ describe("Vite team API", () => {
     });
   });
 
-  it("submits the existing invite action with an intent id and preserves the returned token", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { token: "invite-token" } }));
+  it("submits the existing invite action with an intent id and preserves its exact returned contract", async () => {
+    const output = {
+      invitationId: "b193f7e9-7859-4dbc-8310-78d6ec168329",
+      token: "invite-token",
+      expiresAt: "2026-10-22T10:00:00.000Z",
+    };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: output }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(submitTeamAction({ action: "invite", email: "new@example.com", roleId: "role-1" }, "intent-1"))
-      .resolves.toEqual({ kind: "completed", data: { token: "invite-token" } });
+      .resolves.toEqual({ kind: "completed", data: output });
     expect(fetchMock).toHaveBeenCalledWith("/api/team", expect.objectContaining({
       method: "POST",
       credentials: "same-origin",
@@ -65,9 +70,27 @@ describe("Vite team API", () => {
     await expect(submitTeamAction({ action: "setPermissions", roleId: "role-1", permissions: ["accounting.read"] }, "intent-4"))
       .rejects.toMatchObject({ status: 202, message: "The team service returned an unexpected approval response." });
 
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, pendingApproval: true, reason: "needs approval" }, { status: 202 })));
+    await expect(submitTeamAction({ action: "setPermissions", roleId: "role-1", permissions: ["accounting.read"] }, "intent-6"))
+      .rejects.toMatchObject({ status: 202, message: "The team service returned an unexpected approval response." });
+
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, error: "Role is protected" }, { status: 422 })));
     await expect(submitTeamAction({ action: "setPermissions", roleId: "role-1", permissions: ["accounting.read"] }, "intent-5"))
       .rejects.toMatchObject({ status: 422, message: "Role is protected" });
+  });
+
+  it("validates each Go capability result against the submitted action", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { roleId: "role-2" } })));
+    await expect(submitTeamAction({ action: "createRole", key: "bookkeeper", name: "Bookkeeper" }, "intent-create"))
+      .resolves.toEqual({ kind: "completed", data: { roleId: "role-2" } });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { permissionCount: 2, extra: true } })));
+    await expect(submitTeamAction({ action: "setPermissions", roleId: "role-1", permissions: ["accounting.read"] }, "intent-permissions"))
+      .rejects.toMatchObject({ message: "The team service returned an unexpected action response." });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { assigned: false } })));
+    await expect(submitTeamAction({ action: "assignRole", userId: "user-1", roleId: "role-1" }, "intent-assign"))
+      .rejects.toMatchObject({ message: "The team service returned an unexpected action response." });
   });
 
   it.each([" \t ", "i".repeat(201), "bad\nkey", "bad\rkey", "bad\0key"])(

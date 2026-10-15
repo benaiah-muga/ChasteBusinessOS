@@ -15,8 +15,8 @@ describe("organization API client", () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({
       activeOrgId: firstOrgId,
       orgs: [
-        { id: firstOrgId, name: "First workspace" },
-        { id: secondOrgId, name: "Second workspace" },
+        { id: firstOrgId, name: "First workspace", baseCurrency: "USD" },
+        { id: secondOrgId, name: "Second workspace", baseCurrency: "UGX" },
       ],
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -26,8 +26,8 @@ describe("organization API client", () => {
     expect(result).toEqual({
       activeOrgId: firstOrgId,
       orgs: [
-        { id: firstOrgId, name: "First workspace" },
-        { id: secondOrgId, name: "Second workspace" },
+        { id: firstOrgId, name: "First workspace", baseCurrency: "USD" },
+        { id: secondOrgId, name: "Second workspace", baseCurrency: "UGX" },
       ],
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/org", expect.objectContaining({
@@ -49,7 +49,24 @@ describe("organization API client", () => {
     });
   });
 
-  it("posts the requested organization and accepts only the legacy success shape", async () => {
+  it("rejects missing or unexpected organization fields", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      activeOrgId: firstOrgId,
+      orgs: [{ id: firstOrgId, name: "First workspace" }],
+    })));
+    await expect(fetchOrganizations()).rejects.toMatchObject({ name: "OrganizationApiError" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      activeOrgId: firstOrgId,
+      orgs: [{ id: firstOrgId, name: "First workspace", baseCurrency: "USD", sessionToken: "unexpected" }],
+    })));
+    await expect(fetchOrganizations()).rejects.toMatchObject({
+      name: "OrganizationApiError",
+      message: "The organization service returned an invalid response.",
+    });
+  });
+
+  it("posts the requested organization and accepts only Go's success shape", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -65,6 +82,15 @@ describe("organization API client", () => {
       body: JSON.stringify({ orgId: secondOrgId }),
       signal: expect.any(AbortSignal),
     }));
+  });
+
+  it("rejects an organization switch response with unexpected fields", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, activeOrgId: firstOrgId })));
+
+    await expect(switchActiveOrganization(secondOrgId)).rejects.toMatchObject({
+      name: "OrganizationApiError",
+      message: "The organization service returned an invalid response.",
+    });
   });
 
   it("validates each member workspace currency so the dashboard can format the selected org", async () => {

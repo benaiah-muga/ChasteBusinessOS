@@ -331,15 +331,23 @@ describe("Vite settings API", () => {
     });
   });
 
-  it("narrows the policy approval list to the risk names the editor understands", async () => {
+  it("requires Go policy approvals to be a string list and rejects malformed entries", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({
-      policy: { maxRiskAutonomous: "write", moneyThresholdMinor: 50_000, requiresApprovalFor: ["identity", 7, "money"] },
+      policy: { maxRiskAutonomous: "write", moneyThresholdMinor: 50_000, requiresApprovalFor: ["identity", "money"] },
       canEdit: true,
     })));
 
     const policy = await fetchPolicy();
     expect(policy.policy.requiresApprovalFor).toEqual(["identity", "money"]);
     expect(policy.canEdit).toBe(true);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      policy: { maxRiskAutonomous: "write", moneyThresholdMinor: 50_000, requiresApprovalFor: ["identity", 7, "money"] },
+      canEdit: true,
+    })));
+    await expect(fetchPolicy()).rejects.toMatchObject({
+      message: "The settings service returned data in an unexpected format.",
+    });
   });
 
   it("keeps only the short key hint from the model configuration contract", async () => {

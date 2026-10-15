@@ -5,11 +5,11 @@ const OrganizationResponseSchema = z.object({
   orgs: z.array(z.object({
     id: z.string().uuid(),
     name: z.string(),
-    baseCurrency: z.string().regex(/^[A-Z]{3}$/).optional(),
-  })),
-});
+    baseCurrency: z.string().regex(/^[A-Z]{3}$/),
+  }).strict()),
+}).strict();
 
-const SwitchResponseSchema = z.object({ ok: z.literal(true) });
+const SwitchResponseSchema = z.object({ ok: z.literal(true) }).strict();
 const REQUEST_TIMEOUT_MS = 12_000;
 
 export type Organization = z.infer<typeof OrganizationResponseSchema>["orgs"][number];

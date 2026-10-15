@@ -4767,3 +4767,10 @@ new owners and the manifest shows zero legacy runtime paths.
      quantities. Documents API response contracts remain strict and match Go.
      Focused Documents and Analytics tests pass 98 cases, targeted lint passes,
      and an independent review verified the numeric precision guard.
+
+447. (Contract verified) Vite Auth now accepts Go's browser sign-in envelope
+     while rejecting unexpected session token fields. Organizations require
+     Go's baseCurrency field, Team writes validate action-specific outputs, and
+     Settings reject malformed policy approval values. The focused suites pass
+     68 tests, targeted lint and Vite typecheck pass, and independent review
+     confirmed the client shapes match the Go handlers.
