@@ -3,6 +3,7 @@ package capability
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -37,6 +38,12 @@ func TestSalesOrdersParserContracts(t *testing.T) {
 			parse:    func(raw json.RawMessage) (any, error) { return ParseSalesCreateOrderInput(raw) },
 			raw:      `{"customerId":"` + customerID + `","lines":[{"description":"Bare","quantity":1000,"unitPriceMinor":500}]}`,
 			wantJSON: `{"customerId":"` + customerID + `","lines":[{"description":"Bare","quantity":1000,"unitPriceMinor":500}]}`,
+		},
+		{
+			name:     "updateDraftOrder",
+			parse:    func(raw json.RawMessage) (any, error) { return ParseSalesUpdateDraftOrderInput(raw) },
+			raw:      `{"orderId":"` + orderID + `","customerId":"` + customerID + `","note":"revised","lines":[{"description":"Revised","quantity":2000,"unitPriceMinor":750,"taxMinor":50}]}`,
+			wantJSON: `{"orderId":"` + orderID + `","customerId":"` + customerID + `","note":"revised","lines":[{"description":"Revised","quantity":2000,"unitPriceMinor":750,"taxMinor":50}]}`,
 		},
 		{
 			name:     "confirmOrder",
@@ -125,14 +132,106 @@ func TestSalesOrdersParserContracts(t *testing.T) {
 	if _, err := parseSalesInput(salesCreateOrderCapabilityID, json.RawMessage(`{"customerId":"`+customerID+`","lines":[{"description":"Bare","quantity":1000,"unitPriceMinor":500}]}`)); err != nil {
 		t.Fatalf("parseSalesInput dispatch error = %v", err)
 	}
+	if _, err := parseSalesInput(salesUpdateDraftOrderCapabilityID, json.RawMessage(`{"orderId":"`+orderID+`","customerId":"`+customerID+`","lines":[{"description":"Revised","quantity":1000,"unitPriceMinor":500}]}`)); err != nil {
+		t.Fatalf("parseSalesInput update dispatch error = %v", err)
+	}
 	if _, err := parseSalesInput("sales.unknown", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("parseSalesInput accepted an unsupported capability")
+	}
+}
+
+func TestSalesOrdersUpdateDraftOrderIsScopedAndDraftOnly(t *testing.T) {
+	fx := newExecutorFixture(t)
+	claims := salesTestClaims(fx)
+	customerID := seedCRMDealCustomer(t, fx, fx.orgID, "Order buyer")
+	newItemID := seedSalesItem(t, fx, fx.orgID, "NEW-SKU", "goods")
+	created := salesCreateDraft(t, fx, claims, customerID, []SalesOrderLineInput{{Description: "Original", Quantity: 1000, UnitPriceMinor: 1250, TaxMinor: crmInt64Pointer(25)}})
+	updated := salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesUpdateDraftOrderOutput, error) {
+		return salesUpdateDraftOrder(fx.ctx, tx, fx.orgID, SalesUpdateDraftOrderInput{
+			OrderID: created.OrderID, CustomerID: customerID, Note: crmStringPointer("updated note"),
+			Lines: []SalesOrderLineInput{{Description: "Revised", Quantity: 2500, UnitPriceMinor: 3000, SKU: crmStringPointer("NEW-SKU")}},
+		})
+	})
+	if updated.OrderID != created.OrderID || len(updated.Before.Lines) != 1 || updated.Before.Lines[0].Description != "Original" || updated.Before.Lines[0].UnitPriceMinor != 1250 {
+		t.Fatalf("update output snapshot = %+v, want original draft snapshot", updated)
+	}
+	var note *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT note FROM sales_orders WHERE id=$1::uuid AND org_id=$2::uuid`, created.OrderID, fx.orgID).Scan(&note); err != nil {
+		t.Fatal(err)
+	}
+	if note == nil || *note != "updated note" {
+		t.Fatalf("updated note = %v, want updated note", note)
+	}
+	var description string
+	var quantity, price, tax int64
+	var itemID *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT description, quantity, unit_price_minor, tax_minor, item_id::text FROM sales_order_lines WHERE order_id=$1::uuid`, created.OrderID).Scan(&description, &quantity, &price, &tax, &itemID); err != nil {
+		t.Fatal(err)
+	}
+	if description != "Revised" || quantity != 2500 || price != 3000 || tax != 0 || itemID == nil || *itemID != newItemID {
+		t.Fatalf("updated line = %q, %d, %d, %d, %v", description, quantity, price, tax, itemID)
+	}
+	foreignOrder := salesCreateDraft(t, fx, claims, customerID, []SalesOrderLineInput{{Description: "Scoped", Quantity: 1000, UnitPriceMinor: 1}})
+	err := salesErrInOrgTx(t, fx, fx.otherOrgID, func(tx pgx.Tx) error {
+		_, err := salesUpdateDraftOrder(fx.ctx, tx, fx.otherOrgID, SalesUpdateDraftOrderInput{OrderID: foreignOrder.OrderID, CustomerID: customerID, Lines: []SalesOrderLineInput{{Description: "Nope", Quantity: 1000, UnitPriceMinor: 1}}})
+		return err
+	})
+	if err == nil || err.Error() != "order not found" {
+		t.Fatalf("foreign order update error = %v, want order not found", err)
+	}
+	allowBackorder := true
+	_ = salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesConfirmOrderOutput, error) {
+		return salesConfirmOrder(fx.ctx, tx, claims, SalesConfirmOrderInput{OrderID: created.OrderID, AllowBackorder: &allowBackorder}, time.Now())
+	})
+	err = salesErrInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) error {
+		_, err := salesUpdateDraftOrder(fx.ctx, tx, fx.orgID, SalesUpdateDraftOrderInput{OrderID: created.OrderID, CustomerID: customerID, Lines: []SalesOrderLineInput{{Description: "Too late", Quantity: 1000, UnitPriceMinor: 1}}})
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "only draft orders can be edited") {
+		t.Fatalf("confirmed order update error = %v, want draft-only guard", err)
 	}
 }
 
 func TestSalesOrdersParserRejections(t *testing.T) {
 	customerID := "11111111-1111-4111-8111-111111111111"
 	orderID := "22222222-2222-4222-8222-222222222222"
+	for _, raw := range []string{
+		`{}`,
+		`{"orderId":"` + orderID + `","customerId":"invalid","lines":[{"description":"x","quantity":1000,"unitPriceMinor":1}]}`,
+		`{"orderId":"` + orderID + `","customerId":"` + customerID + `","lines":[]}`,
+		`{"orderId":"` + orderID + `","customerId":"` + customerID + `","lines":[{"description":"x","quantity":2147483648,"unitPriceMinor":1}]}`,
+	} {
+		if _, err := ParseSalesUpdateDraftOrderInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("ParseSalesUpdateDraftOrderInput accepted %s", raw)
+		}
+	}
+	updateInput := map[string]any{
+		"orderId": orderID, "customerId": customerID,
+		"lines": []map[string]any{{"description": "x", "quantity": 1000, "unitPriceMinor": 1}},
+	}
+	for _, test := range []struct {
+		name     string
+		note     string
+		wantFail bool
+	}{
+		{name: "4,000 UTF-16 units", note: strings.Repeat("😀", 2000)},
+		{name: "4,002 UTF-16 units", note: strings.Repeat("😀", 2001), wantFail: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			updateInput["note"] = test.note
+			raw, err := json.Marshal(updateInput)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = ParseSalesUpdateDraftOrderInput(raw)
+			if test.wantFail && err == nil {
+				t.Fatal("ParseSalesUpdateDraftOrderInput accepted a note beyond 4,000 UTF-16 units")
+			}
+			if !test.wantFail && err != nil {
+				t.Fatalf("ParseSalesUpdateDraftOrderInput rejected the 4,000 UTF-16-unit boundary: %v", err)
+			}
+		})
+	}
 	for _, raw := range []string{
 		`{}`,
 		`{"customerId":null,"lines":[{"description":"x","quantity":1000,"unitPriceMinor":1}]}`,
@@ -891,6 +990,7 @@ func TestSalesOrdersListScopeStatusAndTenantIsolation(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	customerID := seedCRMDealCustomer(t, fx, fx.orgID, "Local buyer")
 	foreignCustomer := seedCRMDealCustomer(t, fx, fx.otherOrgID, "Foreign buyer")
+	seedSalesItem(t, fx, fx.orgID, "SO-LIST-SKU", "goods")
 	var foreignOrderID string
 	if err := fx.owner.QueryRow(fx.ctx, `
 		INSERT INTO sales_orders (org_id, number, customer_id, status)
@@ -899,7 +999,10 @@ func TestSalesOrdersListScopeStatusAndTenantIsolation(t *testing.T) {
 	}
 
 	first := salesCreateDraft(t, fx, claims, customerID, []SalesOrderLineInput{
-		{Description: "Probe Chair", Quantity: 30000, UnitPriceMinor: 20000, TaxMinor: crmInt64Pointer(60000)},
+		{Description: "Probe Chair", Quantity: 30000, UnitPriceMinor: 20000, TaxMinor: crmInt64Pointer(60000), SKU: crmStringPointer("SO-LIST-SKU")},
+	})
+	_ = salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesUpdateDraftOrderOutput, error) {
+		return salesUpdateDraftOrder(fx.ctx, tx, fx.orgID, SalesUpdateDraftOrderInput{OrderID: first.OrderID, CustomerID: customerID, Note: crmStringPointer("Editable note"), Lines: []SalesOrderLineInput{{Description: "Probe Chair", Quantity: 30000, UnitPriceMinor: 20000, TaxMinor: crmInt64Pointer(60000), SKU: crmStringPointer("SO-LIST-SKU")}}})
 	})
 	second := salesCreateDraft(t, fx, claims, customerID, []SalesOrderLineInput{
 		{Description: "Consulting half-day", Quantity: 1000, UnitPriceMinor: 10000},
@@ -918,8 +1021,11 @@ func TestSalesOrdersListScopeStatusAndTenantIsolation(t *testing.T) {
 		listed.Orders[0].CustomerID != customerID || listed.Orders[0].Backordered || listed.Orders[0].TotalMinor != 10000 {
 		t.Fatalf("newest order = %+v, want cancelled number 2 with 10000 total", listed.Orders[0])
 	}
-	if listed.Orders[1].ID != first.OrderID || listed.Orders[1].Number != 1 || listed.Orders[1].Status != "draft" || listed.Orders[1].TotalMinor != 660000 {
+	if listed.Orders[1].ID != first.OrderID || listed.Orders[1].Number != 1 || listed.Orders[1].Status != "draft" || listed.Orders[1].TotalMinor != 660000 || listed.Orders[1].Note == nil || *listed.Orders[1].Note != "Editable note" {
 		t.Fatalf("oldest order = %+v, want draft number 1 with 660000 total", listed.Orders[1])
+	}
+	if len(listed.Orders[1].Lines) != 1 || listed.Orders[1].Lines[0].UnitPriceMinor != 20000 || listed.Orders[1].Lines[0].TaxMinor != 60000 || listed.Orders[1].Lines[0].SKU == nil || *listed.Orders[1].Lines[0].SKU != "SO-LIST-SKU" {
+		t.Fatalf("editable line projection = %+v, want price, tax, and SKU", listed.Orders[1].Lines)
 	}
 	if listed.Orders[1].CreatedAt == "" || listed.Orders[1].CreatedAt[len(listed.Orders[1].CreatedAt)-1] != 'Z' {
 		t.Fatalf("createdAt = %q, want ISO millisecond string", listed.Orders[1].CreatedAt)

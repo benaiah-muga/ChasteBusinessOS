@@ -181,6 +181,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const [allowBackorder, setAllowBackorder] = useState<Record<string, boolean>>({});
   const [actionNotice, setActionNotice] = useState<{ tone: "success" | "pending" | "error"; message: string } | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
   const [createError, setCreateError] = useState<string | null>(null);
   const [quickCreateTargetIndex, setQuickCreateTargetIndex] = useState<number | null>(null);
@@ -459,6 +460,8 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         tone: "success",
         message: result.action === "cancel"
           ? `Order ${orderLabel} cancelled.`
+          : result.action === "update"
+            ? `Draft order ${orderLabel} updated.`
           : result.data.orderStatus === "delivered"
             ? `Order ${orderLabel} fully delivered and invoiced.`
             : `Reserved quantities delivered and invoiced for order ${orderLabel}. The order remains confirmed.`,
@@ -616,10 +619,10 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     setCreateError(null);
     setActionNotice(null);
     try {
-      const result = await submitSalesOrderWrite({
-        action: "create", customerId: createForm.customerId,
-        ...(createForm.note.trim() ? { note: createForm.note.trim() } : {}), lines,
-      }, { actorId, organizationId });
+      const write: SalesOrderWrite = editingOrderId
+        ? { action: "update", orderId: editingOrderId, customerId: createForm.customerId, ...(createForm.note.trim() ? { note: createForm.note.trim() } : {}), lines }
+        : { action: "create", customerId: createForm.customerId, ...(createForm.note.trim() ? { note: createForm.note.trim() } : {}), lines };
+      const result = await submitSalesOrderWrite(write, { actorId, organizationId });
       if (currentCreateScope.current !== submittedScope) return;
       if (result.kind === "pending") {
         setCreateAttemptPending(true);
@@ -627,9 +630,10 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         return;
       }
       setCreateAttemptPending(false);
+      setEditingOrderId(null);
       setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
       setShowCreateForm(false);
-      setActionNotice({ tone: "success", message: "Sales order created as a draft." });
+      setActionNotice({ tone: "success", message: write.action === "update" ? "Sales draft updated." : "Sales order created as a draft." });
       await refreshOrderList(submittedScope);
     } catch (error) {
       if (currentCreateScope.current !== submittedScope) return;
@@ -697,7 +701,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
           <div className="sales-write-heading">
             <div>
               <p className="sales-eyebrow">Saved Go action</p>
-              <h2 id="sales-retry-title">Retry the unresolved {recoveredWriteAction.action === "deliver" ? "delivery" : "cancellation"}</h2>
+              <h2 id="sales-retry-title">Retry the unresolved {recoveredWriteAction.action === "deliver" ? "delivery" : recoveredWriteAction.action === "update" ? "draft edit" : "cancellation"}</h2>
             </div>
             <button
               type="button"
@@ -705,11 +709,11 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
               disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || writeBusy || !createScopeReady}
               onClick={() => void retryRecoveredWriteAction()}
             >
-              {writeBusy ? "Checking…" : recoveredWriteAction.action === "deliver" ? "Retry saved delivery" : "Retry saved cancellation"}
+              {writeBusy ? "Checking…" : recoveredWriteAction.action === "deliver" ? "Retry saved delivery" : recoveredWriteAction.action === "update" ? "Retry saved draft edit" : "Retry saved cancellation"}
             </button>
           </div>
           <p>
-            This sends the saved {recoveredWriteAction.action === "deliver" ? "delivery quantities" : "cancellation"} to Go again with the original intent ID. Other Sales writes stay locked until the action is resolved.
+            This sends the saved {recoveredWriteAction.action === "deliver" ? "delivery quantities" : recoveredWriteAction.action === "update" ? "draft changes" : "cancellation"} to Go again with the original intent ID. Other Sales writes stay locked until the action is resolved.
           </p>
         </section>
       )}
@@ -721,7 +725,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         </div>
         <div className="sales-header-actions">
           {visibleState.status === "ready" && <span className="sales-order-count">{visibleState.orders.length} {visibleState.orders.length === 1 ? "order" : "orders"}</span>}
-          <button className="sales-new-order" type="button" disabled={createAttemptPending || quickCreateBusy || quickCreatePending} onClick={() => { setShowCreateForm((open) => !open); setCreateError(null); }} aria-expanded={showCreateForm}>
+          <button className="sales-new-order" type="button" disabled={createAttemptPending || quickCreateBusy || quickCreatePending} onClick={() => { const nextOpen = !showCreateForm; setShowCreateForm(nextOpen); if (nextOpen) { setEditingOrderId(null); setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] }); } setCreateError(null); }} aria-expanded={showCreateForm}>
             {showCreateForm ? "Close order form" : "Create sales order"}
           </button>
         </div>
@@ -752,7 +756,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       {showCreateForm && visibleState.status === "ready" && (
         <section className="sales-write-card" aria-labelledby="sales-create-title">
           <div className="sales-write-heading">
-            <div><p className="sales-eyebrow">New draft</p><h2 id="sales-create-title">Create sales order</h2></div>
+            <div><p className="sales-eyebrow">{editingOrderId ? "Draft order" : "New draft"}</p><h2 id="sales-create-title">{editingOrderId ? "Edit sales order" : "Create sales order"}</h2></div>
             <p>Prices and tax use {baseCurrency ?? "the workspace currency"}. A non-empty SKU links the line to inventory.</p>
           </div>
           <div className="sales-write-grid">
@@ -781,7 +785,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
             ))}
             <div className="sales-write-actions">
               <button type="button" className="sales-write-secondary" disabled={writeBusy || createWriteLocked} onClick={() => setCreateForm((current) => ({ ...current, lines: [...current.lines, emptyOrderDraftLine()] }))}>Add line</button>
-              <button type="button" className="sales-write-primary" disabled={writeBusy || !createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked} onClick={() => void handleCreateOrder()}>{writeBusy ? "Saving…" : "Create draft"}</button>
+              <button type="button" className="sales-write-primary" disabled={writeBusy || !createScopeReady || routeLessAttemptCurrent || scopedWriteRecoveryLocked} onClick={() => void handleCreateOrder()}>{writeBusy ? "Saving…" : editingOrderId ? "Save draft changes" : "Create draft"}</button>
             </div>
             {createError && <p className="sales-write-error" role="alert">{createError}</p>}
           </div>
@@ -898,6 +902,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
                   <td><time dateTime={order.createdAt}>{new Date(order.createdAt).toLocaleDateString()}</time></td>
                   <td className="sales-total">{formatMoney(order.totalMinor, currency)}</td>
                   <td>{order.status === "draft" && <>
+                    <button type="button" className="sales-row-action" disabled={routeLessAttemptCurrent || scopedWriteRecoveryLocked || recoveredWriteAction !== null || writeBusy || !createScopeReady || confirmingOrderId !== null} onClick={() => { setEditingOrderId(order.id); setCreateForm({ customerId: order.customerId, note: order.note ?? "", lines: order.lines.map((line) => ({ sku: line.sku ?? "", description: line.description, quantity: String(line.quantityThousandths / 1000), unitPrice: String(line.unitPriceMinor / (10 ** currency.minorUnits)), tax: String(line.taxMinor / (10 ** currency.minorUnits)) })) }); setShowCreateForm(true); setCreateError(null); }}>Edit #{order.number}</button>
                     <label>
                       <input
                         type="checkbox"

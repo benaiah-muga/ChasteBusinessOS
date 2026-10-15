@@ -16,11 +16,13 @@ import (
 )
 
 const (
-	salesCreateOrderCapabilityID  = "sales.createOrder"
-	salesConfirmOrderCapabilityID = "sales.confirmOrder"
-	salesDeliverOrderCapabilityID = "sales.deliverOrder"
-	salesCancelOrderCapabilityID  = "sales.cancelOrder"
-	salesListOrdersCapabilityID   = "sales.listOrders"
+	salesCreateOrderCapabilityID       = "sales.createOrder"
+	salesUpdateDraftOrderCapabilityID  = "sales.updateDraftOrder"
+	salesRestoreDraftOrderCapabilityID = "sales.restoreDraftOrder"
+	salesConfirmOrderCapabilityID      = "sales.confirmOrder"
+	salesDeliverOrderCapabilityID      = "sales.deliverOrder"
+	salesCancelOrderCapabilityID       = "sales.cancelOrder"
+	salesListOrdersCapabilityID        = "sales.listOrders"
 )
 
 var salesOrderStatusValues = []string{"draft", "confirmed", "delivered", "cancelled"}
@@ -34,6 +36,24 @@ type SalesOrderLineInput struct {
 }
 
 type SalesCreateOrderInput struct {
+	CustomerID string                `json:"customerId"`
+	Note       *string               `json:"note,omitempty"`
+	Lines      []SalesOrderLineInput `json:"lines"`
+}
+
+type SalesUpdateDraftOrderInput struct {
+	OrderID    string                `json:"orderId"`
+	CustomerID string                `json:"customerId"`
+	Note       *string               `json:"note,omitempty"`
+	Lines      []SalesOrderLineInput `json:"lines"`
+}
+
+type SalesUpdateDraftOrderOutput struct {
+	OrderID string                        `json:"orderId"`
+	Before  SalesUpdateDraftOrderSnapshot `json:"before"`
+}
+
+type SalesUpdateDraftOrderSnapshot struct {
 	CustomerID string                `json:"customerId"`
 	Note       *string               `json:"note,omitempty"`
 	Lines      []SalesOrderLineInput `json:"lines"`
@@ -93,15 +113,19 @@ type SalesListOrderItem struct {
 	Backordered bool                     `json:"backordered"`
 	TotalMinor  int64                    `json:"totalMinor"`
 	CreatedAt   string                   `json:"createdAt"`
+	Note        *string                  `json:"note,omitempty"`
 	Lines       []SalesListOrderLineItem `json:"lines"`
 }
 
 type SalesListOrderLineItem struct {
-	LineID                 string `json:"lineId"`
-	Description            string `json:"description"`
-	QuantityThousandths    int64  `json:"quantityThousandths"`
-	DeliveredThousandths   int64  `json:"deliveredThousandths"`
-	DeliverableThousandths int64  `json:"deliverableThousandths"`
+	LineID                 string  `json:"lineId"`
+	Description            string  `json:"description"`
+	QuantityThousandths    int64   `json:"quantityThousandths"`
+	DeliveredThousandths   int64   `json:"deliveredThousandths"`
+	DeliverableThousandths int64   `json:"deliverableThousandths"`
+	UnitPriceMinor         int64   `json:"unitPriceMinor"`
+	TaxMinor               int64   `json:"taxMinor"`
+	SKU                    *string `json:"sku,omitempty"`
 }
 
 type SalesListOrdersOutput struct {
@@ -112,6 +136,8 @@ func parseSalesInput(capabilityID string, raw json.RawMessage) (any, error) {
 	switch capabilityID {
 	case salesCreateOrderCapabilityID:
 		return ParseSalesCreateOrderInput(raw)
+	case salesUpdateDraftOrderCapabilityID, salesRestoreDraftOrderCapabilityID:
+		return ParseSalesUpdateDraftOrderInput(raw)
 	case salesConfirmOrderCapabilityID:
 		return ParseSalesConfirmOrderInput(raw)
 	case salesDeliverOrderCapabilityID:
@@ -123,6 +149,38 @@ func parseSalesInput(capabilityID string, raw json.RawMessage) (any, error) {
 	default:
 		return nil, errors.New("unsupported sales capability")
 	}
+}
+
+func ParseSalesUpdateDraftOrderInput(raw json.RawMessage) (SalesUpdateDraftOrderInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return SalesUpdateDraftOrderInput{}, err
+	}
+	orderID, err := salesRequiredUUID(fields, "orderId")
+	if err != nil {
+		return SalesUpdateDraftOrderInput{}, err
+	}
+	customerID, err := requiredCRMDealString(fields, "customerId", 0, 0)
+	if err != nil || !isZodUUID(customerID) {
+		return SalesUpdateDraftOrderInput{}, errors.New("customerId must be a UUID")
+	}
+	note, err := optionalCRMDealString(fields, "note", 4000, false)
+	if err != nil {
+		return SalesUpdateDraftOrderInput{}, err
+	}
+	linesRaw, ok := fields["lines"]
+	if !ok || bytes.Equal(bytes.TrimSpace(linesRaw), []byte("null")) {
+		return SalesUpdateDraftOrderInput{}, errors.New("lines must contain at least one line")
+	}
+	var lineValues []json.RawMessage
+	if err := json.Unmarshal(linesRaw, &lineValues); err != nil || len(lineValues) == 0 || len(lineValues) > 100 {
+		return SalesUpdateDraftOrderInput{}, errors.New("lines must contain between 1 and 100 lines")
+	}
+	lines, err := parseSalesOrderLines(lineValues)
+	if err != nil {
+		return SalesUpdateDraftOrderInput{}, err
+	}
+	return SalesUpdateDraftOrderInput{OrderID: orderID, CustomerID: customerID, Note: note, Lines: lines}, nil
 }
 
 func ParseSalesCreateOrderInput(raw json.RawMessage) (SalesCreateOrderInput, error) {
@@ -168,15 +226,15 @@ func parseSalesOrderLines(lineValues []json.RawMessage) ([]SalesOrderLineInput, 
 			return nil, err
 		}
 		quantity, err := requiredSafeInteger(lineFields, "quantity")
-		if err != nil || quantity <= 0 {
+		if err != nil || quantity <= 0 || quantity > math.MaxInt32 {
 			return nil, errors.New("quantity must be a positive integer")
 		}
 		unitPriceMinor, err := requiredSafeInteger(lineFields, "unitPriceMinor")
-		if err != nil || unitPriceMinor < 0 {
+		if err != nil || unitPriceMinor < 0 || unitPriceMinor > math.MaxInt32 {
 			return nil, errors.New("unitPriceMinor must be a non-negative integer")
 		}
 		taxMinor, err := optionalSafeInteger(lineFields, "taxMinor")
-		if err != nil || taxMinor != nil && *taxMinor < 0 {
+		if err != nil || taxMinor != nil && (*taxMinor < 0 || *taxMinor > math.MaxInt32) {
 			return nil, errors.New("taxMinor must be a non-negative integer")
 		}
 		sku, err := optionalCRMDealString(lineFields, "sku", 0, false)
@@ -547,6 +605,92 @@ func salesCreateOrder(ctx context.Context, tx pgx.Tx, claims authbridge.Capabili
 		}
 	}
 	return SalesCreateOrderOutput{OrderID: orderID, OrderNumber: number}, nil
+}
+
+func salesUpdateDraftOrder(ctx context.Context, tx pgx.Tx, orgID string, input SalesUpdateDraftOrderInput) (SalesUpdateDraftOrderOutput, error) {
+	var status string
+	var before SalesUpdateDraftOrderSnapshot
+	if err := tx.QueryRow(ctx, `
+		SELECT customer_id::text, status, note
+		FROM sales_orders WHERE id = $1::uuid AND org_id = $2::uuid FOR UPDATE`, input.OrderID, orgID).
+		Scan(&before.CustomerID, &status, &before.Note); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return SalesUpdateDraftOrderOutput{}, errors.New("order not found")
+		}
+		return SalesUpdateDraftOrderOutput{}, err
+	}
+	if status != "draft" {
+		return SalesUpdateDraftOrderOutput{}, fmt.Errorf("order is %s; only draft orders can be edited", status)
+	}
+	var customerExists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM customers WHERE id = $1::uuid AND org_id = $2::uuid)`, input.CustomerID, orgID).Scan(&customerExists); err != nil {
+		return SalesUpdateDraftOrderOutput{}, err
+	}
+	if !customerExists {
+		return SalesUpdateDraftOrderOutput{}, errors.New("customer not found")
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT l.description, l.quantity, l.unit_price_minor, l.tax_minor, i.sku
+		FROM sales_order_lines l
+		LEFT JOIN items i ON i.id = l.item_id AND i.org_id = $2::uuid
+		WHERE l.order_id = $1::uuid AND l.org_id = $2::uuid ORDER BY l.id`, input.OrderID, orgID)
+	if err != nil {
+		return SalesUpdateDraftOrderOutput{}, err
+	}
+	before.Lines = make([]SalesOrderLineInput, 0, len(input.Lines))
+	for rows.Next() {
+		var line SalesOrderLineInput
+		if err := rows.Scan(&line.Description, &line.Quantity, &line.UnitPriceMinor, &line.TaxMinor, &line.SKU); err != nil {
+			rows.Close()
+			return SalesUpdateDraftOrderOutput{}, err
+		}
+		before.Lines = append(before.Lines, line)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return SalesUpdateDraftOrderOutput{}, err
+	}
+	rows.Close()
+	if len(before.Lines) == 0 {
+		return SalesUpdateDraftOrderOutput{}, errors.New("draft order has no editable lines")
+	}
+	resolved := make([]SalesOrderLineInput, 0, len(input.Lines))
+	itemIDs := make([]*string, 0, len(input.Lines))
+	for _, line := range input.Lines {
+		var itemID *string
+		if line.SKU != nil {
+			var id string
+			err := tx.QueryRow(ctx, `SELECT id::text FROM items WHERE org_id = $1::uuid AND sku = $2 LIMIT 1`, orgID, *line.SKU).Scan(&id)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return SalesUpdateDraftOrderOutput{}, fmt.Errorf("no item with sku %s", *line.SKU)
+			}
+			if err != nil {
+				return SalesUpdateDraftOrderOutput{}, err
+			}
+			itemID = &id
+		}
+		resolved = append(resolved, line)
+		itemIDs = append(itemIDs, itemID)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE sales_orders SET customer_id = $1::uuid, note = $2 WHERE id = $3::uuid AND org_id = $4::uuid AND status = 'draft'`, input.CustomerID, input.Note, input.OrderID, orgID); err != nil {
+		return SalesUpdateDraftOrderOutput{}, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM sales_order_lines WHERE order_id = $1::uuid AND org_id = $2::uuid`, input.OrderID, orgID); err != nil {
+		return SalesUpdateDraftOrderOutput{}, err
+	}
+	for i, line := range resolved {
+		taxMinor := int64(0)
+		if line.TaxMinor != nil {
+			taxMinor = *line.TaxMinor
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO sales_order_lines (org_id, order_id, description, quantity, unit_price_minor, tax_minor, item_id)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::uuid)`,
+			orgID, input.OrderID, line.Description, line.Quantity, line.UnitPriceMinor, taxMinor, itemIDs[i]); err != nil {
+			return SalesUpdateDraftOrderOutput{}, err
+		}
+	}
+	return SalesUpdateDraftOrderOutput{OrderID: input.OrderID, Before: before}, nil
 }
 
 func salesConfirmOrder(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input SalesConfirmOrderInput, now time.Time) (SalesConfirmOrderOutput, error) {
@@ -1059,7 +1203,7 @@ func salesCancelOrder(ctx context.Context, tx pgx.Tx, orgID string, input SalesC
 
 func salesListOrders(ctx context.Context, tx pgx.Tx, orgID string, input SalesListOrdersInput) (SalesListOrdersOutput, error) {
 	query := `
-		SELECT id::text, number, customer_id::text, status, backordered, created_at
+		SELECT id::text, number, customer_id::text, status, backordered, created_at, note
 		FROM sales_orders WHERE org_id = $1::uuid`
 	args := []any{orgID}
 	if input.Status != nil {
@@ -1080,7 +1224,7 @@ func salesListOrders(ctx context.Context, tx pgx.Tx, orgID string, input SalesLi
 	for rows.Next() {
 		var order listedOrder
 		var createdAt time.Time
-		if err := rows.Scan(&order.item.ID, &order.item.Number, &order.item.CustomerID, &order.item.Status, &order.item.Backordered, &createdAt); err != nil {
+		if err := rows.Scan(&order.item.ID, &order.item.Number, &order.item.CustomerID, &order.item.Status, &order.item.Backordered, &createdAt, &order.item.Note); err != nil {
 			return SalesListOrdersOutput{}, err
 		}
 		order.id = order.item.ID
@@ -1097,7 +1241,7 @@ func salesListOrders(ctx context.Context, tx pgx.Tx, orgID string, input SalesLi
 	for _, listed := range collected {
 		lineRows, err := tx.Query(ctx, `
 			SELECT sales_order_lines.id::text, description, quantity, delivered_thousandths,
-			       reserved_thousandths, sales_order_lines.item_id::text, items.kind,
+			       reserved_thousandths, sales_order_lines.item_id::text, items.kind, items.sku,
 			       unit_price_minor, tax_minor
 			FROM sales_order_lines
 			LEFT JOIN items ON items.id = sales_order_lines.item_id AND items.org_id = $2::uuid
@@ -1111,17 +1255,21 @@ func salesListOrders(ctx context.Context, tx pgx.Tx, orgID string, input SalesLi
 			reserved int64
 			itemID   *string
 			kind     *string
+			sku      *string
 		}
 		lines := make([]listedLine, 0)
 		for lineRows.Next() {
 			var line listedLine
 			var unitPriceMinor, taxMinor int64
 			if err := lineRows.Scan(&line.item.LineID, &line.item.Description, &line.item.QuantityThousandths,
-				&line.item.DeliveredThousandths, &line.reserved, &line.itemID, &line.kind, &unitPriceMinor, &taxMinor); err != nil {
+				&line.item.DeliveredThousandths, &line.reserved, &line.itemID, &line.kind, &line.sku, &unitPriceMinor, &taxMinor); err != nil {
 				lineRows.Close()
 				return SalesListOrdersOutput{}, err
 			}
 			total += int64(math.Round(float64(line.item.QuantityThousandths)*float64(unitPriceMinor)/1000)) + taxMinor
+			line.item.UnitPriceMinor = unitPriceMinor
+			line.item.TaxMinor = taxMinor
+			line.item.SKU = line.sku
 			lines = append(lines, line)
 		}
 		if err := lineRows.Err(); err != nil {

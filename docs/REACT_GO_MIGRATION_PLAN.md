@@ -4662,3 +4662,13 @@ new owners and the manifest shows zero legacy runtime paths.
      and the Go task integration test passing. Authenticated browser proof
      created and edited a synthetic task, reloaded it, and confirmed the title
      and note persisted through Go; no browser errors were reported.
+
+434. (Runtime verified) Vite Sales edits notes and line descriptions,
+     quantities, prices, tax, and SKU on draft orders through the Go
+     `sales.updateDraftOrder` capability. Go locks and checks draft status,
+     scopes the write to the organization, and enforces Vite's 4,000 UTF-16
+     unit note limit. Focused Sales API/page tests pass 65 cases, with Vite
+     typecheck/lint and Go parser/update database tests passing. Authenticated
+     browser proof changed a synthetic draft, reloaded it, and confirmed the
+     updated note, line values, and total persisted; Go returned HTTP 200 and
+     the browser reported no errors.

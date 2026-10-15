@@ -57,11 +57,13 @@ describe("Sales customer lookup", () => {
 describe("sales order writes", () => {
   const goWrite404Cases: Array<[string, Parameters<typeof submitSalesOrderWrite>[0], unknown]> = [
     ["create", { action: "create", customerId, lines: [{ description: "Coffee", quantity: 1000, unitPriceMinor: 1250 }] }, { orderId, orderNumber: 46 }],
+    ["update", { action: "update", orderId, customerId, lines: [{ description: "Coffee revised", quantity: 1000, unitPriceMinor: 1500 }] }, { orderId, before: { customerId, lines: [{ description: "Coffee", quantity: 1000, unitPriceMinor: 1250 }] } }],
     ["deliver", { action: "deliver", orderId }, { invoiceId: orderId, invoiceNumber: 901, invoiceTotalMinor: 5000, orderStatus: "delivered" }],
     ["cancel", { action: "cancel", orderId }, { status: "cancelled", releasedThousandths: 1000 }],
   ];
   const routeLessActionCases: Array<[string, Parameters<typeof submitSalesOrderWrite>[0]]> = [
     ["create", { action: "create", customerId, lines: [{ description: "Coffee", quantity: 1000, unitPriceMinor: 1250 }] }],
+    ["update", { action: "update", orderId, customerId, lines: [{ description: "Coffee revised", quantity: 1000, unitPriceMinor: 1500 }] }],
     ["deliver", { action: "deliver", orderId }],
     ["cancel", { action: "cancel", orderId }],
   ];
@@ -357,6 +359,8 @@ describe("sales order reads", () => {
         quantityThousandths: 2500,
         deliveredThousandths: 500,
         deliverableThousandths: 2000,
+        unitPriceMinor: 0,
+        taxMinor: 0,
       }],
     }],
   };

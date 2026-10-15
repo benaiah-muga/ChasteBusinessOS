@@ -135,6 +135,8 @@ var capabilitySpecs = map[string]capabilitySpec{
 	hrReportCapabilityID:                                {module: "hr", permission: "hr.read", risk: "read"},
 	hrUpdateEmployeeStructureCapabilityID:               {module: "hr", permission: "hr.write", risk: "write"},
 	salesCreateOrderCapabilityID:                        {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
+	salesUpdateDraftOrderCapabilityID:                   {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: salesRestoreDraftOrderCapabilityID},
+	salesRestoreDraftOrderCapabilityID:                  {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: salesUpdateDraftOrderCapabilityID},
 	salesConfirmOrderCapabilityID:                       {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
 	salesDeliverOrderCapabilityID:                       {module: "sales", permission: "sales.write", risk: "write"},
 	salesCancelOrderCapabilityID:                        {module: "sales", permission: "sales.write", risk: "write"},
@@ -461,7 +463,7 @@ func supportedCapability(capabilityID string) bool {
 		createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID,
 		createRecurringTemplateCapabilityID, pauseRecurringTemplateCapabilityID, resumeRecurringTemplateCapabilityID, listRecurringTemplatesCapabilityID,
 		hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrReportCapabilityID, hrUpdateEmployeeStructureCapabilityID,
-		salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
+		salesCreateOrderCapabilityID, salesUpdateDraftOrderCapabilityID, salesRestoreDraftOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
 		createInvoiceCapabilityID, recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID, trialBalanceCapabilityID,
 		submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID, listExpensePoliciesCapabilityID, setExpensePolicyCapabilityID,
 		createVendorCapabilityID, createPurchaseOrderCapabilityID, receiveGoodsCapabilityID, returnGoodsCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID,
@@ -942,7 +944,7 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID:
+		case salesCreateOrderCapabilityID, salesUpdateDraftOrderCapabilityID, salesRestoreDraftOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID:
 			parsed, err := parseSalesInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -2126,6 +2128,12 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case SalesCreateOrderInput:
 			output, err := salesCreateOrder(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SalesUpdateDraftOrderInput:
+			output, err := salesUpdateDraftOrder(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3639,7 +3647,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreateQuoteInput, AcceptQuoteInput, DeclineQuoteInput, ExpireQuoteInput, ListQuotesInput,
 		CreateRecurringTemplateInput, PauseRecurringTemplateInput, ResumeRecurringTemplateInput, ListRecurringTemplatesInput,
 		HRHireEmployeeInput, HRDeactivateEmployeeInput, HRListEmployeesInput, HRReportInput, HRUpdateEmployeeStructureInput,
-		SalesCreateOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
+		SalesCreateOrderInput, SalesUpdateDraftOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
 		CreateInvoiceInput, RecordFxRateInput, RecordPaymentInput, ReversePaymentInput, TrialBalanceInput,
 		SubmitExpenseClaimInput, DecideExpenseClaimInput, PayExpenseClaimInput, ListExpenseClaimsInput, ListExpensePoliciesInput, SetExpensePolicyInput,
 		CreateVendorInput, CreatePurchaseOrderInput, ReceiveGoodsInput, ReturnGoodsInput, CreateBillInput, PayBillInput, ReverseVendorPaymentInput,

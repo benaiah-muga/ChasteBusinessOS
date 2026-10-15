@@ -14,7 +14,11 @@ const GoSalesOrderSchema = z.object({
     quantityThousandths: z.number().int().positive().safe(),
     deliveredThousandths: z.number().int().nonnegative().safe(),
     deliverableThousandths: z.number().int().nonnegative().safe(),
+    unitPriceMinor: z.number().int().nonnegative().safe().optional().default(0),
+    taxMinor: z.number().int().nonnegative().safe().optional().default(0),
+    sku: z.string().min(1).optional(),
   }).strict()).default([]),
+  note: z.string().nullable().optional(),
 }).strict();
 const GoSalesOrdersSchema = z.object({ orders: z.array(GoSalesOrderSchema) }).strict();
 const GoSalesCustomersSchema = z.object({ customers: z.array(z.object({ id: z.string().uuid(), name: z.string().min(1) }).strict()) }).strict();
@@ -56,12 +60,16 @@ const CreateOrderSchema = z.object({
   note: z.string().optional(),
   lines: z.array(SalesWriteLineSchema).min(1),
 }).strict();
+const UpdateDraftOrderSchema = z.object({
+  action: z.literal("update"), orderId: z.string().uuid(), customerId: z.string().uuid(),
+  note: z.string().max(4000).optional(), lines: z.array(SalesWriteLineSchema).min(1).max(100),
+}).strict();
 const DeliverOrderLineSchema = z.object({ lineId: z.string().uuid(), quantityThousandths: z.number().int().positive().safe() }).strict();
 const DeliverOrderSchema = z.object({
   action: z.literal("deliver"), orderId: z.string().uuid(), lines: z.array(DeliverOrderLineSchema).min(1).optional(),
 }).strict();
 const CancelOrderSchema = z.object({ action: z.literal("cancel"), orderId: z.string().uuid() }).strict();
-const SalesOrderWriteSchema = z.discriminatedUnion("action", [CreateOrderSchema, DeliverOrderSchema, CancelOrderSchema]);
+const SalesOrderWriteSchema = z.discriminatedUnion("action", [CreateOrderSchema, UpdateDraftOrderSchema, DeliverOrderSchema, CancelOrderSchema]);
 const PendingWriteSchema = z.object({
   ok: z.literal(false).optional(),
   pendingApproval: z.literal(true),
@@ -76,6 +84,7 @@ const DeliverOrderOutputSchema = z.object({
   invoiceTotalMinor: z.number().int().nonnegative().safe(), orderStatus: z.enum(["confirmed", "delivered"]),
 }).passthrough();
 const CancelOrderOutputSchema = z.object({ status: z.literal("cancelled"), releasedThousandths: z.number().int().nonnegative().safe() }).passthrough();
+const UpdateDraftOrderOutputSchema = z.object({ orderId: z.string().uuid(), before: z.object({ customerId: z.string().uuid(), note: z.string().nullable().optional(), lines: z.array(SalesWriteLineSchema).min(1).max(100) }).strict() }).strict();
 const SalesOrderAttemptPrefix = "chaste:sales-order-write-attempt:";
 
 type SalesRetryScope = { actorId: string | null; organizationId: string | null };
@@ -91,6 +100,7 @@ type StoredSalesOrderAttempt = z.infer<typeof StoredSalesOrderAttemptSchema>;
 export type SalesOrderWriteOutcome =
   | { kind: "pending"; reason: string }
   | { kind: "completed"; action: "create"; data: z.infer<typeof CreateOrderOutputSchema> }
+  | { kind: "completed"; action: "update"; data: { orderId: string } }
   | { kind: "completed"; action: "deliver"; data: z.infer<typeof DeliverOrderOutputSchema> }
   | { kind: "completed"; action: "cancel"; data: z.infer<typeof CancelOrderOutputSchema> };
 
@@ -440,6 +450,7 @@ export async function confirmSalesOrder(orderId: string, intentId: string, organ
 
 function salesOrderWriteRequest(action: SalesOrderWrite, intentId: string): { url: string; body: Record<string, unknown> } {
   const capabilityId = action.action === "create" ? "sales.createOrder"
+    : action.action === "update" ? "sales.updateDraftOrder"
     : action.action === "deliver" ? "sales.deliverOrder" : "sales.cancelOrder";
   const { action: _action, ...input } = action;
   return { url: "/api/capabilities/execute", body: { capabilityId, input, intentId } };
@@ -498,6 +509,12 @@ export async function submitSalesOrderWrite(
       if (!output.success) throw new SalesApiError(response.status, "The sales service returned an unexpected order response.");
       await clearSalesOrderAttempt(attempt);
       return { kind: "completed", action: "deliver", data: output.data };
+    }
+    case "update": {
+      const output = UpdateDraftOrderOutputSchema.safeParse(envelope.data.data);
+      if (!output.success) throw new SalesApiError(response.status, "The sales service returned an unexpected draft update response.");
+      await clearSalesOrderAttempt(attempt);
+      return { kind: "completed", action: "update", data: { orderId: output.data.orderId } };
     }
     case "cancel": {
       const output = CancelOrderOutputSchema.safeParse(envelope.data.data);

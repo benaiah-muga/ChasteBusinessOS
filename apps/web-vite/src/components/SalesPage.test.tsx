@@ -34,6 +34,8 @@ const orders = [
     backordered: false,
     totalMinor: 25000,
     createdAt: "2026-09-28T12:00:00.000Z",
+    note: "Initial order note",
+    lines: [{ lineId: "30000000-0000-4000-8000-000000000003", description: "Draft product", quantityThousandths: 2000, deliveredThousandths: 0, deliverableThousandths: 2000, unitPriceMinor: 12500, taxMinor: 500, sku: "DRAFT-1" }],
   },
 ];
 const switchboard = { catalog: [{ id: "sales" }], enabledModules: ["sales"] };
@@ -97,7 +99,7 @@ function salesWriteCalls(fetchMock: SalesFetchMock) {
   return fetchMock.mock.calls.filter(([input, init]) => {
     if (input !== "/api/capabilities/execute") return false;
     const { capabilityId } = JSON.parse(String(init?.body)) as { capabilityId?: string };
-    return ["sales.confirmOrder", "sales.createOrder", "sales.deliverOrder", "sales.cancelOrder"].includes(capabilityId ?? "");
+    return ["sales.confirmOrder", "sales.createOrder", "sales.updateDraftOrder", "sales.deliverOrder", "sales.cancelOrder"].includes(capabilityId ?? "");
   });
 }
 
@@ -138,6 +140,37 @@ afterEach(() => {
 });
 
 describe("Vite sales page", () => {
+  it("edits a draft order through sales.updateDraftOrder and refreshes from Go", async () => {
+    const fetchMock = goAwareFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/sales/customers") return Response.json(customers);
+      if (input === "/api/capabilities/execute") {
+        const request = JSON.parse(String(init?.body)) as { capabilityId: string };
+        if (request.capabilityId === "sales.updateDraftOrder") return Response.json({ ok: true, data: { orderId: orders[2]!.id, before: { customerId: customers.customers[0]!.id, lines: [{ description: "Draft product", quantity: 2000, unitPriceMinor: 12500 }] } } });
+      }
+      return Response.json({ orders });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SalesPage actorId="actor-1" organizationId="40000000-0000-4000-8000-000000000004" />);
+
+    const editButton = await screen.findByRole("button", { name: "Edit #43" });
+    await waitFor(() => expect((editButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(editButton);
+    expect((screen.getByLabelText("Order note") as HTMLInputElement).value).toBe("Initial order note");
+    expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("Draft product");
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Updated product" } });
+    fireEvent.change(screen.getByLabelText("Order note"), { target: { value: "Updated note" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Save draft changes" }));
+
+    const updateNotice = await screen.findByText("Sales draft updated.");
+    expect(updateNotice).toBeTruthy();
+    const update = salesWriteCalls(fetchMock).find(([, init]) => (JSON.parse(String(init?.body)) as { capabilityId: string }).capabilityId === "sales.updateDraftOrder");
+    expect(JSON.parse(String(update?.[1]?.body))).toMatchObject({
+      capabilityId: "sales.updateDraftOrder",
+      input: { orderId: orders[2]!.id, customerId: customers.customers[0]!.id, note: "Updated note", lines: [{ sku: "DRAFT-1", description: "Updated product", quantity: 2000, unitPriceMinor: 12500, taxMinor: 500 }] },
+    });
+  });
+
   it("uses Go for the initial order list and the post-create refresh", async () => {
     vi.stubGlobal("__GO_SALES_ORDER_READS__", true);
     vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
