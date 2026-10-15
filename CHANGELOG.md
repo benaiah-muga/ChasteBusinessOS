@@ -14,6 +14,7 @@ The full v1 changelog is preserved at the bottom of this file.
 ### Added
 
 - Vite Inventory now displays lot balances from the Go inventory read, including zero balances, with a strict validated response contract.
+- Vite Expenses validates Go claims, policies, payment IDs, and pending approval receipts, and preserves retry identity after malformed successful responses.
 - Vite Projects validates Go project action receipts with required fields while preserving separately typed legacy receipts during migration.
 - Vite Sales quotes, Products, and invoice printing validate Go response contracts, including nullable fields and action-specific receipts; malformed write responses retain their retry intent.
 

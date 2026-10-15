@@ -82,7 +82,7 @@ describe("Expenses API", () => {
     respond[1]?.(Response.json({ ok: true, data: { set: true, category: "travel", limitMinor: 25000 } }));
     await expect(duplicate).resolves.toMatchObject({ kind: "completed" });
     await expect(readPendingExpenseAction(scope)).resolves.toEqual(nextAction);
-    respond[2]?.(Response.json({ error: "approval required", pendingApproval: true }, { status: 202 }));
+    respond[2]?.(Response.json({ ok: false, pendingApproval: true, reason: "approval required" }, { status: 202 }));
     await expect(next).resolves.toMatchObject({ kind: "pending" });
   }, 60_000);
 
@@ -127,6 +127,11 @@ describe("Expenses API", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { policies: [] } })));
     await expect(fetchExpenses(scope.organizationId)).rejects.toMatchObject({ name: "ExpensesApiError", status: 200, message: expect.stringContaining("unexpected format") });
 
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { claims: [{ ...claim, unprojected: true }] } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { policies: [] } })));
+    await expect(fetchExpenses(scope.organizationId)).rejects.toMatchObject({ name: "ExpensesApiError", status: 200, message: expect.stringContaining("unexpected format") });
+
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: missing expenses.decide" }, { status: 403 })));
     await expect(fetchExpenses(scope.organizationId)).rejects.toMatchObject({ name: "ExpensesApiError", status: 403, message: "forbidden: missing expenses.decide" });
   });
@@ -146,7 +151,7 @@ describe("Expenses API", () => {
   });
 
   it("surfaces pending approval without treating it as a completed action", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "policy approval required", pendingApproval: true }, { status: 202 })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "policy approval required" }, { status: 202 })));
 
     await expect(submitExpenseAction({ action: "pay", claimId: claim.id, amountMinor: 12500 }, undefined, scope)).resolves.toEqual({ kind: "pending", reason: "policy approval required" });
   });
@@ -170,8 +175,26 @@ describe("Expenses API", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: missing accounting.post" }, { status: 403 })));
     await expect(submitExpenseAction({ action: "pay", claimId: claim.id, amountMinor: 12500 }, undefined, scope)).rejects.toMatchObject({ name: "ExpensesApiError", status: 403 });
 
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "approval required" }, { status: 202 })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "approval required", approvalId: "not-a-uuid" }, { status: 202 })));
     await expect(submitExpenseAction({ action: "pay", claimId: claim.id, amountMinor: 12500 }, undefined, scope)).rejects.toBeInstanceOf(ExpensesApiError);
+  });
+
+  it("retains the same intent when a successful write has a malformed Go result", async () => {
+    const action: ExpenseAction = { action: "pay", claimId: claim.id, amountMinor: 12500 };
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
+      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+      return intentIds.length === 1
+        ? Response.json({ ok: true, data: { claimId: claim.id, entryId: "not-a-uuid", paidMinor: 12500 } })
+        : Response.json({ ok: true, data: { claimId: claim.id, entryId: "55555555-5555-4555-8555-555555555555", paidMinor: 12500 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitExpenseAction(action, undefined, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingExpenseAction(scope)).resolves.toEqual(action);
+    await expect(submitExpenseAction(action, undefined, scope)).resolves.toMatchObject({ kind: "completed" });
+    expect(intentIds[1]).toBe(intentIds[0]);
+    await expect(readPendingExpenseAction(scope)).resolves.toBeNull();
   });
 
   it("maps all expense writes to Go capabilities with their exact input contracts", async () => {

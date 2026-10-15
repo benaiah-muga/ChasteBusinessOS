@@ -9,13 +9,18 @@ const ClaimSchema = z.object({
   currency: z.string().regex(/^[A-Z]{3}$/),
   status: z.enum(["submitted", "approved", "rejected", "paid"]),
   memo: z.string(),
-});
+}).strict();
 
-const PolicySchema = z.object({ category: z.string(), limitMinor: z.number().int().safe().nonnegative() });
-const ListClaimsSchema = z.object({ claims: z.array(ClaimSchema) });
-const ListPoliciesSchema = z.object({ policies: z.array(PolicySchema) });
+const PolicySchema = z.object({ category: z.string(), limitMinor: z.number().int().safe().nonnegative() }).strict();
+const ListClaimsSchema = z.object({ claims: z.array(ClaimSchema) }).strict();
+const ListPoliciesSchema = z.object({ policies: z.array(PolicySchema) }).strict();
 const ErrorSchema = z.object({ error: z.string() });
-const PendingSchema = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() });
+const PendingSchema = z.object({
+  ok: z.literal(false),
+  pendingApproval: z.literal(true),
+  reason: z.string(),
+  approvalId: z.string().uuid().optional(),
+}).strict();
 const SubmitActionSchema = z.object({ action: z.literal("submit"), amountMinor: z.number().int().safe().positive(), memo: z.string().min(3).max(500), accountCode: z.string().optional() }).strict();
 const DecideActionSchema = z.object({ action: z.literal("decide"), claimId: uuid, decision: z.enum(["approved", "rejected"]) }).strict();
 const PayActionSchema = z.object({ action: z.literal("pay"), claimId: uuid, amountMinor: z.number().int().safe().positive() }).strict();
@@ -23,9 +28,9 @@ const SetPolicyActionSchema = z.object({ action: z.literal("setPolicy"), categor
 const ExpenseActionSchema = z.discriminatedUnion("action", [SubmitActionSchema, DecideActionSchema, PayActionSchema, SetPolicyActionSchema]);
 const AttemptSchema = z.object({ intentId: uuid, fingerprint: z.string().length(64), action: ExpenseActionSchema }).strict();
 const ActionSchemas = {
-  submit: z.object({ claimId: uuid, status: z.literal("submitted"), category: z.string(), overPolicyLimit: z.boolean(), policyLimitMinor: z.number().nullable() }).strict(),
+  submit: z.object({ claimId: uuid, status: z.literal("submitted"), category: z.string(), overPolicyLimit: z.boolean(), policyLimitMinor: z.number().int().safe().nonnegative().nullable() }).strict(),
   decide: z.object({ claimId: uuid, status: z.enum(["approved", "rejected"]) }).strict(),
-  pay: z.object({ claimId: uuid, entryId: z.string().min(1), paidMinor: z.number().int().safe().positive() }).strict(),
+  pay: z.object({ claimId: uuid, entryId: uuid, paidMinor: z.number().int().safe().positive() }).strict(),
   setPolicy: z.object({ set: z.literal(true), category: z.string(), limitMinor: z.number().int().safe().nonnegative() }).strict(),
 } as const;
 
@@ -146,7 +151,7 @@ export async function submitExpenseAction(
     if (response.status === 202) {
       const pending = PendingSchema.safeParse(body);
       if (!pending.success) throw new ExpensesApiError(response.status, "The expenses service returned an unexpected approval response.", true);
-      return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This action is waiting for approval." };
+      return { kind: "pending", reason: pending.data.reason };
     }
     if (!response.ok) {
       const mayHaveReachedServer = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
