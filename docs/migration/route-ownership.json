@@ -438,8 +438,8 @@
       "path": "/api/docs/assist",
       "method": "POST",
       "source": "apps/web/src/app/api/docs/assist/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -558,8 +558,8 @@
       "path": "/api/health",
       "method": "GET",
       "source": "apps/web/src/app/api/health/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

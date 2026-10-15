@@ -4707,3 +4707,10 @@ new owners and the manifest shows zero legacy runtime paths.
      in-app browser registry is empty, so an authenticated browser proof remains
      open. Route ownership checks pass at 94 files, 162 methods (85 Go, 75
      legacy, 2 auth), and 30 pages.
+
+438. (Ownership verified) Active Vite's `/api/health` request reaches Go's
+     health handler, and `/api/docs/assist` reaches the session-authenticated
+     Go Documents assistant. Both endpoints already had Vite proxy rules and
+     Go handlers with focused tests; their generated ownership records now
+     match that runtime. Route ownership checks pass at 94 files, 162 methods
+     (87 Go, 73 legacy, 2 auth), and 30 pages.
