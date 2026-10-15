@@ -77,6 +77,16 @@ function manufacturingFetch({ onPost, payload = report, enabled = true }: StubOp
             ...(body.capabilityId === "manufacturing.reverseProductionRun" ? { runId: (body.input as PostedBody).runRef } : {}) }
         : body;
       if (action.action === "overviewReport") return Response.json({ ok: true, data: payload });
+      if (action.action === "bomTree") return Response.json({ ok: true, data: {
+        hasBom: true,
+        root: {
+          sku: "DESK-1", name: "Oak desk", quantityThousandths: 1000, scrapPctThousandths: 0,
+          children: [{
+            sku: "LEG-1", name: "Oak leg", quantityThousandths: 4000, scrapPctThousandths: 20_000,
+            children: [{ sku: "FOOT-1", name: "Rubber foot", quantityThousandths: 8_000, scrapPctThousandths: 10_000, children: [] }],
+          }],
+        },
+      } });
       const result = onPost ? await onPost(action) : Response.json({ ok: true, data: manufacturingWriteResult(action) });
       if (result.status === 200) {
         const envelope = await result.clone().json() as { data?: unknown };
@@ -197,8 +207,9 @@ describe("Vite manufacturing page", () => {
     expect(window.location.search).toBe("?tab=orders");
   });
 
-  it("lists bills of materials and expands the nested client-side tree", async () => {
-    vi.stubGlobal("fetch", manufacturingFetch());
+  it("loads and renders the nested BOM tree from the Go capability", async () => {
+    const fetchMock = manufacturingFetch();
+    vi.stubGlobal("fetch", fetchMock);
     render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
 
     await screen.findByRole("heading", { name: "Manufacturing" });
@@ -207,8 +218,16 @@ describe("Vite manufacturing page", () => {
     expect(screen.getByText((_, element) => element?.tagName === "LI" && element.textContent?.includes("Oak leg (LEG-1) × 4.000 · scrap 2.0%") === true)).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "tree" }));
-    expect(screen.getByRole("columnheader", { name: "Qty / parent" })).not.toBeNull();
+    expect(await screen.findByRole("columnheader", { name: "Qty for 1 assembly" })).not.toBeNull();
     expect(screen.getByText("4.000")).not.toBeNull();
+    expect(screen.getByText("8.000")).not.toBeNull();
+    const treeCall = fetchMock.mock.calls.find(([, init]) =>
+      typeof init?.body === "string" && (JSON.parse(init.body) as { capabilityId?: string }).capabilityId === "manufacturing.bomTree",
+    );
+    expect(JSON.parse(String(treeCall?.[1]?.body))).toMatchObject({
+      input: { assemblySku: "DESK-1", quantityThousandths: 1000 },
+      intentId: expect.any(String),
+    });
   });
 
   it("toggles undo and redo through Go while preserving the exact BOM snapshots", async () => {

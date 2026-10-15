@@ -82,6 +82,7 @@ type ManufacturingBomTreeNode struct {
 	SKU                 string                     `json:"sku"`
 	Name                string                     `json:"name"`
 	QuantityThousandths int64                      `json:"quantityThousandths"`
+	ScrapPctThousandths int64                      `json:"scrapPctThousandths"`
 	Children            []ManufacturingBomTreeNode `json:"children"`
 }
 
@@ -621,12 +622,12 @@ func manufacturingBomTree(ctx context.Context, tx pgx.Tx, orgID string, input Ma
 	if root == nil {
 		return ManufacturingBomTreeOutput{}, fmt.Errorf("no item with SKU %s", input.AssemblySKU)
 	}
-	var build func(itemID string, qty int64, path map[string]bool) ManufacturingBomTreeNode
-	build = func(itemID string, qty int64, path map[string]bool) ManufacturingBomTreeNode {
+	var build func(itemID string, qty int64, scrapPct int64, path map[string]bool) (ManufacturingBomTreeNode, error)
+	build = func(itemID string, qty int64, scrapPct int64, path map[string]bool) (ManufacturingBomTreeNode, error) {
 		item := itemByID[itemID]
-		node := ManufacturingBomTreeNode{SKU: item.sku, Name: item.name, QuantityThousandths: qty, Children: []ManufacturingBomTreeNode{}}
+		node := ManufacturingBomTreeNode{SKU: item.sku, Name: item.name, QuantityThousandths: qty, ScrapPctThousandths: scrapPct, Children: []ManufacturingBomTreeNode{}}
 		if path[itemID] {
-			return node
+			return node, nil
 		}
 		nextPath := map[string]bool{}
 		for key := range path {
@@ -634,13 +635,32 @@ func manufacturingBomTree(ctx context.Context, tx pgx.Tx, orgID string, input Ma
 		}
 		nextPath[itemID] = true
 		for _, edge := range edgesByAssembly[itemID] {
-			scaled := (edge.quantityThousandths*qty + 500) / 1000
-			node.Children = append(node.Children, build(edge.componentItemID, scaled, nextPath))
+			scaled, err := scaleManufacturingBomQuantity(edge.quantityThousandths, qty)
+			if err != nil {
+				return ManufacturingBomTreeNode{}, err
+			}
+			child, err := build(edge.componentItemID, scaled, edge.scrapPctThousandths, nextPath)
+			if err != nil {
+				return ManufacturingBomTreeNode{}, err
+			}
+			node.Children = append(node.Children, child)
 		}
-		return node
+		return node, nil
 	}
-	rootNode := build(root.id, input.QuantityThousandths, map[string]bool{})
+	rootNode, err := build(root.id, input.QuantityThousandths, 0, map[string]bool{})
+	if err != nil {
+		return ManufacturingBomTreeOutput{}, err
+	}
 	return ManufacturingBomTreeOutput{HasBom: len(rootNode.Children) > 0, Root: rootNode}, nil
+}
+
+func scaleManufacturingBomQuantity(edgeQuantityThousandths, parentQuantityThousandths int64) (int64, error) {
+	// Keep the rounded product inside the JavaScript safe-integer range returned by the API.
+	const maxRoundedProduct int64 = (maxSafeInteger+1)*1000 - 501
+	if edgeQuantityThousandths <= 0 || parentQuantityThousandths <= 0 || edgeQuantityThousandths > maxRoundedProduct/parentQuantityThousandths {
+		return 0, errors.New("manufacturing BOM quantity exceeds safe integer range")
+	}
+	return (edgeQuantityThousandths*parentQuantityThousandths + 500) / 1000, nil
 }
 
 func manufacturingBomReport(ctx context.Context, tx pgx.Tx, orgID string, input ManufacturingBomReportInput) (ManufacturingBomReportOutput, error) {

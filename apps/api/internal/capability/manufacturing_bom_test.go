@@ -24,6 +24,33 @@ func seedManufacturingBomItem(t *testing.T, fx *executorFixture, orgID, sku, nam
 	return id
 }
 
+func TestScaleManufacturingBomQuantityKeepsSafeIntegerRange(t *testing.T) {
+	tests := []struct {
+		name    string
+		edge    int64
+		parent  int64
+		want    int64
+		wantErr bool
+	}{
+		{name: "normal nested quantity", edge: 4000, parent: 2000, want: 8000},
+		{name: "maximum safe result", edge: 1000, parent: maxSafeInteger, want: maxSafeInteger},
+		{name: "unsafe rounded result", edge: 1001, parent: maxSafeInteger, wantErr: true},
+		{name: "multiplication overflow", edge: maxSafeInteger, parent: maxSafeInteger, wantErr: true},
+		{name: "zero edge", edge: 0, parent: 1000, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := scaleManufacturingBomQuantity(tt.edge, tt.parent)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("scaleManufacturingBomQuantity(%d, %d) error=%v, wantErr=%v", tt.edge, tt.parent, err, tt.wantErr)
+			}
+			if err == nil && got != tt.want {
+				t.Fatalf("scaleManufacturingBomQuantity(%d, %d)=%d, want %d", tt.edge, tt.parent, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestManufacturingBomParsersMirrorZodContracts(t *testing.T) {
 	defined, err := ParseManufacturingDefineBomInput(json.RawMessage(`{"assemblySku":"DESK","expectedComponents":[],"components":[{"sku":"LEG","quantityThousandths":4000},{"sku":"TOP","quantityThousandths":1000,"scrapPctThousandths":50000}]}`))
 	if err != nil || len(defined.ExpectedComponents) != 0 || len(defined.Components) != 2 || defined.Components[0].ScrapPctThousandths != 0 || defined.Components[1].ScrapPctThousandths != 50000 {
@@ -143,15 +170,16 @@ func TestManufacturingBomLifecycleAndTree(t *testing.T) {
 	claims := authbridge.CapabilityClaims{OrganizationID: fx.orgID, ActorType: "human"}
 
 	assemblyID := seedManufacturingBomItem(t, fx, fx.orgID, "DESK", "Desk")
-	legID := seedManufacturingBomItem(t, fx, fx.orgID, "LEG", "Leg")
+	seedManufacturingBomItem(t, fx, fx.orgID, "LEG", "Leg")
 	seedManufacturingBomItem(t, fx, fx.orgID, "TOP", "Top")
+	seedManufacturingBomItem(t, fx, fx.orgID, "FOOT", "Foot")
 
 	if _, err := dbx.WithOrgTx(fx.ctx, fx.owner, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
 		defined, err := manufacturingDefineBom(context.Background(), tx, claims, ManufacturingDefineBomInput{
 			AssemblySKU:        "DESK",
 			ExpectedComponents: []ManufacturingBomComponentInput{},
 			Components: []ManufacturingBomComponentInput{
-				{SKU: "LEG", QuantityThousandths: 4000},
+				{SKU: "LEG", QuantityThousandths: 4000, ScrapPctThousandths: 20_000},
 				{SKU: "TOP", QuantityThousandths: 1000},
 			},
 		})
@@ -163,10 +191,13 @@ func TestManufacturingBomLifecycleAndTree(t *testing.T) {
 		}
 		if _, err := manufacturingDefineBom(context.Background(), tx, claims, ManufacturingDefineBomInput{
 			AssemblySKU:        "DESK",
-			ExpectedComponents: []ManufacturingBomComponentInput{{SKU: "LEG", QuantityThousandths: 4000}, {SKU: "TOP", QuantityThousandths: 1000}},
+			ExpectedComponents: []ManufacturingBomComponentInput{{SKU: "LEG", QuantityThousandths: 4000, ScrapPctThousandths: 20_000}, {SKU: "TOP", QuantityThousandths: 1000}},
 			Components:         []ManufacturingBomComponentInput{{SKU: "DESK", QuantityThousandths: 1000}},
 		}); err == nil || err.Error() != "an assembly cannot contain itself" {
 			t.Fatalf("self containment err=%v, want refusal", err)
+		}
+		if _, err := tx.Exec(context.Background(), `SAVEPOINT bom_cycle_attempt`); err != nil {
+			return struct{}{}, err
 		}
 		if _, err := manufacturingDefineBom(context.Background(), tx, claims, ManufacturingDefineBomInput{
 			AssemblySKU:        "LEG",
@@ -175,7 +206,17 @@ func TestManufacturingBomLifecycleAndTree(t *testing.T) {
 		}); err == nil || !strings.HasPrefix(err.Error(), "rejected: ") {
 			t.Fatalf("cycle define err=%v, want rejected prefix", err)
 		}
-		if _, err := tx.Exec(context.Background(), `DELETE FROM bom_lines WHERE org_id=$1::uuid AND assembly_item_id=$2::uuid`, fx.orgID, legID); err != nil {
+		if _, err := tx.Exec(context.Background(), `ROLLBACK TO SAVEPOINT bom_cycle_attempt`); err != nil {
+			return struct{}{}, err
+		}
+		if _, err := tx.Exec(context.Background(), `RELEASE SAVEPOINT bom_cycle_attempt`); err != nil {
+			return struct{}{}, err
+		}
+		if _, err := manufacturingDefineBom(context.Background(), tx, claims, ManufacturingDefineBomInput{
+			AssemblySKU:        "LEG",
+			ExpectedComponents: []ManufacturingBomComponentInput{},
+			Components:         []ManufacturingBomComponentInput{{SKU: "FOOT", QuantityThousandths: 2000, ScrapPctThousandths: 10_000}},
+		}); err != nil {
 			return struct{}{}, err
 		}
 
@@ -186,10 +227,15 @@ func TestManufacturingBomLifecycleAndTree(t *testing.T) {
 		if !tree.HasBom || tree.Root.SKU != "DESK" || tree.Root.QuantityThousandths != 2000 || len(tree.Root.Children) != 2 {
 			t.Fatalf("bomTree output=%+v, want DESK with two children", tree.Root)
 		}
-		for _, child := range tree.Root.Children {
-			if child.QuantityThousandths != 2*child.QuantityThousandths/2 || (child.SKU != "LEG" && child.SKU != "TOP") {
-				t.Fatalf("bomTree child=%+v, want scaled LEG and TOP", child)
+		var leg *ManufacturingBomTreeNode
+		for i := range tree.Root.Children {
+			if tree.Root.Children[i].SKU == "LEG" {
+				leg = &tree.Root.Children[i]
+				break
 			}
+		}
+		if leg == nil || leg.QuantityThousandths != 8000 || leg.ScrapPctThousandths != 20_000 || len(leg.Children) != 1 || leg.Children[0].SKU != "FOOT" || leg.Children[0].QuantityThousandths != 16_000 || leg.Children[0].ScrapPctThousandths != 10_000 {
+			t.Fatalf("bomTree nested component=%+v, want scaled quantity and edge scrap", leg)
 		}
 		if child := tree.Root.Children[0]; child.Children == nil {
 			t.Fatalf("bomTree children must marshal as arrays, got %+v", child)
@@ -199,8 +245,8 @@ func TestManufacturingBomLifecycleAndTree(t *testing.T) {
 		if err != nil {
 			return struct{}{}, err
 		}
-		if report.Producible || report.TotalShortfallThousandths != 5000 {
-			t.Fatalf("bomReport output=%+v, want shortfall of 5000 without stock", report)
+		if report.Producible || report.TotalShortfallThousandths != 9080 {
+			t.Fatalf("bomReport output=%+v, want scrap-adjusted shortfall of 9080 without stock", report)
 		}
 
 		preview, err := manufacturingCostPreview(context.Background(), tx, fx.orgID, ManufacturingCostPreviewInput{AssemblySKU: "DESK", QuantityThousandths: 1000, YieldPctThousandths: manufacturingPctScale})

@@ -129,6 +129,21 @@ const BomReportSchema = z.object({
     shortfallThousandths: z.number().int().safe(),
   }).strict()),
 }).strict();
+export interface ManufacturingBomTreeNode {
+  sku: string;
+  name: string;
+  quantityThousandths: number;
+  scrapPctThousandths: number;
+  children: ManufacturingBomTreeNode[];
+}
+const ManufacturingBomTreeNodeSchema: z.ZodType<ManufacturingBomTreeNode> = z.lazy(() => z.object({
+  sku: z.string().min(1),
+  name: z.string(),
+  quantityThousandths: z.number().int().safe(),
+  scrapPctThousandths: z.number().int().safe(),
+  children: z.array(ManufacturingBomTreeNodeSchema),
+}).strict());
+const ManufacturingBomTreeSchema = z.object({ hasBom: z.boolean(), root: ManufacturingBomTreeNodeSchema }).strict();
 
 const DefineBomSchema = z.object({
   action: z.literal("defineBom"),
@@ -289,6 +304,7 @@ const ErrorSchema = z.object({ error: z.string() }).passthrough();
 const ProductionCostInputSchema = z.object({ assemblySku: z.string().trim().min(1), quantityThousandths: z.number().int().positive().safe() }).strict();
 const ProductionFeasibilityInputSchema = z.object({ assemblySku: z.string().trim().min(1), desiredUnitsThousandths: z.number().int().positive().safe() }).strict();
 const BomReportInputSchema = z.object({ assemblySku: z.string().trim().min(1), quantityThousandths: z.number().int().positive().safe() }).strict();
+const BomTreeInputSchema = z.object({ assemblySku: z.string().trim().min(1), quantityThousandths: z.number().int().positive().safe() }).strict();
 const WorkOrderOutputSchemas = {
   createWorkOrder: z.object({ workOrderId: z.string().uuid(), number: z.number().int().positive().safe(), expectedGoodThousandths: z.number().int().nonnegative().safe() }).passthrough(),
   releaseWorkOrder: z.object({ released: z.boolean() }).passthrough(),
@@ -325,6 +341,7 @@ export type ManufacturingReport = z.infer<typeof ManufacturingReportSchema>;
 export type ManufacturingCostPreview = z.infer<typeof CostPreviewSchema>;
 export type ManufacturingFeasibility = z.infer<typeof FeasibilitySchema>;
 export type ManufacturingBomReport = z.infer<typeof BomReportSchema>;
+export type ManufacturingBomTree = z.infer<typeof ManufacturingBomTreeSchema>;
 export type ManufacturingWriteAction = z.infer<typeof WriteActionSchema>;
 type ManufacturingBomComponent = { sku: string; quantityThousandths: number; scrapPctThousandths: number };
 export type ManufacturingBomUndo = { assemblySku: string; expectedComponents: ManufacturingBomComponent[]; components: ManufacturingBomComponent[] };
@@ -615,7 +632,7 @@ export async function submitManufacturingAction(
 }
 
 async function postRead<TInput extends object, T>(
-  action: "costPreview" | "checkProductionFeasibility" | "bomReport",
+  action: "costPreview" | "checkProductionFeasibility" | "bomReport" | "bomTree",
   payload: unknown,
   inputSchema: z.ZodType<TInput>,
   schema: z.ZodType<T>,
@@ -651,6 +668,10 @@ export function fetchProductionFeasibility(assemblySku: string, desiredUnitsThou
 
 export function fetchManufacturingBomReport(assemblySku: string, quantityThousandths: number, signal?: AbortSignal): Promise<ManufacturingBomReport> {
   return postRead("bomReport", { assemblySku, quantityThousandths }, BomReportInputSchema, BomReportSchema, "Could not build the BOM report.", signal);
+}
+
+export function fetchManufacturingBomTree(assemblySku: string, quantityThousandths: number, signal?: AbortSignal): Promise<ManufacturingBomTree> {
+  return postRead("bomTree", { assemblySku, quantityThousandths }, BomTreeInputSchema, ManufacturingBomTreeSchema, "Could not build the BOM tree.", signal);
 }
 
 export async function fetchManufacturingLotTrace(sku: string, lotCode: string, signal?: AbortSignal): Promise<ManufacturingLotTrace> {

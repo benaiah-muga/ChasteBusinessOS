@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ManufacturingApiError,
   fetchManufacturingBomReport,
+  fetchManufacturingBomTree,
   fetchManufacturingEnabled,
   fetchManufacturingLotTrace,
   fetchManufacturingReport,
@@ -215,6 +216,33 @@ describe("manufacturing API", () => {
       input: { assemblySku: "DESK-1", quantityThousandths: 2000 },
       intentId: expect.any(String),
     });
+  });
+
+  it("reads and validates the recursively expanded BOM from Go", async () => {
+    const tree = {
+      hasBom: true,
+      root: {
+        sku: "DESK-1", name: "Oak desk", quantityThousandths: 1000, scrapPctThousandths: 0,
+        children: [{
+          sku: "LEG-1", name: "Oak leg", quantityThousandths: 4000, scrapPctThousandths: 20_000,
+          children: [{ sku: "FOOT-1", name: "Rubber foot", quantityThousandths: 8_000, scrapPctThousandths: 10_000, children: [] }],
+        }],
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: tree }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchManufacturingBomTree("DESK-1", 1000)).resolves.toEqual(tree);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "manufacturing.bomTree",
+      input: { assemblySku: "DESK-1", quantityThousandths: 1000 },
+      intentId: expect.any(String),
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { ...tree, extra: true } })));
+    await expect(fetchManufacturingBomTree("DESK-1", 1000)).rejects.toThrow("unexpected format");
   });
 
   it("validates planning read inputs before sending a request", async () => {

@@ -4,6 +4,7 @@ import "./ManufacturingPage.css";
 import {
   ManufacturingApiError,
   fetchManufacturingBomReport,
+  fetchManufacturingBomTree,
   fetchManufacturingEnabled,
   fetchManufacturingLotTrace,
   getPendingManufacturingAction,
@@ -11,8 +12,9 @@ import {
   fetchProductionCostPreview,
   fetchProductionFeasibility,
   submitManufacturingAction,
-  type ManufacturingBomEdge,
   type ManufacturingBomReport,
+  type ManufacturingBomTree,
+  type ManufacturingBomTreeNode,
   type ManufacturingBomUndo,
   type ManufacturingCostPreview,
   type ManufacturingFeasibility,
@@ -41,7 +43,7 @@ type LotTraceState =
   | { key: string; status: "failed"; error: string };
 type BomComponentRow = { sku: string; quantityThousandths: string; scrapPct: string };
 type BomComponent = { sku: string; quantityThousandths: number; scrapPctThousandths: number };
-type BomNode = { sku: string; name: string; quantityPerParentThousandths: number; scrapPctThousandths: number; children: BomNode[] };
+type BomTreeState = { sku: string; status: "loading" } | { sku: string; status: "ready"; tree: ManufacturingBomTree } | { sku: string; status: "failed"; error: string };
 
 const styles = {
   page: { display: "grid", gap: 20, alignContent: "start" },
@@ -146,32 +148,6 @@ function useTabParam(): [Tab, (tab: Tab) => void] {
   return [tab, select];
 }
 
-/** Flattens the raw BOM edges into the nested tree the legacy page renders client-side. */
-function buildBomTree(edges: ManufacturingBomEdge[], assemblySku: string): BomNode[] {
-  const byAssembly = new Map<string, ManufacturingBomEdge[]>();
-  for (const edge of edges) {
-    const list = byAssembly.get(edge.assemblySku) ?? [];
-    list.push(edge);
-    byAssembly.set(edge.assemblySku, list);
-  }
-  const walk = (sku: string, path: ReadonlySet<string>): BomNode[] =>
-    (byAssembly.get(sku) ?? []).map((edge) => {
-      if (path.has(edge.componentSku)) {
-        return { sku: edge.componentSku, name: "(cycle)", quantityPerParentThousandths: edge.quantityThousandths, scrapPctThousandths: edge.scrapPctThousandths, children: [] };
-      }
-      const nextPath = new Set(path);
-      nextPath.add(edge.componentSku);
-      return {
-        sku: edge.componentSku,
-        name: edge.componentName,
-        quantityPerParentThousandths: edge.quantityThousandths,
-        scrapPctThousandths: edge.scrapPctThousandths,
-        children: walk(edge.componentSku, nextPath),
-      };
-    });
-  return walk(assemblySku, new Set([assemblySku]));
-}
-
 function componentsSummary(run: ManufacturingProductionRun): string {
   return run.components
     .map((component) => `${component.sku}×${qty(component.quantityThousandths)}${component.lotCode ? `[${component.lotCode}]` : ""}`)
@@ -183,7 +159,7 @@ function StatusBadge({ tone, children }: { tone: "neutral" | "green" | "red" | "
   return <span style={{ ...styles.badge, ...toneStyle }}>{children}</span>;
 }
 
-function BomTreeRows({ nodes, depth }: { nodes: BomNode[]; depth: number }) {
+function BomTreeRows({ nodes, depth }: { nodes: ManufacturingBomTreeNode[]; depth: number }) {
   return (
     <>
       {nodes.map((node, index) => (
@@ -194,7 +170,7 @@ function BomTreeRows({ nodes, depth }: { nodes: BomNode[]; depth: number }) {
               <span style={styles.code}>{node.sku}</span>
               {node.name && <span style={{ marginLeft: 8, opacity: 0.7 }}>{node.name}</span>}
             </td>
-            <td style={styles.numeric}>{qty(node.quantityPerParentThousandths)}</td>
+            <td style={styles.numeric}>{qty(node.quantityThousandths)}</td>
             <td style={styles.numeric}>{node.scrapPctThousandths ? pct(node.scrapPctThousandths) : "-"}</td>
             <td />
             <td />
@@ -271,6 +247,8 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
   const [bomAssemblySku, setBomAssemblySku] = useState("");
   const [bomComponents, setBomComponents] = useState<BomComponentRow[]>([{ sku: "", quantityThousandths: "1", scrapPct: "0" }]);
   const [openTree, setOpenTree] = useState<string | null>(null);
+  const [bomTree, setBomTree] = useState<BomTreeState | null>(null);
+  const bomTreeGeneration = useRef(0);
   const [unitsInput, setUnitsInput] = useState("1");
   const [feasibility, setFeasibility] = useState<(ManufacturingFeasibility & { assemblySku: string }) | null>(null);
   const [bomReport, setBomReport] = useState<(ManufacturingBomReport & { assemblySku: string }) | null>(null);
@@ -425,6 +403,27 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
     } catch (error) {
       if (requestGeneration !== scopeGeneration.current || traceGeneration !== lotTraceGeneration.current) return;
       setLotTrace({ key, status: "failed", error: errorText(error, "Could not trace this lot.") });
+    }
+  }
+
+  async function toggleBomTree(assemblySku: string): Promise<void> {
+    if (openTree === assemblySku && bomTree?.status !== "failed") {
+      bomTreeGeneration.current += 1;
+      setOpenTree(null);
+      setBomTree(null);
+      return;
+    }
+    const requestGeneration = scopeGeneration.current;
+    const treeRequest = ++bomTreeGeneration.current;
+    setOpenTree(assemblySku);
+    setBomTree({ sku: assemblySku, status: "loading" });
+    try {
+      const tree = await fetchManufacturingBomTree(assemblySku, 1000);
+      if (requestGeneration !== scopeGeneration.current || treeRequest !== bomTreeGeneration.current) return;
+      setBomTree({ sku: assemblySku, status: "ready", tree });
+    } catch (error) {
+      if (requestGeneration !== scopeGeneration.current || treeRequest !== bomTreeGeneration.current) return;
+      setBomTree({ sku: assemblySku, status: "failed", error: errorText(error, "Could not build the BOM tree.") });
     }
   }
 
@@ -737,7 +736,7 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
               <p style={styles.empty}>Define one above so assemblies can be produced.</p>
             </section>
           ) : assembliesWithBoms.map((assemblySku) => {
-            const tree = buildBomTree(boms, assemblySku);
+            const treeState = bomTree?.sku === assemblySku ? bomTree : null;
             return (
               <section key={assemblySku} style={styles.panel} aria-labelledby={`bom-${assemblySku}`}>
                 <div style={styles.panelTitleRow}>
@@ -749,9 +748,9 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
                       type="button"
                       style={styles.ghostButton}
                       aria-expanded={openTree === assemblySku}
-                      onClick={() => setOpenTree(openTree === assemblySku ? null : assemblySku)}
+                      onClick={() => void toggleBomTree(assemblySku)}
                     >
-                      {openTree === assemblySku ? "Hide tree" : "tree"}
+                      {treeState?.status === "loading" ? "Loading tree..." : treeState?.status === "failed" ? "Retry tree" : openTree === assemblySku ? "Hide tree" : "tree"}
                     </button>
                     <button type="button" style={styles.ghostButton} disabled={busy} onClick={() => void run({
                       action: "deleteBom",
@@ -767,19 +766,23 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
                   </div>
                 </div>
 
-                {openTree === assemblySku ? (
+                {openTree === assemblySku && treeState?.status === "loading" ? (
+                  <p role="status" style={styles.empty}>Loading the nested BOM from Go...</p>
+                ) : openTree === assemblySku && treeState?.status === "failed" ? (
+                  <p role="alert" style={{ ...styles.empty, color: "#9d382c" }}>{treeState.error}</p>
+                ) : openTree === assemblySku && treeState?.status === "ready" ? (
                   <table style={styles.table}>
                     <thead>
                       <tr style={styles.tableHead}>
                         <th scope="col">Component</th>
-                        <th scope="col" style={styles.numeric}>Qty / parent</th>
+                        <th scope="col" style={styles.numeric}>Qty for 1 assembly</th>
                         <th scope="col" style={styles.numeric}>Scrap</th>
                         <th />
                         <th />
                       </tr>
                     </thead>
                     <tbody>
-                      <BomTreeRows nodes={[{ sku: assemblySku, name: "", quantityPerParentThousandths: 1000, scrapPctThousandths: 0, children: tree }]} depth={0} />
+                      <BomTreeRows nodes={treeState.tree.root.children} depth={0} />
                     </tbody>
                   </table>
                 ) : (

@@ -4896,3 +4896,17 @@ new owners and the manifest shows zero legacy runtime paths.
      resulting test time entry, and deactivated the employee. All requests
      returned HTTP 200 with no page or console errors; the inactive employee's
      historical record remains because the UI has no delete workflow.
+
+459. (Runtime verified) Vite Manufacturing now loads the nested bill-of-
+     materials tree from Go and displays scaled quantities and each component's
+     scrap percentage for one assembly. Focused Vite API and page suites pass
+     97 tests, with Vite typecheck and targeted lint passing. The Go database
+     lifecycle/tree test and checked-scaling boundary tests pass, and
+     independent review confirms the overflow guard remains inside both the
+     int64 and JavaScript safe-integer limits. Authenticated browser proof
+     defined a two-level synthetic BOM through Vite, loaded it through Go, and
+     displayed leg quantity 4.000 with 20.0% scrap and nested foot quantity
+     8.000 with 10.0% scrap; the request returned HTTP 200 with no page errors.
+     Both synthetic BOMs were deleted and all three zero-stock test products
+     were archived through the UI; a tenant-scoped read confirmed no BOM lines
+     remain and all exact QA items are archived.
