@@ -15,6 +15,71 @@ import (
 
 const documentsTestUUID = "11111111-1111-4111-8111-111111111111"
 
+func TestDocumentsContentJSONBounds(t *testing.T) {
+	valid := json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Hello","marks":[{"type":"bold"}]}]}]}`)
+	if err := documentsValidateDocumentContent(valid); err != nil {
+		t.Fatalf("valid document content rejected: %v", err)
+	}
+	for _, malformed := range []string{
+		`{"type":"paragraph","content":[]}`,
+		`{"type":"doc","content":"no"}`,
+		`{"type":"doc","content":[null]}`,
+		`{"type":"doc","content":[{"type":"text","text":7}]}`,
+		`{"type":"doc","content":[{"type":"text","marks":"bold"}]}`,
+		`{"type":"doc","content":[{"type":"text","marks":[{"type":7}]}]}`,
+	} {
+		if err := documentsValidateDocumentContent(json.RawMessage(malformed)); err == nil {
+			t.Errorf("malformed document content accepted: %s", malformed)
+		}
+	}
+	for _, input := range []struct {
+		capabilityID string
+		payload      string
+	}{
+		{capabilityID: documentsCreateDocCapabilityID, payload: `{"title":"Letter","content":{"type":"paragraph"},"html":""}`},
+		{capabilityID: documentsCreateTemplateCapabilityID, payload: `{"name":"Invoice","content":{"type":"doc","content":[null]}}`},
+	} {
+		if _, err := ParseDocumentsInput(input.capabilityID, json.RawMessage(input.payload)); err == nil {
+			t.Errorf("%s accepted malformed content", input.capabilityID)
+		}
+	}
+	tooDeep := json.RawMessage(`{"type":"doc","content":[` + strings.Repeat(`{"type":"blockquote","content":[`, documentsMaxContentDepth/2) + `{"type":"paragraph"}` + strings.Repeat(`]}`, documentsMaxContentDepth/2) + `]}`)
+	if err := documentsValidateDocumentContent(tooDeep); err == nil {
+		t.Fatal("content deeper than maximum accepted")
+	}
+	tooManyNodes := json.RawMessage(`{"type":"doc","content":[` + strings.TrimSuffix(strings.Repeat(`{"type":"paragraph"},`, documentsMaxContentNodes), ",") + `]}`)
+	if err := documentsValidateDocumentContent(tooManyNodes); err == nil {
+		t.Fatal("content over the node budget accepted")
+	}
+	tooLarge := json.RawMessage(`{"type":"doc","text":"` + strings.Repeat("é", documentsMaxContentBytes/2) + `"}`)
+	if err := documentsValidateDocumentContent(tooLarge); err == nil {
+		t.Fatal("content larger than the UTF-8 byte budget accepted")
+	}
+	withinSize := json.RawMessage(`{"type":"doc","content":[{"type":"text","text":"` + strings.Repeat("é", 499_000) + `"}]}`)
+	if err := documentsValidateDocumentContent(withinSize); err != nil {
+		t.Fatalf("content within the UTF-8 byte budget rejected: %v", err)
+	}
+	loneSurrogates := json.RawMessage(`{"type":"doc","text":"` + strings.Repeat(`\ud800`, 170_000) + `"}`)
+	if err := documentsValidateDocumentContent(loneSurrogates); err != nil {
+		t.Fatalf("content with unpaired surrogates rejected after JSON normalization: %v", err)
+	}
+	if err := documentsValidateDocumentContent(json.RawMessage(`{"type":"doc","text":"\\u2028"}`)); err != nil {
+		t.Fatalf("literal Unicode escape sequence was not preserved: %v", err)
+	}
+	withinValueBudget := json.RawMessage(`{"type":"doc","attrs":{"flags":[` + strings.TrimSuffix(strings.Repeat("true,", documentsMaxContentValues-4), ",") + `]}}`)
+	if err := documentsValidateDocumentContent(withinValueBudget); err != nil {
+		t.Fatalf("content at the generic value budget rejected: %v", err)
+	}
+	overValueBudget := json.RawMessage(`{"type":"doc","attrs":{"flags":[` + strings.TrimSuffix(strings.Repeat("true,", documentsMaxContentValues-3), ",") + `]}}`)
+	if err := documentsValidateDocumentContent(overValueBudget); err == nil {
+		t.Fatal("content over the generic value budget accepted")
+	}
+	deepAttributes := json.RawMessage(`{"type":"doc","attrs":{"nested":` + strings.Repeat(`{"value":`, documentsMaxContentDepth) + `"end"` + strings.Repeat("}", documentsMaxContentDepth) + `}}`)
+	if err := documentsValidateDocumentContent(deepAttributes); err == nil {
+		t.Fatal("deep arbitrary attribute values accepted")
+	}
+}
+
 func TestDocumentNumberInputContract(t *testing.T) {
 	capabilityID := documentsAllocateNumberCapabilityID
 	spec, exists := capabilitySpecs[capabilityID]
@@ -54,7 +119,7 @@ var documentsSampleInputs = map[string]string{
 	documentsListVersionsCapabilityID:      `{"documentId":"` + documentsTestUUID + `"}`,
 	documentsRenameFolderCapabilityID:      `{"path":"Finance","newPath":"Money"}`,
 	documentsRestoreDocVersionCapabilityID: `{"documentId":"` + documentsTestUUID + `","sourceVersion":1}`,
-	documentsSaveDocVersionCapabilityID:    `{"documentId":"` + documentsTestUUID + `","content":{},"html":""}`,
+	documentsSaveDocVersionCapabilityID:    `{"documentId":"` + documentsTestUUID + `","content":{"type":"doc"},"html":""}`,
 	documentsSearchMemoryCapabilityID:      `{"query":"ledger","limit":5}`,
 	documentsSearchRecordsCapabilityID:     `{"type":"customer","query":"ada"}`,
 	documentsSuggestCodingCapabilityID:     `{"documentId":"` + documentsTestUUID + `"}`,
@@ -327,26 +392,26 @@ func TestDocumentsInputValidationBoundaries(t *testing.T) {
 			name:         "createDoc validates title, html and the link fields",
 			capabilityID: documentsCreateDocCapabilityID,
 			accept: []string{
-				`{"title":"T","content":{},"html":""}`,
-				`{"title":"T","content":{"a":[1,2]},"html":"<p>x</p>","pageSettings":{}}`,
-				`{"title":"T","content":{},"html":"","pageSettings":{"size":"Letter","orientation":"landscape","margin":"wide"}}`,
-				`{"title":"T","content":{},"html":"","templateId":"` + uuid + `","intentId":"abc"}`,
+				`{"title":"T","content":{"type":"doc"},"html":""}`,
+				`{"title":"T","content":{"type":"doc","attrs":{"a":[1,2]}},"html":"<p>x</p>","pageSettings":{}}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","pageSettings":{"size":"Letter","orientation":"landscape","margin":"wide"}}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","templateId":"` + uuid + `","intentId":"abc"}`,
 			},
 			refuse: []string{
-				`{"title":"","content":{},"html":""}`,
-				`{"title":"` + longString(201) + `","content":{},"html":""}`,
+				`{"title":"","content":{"type":"doc"},"html":""}`,
+				`{"title":"` + longString(201) + `","content":{"type":"doc"},"html":""}`,
 				`{"title":"T","html":""}`,
 				`{"title":"T","content":[],"html":""}`,
 				`{"title":"T","content":null,"html":""}`,
-				`{"title":"T","content":{},"html":"` + longString(documentsMaxHTMLLength+1) + `"}`,
-				`{"title":"T","content":{},"html":"","folder":null}`,
-				`{"title":"T","content":{},"html":"","templateId":"nope"}`,
-				`{"title":"T","content":{},"html":"","linkedRecordId":"nope"}`,
-				`{"title":"T","content":{},"html":"","documentType":"` + longString(61) + `"}`,
-				`{"title":"T","content":{},"html":"","pageSettings":{"size":"A3"}}`,
-				`{"title":"T","content":{},"html":"","pageSettings":{"orientation":"sideways"}}`,
-				`{"title":"T","content":{},"html":"","pageSettings":{"margin":"huge"}}`,
-				`{"title":"T","content":{},"html":"","pageSettings":[]}`,
+				`{"title":"T","content":{"type":"doc"},"html":"` + longString(documentsMaxHTMLLength+1) + `"}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","folder":null}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","templateId":"nope"}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","linkedRecordId":"nope"}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","documentType":"` + longString(61) + `"}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","pageSettings":{"size":"A3"}}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","pageSettings":{"orientation":"sideways"}}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","pageSettings":{"margin":"huge"}}`,
+				`{"title":"T","content":{"type":"doc"},"html":"","pageSettings":[]}`,
 			},
 		},
 		{
@@ -390,12 +455,12 @@ func TestDocumentsInputValidationBoundaries(t *testing.T) {
 		{
 			name:         "createTemplate validates name and description",
 			capabilityID: documentsCreateTemplateCapabilityID,
-			accept:       []string{`{"name":"N","content":{}}`, `{"name":"N","content":{},"description":"` + longString(300) + `"}`},
+			accept:       []string{`{"name":"N","content":{"type":"doc"}}`, `{"name":"N","content":{"type":"doc"},"description":"` + longString(300) + `"}`},
 			refuse: []string{
-				`{"content":{}}`, `{"name":"","content":{}}`,
-				`{"name":"` + longString(121) + `","content":{}}`,
+				`{"content":{"type":"doc"}}`, `{"name":"","content":{"type":"doc"}}`,
+				`{"name":"` + longString(121) + `","content":{"type":"doc"}}`,
 				`{"name":"N"}`, `{"name":"N","content":[]}`,
-				`{"name":"N","content":{},"description":"` + longString(301) + `"}`,
+				`{"name":"N","content":{"type":"doc"},"description":"` + longString(301) + `"}`,
 			},
 		},
 		{
@@ -426,12 +491,12 @@ func TestDocumentsInputValidationBoundaries(t *testing.T) {
 		{
 			name:         "saveDocVersion requires content and html",
 			capabilityID: documentsSaveDocVersionCapabilityID,
-			accept:       []string{`{"documentId":"` + uuid + `","content":{"a":1},"html":"<p>x</p>","note":"n"}`},
+			accept:       []string{`{"documentId":"` + uuid + `","content":{"type":"doc","attrs":{"a":1}},"html":"<p>x</p>","note":"n"}`},
 			refuse: []string{
 				`{"documentId":"` + uuid + `","html":""}`,
-				`{"documentId":"` + uuid + `","content":{}}`,
+				`{"documentId":"` + uuid + `","content":{"type":"doc"}}`,
 				`{"documentId":"` + uuid + `","content":"text","html":""}`,
-				`{"documentId":"` + uuid + `","content":{},"html":"","title":""}`,
+				`{"documentId":"` + uuid + `","content":{"type":"doc"},"html":"","title":""}`,
 			},
 		},
 		{
@@ -575,7 +640,7 @@ func TestDocumentsZodDefaultsAreCanonical(t *testing.T) {
 		t.Fatalf("searchRecords query = %v, want the Zod default empty string", records.Query)
 	}
 	doc, err := ParseDocumentsInput(documentsCreateDocCapabilityID,
-		json.RawMessage(`{"title":"T","content":{},"html":"","pageSettings":{"size":"Letter"}}`))
+		json.RawMessage(`{"title":"T","content":{"type":"doc"},"html":"","pageSettings":{"size":"Letter"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

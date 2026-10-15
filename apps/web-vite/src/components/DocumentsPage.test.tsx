@@ -11,6 +11,7 @@ const goDocumentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 function emptyLibraryCapability(capabilityId: string): Response | undefined {
   if (capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
   if (capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+  if (capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
   return undefined;
 }
 
@@ -64,6 +65,7 @@ describe("Vite documents page", () => {
       const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string } };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
       return request.input?.id === undefined
         ? Response.json({ ok: true, data: { documents: rows, vendors: [] } })
         : Response.json({ ok: true, data: { document: detail(request.input.id, request.input.id === rows[1]!.id ? "Warehouse notes" : "Supplier invoice", request.input.id === rows[1]!.id ? "queued" : "parsed", request.input.id === rows[1]!.id ? null : "Invoice number: 42").document } });
@@ -78,7 +80,7 @@ describe("Vite documents page", () => {
     expect(screen.getByText("Printer paper")).not.toBeNull();
     expect(screen.getByText("Account 6000")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe(`/api/go/documents/${rows[0]!.id}/content`);
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(4);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(5);
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search documents" }), { target: { value: "warehouse" } });
     expect(screen.getByRole("button", { name: /Warehouse notes/ })).not.toBeNull();
@@ -97,6 +99,7 @@ describe("Vite documents page", () => {
       const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: authoredDocuments } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
       if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
       throw new Error(`Unexpected capability ${request.capabilityId}`);
     });
@@ -167,6 +170,7 @@ describe("Vite documents page", () => {
       const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
       return request.input.id === undefined
         ? Response.json({ ok: true, data: { documents: rows, vendors: [] } })
         : Response.json({ ok: true, data: { document: detail(rows[1]!.id, "Warehouse notes", "queued", null).document } });
@@ -178,7 +182,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Warehouse notes" })).not.toBeNull();
     expect(screen.getByRole("button", { name: /Warehouse notes/ }).getAttribute("aria-current")).toBe("true");
     expect(screen.getByRole("button", { name: /Supplier invoice/ }).getAttribute("aria-current")).toBeNull();
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(4);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(5);
   });
 
   it("validates documentId and shows a not-found state without selecting the first row", async () => {
@@ -190,6 +194,7 @@ describe("Vite documents page", () => {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string };
         if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
         if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+        if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
         expect(request.capabilityId).toBe("documents.listIngestedDocuments");
         return Response.json({ ok: true, data: { documents: rows, vendors: [] } });
       }
@@ -202,7 +207,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Invalid document link" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Back to document library" }).getAttribute("href")).toBe("/documents");
     expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute")).toHaveLength(3));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute")).toHaveLength(4));
 
     cleanup();
     window.history.replaceState(null, "", `/documents?documentId=${goDocumentId}`);
@@ -213,6 +218,7 @@ describe("Vite documents page", () => {
         const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: { id?: string } };
         if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
         if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+        if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
         expect(request.capabilityId).toBe("documents.listIngestedDocuments");
         return request.input.id === undefined
           ? Response.json({ ok: true, data: { documents: [{ ...rows[0]!, id: goDocumentId }], vendors: [] } })
@@ -226,7 +232,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Document not found" })).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "Supplier invoice" })).toBeNull();
     const detailRequests = notFoundFetch.mock.calls.filter(([url]) => String(url) === "/api/capabilities/execute");
-    expect(detailRequests).toHaveLength(4);
+    expect(detailRequests).toHaveLength(5);
     const detailRequest = detailRequests.map((call) => JSON.parse(String(call[1]?.body)) as { input: { id?: string; preview?: boolean } }).find((request) => request.input.id !== undefined);
     expect(detailRequest).toMatchObject({
       capabilityId: "documents.listIngestedDocuments",
@@ -262,7 +268,7 @@ describe("Vite documents page", () => {
     expect(await screen.findByRole("heading", { name: "Supplier invoice" })).not.toBeNull();
     expect(screen.getByText("Invoice number: 42")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open uploaded file" }).getAttribute("href")).toBe(`/api/go/documents/${goDocumentId}/content`);
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(4);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute")).toHaveLength(5);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/documents")).toBe(false);
   });
 
@@ -281,6 +287,7 @@ describe("Vite documents page", () => {
       requests.push({ url, ...request });
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
       if (request.capabilityId === "documents.listIngestedDocuments") {
         if (request.input?.id) return Response.json({ ok: true, data: { document: detail(goDocumentId, "Supplier invoice", "parsed", "Invoice 42").document } });
         return Response.json({ ok: true, data: { documents: remaining, vendors: [] } });
@@ -315,6 +322,7 @@ describe("Vite documents page", () => {
       const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string } };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
       if (request.capabilityId === "documents.listIngestedDocuments") {
         return request.input?.id
           ? Response.json({ ok: true, data: { document: detail(request.input.id, request.input.id === goDocumentId ? "Supplier invoice" : "Warehouse notes", "parsed", null).document } })
@@ -350,6 +358,7 @@ describe("Vite documents page", () => {
       const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string; documentId?: string }; intentId?: string };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
       if (request.capabilityId === "documents.listIngestedDocuments") {
         if (request.input?.id) {
           if (!documentExists) return Response.json({ error: "The document was not found." }, { status: 404 });
@@ -436,6 +445,7 @@ describe("Vite documents page", () => {
       "/api/capabilities/execute",
       "/api/capabilities/execute",
       "/api/capabilities/execute",
+      "/api/capabilities/execute",
     ]);
   });
 
@@ -452,9 +462,10 @@ describe("Vite documents page", () => {
     expect(screen.getByRole("status").textContent).toContain("Loading documents");
     await waitFor(() => expect(pending.some(({ capabilityId }) => capabilityId === "documents.listIngestedDocuments")).toBe(true));
     pending.find(({ capabilityId }) => capabilityId === "documents.listIngestedDocuments")?.resolve(Response.json({ ok: true, data: { documents: [], vendors: [] } }));
-    await waitFor(() => expect(pending).toHaveLength(3));
+    await waitFor(() => expect(pending).toHaveLength(4));
     pending.find(({ capabilityId }) => capabilityId === "documents.listDocs")?.resolve(Response.json({ ok: true, data: { documents: [] } }));
     pending.find(({ capabilityId }) => capabilityId === "documents.listFolders")?.resolve(Response.json({ ok: true, data: { folders: [] } }));
+    pending.find(({ capabilityId }) => capabilityId === "documents.listTemplates")?.resolve(Response.json({ ok: true, data: { templates: [] } }));
     expect(await screen.findByRole("heading", { name: "No documents yet" })).not.toBeNull();
   });
 
@@ -484,6 +495,101 @@ describe("Vite documents page", () => {
     fireEvent.click(create);
     await waitFor(() => expect(window.location.pathname).toBe(`/documents/editor/${goDocumentId}`));
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes(":3001"))).toBe(false);
+  });
+
+  it("creates a Go draft from the selected template and opens the Vite editor", async () => {
+    vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+    const templateId = "33333333-3333-4333-8333-333333333333";
+    const template = {
+      id: templateId,
+      name: "Service quote",
+      description: "Quote for customer services",
+      placeholders: ["customer.name"],
+      isSystem: null,
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "{{customer.name}}" }] }] },
+    };
+    const createInputs: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
+      if (url === "/api/org") return Response.json({ activeOrgId: "11111111-1111-4111-8111-111111111111", orgs: [{ id: "11111111-1111-4111-8111-111111111111", name: "Workspace" }] });
+      if (url === "/api/capabilities/execute") {
+        const request = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [template] } });
+        const libraryResponse = emptyLibraryCapability(request.capabilityId);
+        if (libraryResponse) return libraryResponse;
+        if (request.capabilityId === "documents.listIngestedDocuments") return Response.json({ ok: true, data: { documents: [], vendors: [] } });
+        expect(request.capabilityId).toBe("documents.createDoc");
+        createInputs.push(request.input);
+        return Response.json({ ok: true, data: { documentId: goDocumentId } });
+      }
+      return Response.json({ error: "unexpected request" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use template" }));
+    await waitFor(() => expect(window.location.pathname).toBe(`/documents/editor/${goDocumentId}`));
+    expect(createInputs).toHaveLength(1);
+    expect(createInputs[0]).toMatchObject({
+      title: template.name,
+      templateId,
+      content: template.content,
+      html: "<p>{{customer.name}}</p>",
+    });
+    const createRequest = fetchMock.mock.calls
+      .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string; input?: Record<string, unknown> })
+      .find((request) => request.capabilityId === "documents.createDoc");
+    expect(createRequest?.input?.templateId).toBe(templateId);
+  });
+
+  it("shows an empty Go template gallery without offering a draft action", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string };
+      return emptyLibraryCapability(request.capabilityId) ?? Response.json({ ok: true, data: { documents: [], vendors: [] } });
+    }));
+    render(<DocumentsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Document templates" })).not.toBeNull();
+    expect(await screen.findByText("Save a written document as a template to reuse it here.")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Use template" })).toBeNull();
+  });
+
+  it("lets Go refuse a template that belongs to a different active workspace", async () => {
+    vi.stubGlobal("navigator", { ...navigator, locks: { request: async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => callback() } });
+    const template = {
+      id: "33333333-3333-4333-8333-333333333333",
+      name: "Service quote",
+      description: null,
+      placeholders: [],
+      isSystem: null,
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+    };
+    const capabilities: Array<{ capabilityId: string; organizationId: string | null }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") return Response.json({ catalog: [{ id: "documents" }], enabledModules: ["documents"] });
+      if (url === "/api/auth/get-session") return Response.json({ user: { id: "actor-1", name: "Ada Lovelace", email: "ada@example.test", emailVerified: true, image: null, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }, session: { id: "session-1", userId: "actor-1", expiresAt: "2027-01-01T00:00:00.000Z", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" } });
+      if (url === "/api/org") return Response.json({ activeOrgId: "22222222-2222-4222-8222-222222222222", orgs: [{ id: "22222222-2222-4222-8222-222222222222", name: "Current workspace" }] });
+      if (url === "/api/capabilities/execute") {
+        const request = JSON.parse(String(init?.body)) as { capabilityId: string };
+        const organizationId = new Headers(init?.headers).get("X-Organization-ID");
+        capabilities.push({ capabilityId: request.capabilityId, organizationId });
+        if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [template] } });
+        if (request.capabilityId === "documents.createDoc") return Response.json({ error: "template not found" }, { status: 422 });
+        return emptyLibraryCapability(request.capabilityId) ?? Response.json({ ok: true, data: { documents: [], vendors: [] } });
+      }
+      return Response.json({ error: "unexpected request" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use template" }));
+    expect(await screen.findByText(/template not found/i)).not.toBeNull();
+    expect(capabilities).toContainEqual({ capabilityId: "documents.createDoc", organizationId: "22222222-2222-4222-8222-222222222222" });
+    expect(window.location.pathname).toBe("/");
   });
 
   it("adds pasted text through documents.createDocument with the active account scope", async () => {
@@ -557,6 +663,7 @@ describe("Vite documents page", () => {
       const request = JSON.parse(String(init?.body)) as { capabilityId: string };
       if (request.capabilityId === "documents.listDocs") return Response.json({ ok: true, data: { documents: [] } });
       if (request.capabilityId === "documents.listFolders") return Response.json({ ok: true, data: { folders: [] } });
+      if (request.capabilityId === "documents.listTemplates") return Response.json({ ok: true, data: { templates: [] } });
       listAttempt += 1;
       return listAttempt === 1
         ? Response.json({ error: "forbidden" }, { status: 403 })

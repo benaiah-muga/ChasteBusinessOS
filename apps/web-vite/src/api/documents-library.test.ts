@@ -6,6 +6,7 @@ import {
   DocumentsLibraryApiError,
   fetchAuthoredDocuments,
   fetchDocumentFolders,
+  fetchDocumentTemplates,
   pendingIngestedDocumentDeletion,
   renameDocumentFolder,
   searchDocumentRecords,
@@ -73,6 +74,24 @@ describe("Go document library capability client", () => {
       { capabilityId: "documents.listFolders", input: {} },
       { capabilityId: "documents.searchRecords", input: { type: "customer", query: "Ada" } },
     ]);
+  });
+
+  it("loads strict template rows from Go and accepts empty lists", async () => {
+    const template = { id: authored.id, name: "Quote", description: "Sales quote", placeholders: ["customer.name"], isSystem: null, content: { type: "doc", content: [{ type: "paragraph" }] } };
+    const calls: RequestInit[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return Response.json({ ok: true, data: { templates: [template] } });
+    }));
+
+    await expect(fetchDocumentTemplates()).resolves.toEqual([template]);
+    expect(bodyOf(calls[0])).toMatchObject({ capabilityId: "documents.listTemplates", input: {} });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { templates: [] } })));
+    await expect(fetchDocumentTemplates()).resolves.toEqual([]);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { templates: [{ ...template, unexpected: true }] } })));
+    await expect(fetchDocumentTemplates()).rejects.toMatchObject({ status: 200, message: expect.stringContaining("unexpected format") });
   });
 
   it("preserves the same intent when a folder create response is lost", async () => {

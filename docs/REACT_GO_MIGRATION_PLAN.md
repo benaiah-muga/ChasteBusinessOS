@@ -4637,3 +4637,11 @@ new owners and the manifest shows zero legacy runtime paths.
      delayed the Go receipt-history response, entered a receipt quantity, then
      confirmed the quantity remained after the response completed. No receipt
      was submitted and the browser reported no errors.
+
+431. (Runtime verified) Vite Documents lists Go-backed reusable templates and
+     creates a new draft from the selected template content. Go and Vite enforce
+     the same ProseMirror structure and canonical JSON byte, depth, value, and
+     node limits. Focused Vite tests pass 87 cases, and the Go capability
+     package passes. Authenticated browser proof selected a template, confirmed
+     its content in the new draft after reload, and recorded successful Go
+     capability requests with no browser errors.

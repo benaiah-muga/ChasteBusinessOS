@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isBoundedDocumentContent } from "./document-content";
 
 const CapabilitySuccessSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
 const PendingApprovalSchema = z.object({
@@ -24,6 +25,15 @@ const AuthoredDocumentRowSchema = z.object({
 const AuthoredDocumentsOutputSchema = z.object({ documents: z.array(AuthoredDocumentRowSchema) }).strict();
 const DocumentFolderSchema = z.object({ id: z.string().uuid(), path: z.string().min(1).max(300) }).strict();
 const DocumentFoldersOutputSchema = z.object({ folders: z.array(DocumentFolderSchema) }).strict();
+const DocumentTemplateSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(120),
+  description: z.string().nullable(),
+  placeholders: z.array(z.string()),
+  isSystem: z.string().nullable(),
+  content: z.record(z.string(), z.unknown()).refine(isBoundedDocumentContent, "Document template content is malformed or exceeds the supported size."),
+}).strict();
+const DocumentTemplatesOutputSchema = z.object({ templates: z.array(DocumentTemplateSchema) }).strict();
 const FolderCreatedSchema = z.object({ folderId: z.string().uuid(), path: z.string().min(1).max(300) }).strict();
 const FolderRenamedSchema = z.object({ path: z.string().min(1).max(300), movedTo: z.string().min(1).max(300) }).strict();
 const FolderDeletedSchema = z.object({ deleted: z.boolean(), path: z.string().min(1).max(300) }).strict();
@@ -46,6 +56,7 @@ const RetryMarkerSchema = z.object({
 
 export type AuthoredDocumentRow = z.infer<typeof AuthoredDocumentRowSchema>;
 export type DocumentFolder = z.infer<typeof DocumentFolderSchema>;
+export type DocumentTemplate = z.infer<typeof DocumentTemplateSchema>;
 export type DocumentRecord = z.infer<typeof DocumentRecordSchema>;
 export type DocumentRecordType = "customer" | "supplier" | "employee" | "invoice" | "quote" | "purchase_order" | "sales_order";
 export type DocumentsLibraryScope = { actorId: string; organizationId: string };
@@ -115,6 +126,11 @@ export async function fetchAuthoredDocuments(signal?: AbortSignal): Promise<Auth
 export async function fetchDocumentFolders(signal?: AbortSignal): Promise<DocumentFolder[]> {
   const result = await executeRead("documents.listFolders", {}, DocumentFoldersOutputSchema, signal);
   return result.folders;
+}
+
+export async function fetchDocumentTemplates(signal?: AbortSignal): Promise<DocumentTemplate[]> {
+  const result = await executeRead("documents.listTemplates", {}, DocumentTemplatesOutputSchema, signal);
+  return result.templates;
 }
 
 export async function searchDocumentRecords(type: DocumentRecordType, query: string, signal?: AbortSignal): Promise<DocumentRecord[]> {

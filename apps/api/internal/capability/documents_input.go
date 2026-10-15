@@ -5,14 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"regexp"
 	"time"
 )
 
 const (
-	documentsMaxUploadBytes  = 5 * 1024 * 1024
-	documentsMaxUploadBase64 = 6_990_507 // Math.ceil(5MiB * 4/3)
-	documentsMaxHTMLLength   = 2_000_000
+	documentsMaxUploadBytes   = 5 * 1024 * 1024
+	documentsMaxUploadBase64  = 6_990_507 // Math.ceil(5MiB * 4/3)
+	documentsMaxHTMLLength    = 2_000_000
+	documentsMaxContentBytes  = 1_000_000
+	documentsMaxContentDepth  = 64
+	documentsMaxContentNodes  = 10_000
+	documentsMaxContentValues = 100_000
 )
 
 var documentsMIMETypePattern = regexp.MustCompile(`^[\w.+-]+/[\w.+-]+$`)
@@ -129,16 +135,15 @@ func documentsNonNullableString(fields map[string]json.RawMessage, key string, m
 	return value, nil
 }
 
-// documentsRequiredContentObject validates z.record(z.string(), z.unknown()):
-// a non-null JSON object whose keys are strings. The original bytes are kept
-// so the stored document and the canonical input hash are unchanged.
+// documentsRequiredContentObject validates bounded ProseMirror JSON. The
+// original bytes are kept so the stored content and canonical input hash stay unchanged.
 func documentsRequiredContentObject(fields map[string]json.RawMessage, key string) (json.RawMessage, error) {
 	raw, ok := fields[key]
 	if !ok {
 		return nil, fmt.Errorf("%s is required", key)
 	}
-	if err := documentsAssertJSONObject(raw); err != nil {
-		return nil, fmt.Errorf("%s must be an object", key)
+	if err := documentsValidateDocumentContent(raw); err != nil {
+		return nil, fmt.Errorf("%s exceeds the supported structure", key)
 	}
 	return json.RawMessage(bytes.TrimSpace(raw)), nil
 }
@@ -148,22 +153,220 @@ func documentsOptionalContentObject(fields map[string]json.RawMessage, key strin
 	if !ok {
 		return nil, nil
 	}
-	if err := documentsAssertJSONObject(raw); err != nil {
-		return nil, fmt.Errorf("%s must be an object", key)
+	if err := documentsValidateDocumentContent(raw); err != nil {
+		return nil, fmt.Errorf("%s exceeds the supported structure", key)
 	}
 	return json.RawMessage(bytes.TrimSpace(raw)), nil
 }
 
-func documentsAssertJSONObject(raw json.RawMessage) error {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return errors.New("expected an object")
+func documentsValidateJSONBounds(raw json.RawMessage) error {
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil || compact.Len() == 0 {
+		return errors.New("content JSON is invalid")
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(trimmed, &fields); err != nil || fields == nil {
-		return errors.New("expected an object")
+	decoder := json.NewDecoder(&compact)
+	depth := 0
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return errors.New("content JSON is invalid")
+		}
+		if delimiter, ok := token.(json.Delim); ok {
+			switch delimiter {
+			case '{', '[':
+				depth++
+				if depth > documentsMaxContentDepth {
+					return errors.New("content JSON is nested too deeply")
+				}
+			case '}', ']':
+				depth--
+				if depth < 0 {
+					return errors.New("content JSON is invalid")
+				}
+			}
+		}
+	}
+	if depth != 0 {
+		return errors.New("content JSON is invalid")
 	}
 	return nil
+}
+
+type documentsContentValue struct {
+	value any
+	depth int
+}
+
+func documentsValidateDocumentContent(raw json.RawMessage) error {
+	if err := documentsValidateJSONBounds(raw); err != nil {
+		return err
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return errors.New("content JSON is invalid")
+	}
+	decoder := json.NewDecoder(&compact)
+	var root any
+	if err := decoder.Decode(&root); err != nil {
+		return errors.New("content JSON is invalid")
+	}
+	rootNode, ok := root.(map[string]any)
+	if !ok || rootNode["type"] != "doc" {
+		return errors.New("document content must have a doc root")
+	}
+	values := []documentsContentValue{{value: root, depth: 1}}
+	valueCount := 0
+	for len(values) > 0 {
+		last := len(values) - 1
+		entry := values[last]
+		values = values[:last]
+		valueCount++
+		if entry.depth > documentsMaxContentDepth {
+			return errors.New("content JSON is nested too deeply")
+		}
+		if valueCount > documentsMaxContentValues {
+			return errors.New("content JSON has too many values")
+		}
+		switch value := entry.value.(type) {
+		case map[string]any:
+			for key, nested := range value {
+				if number, ok := nested.(float64); ok && number == 0 {
+					value[key] = float64(0)
+					nested = float64(0)
+				}
+				depth := entry.depth
+				switch nested.(type) {
+				case map[string]any, []any:
+					depth++
+				}
+				values = append(values, documentsContentValue{value: nested, depth: depth})
+			}
+		case []any:
+			for index, nested := range value {
+				if number, ok := nested.(float64); ok && number == 0 {
+					value[index] = float64(0)
+					nested = float64(0)
+				}
+				depth := entry.depth
+				switch nested.(type) {
+				case map[string]any, []any:
+					depth++
+				}
+				values = append(values, documentsContentValue{value: nested, depth: depth})
+			}
+		case float64:
+			if math.IsInf(value, 0) || math.IsNaN(value) {
+				return errors.New("document content numbers must be finite")
+			}
+		}
+	}
+	// Match JSON.stringify's UTF-8 byte accounting for the decoded JSON value.
+	var canonical bytes.Buffer
+	encoder := json.NewEncoder(&canonical)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(root); err != nil {
+		return errors.New("content JSON is invalid")
+	}
+	serialized := documentsJSONStringUTF8(bytes.TrimSuffix(canonical.Bytes(), []byte("\n")))
+	if len(serialized) > documentsMaxContentBytes {
+		return errors.New("content JSON exceeds the supported size")
+	}
+
+	nodes := []any{rootNode}
+	nodeCount := 0
+	for len(nodes) > 0 {
+		last := len(nodes) - 1
+		nodeValue := nodes[last]
+		nodes = nodes[:last]
+		node, ok := nodeValue.(map[string]any)
+		if !ok {
+			return errors.New("document content nodes must be objects")
+		}
+		nodeCount++
+		if nodeCount > documentsMaxContentNodes {
+			return errors.New("document content has too many nodes")
+		}
+		nodeType, ok := node["type"].(string)
+		if !ok || nodeType == "" || utf16Length(nodeType) > 100 {
+			return errors.New("document content nodes need a valid type")
+		}
+		if text, exists := node["text"]; exists {
+			if _, ok := text.(string); !ok {
+				return errors.New("document text must be a string")
+			}
+		}
+		if attrs, exists := node["attrs"]; exists {
+			if _, ok := attrs.(map[string]any); !ok {
+				return errors.New("document node attributes must be an object")
+			}
+		}
+		if marks, exists := node["marks"]; exists {
+			markList, ok := marks.([]any)
+			if !ok {
+				return errors.New("document node marks must be an array")
+			}
+			for _, markValue := range markList {
+				mark, ok := markValue.(map[string]any)
+				if !ok {
+					return errors.New("document marks must be objects")
+				}
+				markType, ok := mark["type"].(string)
+				if !ok || markType == "" || utf16Length(markType) > 100 {
+					return errors.New("document marks need a valid type")
+				}
+				if attrs, exists := mark["attrs"]; exists {
+					if _, ok := attrs.(map[string]any); !ok {
+						return errors.New("document mark attributes must be an object")
+					}
+				}
+			}
+		}
+		if content, exists := node["content"]; exists {
+			children, ok := content.([]any)
+			if !ok {
+				return errors.New("document node content must be an array")
+			}
+			nodes = append(nodes, children...)
+		}
+	}
+	return nil
+}
+
+func documentsJSONStringUTF8(serialized []byte) []byte {
+	var normalized bytes.Buffer
+	inString := false
+	for index := 0; index < len(serialized); {
+		character := serialized[index]
+		if !inString && character == '"' {
+			inString = true
+		} else if inString && character == '"' {
+			inString = false
+		}
+		if inString && character == '\\' && index+1 < len(serialized) {
+			if index+6 <= len(serialized) && serialized[index+1] == 'u' {
+				sequence := serialized[index : index+6]
+				if bytes.Equal(sequence, []byte(`\u2028`)) {
+					normalized.WriteString("\u2028")
+					index += 6
+					continue
+				}
+				if bytes.Equal(sequence, []byte(`\u2029`)) {
+					normalized.WriteString("\u2029")
+					index += 6
+					continue
+				}
+			}
+			normalized.Write(serialized[index : index+2])
+			index += 2
+			continue
+		}
+		normalized.WriteByte(character)
+		index++
+	}
+	return normalized.Bytes()
 }
 
 // documentsPageSettingsInput validates the page settings object. Zod applies

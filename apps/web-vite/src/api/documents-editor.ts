@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isBoundedDocumentContent } from "./document-content";
 
 /**
  * Client for the authored-document editor surface: the one document read,
@@ -36,7 +37,7 @@ export const AuthoredDocumentSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
   status: z.string().min(1),
-  content: z.record(z.string(), z.unknown()),
+  content: z.record(z.string(), z.unknown()).refine(isBoundedDocumentContent, "Document content is malformed or exceeds the supported size."),
   html: z.string(),
   templateId: z.string().nullable().optional(),
   folder: z.string().nullable().optional(),
@@ -59,7 +60,7 @@ const GoAuthoredDocumentSchema = z.object({
   id: z.string().uuid(),
   title: z.string(),
   status: z.string().min(1),
-  content: z.record(z.string(), z.unknown()),
+  content: z.record(z.string(), z.unknown()).refine(isBoundedDocumentContent, "Document content is malformed or exceeds the supported size."),
   html: z.string(),
   templateId: z.string().nullable(),
   folder: z.string().nullable(),
@@ -85,7 +86,7 @@ const CapabilitySuccessSchema = z.object({ ok: z.literal(true), data: z.unknown(
 const GoDocumentVersionsSchema = z.object({ versions: z.array(VersionRowSchema) }).strict();
 const GoArchivedDocumentVersionSchema = z.object({
   version: z.number().int().positive(),
-  content: z.record(z.string(), z.unknown()),
+  content: z.record(z.string(), z.unknown()).refine(isBoundedDocumentContent, "Document content is malformed or exceeds the supported size."),
   html: z.string(),
   note: z.string().nullable(),
   createdAt: z.string().datetime(),
@@ -97,7 +98,7 @@ export type PresenceUser = z.infer<typeof PresenceUserSchema>;
 
 const WorkspaceLockSchema = z.object({ heldBy: z.string(), mine: z.boolean() }).strict();
 const WorkspaceDraftSchema = z.object({
-  content: z.record(z.string(), z.unknown()),
+  content: z.record(z.string(), z.unknown()).refine(isBoundedDocumentContent, "Document content is malformed or exceeds the supported size."),
   pageSettings: PageSettingsSchema.optional(),
   rev: z.number().int().positive(),
   updatedAt: z.string().datetime().optional(),
@@ -171,6 +172,12 @@ export type DocumentsAssistResult = AssistText | AssistPrefill;
 export type GovernedOutcome<T> = { kind: "completed"; data: T } | { kind: "pending"; hint: string };
 
 export type DocumentsEditorRetryScope = { actorId: string | null; organizationId: string | null };
+export type AuthoredDocumentDraftInput = {
+  title: string;
+  content: Record<string, unknown>;
+  html: string;
+  templateId?: string;
+};
 export type AuthoredDocumentNumberKind = "invoice" | "quote" | "receipt" | "delivery_note" | "purchase_order" | "voucher" | "employment_contract" | "employment_agreement";
 
 export class DocumentsEditorApiError extends Error {
@@ -390,8 +397,9 @@ export function createDocumentTemplate(
 
 export function createAuthoredDocumentDraft(
   scope: DocumentsEditorRetryScope,
+  draft?: AuthoredDocumentDraftInput,
 ): Promise<GovernedOutcome<z.infer<typeof AuthoredDocumentCreatedSchema>>> {
-  return createAuthoredDocumentDraftInGo(scope);
+  return createAuthoredDocumentDraftInGo(scope, draft);
 }
 
 export function allocateAuthoredDocumentNumber(
@@ -569,17 +577,25 @@ async function createDocumentTemplateInGo(
 
 async function createAuthoredDocumentDraftInGo(
   scope: DocumentsEditorRetryScope,
+  draft?: AuthoredDocumentDraftInput,
 ): Promise<GovernedOutcome<z.infer<typeof AuthoredDocumentCreatedSchema>>> {
   const { actorId, organizationId } = templateRetryScope(scope);
   const locks = navigator.locks;
   if (!locks) throw new DocumentsEditorApiError(0, "Document creation retry protection is unavailable in this browser.");
 
   const input = {
-    title: "Untitled document",
-    content: { type: "doc", content: [{ type: "paragraph" }] },
-    html: "<p></p>",
+    title: draft?.title.trim() || "Untitled document",
+    content: draft?.content ?? { type: "doc", content: [{ type: "paragraph" }] },
+    html: draft ? sanitizeDocumentHtml(draft.html) : "<p></p>",
     pageSettings: DEFAULT_PAGE_SETTINGS,
+    ...(draft?.templateId ? { templateId: draft.templateId } : {}),
   };
+  if (!isBoundedDocumentContent(input.content)) {
+    throw new DocumentsEditorApiError(400, "The document content is malformed or exceeds the supported size.");
+  }
+  if (input.title.length > 200 || (draft && (!input.title || !documentUUID.safeParse(draft.templateId).success))) {
+    throw new DocumentsEditorApiError(400, "Choose a valid document template before creating a draft.");
+  }
   return locks.request(`chaste:authored-document-create:${actorId}:${organizationId}`, { mode: "exclusive" }, async () => {
     const fingerprint = await digest(JSON.stringify({ capabilityId: "documents.createDoc", input }));
     const scopeHash = await digest(`${actorId}:${organizationId}`);
@@ -795,6 +811,7 @@ function renderBlock(node: ContentNode): string {
 
 /** Serializes the editor's JSON tree to allowlisted HTML. Unknown nodes keep their children. */
 export function documentJsonToHtml(content: unknown): string {
+  if (!isBoundedDocumentContent(content)) throw new Error("The document content is malformed or exceeds the supported size.");
   const doc = asNode(content);
   if (!doc) return "";
   if (doc.type === "doc") return childrenOf(doc).map(renderBlock).join("");

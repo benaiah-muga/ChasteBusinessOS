@@ -110,6 +110,9 @@ func listDocumentTemplates(ctx context.Context, tx pgx.Tx, orgID string) (ListDo
 		if len(bytes.TrimSpace(template.Content)) == 0 {
 			template.Content = json.RawMessage("{}")
 		}
+		if err := documentsValidateDocumentContent(template.Content); err != nil {
+			return ListDocumentTemplatesOutput{}, errors.New("stored document template content exceeds the supported structure")
+		}
 		templates = append(templates, template)
 	}
 	if err := rows.Err(); err != nil {
@@ -134,6 +137,9 @@ func getDocumentTemplate(ctx context.Context, tx pgx.Tx, claims authbridge.Capab
 	}
 	if err != nil {
 		return GetDocumentTemplateOutput{}, err
+	}
+	if err := documentsValidateDocumentContent(template.Content); err != nil {
+		return GetDocumentTemplateOutput{}, errors.New("stored document template content exceeds the supported structure")
 	}
 	resolved, err := documentsTemplatePlaceholders(placeholders)
 	if err != nil {

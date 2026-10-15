@@ -2,19 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { DocumentsApiError, fetchDocumentDetail, fetchDocuments, fetchDocumentsEnabled, type DocumentDetail, type DocumentRow } from "../api/documents";
 import { authClient } from "../api/auth";
 import { fetchOrganizations } from "../api/organizations";
-import { createAuthoredDocumentDraft, DocumentsEditorApiError } from "../api/documents-editor";
+import { createAuthoredDocumentDraft, documentJsonToHtml, DocumentsEditorApiError, sanitizeDocumentHtml } from "../api/documents-editor";
 import { createIngestedDocument, DocumentsIngestApiError } from "../api/documents-ingest";
 import {
   createDocumentFolder,
   deleteDocumentFolder,
   fetchAuthoredDocuments,
   fetchDocumentFolders,
+  fetchDocumentTemplates,
   renameDocumentFolder,
   deleteIngestedDocument,
   hasPendingIngestedDocumentDeletionMarker,
   pendingIngestedDocumentDeletion,
   type AuthoredDocumentRow,
   type DocumentFolder,
+  type DocumentTemplate,
   type DocumentsLibraryScope,
   type PendingIngestedDocumentDeletion,
 } from "../api/documents-library";
@@ -37,6 +39,11 @@ type AuthoredListState =
   | { status: "loading" }
   | { status: "failed"; error: string }
   | { status: "ready"; documents: AuthoredDocumentRow[] };
+
+type TemplateListState =
+  | { status: "loading" }
+  | { status: "failed"; error: string }
+  | { status: "ready"; templates: DocumentTemplate[] };
 
 type RequestedDocumentSelection =
   | { kind: "none" }
@@ -184,6 +191,7 @@ export function DocumentsPage() {
   const [query, setQuery] = useState("");
   const [authoredQuery, setAuthoredQuery] = useState("");
   const [authoredState, setAuthoredState] = useState<AuthoredListState>({ status: "loading" });
+  const [templateState, setTemplateState] = useState<TemplateListState>({ status: "loading" });
   const [folders, setFolders] = useState<DocumentFolder[]>([]);
   const [folderLoadError, setFolderLoadError] = useState<string | null>(null);
   const [folderNotice, setFolderNotice] = useState<string | null>(null);
@@ -271,6 +279,17 @@ export function DocumentsPage() {
     });
     return () => controller.abort();
   }, [state.status, retry]);
+
+  useEffect(() => {
+    if (state.status !== "ready") return;
+    const controller = new AbortController();
+    void fetchDocumentTemplates(controller.signal).then((templates) => {
+      if (!controller.signal.aborted) setTemplateState({ status: "ready", templates });
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setTemplateState({ status: "failed", error: error instanceof Error ? error.message : "Could not load document templates." });
+    });
+    return () => controller.abort();
+  }, [state.status, retry, libraryScope]);
 
   useEffect(() => {
     if (state.status !== "ready") return;
@@ -464,6 +483,30 @@ export function DocumentsPage() {
       navigate(`/documents/editor/${encodeURIComponent(outcome.data.documentId)}`);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "Could not create the document. Try again.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const createDraftFromTemplate = async (template: DocumentTemplate) => {
+    if (creating) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const scope = await libraryScope();
+      const outcome = await createAuthoredDocumentDraft(scope, {
+        title: template.name,
+        content: template.content,
+        html: sanitizeDocumentHtml(documentJsonToHtml(template.content)),
+        templateId: template.id,
+      });
+      if (outcome.kind === "pending") {
+        setCreateError(outcome.hint);
+        return;
+      }
+      navigate(`/documents/editor/${encodeURIComponent(outcome.data.documentId)}`);
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : "Could not create a draft from this template. Try again.");
     } finally {
       setCreating(false);
     }
@@ -738,6 +781,41 @@ export function DocumentsPage() {
                   </div>
                   <span className={`documents-status ${statusClass(document.status)}`}>{document.status}</span>
                   <button className="documents-secondary-action" type="button" onClick={() => navigate(`/documents/editor/${encodeURIComponent(document.id)}`)}>Open editor</button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      )}
+
+      {state.status === "ready" && (
+        <section className="documents-authored" aria-labelledby="documents-templates-title">
+          <div className="documents-authored-heading">
+            <div>
+              <p className="documents-eyebrow">Reusable starting points</p>
+              <h2 id="documents-templates-title">Document templates</h2>
+            </div>
+            <span>{templateState.status === "ready" ? templateState.templates.length : ""}</span>
+          </div>
+          {templateState.status === "loading" ? <p className="documents-loading" role="status">Loading templates…</p> : null}
+          {templateState.status === "failed" ? (
+            <div className="documents-error" role="alert"><p>{templateState.error}</p><button type="button" onClick={() => setRetry((current) => current + 1)}>Try again</button></div>
+          ) : null}
+          {templateState.status === "ready" && templateState.templates.length === 0 ? (
+            <p className="documents-muted">Save a written document as a template to reuse it here.</p>
+          ) : null}
+          {templateState.status === "ready" && templateState.templates.length > 0 ? (
+            <ul className="documents-authored-list">
+              {templateState.templates.map((template) => (
+                <li key={template.id}>
+                  <div>
+                    <strong>{template.name}</strong>
+                    <span>{template.description || (template.placeholders.length ? `${template.placeholders.length} fillable fields` : "Reusable document layout")}</span>
+                  </div>
+                  <span className="documents-status documents-status-neutral">{template.isSystem === "system" ? "Built in" : "Custom"}</span>
+                  <button className="documents-secondary-action" type="button" disabled={creating} onClick={() => void createDraftFromTemplate(template)}>
+                    {creating ? "Creating…" : "Use template"}
+                  </button>
                 </li>
               ))}
             </ul>

@@ -293,6 +293,45 @@ describe("authored document creation", () => {
     expect(window.localStorage.length).toBe(0);
   });
 
+  it("creates a template-based draft with the template bound into the exact retry payload", async () => {
+    stubWebLocks();
+    const templateId = "6f1b2c3d-0000-4000-8000-000000000004";
+    const draft = {
+      title: "Service quote",
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "{{customer.name}}" }] }] },
+      html: "<p>{{customer.name}}</p>",
+      templateId,
+    };
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(createAuthoredDocumentDraft(templateScope, draft)).rejects.toMatchObject({ status: 0 });
+    const first = bodyOf(calls[0]!);
+    expect(first.input).toMatchObject({ ...draft, pageSettings: DEFAULT_PAGE_SETTINGS });
+    expect(first.intentId).toEqual(expect.any(String));
+
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft(templateScope, draft)).resolves.toMatchObject({ kind: "completed" });
+    expect(bodyOf(retryCalls[0]!)).toEqual(first);
+    expect(organizationHeaderOf(retryCalls[0]!)).toBe(templateScope.organizationId);
+  });
+
+  it("keeps template creation retries isolated by organization", async () => {
+    stubWebLocks();
+    const draft = {
+      title: "Service quote",
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+      html: "<p></p>",
+      templateId: "6f1b2c3d-0000-4000-8000-000000000004",
+    };
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(createAuthoredDocumentDraft(templateScope, draft)).rejects.toMatchObject({ status: 0 });
+    const firstIntent = bodyOf(calls[0]!).intentId;
+    const switchedScope = { ...templateScope, organizationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const { calls: switchedCalls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft(switchedScope, draft)).resolves.toMatchObject({ kind: "completed" });
+    expect(bodyOf(switchedCalls[0]!).intentId).not.toBe(firstIntent);
+    expect(organizationHeaderOf(switchedCalls[0]!)).toBe(switchedScope.organizationId);
+  });
+
   it("reuses the same scoped intent after an uncertain response and blocks malformed UUID output", async () => {
     stubWebLocks();
     const { calls } = recorder(() => { throw new Error("connection lost"); });
