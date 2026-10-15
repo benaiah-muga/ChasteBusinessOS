@@ -814,8 +814,8 @@
       "path": "/api/onboarding",
       "method": "GET",
       "source": "apps/web/src/app/api/onboarding/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -830,8 +830,8 @@
       "path": "/api/onboarding",
       "method": "PATCH",
       "source": "apps/web/src/app/api/onboarding/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

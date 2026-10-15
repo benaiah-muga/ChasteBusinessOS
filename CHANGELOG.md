@@ -96,6 +96,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- The migration route census now records onboarding state reads and updates as Go-owned after authenticated Vite runtime proof.
 - CI now requires the focused Vite and Go verification command while retaining the migration-era workspace checks and live TypeScript proofs; the Next.js production build is no longer required.
 - Vite Messaging refreshes the latest thread page and advances its read cursor only while the reader is near the bottom. Search-around results and older pages remain in place while reading history.
 - The default `pnpm dev` command now starts only the React/Vite app; use `pnpm dev:legacy` explicitly for temporary Next compatibility work.
