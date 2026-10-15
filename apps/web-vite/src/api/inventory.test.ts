@@ -1,15 +1,34 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoStockReport, fetchInventoryReport, InventoryApiError } from "./inventory";
+import { fetchGoStockReport, fetchInventoryEnabled, fetchInventoryReport, InventoryApiError } from "./inventory";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Go inventory stock report client", () => {
+  it("validates the exact Go module switchboard contract", async () => {
+    const catalog = [{ id: "inventory", label: "Inventory", description: "Stock ledger", href: "/inventory" }];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ catalog, enabledModules: ["inventory"], usingDefaults: false }))
+      .mockResolvedValueOnce(Response.json({ catalog: [{ ...catalog[0], unexpected: true }], enabledModules: ["inventory"], usingDefaults: false }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchInventoryEnabled()).resolves.toBe(true);
+    await expect(fetchInventoryEnabled()).rejects.toThrow("unexpected format");
+  });
+
   it("loads the complete inventory report from the Go reader", async () => {
     const report = {
-      items: [{ sku: "BEANS-1KG", name: "Coffee beans", kind: "goods", unitLabel: "bag", onHandThousandths: 3000, reservedThousandths: 500, availableThousandths: 2500, totalValueMinor: 12000, reorderPointThousandths: 1000, reorderNeeded: false }],
+      items: [{
+        id: "10000000-0000-4000-8000-000000000001",
+        sku: "BEANS-1KG", name: "Coffee beans", kind: "goods", unitLabel: "bag", salePriceMinor: 2500,
+        imageUrl: null, tags: [], barcode: null, onHandThousandths: 3000, valueMinor: 12000,
+        avgUnitCostMinor: 4000, reservedThousandths: 500, availableThousandths: 2500, totalValueMinor: 12000,
+        reorderPointThousandths: 1000, reorderNeeded: false,
+      }],
       totalValueMinor: 12000,
-      locations: [{ id: "location-1", code: "MAIN", name: "Main warehouse" }],
-      lots: [], cycleCounts: [], transfers: [], reservations: [],
+      reorderAlerts: [],
+      locations: [{ id: "20000000-0000-4000-8000-000000000002", orgId: "30000000-0000-4000-8000-000000000003", code: "MAIN", name: "Main warehouse", createdAt: "2026-10-14T10:00:00.000Z" }],
+      lots: [{ id: "40000000-0000-4000-8000-000000000004", sku: "BEANS-1KG", lotCode: "BATCH-1", balanceThousandths: 3000, expiresAt: null }],
+      cycleCounts: [], transfers: [], reservations: [],
     };
     const fetchMock = vi.fn().mockResolvedValue(Response.json(report));
     vi.stubGlobal("fetch", fetchMock);
@@ -30,10 +49,15 @@ describe("Go inventory stock report client", () => {
           name: "Coffee beans",
           kind: "goods",
           unitLabel: "bag",
+          salePriceMinor: 2500,
+          imageUrl: null,
+          tags: [],
+          barcode: null,
           onHandThousandths: 3000,
+          valueMinor: 12000,
+          avgUnitCostMinor: 4000,
           reservedThousandths: 500,
           availableThousandths: 2500,
-          valueMinor: 12000,
           reorderPointThousandths: 1000,
           reorderNeeded: false,
         }],
@@ -54,8 +78,31 @@ describe("Go inventory stock report client", () => {
   });
 
   it("fails closed when Go returns a malformed report", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { items: [] } })));
+    const report = {
+      items: [], totalValueMinor: 0, reorderAlerts: [], locations: [], lots: [], cycleCounts: [], transfers: [], reservations: [],
+    };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ ...report, unexpected: true }))
+      .mockResolvedValueOnce(Response.json({ ...report, reservations: undefined }))
+      .mockResolvedValueOnce(Response.json({ ...report, lots: [{ id: "40000000-0000-4000-8000-000000000004", sku: "BEANS-1KG", lotCode: "BATCH-1", expiresAt: null }] })));
 
     await expect(fetchGoStockReport()).rejects.toBeInstanceOf(InventoryApiError);
+    await expect(fetchInventoryReport()).rejects.toMatchObject({ status: 200, message: expect.stringContaining("unexpected format") });
+    await expect(fetchInventoryReport()).rejects.toMatchObject({ status: 200, message: expect.stringContaining("unexpected format") });
+  });
+
+  it("rejects missing and unexpected stock capability fields", async () => {
+    const item = {
+      sku: "BEANS-1KG", name: "Coffee beans", kind: "goods", unitLabel: "bag", salePriceMinor: 2500,
+      imageUrl: null, tags: [], barcode: null, onHandThousandths: 3000, valueMinor: 12000, avgUnitCostMinor: 4000,
+      reservedThousandths: 500, availableThousandths: 2500, reorderPointThousandths: 1000, reorderNeeded: false,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { items: [{ ...item, unexpected: true }], totalValueMinor: 12000 } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { items: [{ ...item, tags: undefined }], totalValueMinor: 12000 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchGoStockReport()).rejects.toThrow("unexpected format");
+    await expect(fetchGoStockReport()).rejects.toThrow("unexpected format");
   });
 });

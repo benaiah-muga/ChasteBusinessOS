@@ -4785,3 +4785,9 @@ new owners and the manifest shows zero legacy runtime paths.
      narrowing by backend, while legacy receipt fields remain optional. Focused
      Projects, Approvals, portal, and widget suites pass 44 tests; lint,
      typecheck, and independent review pass.
+
+450. (Contract and UI verified) Go's Vite Inventory projection now includes
+     each lot's integer balance, and the strict client contract validates it.
+     The page renders populated and zero balances. Eight focused UI and API
+     suites pass 75 tests, the Go handler test and Vite typecheck pass, and
+     independent review found no contract mismatch.

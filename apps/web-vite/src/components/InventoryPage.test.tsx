@@ -4,11 +4,18 @@ import { InventoryPage } from "./InventoryPage";
 
 const items = [
   {
+    id: "44444444-4444-4444-8444-444444444444",
     sku: "MUG-1",
     name: "Ceramic mug",
-    kind: "product",
+    kind: "goods",
     unitLabel: "unit",
+    salePriceMinor: 1_500,
+    imageUrl: null,
+    tags: [],
+    barcode: null,
     onHandThousandths: 4_000,
+    valueMinor: 2_000,
+    avgUnitCostMinor: 500,
     reservedThousandths: 1_000,
     availableThousandths: 3_000,
     totalValueMinor: 2_000,
@@ -16,11 +23,18 @@ const items = [
     reorderNeeded: true,
   },
   {
+    id: "55555555-5555-4555-8555-555555555555",
     sku: "DESK-2",
     name: "Oak desk",
-    kind: "product",
+    kind: "goods",
     unitLabel: "unit",
+    salePriceMinor: 12_000,
+    imageUrl: null,
+    tags: [],
+    barcode: null,
     onHandThousandths: 2_000,
+    valueMinor: 10_000,
+    avgUnitCostMinor: 5_000,
     reservedThousandths: 0,
     availableThousandths: 2_000,
     totalValueMinor: 10_000,
@@ -28,8 +42,21 @@ const items = [
     reorderNeeded: false,
   },
 ];
-const switchboard = { catalog: [{ id: "inventory" }], enabledModules: ["inventory"] };
-const report = { items, totalValueMinor: 12_000, lots: [], locations: [], cycleCounts: [], transfers: [] };
+const switchboard = {
+  catalog: [{ id: "inventory", label: "Inventory", description: "Stock ledger", href: "/inventory" }],
+  enabledModules: ["inventory"],
+  usingDefaults: false,
+};
+const report = {
+  items,
+  totalValueMinor: 12_000,
+  reorderAlerts: [{ sku: "MUG-1", name: "Ceramic mug", onHandThousandths: 4_000, reorderPointThousandths: 5_000, shortfallThousandths: 1_000, avgUnitCostMinor: 500 }],
+  lots: [],
+  locations: [],
+  cycleCounts: [],
+  transfers: [],
+  reservations: [],
+};
 
 function inventoryFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
@@ -78,10 +105,10 @@ describe("Vite inventory page", () => {
     expect(screen.queryByText("MUG-1")).toBeNull();
   });
 
-  it("shows read-only lot details and balances only when the API provides them", async () => {
+  it("shows read-only lot details and balances from the Go report", async () => {
     const lots = [
-      { id: "lot-1", sku: "MUG-1", lotCode: "MUG-MAR-26", expiresAt: "2026-03-12T00:00:00.000Z", balanceThousandths: 1_500 },
-      { id: "lot-2", sku: "DESK-2", lotCode: "DESK-APR-26", expiresAt: null },
+      { id: "66666666-6666-4666-8666-666666666666", sku: "MUG-1", lotCode: "MUG-MAR-26", expiresAt: "2026-03-12T00:00:00.000Z", balanceThousandths: 1_500 },
+      { id: "77777777-7777-4777-8777-777777777777", sku: "DESK-2", lotCode: "DESK-APR-26", expiresAt: null, balanceThousandths: 0 },
     ];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
@@ -97,15 +124,17 @@ describe("Vite inventory page", () => {
     expect(screen.getByText("MUG-MAR-26")).not.toBeNull();
     expect(screen.getByText("Mar 12, 2026")).not.toBeNull();
     expect(screen.getByText("1.5 units")).not.toBeNull();
-    expect(screen.getByText("No expiry date")).not.toBeNull();
-    expect(screen.getByText("Not provided")).not.toBeNull();
+    const noExpiryLotRow = screen.getByText("DESK-APR-26").closest("tr");
+    expect(noExpiryLotRow).not.toBeNull();
+    expect(within(noExpiryLotRow!).getByText("No expiry date")).not.toBeNull();
+    expect(within(noExpiryLotRow!).getByText("0 units")).not.toBeNull();
     expect(screen.queryByRole("link", { name: /inventory workspace/i })).toBeNull();
   });
 
   it("shows read-only stock locations with their codes and names", async () => {
     const locations = [
-      { id: "location-1", code: "MAIN", name: "Main warehouse" },
-      { id: "location-2", code: "SHOP", name: "Retail shop" },
+      { id: "88888888-8888-4888-8888-888888888888", orgId: "11111111-1111-4111-8111-111111111111", code: "MAIN", name: "Main warehouse", createdAt: "2026-05-12T10:30:00.000Z" },
+      { id: "99999999-9999-4999-8999-999999999999", orgId: "11111111-1111-4111-8111-111111111111", code: "SHOP", name: "Retail shop", createdAt: "2026-05-12T10:30:00.000Z" },
     ];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
@@ -161,25 +190,25 @@ describe("Vite inventory page", () => {
   it("shows transfer history in API order and exposes governed transfer actions", async () => {
     const transfers = [
       {
-        id: "transfer-newest",
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         number: 42,
         status: "partial",
         note: "Urgent restock",
         from: "MAIN",
         to: "SHOP",
         lines: [
-          { lineId: "line-42-1", sku: "MUG-1", quantityThousandths: 2_500, confirmedThousandths: 1_000 },
-          { lineId: "line-42-2", sku: "DESK-2", quantityThousandths: -500, confirmedThousandths: 0 },
+          { lineId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", sku: "MUG-1", quantityThousandths: 2_500, confirmedThousandths: 1_000 },
+          { lineId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", sku: "DESK-2", quantityThousandths: 500, confirmedThousandths: 0 },
         ],
       },
       {
-        id: "transfer-older",
+        id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         number: 41,
         status: "cancelled",
         note: null,
         from: "SHOP",
         to: "MAIN",
-        lines: [{ lineId: "line-41-1", sku: "MUG-1", quantityThousandths: 1_000, confirmedThousandths: 1_000 }],
+        lines: [{ lineId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", sku: "MUG-1", quantityThousandths: 1_000, confirmedThousandths: 1_000 }],
       },
     ];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
@@ -219,7 +248,7 @@ describe("Vite inventory page", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { reservations } });
-      return Response.json({ ...report, locations: [{ id: "location-1", code: "MAIN", name: "Main warehouse" }], reservations });
+      return Response.json({ ...report, locations: [{ id: "88888888-8888-4888-8888-888888888888", orgId: organizationId, code: "MAIN", name: "Main warehouse", createdAt: "2026-05-12T10:30:00.000Z" }], reservations });
     }));
     render(<InventoryPage actorId="actor-inventory-test" organizationId={organizationId} />);
 
@@ -325,8 +354,8 @@ describe("Vite inventory page", () => {
         } as const)[body.capabilityId as "inventory.createLocation" | "inventory.createCycleCount"];
         postActions.push(action ?? "unknown");
         return action === "createLocation"
-          ? Response.json({ ok: true, data: { locationId: "location-2" } })
-          : Response.json({ ok: true, data: { countId: "count-1", lineCount: 2 } });
+          ? Response.json({ ok: true, data: { locationId: "99999999-9999-4999-8999-999999999999" } })
+          : Response.json({ ok: true, data: { countId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", lineCount: 2 } });
       }
       reportReads += 1;
       if (reportReads === 1) return Response.json({ ...report, reservations: [] });
@@ -389,7 +418,7 @@ describe("Vite inventory page", () => {
       String(input) === "/api/inventory" && (init?.method ?? "GET") !== "POST",
     ).length;
     page.unmount();
-    await act(async () => { resolveLocationAction?.(Response.json({ ok: true, data: { locationId: "location-2" } })); });
+    await act(async () => { resolveLocationAction?.(Response.json({ ok: true, data: { locationId: "99999999-9999-4999-8999-999999999999" } })); });
 
     const reportReadsAfterUnmount = fetchMock.mock.calls.filter(([input, init]) =>
       String(input) === "/api/inventory" && (init?.method ?? "GET") !== "POST",
@@ -426,7 +455,7 @@ describe("Vite inventory page", () => {
 
     rerender(<InventoryPage actorId={actorId} organizationId={newOrganizationId} />);
     await waitFor(() => expect(requests.filter((request) => request.path === "/api/inventory" && request.org === newOrganizationId)).toHaveLength(1));
-    await act(async () => { resolveAction?.(Response.json({ ok: true, data: { locationId: "location-2" } })); });
+    await act(async () => { resolveAction?.(Response.json({ ok: true, data: { locationId: "99999999-9999-4999-8999-999999999999" } })); });
 
     expect(requests.filter((request) => request.path === "/api/modules")).toEqual([
       { path: "/api/modules", org: oldOrganizationId },
@@ -442,7 +471,7 @@ describe("Vite inventory page", () => {
       if (input === "/api/modules") return Response.json(switchboard);
       if (String(input).startsWith("/api/inventory?sku=")) {
         return Response.json({ movements: [{
-          id: "movement-1",
+          id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
           quantityDelta: 1_000,
           reason: "adjustment",
           note: null,
@@ -479,7 +508,7 @@ describe("Vite inventory page", () => {
   });
 
   it("does not request stock data when Inventory is disabled", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ catalog: [{ id: "inventory" }], enabledModules: [] }));
+    const fetchMock = vi.fn(async () => Response.json({ ...switchboard, enabledModules: [] }));
     vi.stubGlobal("fetch", fetchMock);
     render(<InventoryPage />);
 
@@ -508,7 +537,7 @@ describe("Vite inventory page", () => {
   it("formats value using the active currency's minor-unit scale", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      return Response.json({ items, totalValueMinor: 1_234_560, lots: [], locations: [], cycleCounts: [], transfers: [] });
+      return Response.json({ ...report, totalValueMinor: 1_234_560 });
     }));
     render(<InventoryPage baseCurrency="BHD" />);
 

@@ -43,7 +43,9 @@ describe("Go inventory reservations reader", () => {
   });
 
   it("rejects malformed reads and missing organization scope without fallback", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { reservations: [{ ...reservation, status: "unknown" }] } }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { reservations: [{ ...reservation, status: "unknown" }] } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { reservations: [{ ...reservation, unexpected: true }] } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchInventoryReservations(organizationId)).rejects.toMatchObject({
@@ -51,7 +53,8 @@ describe("Go inventory reservations reader", () => {
       status: 200,
       message: "The Go inventory service returned reservations in an unexpected format.",
     });
+    await expect(fetchInventoryReservations(organizationId)).rejects.toMatchObject({ status: 200, message: expect.stringContaining("unexpected format") });
     await expect(fetchInventoryReservations(null)).rejects.toBeInstanceOf(InventoryReservationsApiError);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

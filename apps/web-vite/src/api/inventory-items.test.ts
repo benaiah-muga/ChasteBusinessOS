@@ -203,6 +203,21 @@ describe("inventory item action API client", () => {
     await expect(getPendingInventoryAdjustment(retryScope)).resolves.toBeNull();
   });
 
+  it("retains an item creation intent after malformed success and reuses it exactly", async () => {
+    const itemId = "40000000-0000-4000-8000-000000000004";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId, unexpected: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+
+    await expect(submitInventoryItemAction(createAction, undefined, retryScope)).rejects.toThrow("unexpected action result");
+    await expect(getPendingInventoryItemCreation(retryScope)).resolves.toEqual(createAction);
+    await expect(submitInventoryItemAction(createAction, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { itemId } });
+    const attempts = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId: string; input: unknown; intentId: string });
+    expect(attempts[1]).toMatchObject({ capabilityId: attempts[0]?.capabilityId, input: attempts[0]?.input, intentId: attempts[0]?.intentId });
+  });
+
   it.each([408, 429])("retains the adjustment intent after retryable HTTP %i", async (status) => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false, error: "Try again" }, { status }))

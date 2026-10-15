@@ -13,9 +13,9 @@ const PendingEnvelope = z.object({
 }).strict();
 
 const ErrorEnvelope = z.object({ ok: z.literal(false), error: z.string().min(1) }).strict();
-const LocationCreated = SuccessEnvelope(z.object({ locationId: z.string().min(1) }).strict());
+const LocationCreated = SuccessEnvelope(z.object({ locationId: z.string().uuid() }).strict());
 const ReservationCreated = SuccessEnvelope(z.object({
-  reservationId: z.string().min(1),
+  reservationId: z.string().uuid(),
   availableAfterThousandths: z.number().int().safe(),
 }).strict());
 const ReservationReleased = SuccessEnvelope(z.object({ released: z.literal(true) }).strict());

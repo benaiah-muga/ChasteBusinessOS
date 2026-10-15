@@ -174,7 +174,8 @@ describe("inventory transfer API client", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "Manager approval required." }, 202))
       .mockResolvedValueOnce(jsonResponse({ ok: false, error: "Source location has insufficient stock." }, 422))
-      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId, number: 12, status: "pending" } }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
 
@@ -183,6 +184,10 @@ describe("inventory transfer API client", () => {
       .resolves.toEqual({ kind: "pending", reason: "Manager approval required." });
     await expect(createInventoryTransfer(input, retryScope)).rejects.toMatchObject({ status: 422, message: "Source location has insufficient stock." });
     await expect(createInventoryTransfer(input, retryScope)).rejects.toThrow("unexpected transfer response");
+    await expect(createInventoryTransfer(input, retryScope)).resolves.toEqual({ kind: "completed" });
+    const malformedAttempt = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    const retryAttempt = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    expect(retryAttempt).toEqual(malformedAttempt);
   });
 
   it("never falls back from a missing Go route and preserves exact retries", async () => {

@@ -116,4 +116,24 @@ describe("Go inventory valuation client", () => {
     expect(second).toMatchObject({ capabilityId: first.capabilityId, input: first.input });
     await expect(readPendingInventoryValuationAction(scope)).resolves.toBeNull();
   });
+
+  it("retains the valuation intent after malformed success and retries the exact request", async () => {
+    installLocks();
+    const action = { action: "post" as const, memo: "Reconcile October stock" };
+    const validOutput = {
+      posted: true, entryId: postedEntryId, varianceMinor: 2500, ledgerValueMinor: 12500, glBalanceMinor: 10000,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(executeResponse({ ok: true, data: { ...validOutput, unexpected: true } }))
+      .mockResolvedValueOnce(executeResponse({ ok: true, data: validOutput }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitInventoryValuationAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingInventoryValuationAction(scope)).resolves.toEqual(action);
+    await expect(submitInventoryValuationAction(action, scope)).resolves.toMatchObject({ kind: "completed", data: validOutput });
+    const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    const retry = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { capabilityId: string; input: unknown; intentId: string };
+    expect(retry).toEqual(first);
+    await expect(readPendingInventoryValuationAction(scope)).resolves.toBeNull();
+  });
 });

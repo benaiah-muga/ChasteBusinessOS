@@ -71,6 +71,21 @@ describe("inventory location and reservation API client", () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(Array(3).fill("/api/capabilities/execute"));
   });
 
+  it("keeps a create-location intent after malformed success and retries the identical request", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { locationId: reservationId, unexpected: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { locationId: reservationId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createInventoryLocation({ code: "MAIN", name: "Main warehouse" }, retryScope))
+      .rejects.toThrow("unexpected result");
+    await expect(createInventoryLocation({ code: "MAIN", name: "Main warehouse" }, retryScope))
+      .resolves.toEqual({ kind: "completed" });
+
+    const attempts = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId: string; input: unknown; intentId: string });
+    expect(attempts[1]).toMatchObject({ capabilityId: attempts[0]?.capabilityId, input: attempts[0]?.input, intentId: attempts[0]?.intentId });
+  });
+
   it("blocks a different action while a Go result is unresolved in the same scope", async () => {
     const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("connection lost"));
     vi.stubGlobal("fetch", fetchMock);

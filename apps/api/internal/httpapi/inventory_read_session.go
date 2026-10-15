@@ -242,10 +242,11 @@ func (h *InventoryReadSessionHandler) readField(r *http.Request, resolved *sessi
 	switch capabilityID {
 	case "inventory.listLots":
 		var rows []struct {
-			ID        string  `json:"id"`
-			SKU       string  `json:"sku"`
-			LotCode   string  `json:"lotCode"`
-			ExpiresAt *string `json:"expiresAt"`
+			ID                 string  `json:"id"`
+			SKU                string  `json:"sku"`
+			LotCode            string  `json:"lotCode"`
+			BalanceThousandths int64   `json:"balanceThousandths"`
+			ExpiresAt          *string `json:"expiresAt"`
 		}
 		if err := json.Unmarshal(output[field], &rows); err != nil {
 			return nil, http.StatusInternalServerError, "internal error"
@@ -255,7 +256,10 @@ func (h *InventoryReadSessionHandler) readField(r *http.Request, resolved *sessi
 		}
 		projected := make([]map[string]any, 0, len(rows))
 		for _, row := range rows {
-			projected = append(projected, map[string]any{"id": row.ID, "sku": row.SKU, "lotCode": row.LotCode, "expiresAt": row.ExpiresAt})
+			projected = append(projected, map[string]any{
+				"id": row.ID, "sku": row.SKU, "lotCode": row.LotCode,
+				"balanceThousandths": row.BalanceThousandths, "expiresAt": row.ExpiresAt,
+			})
 		}
 		output[field], _ = json.Marshal(projected)
 	case "inventory.listTransfers":

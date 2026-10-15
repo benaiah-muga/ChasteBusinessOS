@@ -21,7 +21,10 @@ const ResponseSchema = z.object({
   data: z.object({ reservations: z.array(ReservationSchema) }).strict(),
 }).strict();
 
-const ErrorSchema = z.object({ error: z.string().optional(), message: z.string().optional() });
+const ErrorSchema = z.union([
+  z.object({ error: z.string().min(1) }).strict(),
+  z.object({ ok: z.literal(false), error: z.string().min(1) }).strict(),
+]);
 
 export type GoInventoryReservation = z.infer<typeof ReservationSchema>;
 export type InventoryReservationListItem = Omit<Pick<GoInventoryReservation,
@@ -73,7 +76,7 @@ export async function fetchInventoryReservations(
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const parsedError = ErrorSchema.safeParse(body);
-    const message = parsedError.success ? parsedError.data.message ?? parsedError.data.error : undefined;
+    const message = parsedError.success ? parsedError.data.error : undefined;
     if (message?.trim()) throw new InventoryReservationsApiError(response.status, message);
     if (response.status === 401) throw new InventoryReservationsApiError(401, "Your session has ended. Sign in again to view reservations.");
     if (response.status === 403) throw new InventoryReservationsApiError(403, "You do not have permission to view inventory reservations.");

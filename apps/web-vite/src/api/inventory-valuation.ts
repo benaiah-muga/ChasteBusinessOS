@@ -29,7 +29,11 @@ const PostOutputSchema = z.object({
 }, "The valuation result is inconsistent.");
 const ReverseOutputSchema = z.object({ reversed: z.literal(true), reversalEntryId: z.string().uuid() }).strict();
 const SuccessSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
-const PendingSchema = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string(), approvalId: z.string().optional() }).strict();
+const PendingSchema = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string(), approvalId: z.string().uuid().optional() }).strict();
+const ErrorSchema = z.union([
+  z.object({ error: z.string().min(1) }).strict(),
+  z.object({ ok: z.literal(false), error: z.string().min(1) }).strict(),
+]);
 const AttemptSchema = z.object({ action: ActionSchema, fingerprint: z.string().min(1), intentId: z.string().uuid() }).strict();
 
 export type InventoryValuationEntry = z.infer<typeof EntrySchema>;
@@ -215,10 +219,13 @@ async function execute(
   const body: unknown = await response.json().catch(() => null);
   if (response.status === 202) return body;
   if (!response.ok) {
-    const parsed = z.object({ error: z.string().optional(), message: z.string().optional() }).safeParse(body);
-    const message = parsed.success ? parsed.data.message ?? parsed.data.error : undefined;
+    const parsed = ErrorSchema.safeParse(body);
+    const message = parsed.success ? parsed.data.error : undefined;
     const definitiveNoEffect = [400, 401, 403, 422].includes(response.status);
     throw new InventoryValuationApiError(response.status, message?.trim() || `Could not ${activity}. Check the service and try again.`, !definitiveNoEffect);
+  }
+  if (response.status !== 200) {
+    throw new InventoryValuationApiError(response.status, `Go returned an unexpected response while trying to ${activity}. Retry the exact action or check the journal.`, true);
   }
   return body;
 }

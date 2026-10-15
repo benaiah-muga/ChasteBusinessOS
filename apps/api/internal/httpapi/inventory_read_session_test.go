@@ -62,7 +62,7 @@ func inventoryReadFixtureExecutor() *inventoryReadTestExecutor {
 	}}
 }
 
-func TestInventoryReadSessionHandlerMapsLegacyCatalogShapeThroughCapabilities(t *testing.T) {
+func TestInventoryReadSessionHandlerMapsCatalogShapeThroughCapabilities(t *testing.T) {
 	resolver := &fakeDirectSessionResolver{resolved: inventoryReadTestIdentity()}
 	executor := inventoryReadFixtureExecutor()
 	response := httptest.NewRecorder()
@@ -89,8 +89,8 @@ func TestInventoryReadSessionHandlerMapsLegacyCatalogShapeThroughCapabilities(t 
 		len(body.Reservations) != 0 || len(body.CycleCounts) != 0 || len(body.Lots) != 1 || len(body.Transfers) != 1 {
 		t.Fatalf("legacy catalog response shape mismatch: %+v", body)
 	}
-	if _, hasBalance := body.Lots[0]["balanceThousandths"]; hasBalance {
-		t.Fatal("legacy lot response unexpectedly included balanceThousandths")
+	if got := string(body.Lots[0]["balanceThousandths"]); got != "2000" {
+		t.Fatalf("lot balance=%s, want 2000", got)
 	}
 	if _, hasCreatedAt := body.Transfers[0]["createdAt"]; hasCreatedAt {
 		t.Fatal("legacy transfer response unexpectedly included createdAt")

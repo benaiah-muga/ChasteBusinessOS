@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const MovementSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().uuid(),
   quantityDelta: z.number().int().safe(),
   reason: z.string().min(1),
   note: z.string().nullable(),
@@ -10,7 +10,7 @@ const MovementSchema = z.object({
   lotCode: z.string().nullable(),
   locationCode: z.string().nullable(),
   actorType: z.string().min(1),
-  createdAt: z.string().refine((value) => Number.isFinite(Date.parse(value)), "Expected a valid timestamp"),
+  createdAt: z.string().datetime({ offset: true }),
 }).strict();
 
 const HistoryResponseSchema = z.object({ movements: z.array(MovementSchema), hasMore: z.boolean() }).strict();

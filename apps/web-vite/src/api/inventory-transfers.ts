@@ -16,10 +16,11 @@ const cancelTransferOutput = z.object({ cancelled: z.literal(true) }).strict();
 const pendingEnvelope = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
-  reason: z.string().optional(),
-}).passthrough();
-const failureEnvelope = z.object({ ok: z.literal(false), error: z.string() }).passthrough();
-const legacyFailure = z.object({ error: z.string() }).passthrough();
+  reason: z.string(),
+  approvalId: z.string().uuid().optional(),
+}).strict();
+const failureEnvelope = z.object({ ok: z.literal(false), error: z.string().min(1) }).strict();
+const legacyFailure = z.object({ error: z.string().min(1) }).strict();
 const TransferAttemptSchema = z.object({
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/i),
   intentId: z.string().uuid(),
@@ -244,7 +245,7 @@ async function submit(payload: InventoryTransferAction, fallback: string, retryS
   if (response.status === 202) {
     const pending = pendingEnvelope.safeParse(body);
     if (!pending.success) throw new InventoryTransferApiError(202, "The inventory service returned an unexpected approval response.");
-    return { kind: "pending", reason: pending.data.reason ?? "This transfer requires approval." };
+    return { kind: "pending", reason: pending.data.reason || "This transfer requires approval." };
   }
   if (!response.ok) {
     const failure = failureEnvelope.safeParse(body);
@@ -263,7 +264,7 @@ async function submit(payload: InventoryTransferAction, fallback: string, retryS
         ? confirmTransferOutput.safeParse(envelope.data.data)
         : cancelTransferOutput.safeParse(envelope.data.data)
     : null;
-  if (!output?.success) {
+  if (response.status !== 200 || !output?.success) {
     throw new InventoryTransferApiError(response.status, "The inventory service returned an unexpected transfer response.");
   }
   clearTransferAttempt(attempt);

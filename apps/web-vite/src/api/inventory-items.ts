@@ -26,7 +26,7 @@ const PendingSchema = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
   reason: z.string(),
-  approvalId: z.string().min(1).optional(),
+  approvalId: z.string().uuid().optional(),
 }).strict();
 const ActionResponseSchema = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).strict();
 const CreateItemOutputSchema = z.object({ itemId: z.string().uuid() }).strict();
@@ -287,7 +287,7 @@ export async function submitInventoryItemAction(
   }
 
   const envelope = ActionResponseSchema.safeParse(body);
-  if (!envelope.success) throw new InventoryItemActionError(response.status, "The inventory service returned an unexpected action response.");
+  if (response.status !== 200 || !envelope.success) throw new InventoryItemActionError(response.status, "The inventory service returned an unexpected action response.");
   const output = action.action === "createItem"
     ? CreateItemOutputSchema.safeParse(envelope.data.data)
     : AdjustStockOutputSchema.safeParse(envelope.data.data);
