@@ -205,13 +205,12 @@ func MountGoModuleSettingsRoute(base, route http.Handler) http.Handler {
 // MountGoAIConfigRoute owns the authenticated AI provider configuration API.
 func MountGoAIConfigRoute(base, route http.Handler) http.Handler {
 	if route == nil {
-		return base
+		route = http.NotFoundHandler()
 	}
 	mux := http.NewServeMux()
-	mux.Handle("GET /api/ai-config", route)
-	mux.Handle("POST /api/ai-config", route)
+	mux.Handle("/api/ai-config", route)
+	mux.Handle("/api/ai-config/", http.NotFoundHandler())
 	if base != nil {
-		mux.Handle("HEAD /api/ai-config", base)
 		mux.Handle("/", base)
 	}
 	return mux

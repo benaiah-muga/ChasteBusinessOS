@@ -89,10 +89,6 @@ func goModuleSettingsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
-func goAIConfigRouteEnabledFromEnv(value string) bool {
-	return value != "0"
-}
-
 func goDocumentsEditorWorkspaceEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -238,14 +234,12 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go organization route mounted", "path", "/api/org")
 	}
 	var aiConfigRoute http.Handler
-	if goAIConfigRouteEnabledFromEnv(os.Getenv("GO_AI_CONFIG_ROUTE")) {
-		resolver, resolverErr := getSessionResolver()
-		if resolverErr != nil {
-			return resolverErr
-		}
-		aiConfigRoute = httpapi.NewAIConfigSessionHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs)
-		logger.Info("Go AI config route mounted", "path", "/api/ai-config")
+	aiConfigResolver, aiConfigResolverErr := getSessionResolver()
+	if aiConfigResolverErr != nil {
+		return aiConfigResolverErr
 	}
+	aiConfigRoute = httpapi.NewAIConfigSessionHandler(pool, aiConfigResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go AI config route mounted", "path", "/api/ai-config")
 	var documentsEditorWorkspaceRoute http.Handler
 	if goDocumentsEditorWorkspaceEnabledFromEnv(os.Getenv("GO_DOCUMENTS_EDITOR_WORKSPACE")) {
 		resolver, resolverErr := getSessionResolver()

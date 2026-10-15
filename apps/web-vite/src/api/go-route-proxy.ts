@@ -17,7 +17,6 @@ export type GoRouteProxyFlags = {
   routines: boolean;
   memory: boolean;
   moduleSettings: boolean;
-  aiConfig: boolean;
   policy: boolean;
   teamRead: boolean;
   teamWrite: boolean;
@@ -281,7 +280,6 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     routines: true,
     memory: env.CHASTE_GO_MEMORY_ROUTE !== "0",
     moduleSettings: env.CHASTE_GO_MODULE_SETTINGS_ROUTE !== "0",
-    aiConfig: env.CHASTE_GO_AI_CONFIG_ROUTE !== "0",
     policy: env.CHASTE_GO_POLICY_ROUTE !== "0",
     teamRead: env.CHASTE_GO_TEAM_READ_ROUTE !== "0",
     teamWrite: env.CHASTE_GO_TEAM_WRITE_ROUTE !== "0",
@@ -313,6 +311,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
 
 export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?: string): boolean {
   const path = url ?? "";
+  if (/^\/api\/ai-config(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
   if (flags.onboarding && ["GET", "POST", "PATCH"].includes(method ?? "") && /^\/api\/onboarding(?:\?.*)?$/.test(path)) return true;
   if (/^\/api\/banking(?:\?.*)?$/.test(path)) return true;
   if (/^\/api\/accounting\/budgets(?:\?.*)?$/.test(path)) return true;
@@ -355,7 +354,6 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.routines && ["GET", "POST"].includes(method ?? "") && /^\/api\/routines(?:\?.*)?$/.test(path)) return true;
   if (flags.memory && ["GET", "POST"].includes(method ?? "") && /^\/api\/memory(?:\?.*)?$/.test(path)) return true;
   if (flags.moduleSettings && ["GET", "POST"].includes(method ?? "") && /^\/api\/module-settings(?:\?.*)?$/.test(path)) return true;
-  if (flags.aiConfig && ["GET", "POST"].includes(method ?? "") && /^\/api\/ai-config(?:\?.*)?$/.test(path)) return true;
   if (flags.policy && ["GET", "POST"].includes(method ?? "") && /^\/api\/policy(?:\?.*)?$/.test(path)) return true;
   if (flags.teamRead && method === "GET" && /^\/api\/team(?:\?.*)?$/.test(path)) return true;
   if (flags.teamWrite && method === "POST" && /^\/api\/team(?:\?.*)?$/.test(path)) return true;

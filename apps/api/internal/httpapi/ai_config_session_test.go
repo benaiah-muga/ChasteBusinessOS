@@ -275,22 +275,43 @@ func TestAIConfigSessionHandlerUsesEnvironmentDTOWithoutExposingKey(t *testing.T
 	}
 }
 
-func TestMountGoAIConfigRouteFallsThroughUnsupportedMethodsAndPaths(t *testing.T) {
+func TestMountGoAIConfigRouteKeepsItsNamespaceOutOfTheFallback(t *testing.T) {
 	fallback := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Header().Set("X-Route-Owner", "fallback") })
-	goRoute := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Header().Set("X-Route-Owner", "go") })
+	goRoute := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Route-Owner", "go")
+		if r.Method != http.MethodGet && r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
 	handler := MountGoAIConfigRoute(fallback, goRoute)
-	for _, test := range []struct{ method, path, owner string }{
-		{http.MethodGet, "/api/ai-config", "go"},
-		{http.MethodPost, "/api/ai-config", "go"},
-		{http.MethodHead, "/api/ai-config", "fallback"},
-		{http.MethodDelete, "/api/ai-config", "fallback"},
-		{http.MethodGet, "/api/ai-config/extra", "fallback"},
+	for _, test := range []struct {
+		method, path, owner string
+		status              int
+	}{
+		{http.MethodGet, "/api/ai-config", "go", http.StatusOK},
+		{http.MethodPost, "/api/ai-config", "go", http.StatusOK},
+		{http.MethodHead, "/api/ai-config", "go", http.StatusMethodNotAllowed},
+		{http.MethodDelete, "/api/ai-config", "go", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/api/ai-config/extra", "", http.StatusNotFound},
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
 		if owner := response.Header().Get("X-Route-Owner"); owner != test.owner {
 			t.Errorf("%s %s owner=%q want=%q", test.method, test.path, owner, test.owner)
 		}
+		if response.Code != test.status {
+			t.Errorf("%s %s status=%d want=%d", test.method, test.path, response.Code, test.status)
+		}
+	}
+}
+
+func TestMountGoAIConfigRouteWithoutHandlerDoesNotFallThrough(t *testing.T) {
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Header().Set("X-Route-Owner", "fallback") })
+	handler := MountGoAIConfigRoute(fallback, nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/ai-config", nil))
+	if response.Code != http.StatusNotFound || response.Header().Get("X-Route-Owner") == "fallback" {
+		t.Fatalf("missing AI config owner reached fallback: status=%d headers=%v", response.Code, response.Header())
 	}
 }
 

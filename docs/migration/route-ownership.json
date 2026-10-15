@@ -70,16 +70,16 @@
       "path": "/api/ai-config",
       "method": "GET",
       "source": "apps/web/src/app/api/ai-config/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/ai-config",
       "method": "POST",
       "source": "apps/web/src/app/api/ai-config/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

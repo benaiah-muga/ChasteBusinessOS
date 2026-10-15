@@ -4960,3 +4960,13 @@ new owners and the manifest shows zero legacy runtime paths.
      stored AI configuration through the bounded parser and reject malformed
      or oversized organization settings before using provider credentials.
      Focused worker and public support parser tests pass in Docker.
+
+466. (Vite/Go route verified) Vite Settings AI configuration GET and POST are
+     Go-owned with no legacy selector or fallback. The authenticated Settings
+     page loaded its provider configuration through `/api/ai-config` with HTTP
+     200 and no browser errors. Proxy tests prove the former opt-out value still
+     reaches Go when the fallback points to a distinct legacy server; Go router
+     tests keep unsupported methods and nested paths out of that fallback. The
+     route manifest and its ownership tests now agree that both methods are
+     verified Go routes. The census is 94 API files, 162 methods (91 Go, 69
+     legacy, 2 auth), and 30 Vite pages.

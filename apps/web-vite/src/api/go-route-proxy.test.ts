@@ -634,8 +634,6 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_MEMORY_ROUTE", flag: "memory", method: "POST", url: "/api/memory" },
   { env: "CHASTE_GO_MODULE_SETTINGS_ROUTE", flag: "moduleSettings", method: "GET", url: "/api/module-settings?module=inventory" },
   { env: "CHASTE_GO_MODULE_SETTINGS_ROUTE", flag: "moduleSettings", method: "POST", url: "/api/module-settings" },
-  { env: "CHASTE_GO_AI_CONFIG_ROUTE", flag: "aiConfig", method: "GET", url: "/api/ai-config" },
-  { env: "CHASTE_GO_AI_CONFIG_ROUTE", flag: "aiConfig", method: "POST", url: "/api/ai-config" },
   { env: "CHASTE_GO_POLICY_ROUTE", flag: "policy", method: "GET", url: "/api/policy" },
   { env: "CHASTE_GO_POLICY_ROUTE", flag: "policy", method: "POST", url: "/api/policy" },
   { env: "CHASTE_GO_TEAM_READ_ROUTE", flag: "teamRead", method: "GET", url: "/api/team" },
@@ -839,9 +837,8 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.routines).toBe(true);
     expect(flags.memory).toBe(true);
     expect(flags.moduleSettings).toBe(true);
-    expect(flags.aiConfig).toBe(true);
     expect(flags.onboarding).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "modulesWrite", "projects", "routines", "memory", "moduleSettings", "aiConfig", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "crmFollowUpDraft", "supportReplyDraft", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision", "supportPublic", "branding", "ledger", "myWorkSummary", "signals", "notifications", "notificationsWrite", "onboarding", "scimRead", "scimWrite", "scimTokens"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "analyticsReport", "myWork", "dashboard", "metrics", "modulesRead", "modulesWrite", "projects", "routines", "memory", "moduleSettings", "policy", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "crmReads", "crmFollowUpDraft", "supportReplyDraft", "posRead", "posShiftSummary", "setup", "approvalsRead", "approvalsDecision", "supportPublic", "branding", "ledger", "myWorkSummary", "signals", "notifications", "notificationsWrite", "onboarding", "scimRead", "scimWrite", "scimTokens"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -870,9 +867,9 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/ai-config")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/ai-config?source=workspace")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/ai-config")).toBe(true);
-    expect(isGoRouteRequest(flags, "PUT", "/api/ai-config")).toBe(false);
-    expect(isGoRouteRequest(flags, "DELETE", "/api/ai-config")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/ai-config/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "PUT", "/api/ai-config")).toBe(true);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/ai-config")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/ai-config/extra")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/policy")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/policy?source=settings")).toBe(true);
     expect(isGoRouteRequest(flags, "PUT", "/api/policy")).toBe(false);
@@ -921,34 +918,34 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(rolledBack, "GET", "/api/dashboard")).toBe(false);
   });
 
-  it("routes AI config GET and POST to Go by default and supports an explicit proxy selector opt-out", () => {
+  it("routes the entire AI config namespace to Go without a Next fallback selector", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
-    expect(defaults.aiConfig).toBe(true);
-    expect(isGoRouteRequest(defaults, "GET", "/api/ai-config")).toBe(true);
-    expect(isGoRouteRequest(defaults, "POST", "/api/ai-config")).toBe(true);
-    expect(isGoRouteRequest(defaults, "PATCH", "/api/ai-config")).toBe(false);
-
-    const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_AI_CONFIG_ROUTE: "0" });
-    expect(rolledBack.aiConfig).toBe(false);
-    expect(isGoRouteRequest(rolledBack, "GET", "/api/ai-config")).toBe(false);
-    expect(isGoRouteRequest(rolledBack, "POST", "/api/ai-config")).toBe(false);
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]) {
+      expect(isGoRouteRequest(defaults, method, "/api/ai-config")).toBe(true);
+      expect(isGoRouteRequest(defaults, method, "/api/ai-config/extra")).toBe(true);
+    }
+    const formerOptOut = goRouteProxyFlagsFromEnv({ CHASTE_GO_AI_CONFIG_ROUTE: "0" });
+    expect(isGoRouteRequest(formerOptOut, "GET", "/api/ai-config")).toBe(true);
+    expect(isGoRouteRequest(formerOptOut, "POST", "/api/ai-config")).toBe(true);
   });
 
   it("forwards AI config reads and credential writes to Go without hitting the legacy proxy", async () => {
     const go = requestRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
-
+    const legacy = requestRecorder("legacy");
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
 
     const vite = await createViteServer({
       configFile: false,
       appType: "custom",
-      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({}), goOrigin)],
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_AI_CONFIG_ROUTE: "0" }), goOrigin)],
       server: {
         host: "127.0.0.1",
         port: 0,
         strictPort: false,
-        proxy: { "/api": { target: goOrigin, changeOrigin: false } },
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
       },
     });
     await vite.listen();
@@ -978,6 +975,9 @@ describe("Vite Go route proxy selection", () => {
       cookie,
       body: JSON.stringify({ provider: "nvidia", apiKey: "proof-only-key", intentId }),
     });
+
+    const unsupported = await fetch(`${baseUrl}/api/ai-config`, { method: "DELETE", headers: { cookie } });
+    expect(await unsupported.json()).toMatchObject({ target: "go", method: "DELETE", url: "/api/ai-config" });
   });
 
   it("allows explicit proxy selector opt-out for analytics discovery, preview, and report generation", () => {

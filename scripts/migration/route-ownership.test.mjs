@@ -27,6 +27,20 @@ test("Go-owned auth namespace stays distinct from pending Better Auth parity", (
   );
 });
 
+test("Vite AI configuration methods are verified Go-owned routes", () => {
+  const aiConfigRoutes = manifest.entries.filter(
+    (entry) => entry.kind === "api" && entry.path === "/api/ai-config",
+  );
+
+  assert.deepEqual(
+    aiConfigRoutes.map(({ method, owner, parity }) => ({ method, owner, parity })),
+    [
+      { method: "GET", owner: "go", parity: "verified" },
+      { method: "POST", owner: "go", parity: "verified" },
+    ],
+  );
+});
+
 test("pending auth ownership is limited to the Better Auth catch-all", () => {
   assert.equal(allowsPendingAuthOwner("api", "/api/auth/[...all]", "auth", "pending"), true);
   assert.equal(allowsPendingAuthOwner("api", "/api/analytics", "auth", "pending"), false);
@@ -121,62 +135,62 @@ test("generated Go route declarations still require verified parity", () => {
   assert.ok(overrides.goRoutes.every((route) => route.kind === "api" && route.owner === "go" && route.parity === "verified"));
 });
 
-test("organization persona manifest ownership stays Go with parity pending", () => {
+test("organization persona manifest ownership is verified Go", () => {
   assert.deepEqual(
     manifest.entries
       .filter((entry) => entry.kind === "api" && entry.path === "/api/org" && ["PUT", "PATCH"].includes(entry.method))
       .map(({ method, owner, parity }) => ({ method, owner, parity })),
     [
-      { method: "PUT", owner: "go", parity: "pending" },
-      { method: "PATCH", owner: "go", parity: "pending" },
+      { method: "PUT", owner: "go", parity: "verified" },
+      { method: "PATCH", owner: "go", parity: "verified" },
     ],
   );
 });
 
-test("routine collection manifest ownership stays Go with parity pending", () => {
+test("routine collection manifest ownership is verified Go", () => {
   assert.deepEqual(
     manifest.entries
       .filter((entry) => entry.kind === "api" && entry.path === "/api/routines")
       .map(({ method, owner, parity }) => ({ method, owner, parity })),
     [
-      { method: "GET", owner: "go", parity: "pending" },
-      { method: "POST", owner: "go", parity: "pending" },
+      { method: "GET", owner: "go", parity: "verified" },
+      { method: "POST", owner: "go", parity: "verified" },
     ],
   );
 });
 
-test("memory collection manifest ownership stays Go with parity pending", () => {
+test("memory collection manifest ownership is verified Go", () => {
   assert.deepEqual(
     manifest.entries
       .filter((entry) => entry.kind === "api" && entry.path === "/api/memory")
       .map(({ method, owner, parity }) => ({ method, owner, parity })),
     [
-      { method: "GET", owner: "go", parity: "pending" },
-      { method: "POST", owner: "go", parity: "pending" },
+      { method: "GET", owner: "go", parity: "verified" },
+      { method: "POST", owner: "go", parity: "verified" },
     ],
   );
 });
 
-test("module settings collection manifest ownership stays Go with parity pending", () => {
+test("module settings collection manifest ownership is verified Go", () => {
   assert.deepEqual(
     manifest.entries
       .filter((entry) => entry.kind === "api" && entry.path === "/api/module-settings")
       .map(({ method, owner, parity }) => ({ method, owner, parity })),
     [
-      { method: "GET", owner: "go", parity: "pending" },
-      { method: "POST", owner: "go", parity: "pending" },
+      { method: "GET", owner: "go", parity: "verified" },
+      { method: "POST", owner: "go", parity: "verified" },
     ],
   );
 });
 
-test("policy collection manifest ownership stays Go with parity pending", () => {
+test("policy collection manifest ownership is verified Go", () => {
   assert.deepEqual(
     manifest.entries
       .filter((entry) => entry.kind === "api" && entry.path === "/api/policy")
       .map(({ method, owner, parity }) => ({ method, owner, parity })),
     [
-      { method: "GET", owner: "go", parity: "pending" },
-      { method: "POST", owner: "go", parity: "pending" },
+      { method: "GET", owner: "go", parity: "verified" },
+      { method: "POST", owner: "go", parity: "verified" },
     ],
   );
 });
