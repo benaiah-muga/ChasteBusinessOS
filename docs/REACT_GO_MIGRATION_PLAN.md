@@ -4749,3 +4749,7 @@ new owners and the manifest shows zero legacy runtime paths.
      incomplete aging payloads fail closed. The focused Purchasing API suite
      passes 62 tests, and independent review confirmed the schemas match Go's
      workspace response types.
+
+444. (Typecheck verified) Vite Sales now narrows recovered order writes by
+     action before reading delivery-only fields. This fixes the strict TypeScript
+     error in the success-message branch without changing the action result.

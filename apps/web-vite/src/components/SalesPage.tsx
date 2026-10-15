@@ -462,7 +462,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
           ? `Order ${orderLabel} cancelled.`
           : result.action === "update"
             ? `Draft order ${orderLabel} updated.`
-          : result.data.orderStatus === "delivered"
+          : result.action === "deliver" && result.data.orderStatus === "delivered"
             ? `Order ${orderLabel} fully delivered and invoiced.`
             : `Reserved quantities delivered and invoiced for order ${orderLabel}. The order remains confirmed.`,
       });
