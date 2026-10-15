@@ -57,6 +57,20 @@ const AnalyticsQuestionSchema = z.object({
   }).strict().nullable(),
 }).strict();
 
+const AnalyticsExplainChangeSchema = z.object({
+  priorTotalMinor: z.number(),
+  currentTotalMinor: z.number(),
+  deltaMinor: z.number(),
+  contributions: z.array(z.object({
+    key: z.string(),
+    priorMinor: z.number(),
+    currentMinor: z.number(),
+    deltaMinor: z.number(),
+    shareOfDelta: z.number().nullable(),
+  }).strict()),
+  drill: z.array(z.object({ key: z.string(), invoiceIds: z.array(z.string()) }).strict()),
+}).strict();
+
 const ModuleSwitchboardSchema = z.object({
   catalog: z.array(z.object({
     id: z.string().min(1),
@@ -77,6 +91,15 @@ export type AnalyticsReportInput = z.infer<typeof ReportInputSchema>;
 export type AnalyticsReport = z.infer<typeof ReportSchema>;
 export type AnalyticsQuestionFocus = "revenue" | "collections" | "pipeline";
 export type AnalyticsQuestion = z.infer<typeof AnalyticsQuestionSchema>;
+export type AnalyticsExplainChangeDimension = "customer" | "product";
+export type AnalyticsExplainChangeInput = {
+  dimension: AnalyticsExplainChangeDimension;
+  periodAFrom: string;
+  periodATo: string;
+  periodBFrom: string;
+  periodBTo: string;
+};
+export type AnalyticsExplainChange = z.infer<typeof AnalyticsExplainChangeSchema>;
 
 export class AnalyticsApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -176,6 +199,26 @@ export async function askAnalytics(focus: AnalyticsQuestionFocus, signal?: Abort
     AnalyticsQuestionSchema,
     await getJson(`/api/analytics?${query.toString()}`, signal),
     "analytics insight",
+  );
+}
+
+export async function explainAnalyticsChange(input: AnalyticsExplainChangeInput, signal?: AbortSignal): Promise<AnalyticsExplainChange> {
+  const validated = z.object({
+    dimension: z.enum(["customer", "product"]),
+    periodAFrom: z.string().datetime(),
+    periodATo: z.string().datetime(),
+    periodBFrom: z.string().datetime(),
+    periodBTo: z.string().datetime(),
+  }).strict().safeParse(input);
+  if (!validated.success || Date.parse(validated.data.periodAFrom) >= Date.parse(validated.data.periodATo) ||
+      Date.parse(validated.data.periodBFrom) >= Date.parse(validated.data.periodBTo)) {
+    throw new AnalyticsApiError(0, "Choose valid, non-empty comparison periods.");
+  }
+  const query = new URLSearchParams({ explainChange: "1", ...validated.data });
+  return parseResponse(
+    AnalyticsExplainChangeSchema,
+    await getJson(`/api/analytics?${query.toString()}`, signal),
+    "metric change analysis",
   );
 }
 

@@ -4645,3 +4645,12 @@ new owners and the manifest shows zero legacy runtime paths.
      package passes. Authenticated browser proof selected a template, confirmed
      its content in the new draft after reload, and recorded successful Go
      capability requests with no browser errors.
+
+432. (Runtime verified) Vite Analytics compares customer or product revenue
+     across two inclusive date ranges through the session-authenticated Go
+     `analytics.explainChange` route. The page shows period totals, movement,
+     contributions, and invoice drill IDs when activity exists. Focused
+     Analytics tests pass 23 cases, with Vite typecheck/lint and focused Go
+     handler/parser checks passing. Authenticated browser proof received HTTP
+     200 from Go and rendered the zero-activity empty state for the selected
+     dates; the browser reported no errors.

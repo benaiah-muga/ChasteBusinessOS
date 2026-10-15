@@ -882,6 +882,7 @@ func ParseAnalyticsExplainChangeInput(raw json.RawMessage) (AnalyticsExplainChan
 	if input.Dimension, err = projectRequiredEnum(fields, "dimension", []string{"customer", "product"}); err != nil {
 		return AnalyticsExplainChangeInput{}, err
 	}
+	parsedPeriods := make(map[string]time.Time, 4)
 	for _, key := range []string{"periodAFrom", "periodATo", "periodBFrom", "periodBTo"} {
 		var value string
 		if value, err = requiredCRMDealString(fields, key, 0, 0); err != nil {
@@ -897,9 +898,14 @@ func ParseAnalyticsExplainChangeInput(raw json.RawMessage) (AnalyticsExplainChan
 		case "periodBTo":
 			input.PeriodBTo = value
 		}
-		if _, err := time.Parse(time.RFC3339, value); err != nil {
+		parsed, parseErr := time.Parse(time.RFC3339, value)
+		if parseErr != nil {
 			return AnalyticsExplainChangeInput{}, errors.New(key + " must be an ISO datetime")
 		}
+		parsedPeriods[key] = parsed
+	}
+	if !parsedPeriods["periodAFrom"].Before(parsedPeriods["periodATo"]) || !parsedPeriods["periodBFrom"].Before(parsedPeriods["periodBTo"]) {
+		return AnalyticsExplainChangeInput{}, errors.New("comparison periods must have a start before their end")
 	}
 	return input, nil
 }
@@ -972,6 +978,13 @@ func ValidateAnalyticsDatasetInput(capabilityID string, raw json.RawMessage) err
 	default:
 		return errors.New("unsupported analytics dataset")
 	}
+}
+
+// ValidateAnalyticsExplainChangeInput validates the comparison periods before
+// the authenticated session handler dispatches the governed read capability.
+func ValidateAnalyticsExplainChangeInput(raw json.RawMessage) error {
+	_, err := ParseAnalyticsExplainChangeInput(raw)
+	return err
 }
 
 // ── Execute functions ──

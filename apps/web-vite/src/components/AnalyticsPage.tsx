@@ -6,9 +6,12 @@ import {
   fetchAnalyticsEnabled,
   fetchAnalyticsPreview,
   generateAnalyticsReport,
+  explainAnalyticsChange,
   askAnalytics,
   type AnalyticsChartType,
   type AnalyticsDataset,
+  type AnalyticsExplainChange,
+  type AnalyticsExplainChangeDimension,
   type AnalyticsPreview,
   type AnalyticsQuestion,
   type AnalyticsQuestionFocus,
@@ -39,6 +42,31 @@ function errorMessage(error: unknown): string {
   return "Could not reach the analytics service. Check your connection and try again.";
 }
 
+function dateValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function defaultComparisonPeriods(): { aFrom: string; aTo: string; bFrom: string; bTo: string } {
+  const today = new Date();
+  const bStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const aStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const aEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+  return { aFrom: dateValue(aStart), aTo: dateValue(aEnd), bFrom: dateValue(bStart), bTo: dateValue(today) };
+}
+
+function toPeriodStart(value: string): string {
+  return new Date(`${value}T00:00:00.000Z`).toISOString();
+}
+
+function toPeriodEndExclusive(value: string): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString();
+}
+
 export function AnalyticsPage({ actorId, organizationId }: { actorId?: string | null; organizationId?: string | null } = {}) {
   const scopeIdentity = JSON.stringify([actorId?.trim() ?? "", organizationId?.trim() ?? ""]);
   const currentScopeIdentity = useRef(scopeIdentity);
@@ -54,6 +82,10 @@ export function AnalyticsPage({ actorId, organizationId }: { actorId?: string | 
   const [questionFocus, setQuestionFocus] = useState<AnalyticsQuestionFocus>("revenue");
   const [question, setQuestion] = useState<{ scopeIdentity: string; result: AnalyticsQuestion } | null>(null);
   const [questionBusyScope, setQuestionBusyScope] = useState<string | null>(null);
+  const [comparisonPeriods, setComparisonPeriods] = useState(defaultComparisonPeriods);
+  const [comparisonDimension, setComparisonDimension] = useState<AnalyticsExplainChangeDimension>("customer");
+  const [comparison, setComparison] = useState<{ scopeIdentity: string; result: AnalyticsExplainChange } | null>(null);
+  const [comparisonBusyScope, setComparisonBusyScope] = useState<string | null>(null);
   const [reportTitle, setReportTitle] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -62,6 +94,7 @@ export function AnalyticsPage({ actorId, organizationId }: { actorId?: string | 
   const previewControllers = useRef(new Map<string, AbortController>());
   const generationController = useRef<AbortController | null>(null);
   const questionController = useRef<AbortController | null>(null);
+  const comparisonController = useRef<AbortController | null>(null);
   const questionRequestScope = useRef<string | null>(null);
   const generationInFlight = useRef(false);
 
@@ -91,6 +124,7 @@ export function AnalyticsPage({ actorId, organizationId }: { actorId?: string | 
     setSections([]);
     setPreviews({});
     setReport(null);
+    setComparison(null);
     setReportTitle(null);
     setNotice(null);
     void loadWorkspace(controller.signal);
@@ -104,6 +138,8 @@ export function AnalyticsPage({ actorId, organizationId }: { actorId?: string | 
       generationController.current = null;
       questionController.current?.abort();
       questionController.current = null;
+      comparisonController.current?.abort();
+      comparisonController.current = null;
     };
   }, [loadWorkspace, scopeIdentity]);
 
@@ -113,6 +149,10 @@ export function AnalyticsPage({ actorId, organizationId }: { actorId?: string | 
     questionRequestScope.current = null;
     setQuestion(null);
     setQuestionBusyScope(null);
+    comparisonController.current?.abort();
+    comparisonController.current = null;
+    setComparison(null);
+    setComparisonBusyScope(null);
   }, [scopeIdentity]);
 
   async function addDataset(datasetId: string): Promise<void> {
@@ -210,6 +250,40 @@ export function AnalyticsPage({ actorId, organizationId }: { actorId?: string | 
         questionController.current = null;
         questionRequestScope.current = null;
         if (mounted.current) setQuestionBusyScope(null);
+      }
+    }
+  }
+
+  async function explainChange(): Promise<void> {
+    if (comparisonBusyScope === scopeIdentity) return;
+    const { aFrom, aTo, bFrom, bTo } = comparisonPeriods;
+    if (!aFrom || !aTo || !bFrom || !bTo || aFrom > aTo || bFrom > bTo) {
+      setNotice("Choose a start and end date for both comparison periods.");
+      return;
+    }
+    const controller = new AbortController();
+    comparisonController.current?.abort();
+    comparisonController.current = controller;
+    const submittedScope = scopeIdentity;
+    setComparisonBusyScope(submittedScope);
+    setComparison(null);
+    setNotice(null);
+    try {
+      const result = await explainAnalyticsChange({
+        dimension: comparisonDimension,
+        periodAFrom: toPeriodStart(aFrom),
+        periodATo: toPeriodEndExclusive(aTo),
+        periodBFrom: toPeriodStart(bFrom),
+        periodBTo: toPeriodEndExclusive(bTo),
+      }, controller.signal);
+      if (!mounted.current || controller.signal.aborted || currentScopeIdentity.current !== submittedScope) return;
+      setComparison({ scopeIdentity: submittedScope, result });
+    } catch (error) {
+      if (mounted.current && !controller.signal.aborted) setNotice(errorMessage(error));
+    } finally {
+      if (comparisonController.current === controller && currentScopeIdentity.current === submittedScope) {
+        comparisonController.current = null;
+        if (mounted.current) setComparisonBusyScope(null);
       }
     }
   }
@@ -331,6 +405,43 @@ export function AnalyticsPage({ actorId, organizationId }: { actorId?: string | 
             {question.result.proposedAction && (
               <p className="analytics-composer-note">Suggested action: {question.result.proposedAction.capabilityId}. {question.result.proposedAction.why}</p>
             )}
+          </div>
+        )}
+      </section>
+
+      <section className="analytics-composer" aria-labelledby="analytics-change-title">
+        <div className="analytics-controls">
+          <label className="analytics-field">
+            <span id="analytics-change-title">Explain a revenue change</span>
+            <select value={comparisonDimension} onChange={(event) => setComparisonDimension(event.currentTarget.value as AnalyticsExplainChangeDimension)}>
+              <option value="customer">By customer</option>
+              <option value="product">By product</option>
+            </select>
+          </label>
+          {(["aFrom", "aTo", "bFrom", "bTo"] as const).map((key) => (
+            <label className="analytics-field" key={key}>
+              <span>{({ aFrom: "Period A start", aTo: "Period A last day", bFrom: "Period B start", bTo: "Period B last day" })[key]}</span>
+              <input type="date" value={comparisonPeriods[key]} onChange={(event) => {
+                const value = event.currentTarget.value;
+                setComparisonPeriods((current) => ({ ...current, [key]: value }));
+              }} />
+            </label>
+          ))}
+          <button className="analytics-primary-button" type="button" onClick={() => void explainChange()} disabled={comparisonBusyScope === scopeIdentity} aria-busy={comparisonBusyScope === scopeIdentity}>
+            {comparisonBusyScope === scopeIdentity ? "Analyzing…" : "Explain change"}
+          </button>
+        </div>
+        <p className="analytics-composer-note">Compare invoiced totals across two date ranges. Period end dates are included; amounts are shown in minor units.</p>
+        {comparison?.scopeIdentity === scopeIdentity && (
+          <div className="analytics-question-results" aria-live="polite">
+            <h2>Revenue movement</h2>
+            <p>Period A: {comparison.result.priorTotalMinor.toLocaleString()} minor units. Period B: {comparison.result.currentTotalMinor.toLocaleString()} minor units. Change: {comparison.result.deltaMinor.toLocaleString()} minor units.</p>
+            {comparison.result.contributions.length === 0 ? <p>No invoiced activity was found in either period.</p> : (
+              <ul>{comparison.result.contributions.map((item) => (
+                <li key={item.key}>{item.key}: {item.deltaMinor.toLocaleString()} minor units ({item.shareOfDelta === null ? "no net change" : `${(item.shareOfDelta * 100).toFixed(1)}% of change`})</li>
+              ))}</ul>
+            )}
+            {comparison.result.drill.map((item) => <p className="analytics-composer-note" key={item.key}>{item.key} invoices: {item.invoiceIds.length ? item.invoiceIds.join(", ") : "No invoices in period B"}</p>)}
           </div>
         )}
       </section>

@@ -93,6 +93,52 @@ func TestAnalyticsSessionHandlerRunsKnownDatasetPreviewThroughExecutor(t *testin
 	}
 }
 
+func TestAnalyticsSessionHandlerRunsMetricChangeThroughResolvedSessionScope(t *testing.T) {
+	identity := directTestIdentity()
+	executor := &analyticsReportExecutor{results: map[string]capability.Result{
+		"analytics.explainChange": {OK: true, Data: json.RawMessage(`{"priorTotalMinor":1000,"currentTotalMinor":1500,"deltaMinor":500,"contributions":[],"drill":[]}`)},
+	}}
+	response := httptest.NewRecorder()
+	path := "/api/analytics?explainChange=1&dimension=customer&periodAFrom=2026-01-01T00%3A00%3A00Z&periodATo=2026-02-01T00%3A00%3A00Z&periodBFrom=2026-02-01T00%3A00%3A00Z&periodBTo=2026-03-01T00%3A00%3A00Z"
+	NewAnalyticsSessionHandler(&fakeDirectSessionResolver{resolved: identity}, executor, nil).ServeHTTP(response, analyticsRequest(http.MethodGet, path))
+
+	if response.Code != http.StatusOK || len(executor.calls) != 1 || executor.calls[0].id != "analytics.explainChange" {
+		t.Fatalf("status=%d calls=%+v body=%s", response.Code, executor.calls, response.Body.String())
+	}
+	var input capability.AnalyticsExplainChangeInput
+	if err := json.Unmarshal(executor.calls[0].input, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.Dimension != "customer" || input.PeriodAFrom != "2026-01-01T00:00:00Z" || input.PeriodBTo != "2026-03-01T00:00:00Z" {
+		t.Fatalf("unexpected capability input: %+v", input)
+	}
+	claims := executor.calls[0].claims
+	if claims.Subject != identity.UserID || claims.OrganizationID != *identity.OrgID || claims.AuthSessionID != identity.AuthSessionID || claims.CapabilityID != "analytics.explainChange" {
+		t.Fatalf("claims were not derived from the verified session: %+v", claims)
+	}
+}
+
+func TestAnalyticsSessionHandlerRejectsMalformedMetricChangeSelectors(t *testing.T) {
+	identity := directTestIdentity()
+	executor := &analyticsReportExecutor{}
+	for _, path := range []string{
+		"/api/analytics?explainChange=1&dimension=customer",
+		"/api/analytics?explainChange=1&dimension=other&periodAFrom=2026-01-01T00%3A00%3A00Z&periodATo=2026-02-01T00%3A00%3A00Z&periodBFrom=2026-02-01T00%3A00%3A00Z&periodBTo=2026-03-01T00%3A00%3A00Z",
+		"/api/analytics?explainChange=1&dimension=customer&periodAFrom=bad&periodATo=2026-02-01T00%3A00%3A00Z&periodBFrom=2026-02-01T00%3A00%3A00Z&periodBTo=2026-03-01T00%3A00%3A00Z",
+		"/api/analytics?explainChange=1&explainChange=1&dimension=customer&periodAFrom=2026-01-01T00%3A00%3A00Z&periodATo=2026-02-01T00%3A00%3A00Z&periodBFrom=2026-02-01T00%3A00%3A00Z&periodBTo=2026-03-01T00%3A00%3A00Z",
+		"/api/analytics?explainChange=1&questionFocus=revenue&dimension=customer&periodAFrom=2026-01-01T00%3A00%3A00Z&periodATo=2026-02-01T00%3A00%3A00Z&periodBFrom=2026-02-01T00%3A00%3A00Z&periodBTo=2026-03-01T00%3A00%3A00Z",
+	} {
+		response := httptest.NewRecorder()
+		NewAnalyticsSessionHandler(&fakeDirectSessionResolver{resolved: identity}, executor, nil).ServeHTTP(response, analyticsRequest(http.MethodGet, path))
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("path=%q status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("malformed selectors reached executor: %+v", executor.calls)
+	}
+}
+
 func TestAnalyticsSessionHandlerRunsBusinessQuestionWithResolvedSessionScope(t *testing.T) {
 	identity := directTestIdentity()
 	executor := &analyticsReportExecutor{results: map[string]capability.Result{

@@ -125,6 +125,26 @@ func (h *AnalyticsSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		h.executeRead(w, r, resolved, "analytics.askYourBusiness", input)
 		return
 	}
+	if query.Has("explainChange") {
+		if query.Get("explainChange") != "1" || len(query) != 6 || len(query["explainChange"]) != 1 ||
+			len(query["dimension"]) != 1 || len(query["periodAFrom"]) != 1 ||
+			len(query["periodATo"]) != 1 || len(query["periodBFrom"]) != 1 || len(query["periodBTo"]) != 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid analytics change request"})
+			return
+		}
+		input := map[string]string{
+			"dimension": query.Get("dimension"), "periodAFrom": query.Get("periodAFrom"),
+			"periodATo": query.Get("periodATo"), "periodBFrom": query.Get("periodBFrom"),
+			"periodBTo": query.Get("periodBTo"),
+		}
+		raw, err := json.Marshal(input)
+		if err != nil || capability.ValidateAnalyticsExplainChangeInput(raw) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid analytics change request"})
+			return
+		}
+		h.executeRead(w, r, resolved, "analytics.explainChange", raw)
+		return
+	}
 	if len(query) > 1 || (query.Has("dataset") && len(query["dataset"]) != 1) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid analytics query"})
 		return

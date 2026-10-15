@@ -7,6 +7,7 @@ import {
   fetchAnalyticsEnabled,
   fetchAnalyticsPreview,
   generateAnalyticsReport,
+  explainAnalyticsChange,
 } from "./analytics";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -72,7 +73,7 @@ describe("analytics API client", () => {
       sections: [{ heading: "Top customers this period", citations: ["Acme"], lines: ["Acme: 2 invoice(s), 1250 minor"] }],
       proposedAction: { capabilityId: "accounting.createInvoice", inputDraft: {}, why: "Revenue needs attention" },
     };
-    const fetchMock = vi.fn(async () => Response.json(result));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json(result));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(askAnalytics("revenue")).resolves.toEqual(result);
@@ -90,6 +91,48 @@ describe("analytics API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(askAnalytics("collections")).rejects.toEqual(new AnalyticsApiError(403, "You do not have permission to access this analytics data."));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("requests and validates an exact governed metric comparison", async () => {
+    const result = {
+      priorTotalMinor: 1000,
+      currentTotalMinor: 1500,
+      deltaMinor: 500,
+      contributions: [{ key: "Acme", priorMinor: 1000, currentMinor: 1500, deltaMinor: 500, shareOfDelta: 1 }],
+      drill: [{ key: "Acme", invoiceIds: ["invoice-1"] }],
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json(result));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(explainAnalyticsChange({
+      dimension: "customer",
+      periodAFrom: "2026-01-01T00:00:00.000Z",
+      periodATo: "2026-02-01T00:00:00.000Z",
+      periodBFrom: "2026-02-01T00:00:00.000Z",
+      periodBTo: "2026-03-01T00:00:00.000Z",
+    })).resolves.toEqual(result);
+    const requestInput = fetchMock.mock.calls.at(0)?.[0];
+    expect(requestInput).toBeDefined();
+    const query = new URL(String(requestInput), "http://localhost").searchParams;
+    expect(query.get("explainChange")).toBe("1");
+    expect(query.get("dimension")).toBe("customer");
+    expect(query.get("periodAFrom")).toBe("2026-01-01T00:00:00.000Z");
+
+    await expect(explainAnalyticsChange({
+      dimension: "customer",
+      periodAFrom: "2026-01-01T00:00:00.1Z",
+      periodATo: "2026-01-01T00:00:00.15Z",
+      periodBFrom: "2026-01-01T00:00:00.2Z",
+      periodBTo: "2026-01-01T00:00:00.3Z",
+    })).resolves.toEqual(result);
+
+    await expect(explainAnalyticsChange({
+      dimension: "customer",
+      periodAFrom: "2026-02-01T00:00:00.000Z",
+      periodATo: "2026-01-01T00:00:00.000Z",
+      periodBFrom: "2026-02-01T00:00:00.000Z",
+      periodBTo: "2026-03-01T00:00:00.000Z",
+    })).rejects.toEqual(new AnalyticsApiError(0, "Choose valid, non-empty comparison periods."));
   });
 
   it("posts the exact governed report contract to the existing endpoint and preserves returned values", async () => {

@@ -39,6 +39,13 @@ function responseFor(input: RequestInfo | URL, init?: RequestInit): Response {
     sections: [{ heading: "Top customers this period", citations: ["Acme"], lines: ["Acme: 2 invoices"] }],
     proposedAction: null,
   });
+  if (path.startsWith("/api/analytics?explainChange=1")) return Response.json({
+    priorTotalMinor: 1000,
+    currentTotalMinor: 1500,
+    deltaMinor: 500,
+    contributions: [{ key: "Acme", priorMinor: 1000, currentMinor: 1500, deltaMinor: 500, shareOfDelta: 1 }],
+    drill: [{ key: "Acme", invoiceIds: ["invoice-1"] }],
+  });
   if (path === "/api/analytics") return Response.json({ datasets });
   return Response.json({ error: "unexpected request" }, { status: 404 });
 }
@@ -67,6 +74,27 @@ describe("Vite analytics page", () => {
 
     expect(await screen.findByRole("heading", { name: "Analytics is disabled" })).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs a scoped revenue change analysis and renders its contribution and invoice drill", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => Promise.resolve(responseFor(input, init)));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AnalyticsPage actorId="user-1" organizationId="org-1" />);
+
+    await screen.findByRole("heading", { name: "Analytics" });
+    fireEvent.change(screen.getByLabelText("Period A start"), { target: { value: "2026-01-01" } });
+    fireEvent.change(screen.getByLabelText("Period A last day"), { target: { value: "2026-01-31" } });
+    fireEvent.change(screen.getByLabelText("Period B start"), { target: { value: "2026-02-01" } });
+    fireEvent.change(screen.getByLabelText("Period B last day"), { target: { value: "2026-02-28" } });
+    fireEvent.click(screen.getByRole("button", { name: "Explain change" }));
+
+    expect(await screen.findByText(/Change: 500 minor units/)).not.toBeNull();
+    expect(screen.getByText(/Acme invoices: invoice-1/)).not.toBeNull();
+    const call = fetchMock.mock.calls.find(([input]) => String(input).includes("explainChange=1"));
+    expect(call).toBeDefined();
+    const query = new URL(String(call?.[0]), "http://localhost").searchParams;
+    expect(query.get("periodATo")).toBe("2026-02-01T00:00:00.000Z");
+    expect(query.get("periodBTo")).toBe("2026-03-01T00:00:00.000Z");
   });
 
   it("explains when the permission-filtered endpoint has no available datasets", async () => {

@@ -14,6 +14,7 @@ The full v1 changelog is preserved at the bottom of this file.
 ### Added
 
 - Vite Documents can start drafts from Go-backed reusable templates, with matching Go and Vite validation for ProseMirror content and canonical JSON limits.
+- Vite Analytics compares invoiced revenue across two inclusive date ranges by customer or product through the authenticated Go `analytics.explainChange` capability, showing totals and contribution details.
 - Vite Hiring captures opening departments and role notes through Go and displays the stored details after reload.
 - Vite Marketplace shows when a listing cannot be installed until verification and keeps organization uninstall available for existing installs.
 - Vite Purchasing can reverse an individual standalone vendor bill payment through Go after entering a reason; payment-run members remain available only through whole-run reversal.

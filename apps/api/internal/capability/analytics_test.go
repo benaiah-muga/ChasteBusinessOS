@@ -33,6 +33,9 @@ func TestAnalyticsParsers(t *testing.T) {
 	if _, err := ParseAnalyticsExplainChangeInput(json.RawMessage(`{"dimension":"product","periodAFrom":"not-a-date","periodATo":"2026-02-01T00:00:00Z","periodBFrom":"2026-02-01T00:00:00Z","periodBTo":"2026-03-01T00:00:00Z"}`)); err == nil {
 		t.Fatal("bad datetime refused")
 	}
+	if _, err := ParseAnalyticsExplainChangeInput(json.RawMessage(`{"dimension":"product","periodAFrom":"2026-02-01T00:00:00Z","periodATo":"2026-01-01T00:00:00Z","periodBFrom":"2026-02-01T00:00:00Z","periodBTo":"2026-03-01T00:00:00Z"}`)); err == nil {
+		t.Fatal("reversed comparison period refused")
+	}
 	if err := ValidateAnalyticsQuestionInput(json.RawMessage(`{"focus":"collections"}`)); err != nil {
 		t.Fatalf("valid question focus refused: %v", err)
 	}
