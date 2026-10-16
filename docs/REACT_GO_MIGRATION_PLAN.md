@@ -5111,3 +5111,16 @@ new owners and the manifest shows zero legacy runtime paths.
      receipt, error, cleared lease, and completion timestamp. Earlier attempts
      remain `pending` with the clamped retry time. This prevents rows from
      remaining pending after the claim function has exhausted their attempts.
+
+479. (Contract and implementation added; focused Go and Vite verification
+     passed) The public business OpenAPI contract now describes Go POST
+     `/api/conversations/{id}/agent-reply`, including cookie and bearer auth,
+     verified identity, explicit organization membership, `messaging.write`,
+     same-origin cookie writes, strict JSON input, governed approval outcomes,
+     deterministic replay identity, sanitized errors, and cache headers. Go
+     and Vite use the generated request and response model shapes while keeping
+     runtime validation. Resolver infrastructure errors return a logged
+     generic 500, a short session secret returns 503, and the exact Go-owned
+     path returns 405 with `Allow: POST`; suffix paths remain on the base
+     router. Route ownership remains Go with parity pending until agent-browser
+     exercises an agent-enabled conversation and an `@agent` mention.

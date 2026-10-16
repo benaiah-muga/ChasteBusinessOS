@@ -688,3 +688,13 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: Tasks:
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Three full-suite attempts each reported at least one Vite UI failure under the parallel package test workload. The affected Ledger, Accounting, and Manufacturing files passed focused reruns; the latest failing test was ManufacturingPage at line 139. Re-run after addressing test-suite stability.
+
+- [x] G132: Go Messaging agent replies have a generated OpenAPI contract and matching request, response, auth, and route-method behavior.
+  CHECK: export PATH=/home/benaiah/.nvm/versions/node/v22.16.0/bin:/home/benaiah/.local/share/go/1.27.1/bin:$PATH && pnpm migration:contracts:check && go -C apps/api test ./internal/httpapi -run 'TestMessagingAgent|TestMountGoMessagingAgentRoute' -count=1 && pnpm --filter @chaste/web-vite exec vitest run --config vitest.config.ts src/api/messaging.test.ts && pnpm --filter @chaste/web-vite typecheck && git diff --check
+  EXPECT: /Tests\s+105 passed/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: OpenAPI drift check passed, focused Go Messaging and exact-mount tests passed, all 105 Vite Messaging API tests passed, Vite typecheck passed, and `git diff --check` passed. Resolver failures return sanitized 500 responses, short secrets return 503, invalid sessions return 401, malformed or repeated organization selectors return 400, and a valid selector outside the resolved membership returns 403. Server-side config errors are logged while 5xx response bodies remain generic.
+
+- [ ] G133: Authenticated browser proof exercises the Go-backed agent reply in Vite for an agent-enabled conversation and an `@agent` mention.
+  MANUAL: Use the installed agent-browser to sign in, send a message that triggers the configured conversation agent, verify the generated reply appears, then trigger an `@agent` mention and verify its reply. Confirm both requests use the Go endpoint and the browser console and network log contain no new errors.
+  EVIDENCE: Not run. `agent-browser` is unavailable in the current workspace PATH and package binaries; do not install another browser. The route ownership remains Go with parity pending until this proof runs.

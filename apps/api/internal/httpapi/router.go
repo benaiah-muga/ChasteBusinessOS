@@ -455,7 +455,7 @@ func MountGoMessagingAgentRoute(base, route http.Handler) http.Handler {
 		return base
 	}
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/conversations/{id}/agent-reply", route)
+	mux.Handle("/api/conversations/{id}/agent-reply", route)
 	if base != nil {
 		mux.Handle("/", base)
 	}

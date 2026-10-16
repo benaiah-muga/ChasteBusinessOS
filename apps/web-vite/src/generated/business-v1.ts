@@ -224,6 +224,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{id}/agent-reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate an agent reply to a conversation message
+         * @description Generates an AI reply for a human-authored trigger message in the authenticated user's organization. Cookie sessions and bearer tokens are supported. The session email must be verified, the selected organization must match an explicit organization membership, and the user must have messaging.write (or wildcard) permission. Cookie writes require a same-origin Origin header. The user must be a conversation member; replies are allowed when the conversation has its agent enabled or the trigger message mentions the agent. Agent tools execute through governed capabilities using the initiating user's permissions and auth session. The provider credential remains server-side. The request's intentId is validated but server idempotency is derived from the organization, conversation, and message IDs. Responses include Cache-Control: no-store and Pragma: no-cache.
+         */
+        post: operations["createConversationAgentReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notifications": {
         parameters: {
             query?: never;
@@ -300,6 +320,32 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ConversationAgentReplyRequest: {
+            /** Format: uuid */
+            messageId: string;
+            /**
+             * Format: uuid
+             * @description Client intent identifier; this endpoint validates the UUID while deriving replay identity from organization, conversation, and message.
+             */
+            intentId: string;
+        };
+        ConversationAgentReplySuccess: {
+            /** @constant */
+            ok: true;
+            /** Format: uuid */
+            messageId: string;
+            reply: string;
+            replayed: boolean;
+        };
+        ConversationAgentReplyPending: {
+            /** @constant */
+            ok: false;
+            /** @constant */
+            pendingApproval: true;
+            /** Format: uuid */
+            approvalId: string;
+            reason: string;
+        };
         OrganizationSummary: {
             /** Format: uuid */
             id: string;
@@ -2253,6 +2299,150 @@ export interface operations {
                 };
             };
             /** @description The ledger service or session configuration is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createConversationAgentReply: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Explicit organization selector. If supplied, it must be a single valid UUID and match the resolved membership. */
+                "X-Organization-ID"?: string;
+            };
+            path: {
+                /** @description Conversation UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** @description Strict JSON object limited to 8192 bytes; unknown properties and trailing JSON are rejected. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationAgentReplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent reply was posted, or an existing reply was replayed. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationAgentReplySuccess"];
+                };
+            };
+            /** @description The governed messaging capability requires human approval before posting the generated reply. */
+            202: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationAgentReplyPending"];
+                };
+            };
+            /** @description Conversation ID or strict request body is invalid, or the X-Organization-ID selector is malformed or repeated. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session or bearer identity is missing or invalid. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Cookie origin is not same-origin, organization selector does not match membership, or messaging.write is not granted. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The exact Go-owned path does not support the requested method. */
+            405: {
+                headers: {
+                    Allow?: "POST";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An agent reply for this trigger message is already being generated. */
+            409: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conversation membership, agent trigger, or governed messaging policy does not permit this reply. */
+            422: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal or session-resolution infrastructure failure; details are sanitized. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The configured AI provider failed to produce a usable response. */
+            502: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Messaging agent dependencies or the session signing secret are unavailable. */
             503: {
                 headers: {
                     "Cache-Control"?: "no-store";

@@ -187,6 +187,51 @@ func (e CapabilityExecutionSuccessOk) Valid() bool {
 	}
 }
 
+// Defines values for ConversationAgentReplyPendingOk.
+const (
+	ConversationAgentReplyPendingOkFalse ConversationAgentReplyPendingOk = false
+)
+
+// Valid indicates whether the value is a known member of the ConversationAgentReplyPendingOk enum.
+func (e ConversationAgentReplyPendingOk) Valid() bool {
+	switch e {
+	case ConversationAgentReplyPendingOkFalse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConversationAgentReplyPendingPendingApproval.
+const (
+	ConversationAgentReplyPendingPendingApprovalTrue ConversationAgentReplyPendingPendingApproval = true
+)
+
+// Valid indicates whether the value is a known member of the ConversationAgentReplyPendingPendingApproval enum.
+func (e ConversationAgentReplyPendingPendingApproval) Valid() bool {
+	switch e {
+	case ConversationAgentReplyPendingPendingApprovalTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConversationAgentReplySuccessOk.
+const (
+	ConversationAgentReplySuccessOkTrue ConversationAgentReplySuccessOk = true
+)
+
+// Valid indicates whether the value is a known member of the ConversationAgentReplySuccessOk enum.
+func (e ConversationAgentReplySuccessOk) Valid() bool {
+	switch e {
+	case ConversationAgentReplySuccessOkTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DashboardResponsePipelineStagesStage.
 const (
 	Lead        DashboardResponsePipelineStagesStage = "lead"
@@ -631,6 +676,38 @@ type CapabilityExecutionSuccess struct {
 
 // CapabilityExecutionSuccessOk defines model for CapabilityExecutionSuccess.Ok.
 type CapabilityExecutionSuccessOk bool
+
+// ConversationAgentReplyPending defines model for ConversationAgentReplyPending.
+type ConversationAgentReplyPending struct {
+	ApprovalId      string                                       `json:"approvalId"`
+	Ok              ConversationAgentReplyPendingOk              `json:"ok"`
+	PendingApproval ConversationAgentReplyPendingPendingApproval `json:"pendingApproval"`
+	Reason          string                                       `json:"reason"`
+}
+
+// ConversationAgentReplyPendingOk defines model for ConversationAgentReplyPending.Ok.
+type ConversationAgentReplyPendingOk bool
+
+// ConversationAgentReplyPendingPendingApproval defines model for ConversationAgentReplyPending.PendingApproval.
+type ConversationAgentReplyPendingPendingApproval bool
+
+// ConversationAgentReplyRequest defines model for ConversationAgentReplyRequest.
+type ConversationAgentReplyRequest struct {
+	// IntentId Client intent identifier; this endpoint validates the UUID while deriving replay identity from organization, conversation, and message.
+	IntentId  string `json:"intentId"`
+	MessageId string `json:"messageId"`
+}
+
+// ConversationAgentReplySuccess defines model for ConversationAgentReplySuccess.
+type ConversationAgentReplySuccess struct {
+	MessageId string                          `json:"messageId"`
+	Ok        ConversationAgentReplySuccessOk `json:"ok"`
+	Replayed  bool                            `json:"replayed"`
+	Reply     string                          `json:"reply"`
+}
+
+// ConversationAgentReplySuccessOk defines model for ConversationAgentReplySuccess.Ok.
+type ConversationAgentReplySuccessOk bool
 
 // DashboardResponse defines model for DashboardResponse.
 type DashboardResponse struct {
@@ -1189,6 +1266,12 @@ type ExecuteCapability422JSONResponseBody struct {
 	union json.RawMessage
 }
 
+// CreateConversationAgentReplyParams defines parameters for CreateConversationAgentReply.
+type CreateConversationAgentReplyParams struct {
+	// XOrganizationID Explicit organization selector. If supplied, it must be a single valid UUID and match the resolved membership.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
 // GetDashboardParams defines parameters for GetDashboard.
 type GetDashboardParams struct {
 	// XOrganizationID Selects the organization for this request and must match an organization membership.
@@ -1290,6 +1373,9 @@ type DecideApprovalJSONRequestBody = ApprovalDecisionRequest
 
 // ExecuteCapabilityJSONRequestBody defines body for ExecuteCapability for application/json ContentType.
 type ExecuteCapabilityJSONRequestBody = CapabilityExecutionRequest
+
+// CreateConversationAgentReplyJSONRequestBody defines body for CreateConversationAgentReply for application/json ContentType.
+type CreateConversationAgentReplyJSONRequestBody = ConversationAgentReplyRequest
 
 // SetModuleSwitchboardJSONRequestBody defines body for SetModuleSwitchboard for application/json ContentType.
 type SetModuleSwitchboardJSONRequestBody = ModuleSwitchboardRequest

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
@@ -46,11 +47,6 @@ type messagingTriggerLock struct {
 type messagingTriggerLocks struct {
 	mu    sync.Mutex
 	locks map[string]*messagingTriggerLock
-}
-
-type messagingAgentRequest struct {
-	MessageID string `json:"messageId"`
-	IntentID  string `json:"intentId"`
 }
 
 type messagingAgentCompletion struct {
@@ -95,6 +91,7 @@ func NewMessagingAgentHandler(pool *pgxpool.Pool, resolver DirectCapabilitySessi
 
 func (h *messagingAgentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -111,7 +108,7 @@ func (h *messagingAgentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	selector, valid := activeOrganizationSelector(r)
 	if !valid {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(w, http.StatusBadRequest, businesscontract.ErrorResponse{Error: "invalid organization selector"})
 		return
 	}
 	var resolved *session.ResolvedUser
@@ -128,9 +125,30 @@ func (h *messagingAgentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	} else {
 		resolved, err = h.resolver.Resolve(r.Context(), session.CookieFromRequest(r, session.SessionCookieName), selector)
 	}
-	if err != nil || resolved == nil || !resolved.EmailVerified || resolved.OrgID == nil || resolved.AuthSessionID == "" ||
-		!isUUID(resolved.UserID) || !isUUID(*resolved.OrgID) || !matchesRequestedOrganization(r, resolved) {
+	if err != nil {
+		if errors.Is(err, session.ErrNoSession) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="chaste"`)
+			writeJSON(w, http.StatusUnauthorized, businesscontract.ErrorResponse{Error: "unauthorized"})
+			return
+		}
+		if errors.Is(err, session.ErrSecretTooShort) {
+			writeJSON(w, http.StatusServiceUnavailable, businesscontract.ErrorResponse{Error: "messaging agent unavailable"})
+			return
+		}
+		if h.logger != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			h.logger.Error("Go messaging agent session resolution failed", "error", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, businesscontract.ErrorResponse{Error: "internal error"})
+		return
+	}
+	if resolved == nil || !resolved.EmailVerified || resolved.OrgID == nil || resolved.AuthSessionID == "" ||
+		!isUUID(resolved.UserID) || !isUUID(*resolved.OrgID) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="chaste"`)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if !matchesRequestedOrganization(r, resolved) {
+		writeJSON(w, http.StatusForbidden, businesscontract.ErrorResponse{Error: "organization access denied"})
 		return
 	}
 	if !bearer && !sameOriginCapabilityRequest(r, h.trustedProxyCIDRs) {
@@ -141,10 +159,10 @@ func (h *messagingAgentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
-	var body messagingAgentRequest
+	var body businesscontract.ConversationAgentReplyRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, messagingAgentBodyLimit))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&body) != nil || !isUUID(body.MessageID) || !isUUID(body.IntentID) {
+	if decoder.Decode(&body) != nil || !isUUID(body.MessageId) || !isUUID(body.IntentId) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
@@ -159,16 +177,33 @@ func (h *messagingAgentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		if status >= 500 && h.logger != nil {
 			h.logger.Error("Go messaging agent reply failed", "error", err)
 		}
-		writeJSON(w, status, map[string]string{"error": err.Error()})
+		writeJSON(w, status, businesscontract.ErrorResponse{Error: messagingAgentPublicError(status, err)})
 		return
 	}
 	writeJSON(w, status, result)
 }
 
-func (h *messagingAgentHandler) reply(ctx context.Context, r *http.Request, user *session.ResolvedUser, conversationID string, request messagingAgentRequest) (map[string]any, int, error) {
+func messagingAgentPublicError(status int, err error) string {
+	if status >= 500 {
+		switch status {
+		case http.StatusBadGateway:
+			return "AI provider failed"
+		case http.StatusServiceUnavailable:
+			return "messaging agent unavailable"
+		default:
+			return "internal error"
+		}
+	}
+	if err == nil {
+		return "request failed"
+	}
+	return err.Error()
+}
+
+func (h *messagingAgentHandler) reply(ctx context.Context, r *http.Request, user *session.ResolvedUser, conversationID string, request businesscontract.ConversationAgentReplyRequest) (any, int, error) {
 	orgID := *user.OrgID
-	rootIntent := messagingTriggerIntentID(orgID, conversationID, request.MessageID)
-	release, err := h.triggerLocks.acquire(ctx, orgID+":"+conversationID+":"+request.MessageID)
+	rootIntent := messagingTriggerIntentID(orgID, conversationID, request.MessageId)
+	release, err := h.triggerLocks.acquire(ctx, orgID+":"+conversationID+":"+request.MessageId)
 	if err != nil {
 		return nil, http.StatusConflict, errors.New("an agent reply is already being generated for this message")
 	}
@@ -192,7 +227,7 @@ func (h *messagingAgentHandler) reply(ctx context.Context, r *http.Request, user
 		if err != nil {
 			return err
 		}
-		err = tx.QueryRow(ctx, `SELECT body,mentions FROM messages WHERE id=$1::uuid AND conversation_id=$2::uuid AND org_id=$3::uuid AND sender_type='human' AND sender_user_id=$4::uuid AND deleted_at IS NULL`, request.MessageID, conversationID, orgID, user.UserID).Scan(&messageBody, &mentionJSON)
+		err = tx.QueryRow(ctx, `SELECT body,mentions FROM messages WHERE id=$1::uuid AND conversation_id=$2::uuid AND org_id=$3::uuid AND sender_type='human' AND sender_user_id=$4::uuid AND deleted_at IS NULL`, request.MessageId, conversationID, orgID, user.UserID).Scan(&messageBody, &mentionJSON)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errors.New("trigger message not found")
 		}
@@ -200,7 +235,7 @@ func (h *messagingAgentHandler) reply(ctx context.Context, r *http.Request, user
 			return err
 		}
 		_ = tx.QueryRow(ctx, `SELECT COALESCE(profile_description,'') FROM organizations WHERE id=$1::uuid`, orgID).Scan(&orgDescription)
-		return tx.QueryRow(ctx, `SELECT id::text,body FROM messages WHERE org_id=$1::uuid AND conversation_id=$2::uuid AND sender_type='agent' AND parent_message_id=$3::uuid AND deleted_at IS NULL ORDER BY created_at,id LIMIT 1`, orgID, conversationID, request.MessageID).Scan(&alreadySent, &alreadySentBody)
+		return tx.QueryRow(ctx, `SELECT id::text,body FROM messages WHERE org_id=$1::uuid AND conversation_id=$2::uuid AND sender_type='agent' AND parent_message_id=$3::uuid AND deleted_at IS NULL ORDER BY created_at,id LIMIT 1`, orgID, conversationID, request.MessageId).Scan(&alreadySent, &alreadySentBody)
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		if err.Error() == "conversation not found" || err.Error() == "agent is not enabled for this conversation" || err.Error() == "trigger message not found" {
@@ -209,7 +244,7 @@ func (h *messagingAgentHandler) reply(ctx context.Context, r *http.Request, user
 		return nil, http.StatusInternalServerError, errors.New("could not load conversation")
 	}
 	if alreadySent != "" {
-		return map[string]any{"ok": true, "messageId": alreadySent, "reply": alreadySentBody, "replayed": true}, http.StatusOK, nil
+		return businesscontract.ConversationAgentReplySuccess{Ok: businesscontract.ConversationAgentReplySuccessOkTrue, MessageId: alreadySent, Reply: alreadySentBody, Replayed: true}, http.StatusOK, nil
 	}
 	var mentions []struct {
 		Type string `json:"type"`
@@ -250,7 +285,7 @@ func (h *messagingAgentHandler) reply(ctx context.Context, r *http.Request, user
 	if err := h.addMessagingUsage(ctx, orgID, sessionID, usage); err != nil {
 		return nil, http.StatusInternalServerError, errors.New("could not record agent usage")
 	}
-	input, _ := json.Marshal(map[string]any{"conversationId": conversationID, "body": reply, "parentMessageId": request.MessageID, "mentions": []any{}, "attachmentIds": []any{}})
+	input, _ := json.Marshal(map[string]any{"conversationId": conversationID, "body": reply, "parentMessageId": request.MessageId, "mentions": []any{}, "attachmentIds": []any{}})
 	permissions := make([]string, 0, len(user.Permissions))
 	for permission, granted := range user.Permissions {
 		if granted {
@@ -270,7 +305,7 @@ func (h *messagingAgentHandler) reply(ctx context.Context, r *http.Request, user
 	}
 	if !capResult.OK {
 		if capResult.PendingApproval {
-			return map[string]any{"ok": false, "pendingApproval": true, "approvalId": capResult.ApprovalID, "reason": capResult.ApprovalRationale}, http.StatusAccepted, nil
+			return businesscontract.ConversationAgentReplyPending{Ok: businesscontract.ConversationAgentReplyPendingOkFalse, PendingApproval: businesscontract.ConversationAgentReplyPendingPendingApprovalTrue, ApprovalId: capResult.ApprovalID, Reason: capResult.ApprovalRationale}, http.StatusAccepted, nil
 		}
 		return nil, http.StatusUnprocessableEntity, errors.New("the agent reply was refused by messaging policy")
 	}
@@ -280,7 +315,7 @@ func (h *messagingAgentHandler) reply(ctx context.Context, r *http.Request, user
 	if err := json.Unmarshal(capResult.Data, &posted); err != nil || !isUUID(posted.MessageID) {
 		return nil, http.StatusInternalServerError, errors.New("messaging returned an invalid agent reply")
 	}
-	return map[string]any{"ok": true, "messageId": posted.MessageID, "reply": reply, "replayed": false}, http.StatusOK, nil
+	return businesscontract.ConversationAgentReplySuccess{Ok: businesscontract.ConversationAgentReplySuccessOkTrue, MessageId: posted.MessageID, Reply: reply, Replayed: false}, http.StatusOK, nil
 }
 
 func (locks *messagingTriggerLocks) acquire(ctx context.Context, key string) (func(), error) {

@@ -298,6 +298,30 @@ describe("messaging API client", () => {
     ]);
   });
 
+  it("validates the generated agent-reply approval contract and rejects extra response fields", async () => {
+    vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
+    const approvalId = "550e8400-e29b-41d4-a716-446655440000";
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      call++;
+      if (call === 1) return Response.json({ ok: true, data: { messageId } });
+      return Response.json({ ok: false, pendingApproval: true, approvalId, reason: "Manager review required." }, { status: 202 });
+    }));
+    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, {
+      intentId: "72b99920-8c21-463a-9c5b-479216017501", requestAgentReply: true,
+    })).resolves.toEqual({ kind: "pending", reason: "Manager review required." });
+
+    call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      call++;
+      if (call === 1) return Response.json({ ok: true, data: { messageId } });
+      return Response.json({ ok: true, messageId: "11111111-1111-4111-8111-111111111111", reply: "On it", replayed: false, secret: "unexpected" });
+    }));
+    await expect(sendConversationMessage(conversationId, { body: "Ship it", mentions: [], attachmentIds: [] }, undefined, {
+      intentId: "72b99920-8c21-463a-9c5b-479216017501", requestAgentReply: true,
+    })).rejects.toMatchObject({ name: "MessagingApiError" });
+  });
+
   it("preserves the Go approval-pending response and rejects malformed success envelopes", async () => {
     vi.stubGlobal("__GO_MESSAGING_SEND_SLICE__", true);
     const approvalId = "550e8400-e29b-41d4-a716-446655440000";

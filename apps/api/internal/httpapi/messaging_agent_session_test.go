@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -13,19 +16,123 @@ import (
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestMessagingAgentHandlerRequiresPostAndDependencies(t *testing.T) {
 	handler := NewMessagingAgentHandler(nil, nil, nil, nil)
 	get := httptest.NewRecorder()
 	handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/conversations/11111111-1111-4111-8111-111111111111/agent-reply", nil))
-	if get.Code != http.StatusMethodNotAllowed || get.Header().Get("Allow") != http.MethodPost {
+	if get.Code != http.StatusMethodNotAllowed || get.Header().Get("Allow") != http.MethodPost || get.Header().Get("Cache-Control") != "no-store" || get.Header().Get("Pragma") != "no-cache" {
 		t.Fatalf("GET status=%d allow=%q", get.Code, get.Header().Get("Allow"))
 	}
 	post := httptest.NewRecorder()
 	handler.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/api/conversations/11111111-1111-4111-8111-111111111111/agent-reply", strings.NewReader(`{}`)))
 	if post.Code != http.StatusServiceUnavailable {
 		t.Fatalf("POST status=%d body=%s", post.Code, post.Body.String())
+	}
+}
+
+func TestMessagingAgentResolverErrorsAreClassifiedAndSanitized(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "missing session", err: session.ErrNoSession, want: http.StatusUnauthorized},
+		{name: "short secret", err: session.ErrSecretTooShort, want: http.StatusServiceUnavailable},
+		{name: "resolver infrastructure", err: errors.New("database password leaked"), want: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			resolver := &fakeDirectSessionResolver{err: test.err}
+			route := NewMessagingAgentHandler(&pgxpool.Pool{}, resolver, &fakeDirectCapabilityExecutor{}, slog.New(slog.NewTextHandler(&logs, nil)))
+			handler := MountGoMessagingAgentRoute(nil, route)
+			request := httptest.NewRequest(http.MethodPost, "/api/conversations/11111111-1111-4111-8111-111111111111/agent-reply", strings.NewReader(`{"messageId":"22222222-2222-4222-8222-222222222222","intentId":"33333333-3333-4333-8333-333333333333"}`))
+			request.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: "valid-session"})
+			request.AddCookie(&http.Cookie{Name: session.ActiveOrgCookieName, Value: "44444444-4444-4444-8444-444444444444"})
+			request.Header.Set("Origin", "http://example.com")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+				t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+			}
+			if strings.Contains(response.Body.String(), "database password leaked") {
+				t.Fatalf("resolver detail leaked to client: %s", response.Body.String())
+			}
+			if test.want == http.StatusInternalServerError && !strings.Contains(logs.String(), "database password leaked") {
+				t.Fatalf("resolver infrastructure error was not logged: %s", logs.String())
+			}
+		})
+	}
+}
+
+func TestMessagingAgentPublicErrorsSanitizeServerDetails(t *testing.T) {
+	for _, status := range []int{http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable} {
+		if got := messagingAgentPublicError(status, errors.New("database password leaked")); strings.Contains(got, "database password leaked") {
+			t.Fatalf("status %d leaked server detail: %q", status, got)
+		}
+	}
+	if got := messagingAgentPublicError(http.StatusServiceUnavailable, errors.New("database password leaked")); got != "messaging agent unavailable" {
+		t.Fatalf("503 public error = %q", got)
+	}
+}
+
+func TestMessagingAgentRejectsOrganizationSelectorOutsideResolvedMembership(t *testing.T) {
+	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+	handler := MountGoMessagingAgentRoute(nil, NewMessagingAgentHandler(&pgxpool.Pool{}, resolver, &fakeDirectCapabilityExecutor{}, nil))
+	request := httptest.NewRequest(http.MethodPost, "/api/conversations/33333333-3333-4333-8333-333333333333/agent-reply", strings.NewReader(`{"messageId":"22222222-2222-4222-8222-222222222222","intentId":"33333333-3333-4333-8333-333333333333"}`))
+	request.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: "valid-session"})
+	request.Header.Set("Origin", "http://example.com")
+	request.Header.Set("X-Organization-ID", "55555555-5555-4555-8555-555555555555")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), "internal") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMessagingAgentRejectsMalformedOrRepeatedOrganizationSelector(t *testing.T) {
+	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+	handler := MountGoMessagingAgentRoute(nil, NewMessagingAgentHandler(&pgxpool.Pool{}, resolver, &fakeDirectCapabilityExecutor{}, nil))
+	for _, test := range []struct {
+		name   string
+		values []string
+	}{
+		{name: "malformed", values: []string{"not-a-uuid"}},
+		{name: "repeated", values: []string{"11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/conversations/33333333-3333-4333-8333-333333333333/agent-reply", strings.NewReader(`{}`))
+			for _, value := range test.values {
+				request.Header.Add("X-Organization-ID", value)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest || resolver.resolveCalls != 0 {
+				t.Fatalf("status=%d resolver calls=%d body=%s", response.Code, resolver.resolveCalls, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestMountGoMessagingAgentRouteOwnsExactPathAndFallsBackForSuffix(t *testing.T) {
+	baseCalls := 0
+	base := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		baseCalls++
+		w.WriteHeader(http.StatusNotFound)
+	})
+	route := NewMessagingAgentHandler(nil, nil, nil, nil)
+	handler := MountGoMessagingAgentRoute(base, route)
+	unsupported := httptest.NewRecorder()
+	handler.ServeHTTP(unsupported, httptest.NewRequest(http.MethodGet, "/api/conversations/11111111-1111-4111-8111-111111111111/agent-reply", nil))
+	if unsupported.Code != http.StatusMethodNotAllowed || unsupported.Header().Get("Allow") != http.MethodPost || unsupported.Header().Get("Cache-Control") != "no-store" || unsupported.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("unsupported exact path status=%d headers=%v", unsupported.Code, unsupported.Header())
+	}
+	suffix := httptest.NewRecorder()
+	handler.ServeHTTP(suffix, httptest.NewRequest(http.MethodPost, "/api/conversations/11111111-1111-4111-8111-111111111111/agent-reply/extra", nil))
+	if baseCalls != 1 || suffix.Code != http.StatusNotFound {
+		t.Fatalf("suffix path should fall through to base: calls=%d status=%d", baseCalls, suffix.Code)
 	}
 }
 

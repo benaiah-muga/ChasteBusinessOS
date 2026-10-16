@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 
 const IsoTimestampSchema = z.string().datetime();
 
@@ -625,20 +626,28 @@ async function sendConversationAgentReplyThroughGo(
   intentId: string,
   signal?: AbortSignal,
 ): Promise<{ kind: "completed"; reply: string; messageId: string; replayed: boolean } | { kind: "pending"; reason: string }> {
+  const request: components["schemas"]["ConversationAgentReplyRequest"] = {
+    messageId: z.string().uuid().parse(messageId),
+    intentId: z.string().uuid().parse(intentId),
+  };
   const validatedConversationId = z.string().uuid().parse(conversationId);
-  const validatedMessageId = z.string().uuid().parse(messageId);
-  const validatedIntentId = z.string().uuid().parse(intentId);
   const { response, body } = await send(`/api/conversations/${encodeURIComponent(validatedConversationId)}/agent-reply`, {
     method: "POST",
-    body: JSON.stringify({ messageId: validatedMessageId, intentId: validatedIntentId }),
+    body: JSON.stringify(request),
   }, "get the AI reply", signal, 480_000);
   if (response.status === 202) {
-    const pending = PendingApprovalSchema.safeParse(body);
+    const pendingSchema: z.ZodType<components["schemas"]["ConversationAgentReplyPending"]> = z.object({
+      ok: z.literal(false), pendingApproval: z.literal(true), approvalId: z.string().uuid(), reason: z.string(),
+    }).strict();
+    const pending = pendingSchema.safeParse(body);
     if (!pending.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to the agent reply.");
-    return { kind: "pending", reason: pending.data.hint ?? pending.data.reason ?? pending.data.error ?? "The agent reply is waiting for approval." };
+    return { kind: "pending", reason: pending.data.reason || "The agent reply is waiting for approval." };
   }
   if (!response.ok) throw new MessagingApiError(response.status, readError(response.status, body, "get the AI reply"));
-  const parsed = z.object({ ok: z.literal(true), messageId: z.string().uuid(), reply: z.string(), replayed: z.boolean() }).strict().safeParse(body);
+  const responseSchema: z.ZodType<components["schemas"]["ConversationAgentReplySuccess"]> = z.object({
+    ok: z.literal(true), messageId: z.string().uuid(), reply: z.string(), replayed: z.boolean(),
+  }).strict();
+  const parsed = responseSchema.safeParse(body);
   if (!parsed.success) throw new MessagingApiError(response.status, "The messaging service returned an unexpected agent reply response.");
   return { kind: "completed", ...parsed.data };
 }
