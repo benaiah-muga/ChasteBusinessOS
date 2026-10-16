@@ -208,7 +208,13 @@ func (w *Worker) send(ctx context.Context, claim ClaimedMessage, payload webhook
 		retryAfter := retryAfterDuration(response.Header.Get("Retry-After"))
 		next := w.now().Add(retryAfter)
 		message := fmt.Sprintf("webhook rate limited (%d)", response.StatusCode)
-		return DeliveryResult{Status: "pending", LastError: &message, ProviderReceipt: receipt, AvailableAt: &next}
+		status := "pending"
+		availableAt := &next
+		if claim.Attempts >= claim.MaxAttempts {
+			status = "failed"
+			availableAt = nil
+		}
+		return DeliveryResult{Status: status, LastError: &message, ProviderReceipt: receipt, AvailableAt: availableAt}
 	}
 	if response.StatusCode >= 400 && response.StatusCode < 500 {
 		message := fmt.Sprintf("webhook rejected (%d)", response.StatusCode)

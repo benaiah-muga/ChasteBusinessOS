@@ -276,6 +276,32 @@ func TestGoWebhookOutboxWorkerMatchesLegacy(t *testing.T) {
 		t.Fatalf("retry idempotency key changed: %v, expected %s", keys, rateClaim.ProviderOperationID)
 	}
 
+	finalRateID := insertWorkerTestMessage(t, ctx, owner, orgA, "webhook", tag+"-final-rate", server.URL+"/rate-final")
+	if _, err := owner.Exec(ctx, `UPDATE outbox_messages SET max_attempts = 1 WHERE id = $1::uuid`, finalRateID); err != nil {
+		t.Fatalf("limit final rate-limited webhook to one attempt: %v", err)
+	}
+	finalRateWorker := mustWorker(t, workerPool, "final-rate-worker", server.Client())
+	processed, err = finalRateWorker.ProcessOne(ctx)
+	if err != nil || !processed {
+		t.Fatalf("final-attempt 429 did not finish processing: processed=%v err=%v", processed, err)
+	}
+	var finalStatus, finalError string
+	var finalAttempts, finalMaxAttempts, finalReceiptStatus int
+	var finalCompleted, finalLeaseCleared bool
+	if err := owner.QueryRow(ctx, `
+		SELECT status, attempts, max_attempts, completed_at IS NOT NULL,
+		       (provider_receipt->>'status')::int, last_error,
+		       lease_owner IS NULL AND lease_expires_at IS NULL
+		FROM outbox_messages WHERE id = $1::uuid`, finalRateID).Scan(
+		&finalStatus, &finalAttempts, &finalMaxAttempts, &finalCompleted,
+		&finalReceiptStatus, &finalError, &finalLeaseCleared,
+	); err != nil {
+		t.Fatalf("read final-attempt rate-limited webhook: %v", err)
+	}
+	if finalStatus != "failed" || finalAttempts != 1 || finalMaxAttempts != 1 || !finalCompleted || !finalLeaseCleared || finalReceiptStatus != http.StatusTooManyRequests || finalError != "webhook rate limited (429)" {
+		t.Fatalf("final 429 attempt was not terminally recorded: status=%q attempts=%d/%d completed=%v lease_cleared=%v receipt_status=%d error=%q", finalStatus, finalAttempts, finalMaxAttempts, finalCompleted, finalLeaseCleared, finalReceiptStatus, finalError)
+	}
+
 	for _, scenario := range []struct {
 		path   string
 		status string
@@ -340,6 +366,67 @@ func assertRetryAfterDurations(t *testing.T) {
 		if got := retryAfterDuration(test.value); got != test.want {
 			t.Fatalf("retry delay for %q is %s, want %s", test.value, got, test.want)
 		}
+	}
+}
+
+func TestWebhook429FinalAttemptIsTerminal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Retry-After", "2")
+		writer.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, time.October, 16, 10, 0, 0, 0, time.UTC)
+	worker := &Worker{
+		requestTime: time.Second,
+		client:      server.Client(),
+		now:         func() time.Time { return now },
+	}
+	payload := webhookPayload{URL: server.URL, Body: map[string]json.RawMessage{"proof": json.RawMessage(`true`)}}
+
+	for _, test := range []struct {
+		name       string
+		attempts   int
+		max        int
+		wantStatus string
+		wantRetry  bool
+	}{
+		{name: "single final attempt", attempts: 1, max: 1, wantStatus: "failed"},
+		{name: "final retry attempt", attempts: 3, max: 3, wantStatus: "failed"},
+		{name: "penultimate attempt remains retryable", attempts: 2, max: 3, wantStatus: "pending", wantRetry: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			claim := ClaimedMessage{
+				ID:                  "outbox-id",
+				ProviderOperationID: "provider-operation-id",
+				Attempts:            test.attempts,
+				MaxAttempts:         test.max,
+			}
+			result := worker.send(context.Background(), claim, payload)
+			if result.Status != test.wantStatus {
+				t.Fatalf("429 status = %q, want %q", result.Status, test.wantStatus)
+			}
+			if result.ProviderReceipt == nil || !json.Valid(result.ProviderReceipt) {
+				t.Fatalf("429 provider receipt = %s, want valid receipt", result.ProviderReceipt)
+			}
+			var receipt struct {
+				Status              int    `json:"status"`
+				ProviderOperationID string `json:"providerOperationId"`
+			}
+			if err := json.Unmarshal(result.ProviderReceipt, &receipt); err != nil {
+				t.Fatalf("decode 429 provider receipt: %v", err)
+			}
+			if receipt.Status != http.StatusTooManyRequests || receipt.ProviderOperationID != claim.ProviderOperationID {
+				t.Fatalf("429 provider receipt = %#v", receipt)
+			}
+			if test.wantRetry {
+				if result.AvailableAt == nil || !result.AvailableAt.Equal(now.Add(2*time.Second)) {
+					t.Fatalf("penultimate 429 retry time = %v, want %s", result.AvailableAt, now.Add(2*time.Second))
+				}
+			} else if result.AvailableAt != nil {
+				t.Fatalf("final 429 attempt has retry time %s", result.AvailableAt)
+			}
+		})
 	}
 }
 
@@ -461,6 +548,9 @@ func newWebhookProvider() (*httptest.Server, func() []string) {
 				return
 			}
 			writer.WriteHeader(http.StatusNoContent)
+		case "/rate-final":
+			writer.Header().Set("Retry-After", "2")
+			writer.WriteHeader(http.StatusTooManyRequests)
 		case "/reject":
 			writer.WriteHeader(http.StatusBadRequest)
 		case "/server-error":

@@ -5105,3 +5105,9 @@ new owners and the manifest shows zero legacy runtime paths.
      generic 500, short auth secrets return 503, and the enabled exact-path
      mount returns 405 with `Allow: POST`; suffix and disabled-route fallback
      remain intact.
+
+478. (Go outbox worker fix; focused and database-backed tests passed) A webhook
+     429 on the final allowed attempt now ends as `failed` with its provider
+     receipt, error, cleared lease, and completion timestamp. Earlier attempts
+     remain `pending` with the clamped retry time. This prevents rows from
+     remaining pending after the claim function has exhausted their attempts.

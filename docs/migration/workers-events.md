@@ -183,6 +183,10 @@ table shape `packages/db/src/schema/index.ts:2776-2809`.
   config or ineligible recipients fail. Unknown outcomes do not auto-retry;
   `reconcileOutboxMessage` changes only an org-owned unknown row to sent/failed
   with an optional provider receipt (`apps/web/src/server/outbox.ts:174-198,209-263,310-341`).
+  The Go webhook worker now marks a 429 from the final allowed attempt failed,
+  retaining its provider receipt and completion time; earlier attempts remain
+  pending with the clamped retry time. Focused and database-backed Go tests
+  cover the terminal transition and the preceding retryable attempt.
 - **Shutdown:** There is no outbox abort hook. Webhook requests have a
   5-second timeout; SMTP has no timeout specified in this dispatcher. A hard
   kill during provider I/O yields `unknown` after lease expiry, so the worker
@@ -199,11 +203,9 @@ table shape `packages/db/src/schema/index.ts:2776-2809`.
   the fact that approval/ticket notification insertion currently follows its
   primary write, while marketing's outbox and delivery link are in one
   transaction.
-- **Open questions:** A webhook 429 on the last allowed attempt is finalized
-  as `pending`, but future claims require `attempts < max_attempts`; no outbox
-  exhausted-pending reaper was found (`apps/web/src/server/outbox.ts:109-113,225-232,321-328`).
-  `reconcileOutboxMessage` has tests and an exported helper, but no production
-  API/UI caller was found. Decide where operations can settle `unknown` rows.
+- **Open questions:** `reconcileOutboxMessage` has tests and an exported helper,
+  but no production API/UI caller was found. Decide where operators can settle
+  `unknown` rows.
   Customer-facing `sendOrgMail` in `apps/web/src/server/kernel.ts:340-355`
   sends SMTP directly and is not durable/outbox-backed; preserve it as a
   separate behavior or explicitly move it through a reviewed outbox contract.
