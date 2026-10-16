@@ -5079,3 +5079,14 @@ new owners and the manifest shows zero legacy runtime paths.
      failures return a logged generic 500, short auth secrets return 503, and
      the enabled exact-path mount returns 405 with `Allow: GET`; suffix and
      disabled-flag fallback behavior remains intact.
+
+476. (Implemented; focused checks passed) The public business OpenAPI
+     contract now describes Go GET `/api/ledger`, including cookie and bearer
+     auth, `accounting.read`, organization selection, bounded limit coercion,
+     positive safe-integer sequence cursors, raw JSON payloads, nullable audit
+     fields, cache headers, and errors. Go and Vite use generated event models
+     with runtime validation; the public response omits internal auth-session
+     IDs. Resolver infrastructure failures return logged
+     generic 500, short auth secrets return 503, and the enabled exact-path
+     mount returns 405 with `Allow: GET`; suffix and disabled-route fallback
+     remain intact.

@@ -1,22 +1,23 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 
-export const LedgerEventSchema = z.object({
-  seq: z.number().int(),
-  kind: z.string(),
+export const LedgerEventSchema: z.ZodType<components["schemas"]["LedgerEvent"]> = z.object({
+  seq: z.number().int().positive().safe(),
+  kind: z.string().min(1),
   capabilityId: z.string().nullable(),
-  actorType: z.string(),
+  actorType: z.string().min(1),
   actorId: z.string().nullable(),
   sessionId: z.string().nullable(),
-  payload: z.unknown(),
-  hash: z.string(),
+  payload: z.custom<unknown>((value) => value !== undefined, "Expected a JSON payload"),
+  hash: z.string().min(1),
   prevHash: z.string().nullable(),
   occurredAt: z.string().datetime(),
-});
+}).strict();
 
-const LedgerResponseSchema = z.object({ events: z.array(LedgerEventSchema) });
+export const LedgerResponseSchema: z.ZodType<components["schemas"]["LedgerResponse"]> = z.object({ events: z.array(LedgerEventSchema) }).strict();
 const ErrorResponseSchema = z.object({ error: z.string().optional() });
 
-export type LedgerEvent = z.infer<typeof LedgerEventSchema>;
+export type LedgerEvent = components["schemas"]["LedgerEvent"];
 
 export class LedgerApiError extends Error {
   constructor(readonly status: number, message: string) {

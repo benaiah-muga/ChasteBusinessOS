@@ -808,7 +808,24 @@ func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportC
 		mux.Handle("GET /api/dashboard", dashboardRoute)
 	}
 	if ledgerRoute != nil {
-		mux.Handle("GET /api/ledger", ledgerRoute)
+		mux.Handle("/api/ledger", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/ledger" {
+				if base != nil {
+					base.ServeHTTP(w, r)
+					return
+				}
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodGet {
+				w.Header().Set("Allow", http.MethodGet)
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Pragma", "no-cache")
+				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+				return
+			}
+			ledgerRoute.ServeHTTP(w, r)
+		}))
 	}
 	if directMetricsRoute != nil {
 		mux.HandleFunc("/api/metrics", func(w http.ResponseWriter, r *http.Request) {

@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
-	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/ledger"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract"
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
 
@@ -44,7 +46,23 @@ func (h *LedgerSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	resolved, err := h.resolve(r, selector)
-	if err != nil || resolved == nil || !resolved.EmailVerified || resolved.OrgID == nil ||
+	if err != nil {
+		if errors.Is(err, session.ErrNoSession) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="chaste"`)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		if errors.Is(err, session.ErrSecretTooShort) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ledger service unavailable"})
+			return
+		}
+		if h.logger != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			h.logger.Error("ledger session resolution failed", "error", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if resolved == nil || !resolved.EmailVerified || resolved.OrgID == nil ||
 		!isUUID(resolved.UserID) || !isUUID(*resolved.OrgID) || resolved.AuthSessionID == "" {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="chaste"`)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -73,10 +91,22 @@ func (h *LedgerSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	if events == nil {
-		events = []ledger.Event{}
+	response := businesscontract.LedgerResponse{Events: make([]businesscontract.LedgerEvent, 0, len(events))}
+	for _, event := range events {
+		if event.Seq < 1 || event.Seq > maxSafeLedgerSequence {
+			if h.logger != nil {
+				h.logger.Error("ledger sequence exceeds client safe-integer range", "sequence", event.Seq)
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		response.Events = append(response.Events, businesscontract.LedgerEvent{
+			Seq: event.Seq, Kind: event.Kind, CapabilityId: event.CapabilityID, ActorType: event.ActorType,
+			ActorId: event.ActorID, SessionId: event.SessionID,
+			Payload: apicontract.RawJSON(event.Payload), Hash: event.Hash, PrevHash: event.PrevHash, OccurredAt: event.OccurredAt,
+		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *LedgerSessionHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, error) {

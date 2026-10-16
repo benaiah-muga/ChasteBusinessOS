@@ -68,6 +68,9 @@ func TestLedgerSessionHandlerReadsForResolvedCookieOrganization(t *testing.T) {
 			t.Errorf("nullable field %q = %s, want null", key, body.Events[0][key])
 		}
 	}
+	if _, exists := body.Events[0]["authSessionId"]; exists {
+		t.Errorf("public ledger response exposed internal authentication session ID: %s", response.Body.String())
+	}
 	if string(body.Events[0]["payload"]) != `{"customerId":"c-7"}` {
 		t.Errorf("payload=%s, want original JSON value", body.Events[0]["payload"])
 	}
@@ -108,12 +111,26 @@ func TestLedgerSessionHandlerReadsOlderPageBeforeSequence(t *testing.T) {
 func TestLedgerSessionHandlerRejectsInvalidCursorBeforeRead(t *testing.T) {
 	identity := directTestIdentity()
 	identity.Permissions["accounting.read"] = true
-	reader := &fakeLedgerReader{}
+	for _, cursor := range []string{"-1", "9007199254740992"} {
+		reader := &fakeLedgerReader{}
+		response := httptest.NewRecorder()
+		NewLedgerSessionHandler(&fakeDirectSessionResolver{resolved: identity}, reader, nil).
+			ServeHTTP(response, ledgerSessionRequest("/api/ledger?before="+cursor))
+		if response.Code != http.StatusBadRequest || reader.calls != 0 {
+			t.Fatalf("cursor=%s status=%d reader calls=%d body=%s, want bad request without querying", cursor, response.Code, reader.calls, response.Body.String())
+		}
+	}
+}
+
+func TestLedgerSessionHandlerDoesNotSerializeSequenceOutsideSafeIntegerRange(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["accounting.read"] = true
+	reader := &fakeLedgerReader{events: []ledger.Event{{Seq: maxSafeLedgerSequence + 1, Kind: "test", ActorType: "human", Payload: json.RawMessage(`{}`), Hash: "hash", OccurredAt: "2026-10-04T09:10:11.123Z"}}}
 	response := httptest.NewRecorder()
 	NewLedgerSessionHandler(&fakeDirectSessionResolver{resolved: identity}, reader, nil).
-		ServeHTTP(response, ledgerSessionRequest("/api/ledger?before=-1"))
-	if response.Code != http.StatusBadRequest || reader.calls != 0 {
-		t.Fatalf("status=%d reader calls=%d body=%s, want bad request without querying", response.Code, reader.calls, response.Body.String())
+		ServeHTTP(response, ledgerSessionRequest("/api/ledger"))
+	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "9007199254740992") {
+		t.Fatalf("status=%d body=%s, want sanitized failure for an unsafe sequence", response.Code, response.Body.String())
 	}
 }
 
@@ -196,6 +213,41 @@ func TestLedgerSessionHandlerValidatesSelectorAndBearer(t *testing.T) {
 	}
 }
 
+func TestLedgerSessionHandlerClassifiesResolverFailures(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "missing session", err: session.ErrNoSession, want: http.StatusUnauthorized},
+		{name: "resolver infrastructure failure", err: errors.New("private resolver detail"), want: http.StatusInternalServerError},
+		{name: "short secret configuration", err: session.ErrSecretTooShort, want: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reader := &fakeLedgerReader{}
+			response := httptest.NewRecorder()
+			NewLedgerSessionHandler(&fakeDirectSessionResolver{err: test.err}, reader, nil).
+				ServeHTTP(response, ledgerSessionRequest("/api/ledger"))
+			if response.Code != test.want || reader.calls != 0 || strings.Contains(response.Body.String(), "private resolver detail") {
+				t.Fatalf("status=%d reads=%d body=%q, want status %d without leaked resolver details", response.Code, reader.calls, response.Body.String(), test.want)
+			}
+			if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+				t.Fatalf("privacy headers missing: %v", response.Header())
+			}
+		})
+	}
+}
+
+func TestLedgerSessionHandlerRejectsUnsupportedMethod(t *testing.T) {
+	response := httptest.NewRecorder()
+	NewLedgerSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, &fakeLedgerReader{}, nil).
+		ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/ledger", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet ||
+		response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+}
+
 func TestLedgerSessionHandlerBoundsLimitLikeLegacyRoute(t *testing.T) {
 	tests := []struct {
 		query string
@@ -204,6 +256,9 @@ func TestLedgerSessionHandlerBoundsLimitLikeLegacyRoute(t *testing.T) {
 		{query: "", want: 60},
 		{query: "?limit=100", want: 100},
 		{query: "?limit=999", want: 200},
+		{query: "?limit=0x10000000000000000", want: 200},
+		{query: "?limit=0x" + strings.Repeat("f", 300), want: 60},
+		{query: "?limit=0x10000000000000000z", want: 60},
 		{query: "?limit=-8", want: 1},
 		{query: "?limit=not-a-number", want: 60},
 	}

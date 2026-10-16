@@ -1494,6 +1494,174 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/ledger:
+    get:
+      operationId: getLedgerEvents
+      summary: Read organization ledger events
+      description: >-
+        Returns organization-scoped append-only ledger events, newest first.
+        The authenticated actor must have accounting.read or wildcard
+        permission. Cookie sessions use the active-organization cookie unless
+        X-Organization-ID is supplied; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        membership. Each response includes Cache-Control: no-store and
+        Pragma: no-cache. `limit` defaults to 60; values are coerced using
+        JavaScript-style number parsing, floored, and clamped to 1 through 200.
+        Malformed, non-finite, or underscore-containing values use 60; an empty
+        value clamps to 1. `before` is a positive base-10 sequence cursor and
+        returns events whose sequence is lower than the cursor. Duplicate
+        query parameters use their first value. Event payload is arbitrary raw
+        JSON and may contain sensitive audit details.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for this request.
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: >-
+            Coerced and floored like JavaScript Number, then clamped to 1..200.
+            Malformed, non-finite, or underscore-containing values default to
+            60; an explicit empty value becomes 1. Duplicate parameters use
+            the first value.
+          schema:
+            type: string
+          example: "101"
+        - name: before
+          in: query
+          required: false
+          description: >-
+            Positive base-10 ledger sequence cursor. Returns events with seq
+            lower than this value. Invalid, zero, negative, non-decimal, or
+            greater-than-JavaScript-safe-integer values return 400. Duplicate
+            parameters use the first value.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+            maximum: 9007199254740991
+      responses:
+        "200":
+          description: Ledger events ordered by descending sequence.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerResponse"
+        "400":
+          description: The organization selector is malformed or repeated, or the before cursor is invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or does not identify a verified organization member.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The organization selector does not match the authenticated membership or the actor lacks accounting.read.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported on the exact path while the Go route is enabled.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution or the organization-scoped ledger read failed, or storage returned a sequence outside the public safe-integer contract.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The ledger service or session configuration is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/notifications:
     get:
       operationId: getNotifications
@@ -3187,6 +3355,55 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+    LedgerResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          description: Events are ordered by descending sequence.
+          items:
+            $ref: "#/components/schemas/LedgerEvent"
+    LedgerEvent:
+      type: object
+      additionalProperties: false
+      required: [seq, kind, capabilityId, actorType, actorId, sessionId, payload, hash, prevHash, occurredAt]
+      properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: Positive sequence number bounded to JavaScript's exact integer range for client pagination.
+        kind:
+          type: string
+          minLength: 1
+        capabilityId:
+          type: [string, "null"]
+        actorType:
+          type: string
+          minLength: 1
+        actorId:
+          type: [string, "null"]
+        sessionId:
+          type: [string, "null"]
+        payload:
+          description: Arbitrary event payload retained as raw JSON.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        hash:
+          type: string
+          minLength: 1
+        prevHash:
+          type: [string, "null"]
+        occurredAt:
+          type: string
+          format: date-time
+          x-go-type: string
+          description: UTC timestamp formatted with millisecond precision.
     NotificationsResponse:
       type: object
       additionalProperties: false

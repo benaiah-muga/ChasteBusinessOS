@@ -699,6 +699,32 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// LedgerEvent defines model for LedgerEvent.
+type LedgerEvent struct {
+	ActorId      *string `json:"actorId"`
+	ActorType    string  `json:"actorType"`
+	CapabilityId *string `json:"capabilityId"`
+	Hash         string  `json:"hash"`
+	Kind         string  `json:"kind"`
+
+	// OccurredAt UTC timestamp formatted with millisecond precision.
+	OccurredAt string `json:"occurredAt"`
+
+	// Payload Arbitrary event payload retained as raw JSON.
+	Payload  apicontract.RawJSON `json:"payload"`
+	PrevHash *string             `json:"prevHash"`
+
+	// Seq Positive sequence number bounded to JavaScript's exact integer range for client pagination.
+	Seq       int64   `json:"seq"`
+	SessionId *string `json:"sessionId"`
+}
+
+// LedgerResponse defines model for LedgerResponse.
+type LedgerResponse struct {
+	// Events Events are ordered by descending sequence.
+	Events []LedgerEvent `json:"events"`
+}
+
 // ModuleInfo defines model for ModuleInfo.
 type ModuleInfo struct {
 	Description string  `json:"description"`
@@ -1131,6 +1157,18 @@ type ExecuteCapability422JSONResponseBody struct {
 // GetDashboardParams defines parameters for GetDashboard.
 type GetDashboardParams struct {
 	// XOrganizationID Selects the organization for this request and must match an organization membership.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// GetLedgerEventsParams defines parameters for GetLedgerEvents.
+type GetLedgerEventsParams struct {
+	// Limit Coerced and floored like JavaScript Number, then clamped to 1..200. Malformed, non-finite, or underscore-containing values default to 60; an explicit empty value becomes 1. Duplicate parameters use the first value.
+	Limit *string `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Before Positive base-10 ledger sequence cursor. Returns events with seq lower than this value. Invalid, zero, negative, non-decimal, or greater-than-JavaScript-safe-integer values return 400. Duplicate parameters use the first value.
+	Before *int64 `form:"before,omitempty" json:"before,omitempty"`
+
+	// XOrganizationID Selects an organization membership for this request.
 	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
 }
 

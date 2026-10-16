@@ -23,6 +23,8 @@ type ledgerCursorReader interface {
 	BeforeForOrg(context.Context, string, int64, int) ([]ledger.Event, error)
 }
 
+const maxSafeLedgerSequence int64 = 1<<53 - 1
+
 type GoLedgerHandler struct {
 	secret string
 	reader LedgerReader
@@ -97,7 +99,7 @@ func parseLedgerCursor(value string, present bool) (int64, bool) {
 		return 0, true
 	}
 	cursor, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-	return cursor, err == nil && cursor > 0
+	return cursor, err == nil && cursor > 0 && cursor <= maxSafeLedgerSequence
 }
 
 func parseLedgerLimit(value string, present bool) int {
@@ -128,11 +130,27 @@ func parseLedgerLimit(value string, present bool) int {
 			return 60
 		}
 	} else {
-		integer, parseErr := strconv.ParseUint(trimmed[2:], base, 64)
-		if parseErr != nil {
+		digits := trimmed[2:]
+		if digits == "" {
 			return 60
 		}
-		parsed = float64(integer)
+		parsed = 0
+		for i := 0; i < len(digits); i++ {
+			char := digits[i]
+			digit := -1
+			switch {
+			case char >= '0' && char <= '9':
+				digit = int(char - '0')
+			case char >= 'a' && char <= 'f':
+				digit = int(char-'a') + 10
+			case char >= 'A' && char <= 'F':
+				digit = int(char-'A') + 10
+			}
+			if digit < 0 || digit >= base {
+				return 60
+			}
+			parsed = parsed*float64(base) + float64(digit)
+		}
 	}
 	if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
 		return 60

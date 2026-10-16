@@ -40,8 +40,27 @@ func TestMountGoBusinessRoutesMountsDashboardLedgerAndMetrics(t *testing.T) {
 			}
 		})
 	}
-
 	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/ledger", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet ||
+		response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("POST exact ledger response = %d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/ledger/extra", nil))
+	if response.Code != http.StatusNotFound || response.Body.String() != "legacy" {
+		t.Fatalf("GET ledger suffix response = %d %q, want base fallback", response.Code, response.Body.String())
+	}
+	disabled := MountGoBusinessRoutes(legacy,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	response = httptest.NewRecorder()
+	disabled.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/ledger", nil))
+	if response.Code != http.StatusNotFound || response.Body.String() != "legacy" {
+		t.Fatalf("disabled ledger route response = %d %q, want base fallback", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/dashboard", nil))
 	if response.Code != http.StatusNotFound || response.Body.String() != "legacy" {
 		t.Fatalf("unmounted method response = %d %q, want legacy fallback", response.Code, response.Body.String())

@@ -184,6 +184,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read organization ledger events
+         * @description Returns organization-scoped append-only ledger events, newest first. The authenticated actor must have accounting.read or wildcard permission. Cookie sessions use the active-organization cookie unless X-Organization-ID is supplied; bearer tokens are resolved against the selected organization. A supplied selector must match the resolved membership. Each response includes Cache-Control: no-store and Pragma: no-cache. `limit` defaults to 60; values are coerced using JavaScript-style number parsing, floored, and clamped to 1 through 200. Malformed, non-finite, or underscore-containing values use 60; an empty value clamps to 1. `before` is a positive base-10 sequence cursor and returns events whose sequence is lower than the cursor. Duplicate query parameters use their first value. Event payload is arbitrary raw JSON and may contain sensitive audit details.
+         */
+        get: operations["getLedgerEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notifications": {
         parameters: {
             query?: never;
@@ -683,6 +703,31 @@ export interface components {
             /** Format: date-time */
             createdAt: string | null;
             rank: number;
+        };
+        LedgerResponse: {
+            /** @description Events are ordered by descending sequence. */
+            events: components["schemas"]["LedgerEvent"][];
+        };
+        LedgerEvent: {
+            /**
+             * Format: int64
+             * @description Positive sequence number bounded to JavaScript's exact integer range for client pagination.
+             */
+            seq: number;
+            kind: string;
+            capabilityId: string | null;
+            actorType: string;
+            actorId: string | null;
+            sessionId: string | null;
+            /** @description Arbitrary event payload retained as raw JSON. */
+            payload: unknown;
+            hash: string;
+            prevHash: string | null;
+            /**
+             * Format: date-time
+             * @description UTC timestamp formatted with millisecond precision.
+             */
+            occurredAt: string;
         };
         NotificationsResponse: {
             notifications: components["schemas"]["NotificationRow"][];
@@ -1939,6 +1984,109 @@ export interface operations {
                 };
             };
             /** @description The work service or session configuration is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getLedgerEvents: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Coerced and floored like JavaScript Number, then clamped to 1..200. Malformed, non-finite, or underscore-containing values default to 60; an explicit empty value becomes 1. Duplicate parameters use the first value.
+                 * @example 101
+                 */
+                limit?: string;
+                /** @description Positive base-10 ledger sequence cursor. Returns events with seq lower than this value. Invalid, zero, negative, non-decimal, or greater-than-JavaScript-safe-integer values return 400. Duplicate parameters use the first value. */
+                before?: number;
+            };
+            header?: {
+                /** @description Selects an organization membership for this request. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ledger events ordered by descending sequence. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LedgerResponse"];
+                };
+            };
+            /** @description The organization selector is malformed or repeated, or the before cursor is invalid. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid or does not identify a verified organization member. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The organization selector does not match the authenticated membership or the actor lacks accounting.read. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Only GET is supported on the exact path while the Go route is enabled. */
+            405: {
+                headers: {
+                    /** @description Allowed request method. */
+                    Allow?: "GET";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session resolution or the organization-scoped ledger read failed, or storage returned a sequence outside the public safe-integer contract. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The ledger service or session configuration is unavailable. */
             503: {
                 headers: {
                     "Cache-Control"?: "no-store";

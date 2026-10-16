@@ -34,6 +34,7 @@ describe("ledger API client", () => {
     await expect(fetchLedgerEvents(undefined, 100)).resolves.toEqual([event]);
     expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=101&before=100", expect.any(Object));
     await expect(fetchLedgerEvents(undefined, 0)).rejects.toMatchObject({ status: 0 });
+    await expect(fetchLedgerEvents(undefined, Number.MAX_SAFE_INTEGER + 1)).rejects.toMatchObject({ status: 0 });
   });
 
   it("preserves forbidden and expired-session states as explicit API errors", async () => {
@@ -59,6 +60,22 @@ describe("ledger API client", () => {
       status: 200,
       message: "The ledger service returned data in an unexpected format.",
     }));
+  });
+
+  it("rejects a private auth-session field and requires a safe positive sequence", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ events: [{ ...event, authSessionId: "private-session-id" }] })));
+    await expect(fetchLedgerEvents()).rejects.toMatchObject({ status: 200 });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ events: [{ ...event, seq: 0 }] })));
+    await expect(fetchLedgerEvents()).rejects.toMatchObject({ status: 200 });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ events: [{ ...event, seq: Number.MAX_SAFE_INTEGER + 1 }] })));
+    await expect(fetchLedgerEvents()).rejects.toMatchObject({ status: 200 });
+
+    const { payload: _payload, ...eventWithoutPayload } = event;
+    void _payload;
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ events: [eventWithoutPayload] })));
+    await expect(fetchLedgerEvents()).rejects.toMatchObject({ status: 200 });
   });
 
   it("maps an unavailable ledger service to a recoverable error", async () => {
