@@ -124,7 +124,24 @@ func MountMyWorkSummaryRoute(base, summaryRoute http.Handler) http.Handler {
 		return base
 	}
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/my-work/summarize", summaryRoute)
+	mux.Handle("/api/my-work/summarize", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/my-work/summarize" {
+			if base != nil {
+				base.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+			writeMyWorkSummaryError(w, http.StatusMethodNotAllowed, "method not allowed", "", "")
+			return
+		}
+		summaryRoute.ServeHTTP(w, r)
+	}))
 	if base != nil {
 		mux.Handle("/", base)
 	}

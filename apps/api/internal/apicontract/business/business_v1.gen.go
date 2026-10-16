@@ -782,6 +782,41 @@ type MyWorkResponse struct {
 	GeneratedAt time.Time `json:"generatedAt"`
 }
 
+// MyWorkSummaryCard Unknown object properties are ignored by the Go decoder.
+type MyWorkSummaryCard struct {
+	// Detail Limited to 4,096 UTF-16 code units; empty is allowed.
+	Detail string `json:"detail"`
+
+	// Kind Limited to 4,096 UTF-16 code units.
+	Kind string `json:"kind"`
+
+	// Title Limited to 4,096 UTF-16 code units.
+	Title string `json:"title"`
+}
+
+// MyWorkSummaryError defines model for MyWorkSummaryError.
+type MyWorkSummaryError struct {
+	// Detail Optional sanitized provider or coding-agent failure detail.
+	Detail *string `json:"detail,omitempty"`
+	Error  string  `json:"error"`
+
+	// Hint Optional user-facing setup hint; never includes credentials.
+	Hint *string `json:"hint,omitempty"`
+}
+
+// MyWorkSummaryInput Unknown object properties are ignored by the Go decoder. Body size, per-field UTF-16 units, and composed-prompt limits are documented on the operation because JSON Schema maxLength counts Unicode code points, not the UTF-16 units used by the server.
+type MyWorkSummaryInput struct {
+	Cards []MyWorkSummaryCard `json:"cards"`
+}
+
+// MyWorkSummaryResponse defines model for MyWorkSummaryResponse.
+type MyWorkSummaryResponse struct {
+	Brief string `json:"brief"`
+
+	// Model Selected model identifier without provider credential data.
+	Model string `json:"model"`
+}
+
 // NotificationReadFailure defines model for NotificationReadFailure.
 type NotificationReadFailure struct {
 	// Error Governed capability refusal message.
@@ -1190,6 +1225,12 @@ type GetMyWorkParams struct {
 	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
 }
 
+// SummarizeMyWorkParams defines parameters for SummarizeMyWork.
+type SummarizeMyWorkParams struct {
+	// XOrganizationID Selects an organization membership for this request.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
 // GetNotificationsParams defines parameters for GetNotifications.
 type GetNotificationsParams struct {
 	// Limit Requested result count. Values are parsed as numbers and floored; values below 1 clamp to 1, above 100 clamp to 100, and invalid or non-finite values use the default of 30. An explicitly empty value clamps to 1.
@@ -1252,6 +1293,9 @@ type ExecuteCapabilityJSONRequestBody = CapabilityExecutionRequest
 
 // SetModuleSwitchboardJSONRequestBody defines body for SetModuleSwitchboard for application/json ContentType.
 type SetModuleSwitchboardJSONRequestBody = ModuleSwitchboardRequest
+
+// SummarizeMyWorkJSONRequestBody defines body for SummarizeMyWork for application/json ContentType.
+type SummarizeMyWorkJSONRequestBody = MyWorkSummaryInput
 
 // MarkNotificationReadJSONRequestBody defines body for MarkNotificationRead for application/json ContentType.
 type MarkNotificationReadJSONRequestBody = NotificationReadRequest

@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
@@ -55,57 +56,67 @@ type myWorkSummaryModel interface {
 }
 
 type MyWorkSummarySessionHandler struct {
-	resolver myWorkSessionResolver
-	config   myWorkSummaryConfigReader
-	model    myWorkSummaryModel
-	logger   *slog.Logger
+	resolver          myWorkSessionResolver
+	config            myWorkSummaryConfigReader
+	model             myWorkSummaryModel
+	logger            *slog.Logger
+	trustedProxyCIDRs []*net.IPNet
 }
 
 // NewMyWorkSummarySessionHandler creates the authenticated Go handler for the
 // work brief. Workspace credentials are loaded and decrypted only on the API.
-func NewMyWorkSummarySessionHandler(resolver myWorkSessionResolver, config myWorkSummaryConfigReader, model myWorkSummaryModel, logger *slog.Logger) http.Handler {
+func NewMyWorkSummarySessionHandler(resolver myWorkSessionResolver, config myWorkSummaryConfigReader, model myWorkSummaryModel, logger *slog.Logger, trustedProxyCIDRs ...*net.IPNet) http.Handler {
 	if model == nil {
 		model = newOpenAIWorkSummaryModel()
 	}
-	return &MyWorkSummarySessionHandler{resolver: resolver, config: config, model: model, logger: logger}
+	return &MyWorkSummarySessionHandler{resolver: resolver, config: config, model: model, logger: logger, trustedProxyCIDRs: trustedProxyCIDRs}
 }
 
-type myWorkBriefCard struct {
-	Kind   string `json:"kind"`
-	Title  string `json:"title"`
-	Detail string `json:"detail"`
-}
+type myWorkBriefCard = businesscontract.MyWorkSummaryCard
 
-type myWorkBriefInput struct {
-	Cards []myWorkBriefCard `json:"cards"`
-}
+type myWorkBriefInput = businesscontract.MyWorkSummaryInput
 
 func (h *MyWorkSummarySessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeMyWorkSummaryError(w, http.StatusMethodNotAllowed, "method not allowed", "", "")
 		return
 	}
 	if h == nil || h.resolver == nil || h.config == nil || h.model == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summary unavailable"})
+		writeMyWorkSummaryError(w, http.StatusServiceUnavailable, "summary unavailable", "", "")
 		return
 	}
 	selector, valid := activeOrganizationSelector(r)
 	if !valid {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid organization selector"})
+		writeMyWorkSummaryError(w, http.StatusBadRequest, "invalid organization selector", "", "")
 		return
 	}
 	resolved, err := h.resolve(r, selector)
+	if errors.Is(err, session.ErrSecretTooShort) {
+		writeMyWorkSummaryError(w, http.StatusServiceUnavailable, "summary unavailable", "", "")
+		return
+	}
+	if err != nil && !errors.Is(err, session.ErrNoSession) {
+		if h.logger != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			h.logger.Error("Go my work summary session resolution failed", "error", err)
+		}
+		writeMyWorkSummaryError(w, http.StatusInternalServerError, "summary unavailable", "", "")
+		return
+	}
 	if err != nil || resolved == nil || !resolved.EmailVerified || resolved.OrgID == nil ||
 		!isUUID(resolved.UserID) || !isUUID(*resolved.OrgID) || resolved.AuthSessionID == "" {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="chaste"`)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeMyWorkSummaryError(w, http.StatusUnauthorized, "unauthorized", "", "")
 		return
 	}
 	if !matchesRequestedOrganization(r, resolved) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "organization access denied"})
+		writeMyWorkSummaryError(w, http.StatusForbidden, "organization access denied", "", "")
+		return
+	}
+	if strings.TrimSpace(r.Header.Get("Authorization")) == "" && !sameOriginCapabilityRequest(r, h.trustedProxyCIDRs) {
+		writeMyWorkSummaryError(w, http.StatusForbidden, "same-origin request required", "", "")
 		return
 	}
 	input, ok := decodeMyWorkBriefInput(w, r)
@@ -115,13 +126,13 @@ func (h *MyWorkSummarySessionHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 	lines := make([]string, len(input.Cards))
 	for index, card := range input.Cards {
 		if utf16Length(card.Kind) > myWorkBriefMaxCardFieldUnits || utf16Length(card.Title) > myWorkBriefMaxCardFieldUnits || utf16Length(card.Detail) > myWorkBriefMaxCardFieldUnits {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "card text is too long"})
+			writeMyWorkSummaryError(w, http.StatusBadRequest, "card text is too long", "", "")
 			return
 		}
 		lines[index] = fmt.Sprintf("- [%s] %s: %s", card.Kind, card.Title, card.Detail)
 	}
 	if utf16Length(myWorkBriefPrompt(lines)) > myWorkBriefMaxPromptUnits {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "card text is too long"})
+		writeMyWorkSummaryError(w, http.StatusBadRequest, "card text is too long", "", "")
 		return
 	}
 	config, err := h.config.LoadForOrg(r.Context(), *resolved.OrgID, resolved.UserID)
@@ -129,51 +140,59 @@ func (h *MyWorkSummarySessionHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		if h.logger != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			h.logger.Error("Go my work summary configuration read failed", "organizationId", *resolved.OrgID, "error", err)
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "summary unavailable"})
+		writeMyWorkSummaryError(w, http.StatusInternalServerError, "summary unavailable", "", "")
 		return
 	}
 	if config.codingAgent != nil {
 		brief, inputTokens, outputTokens, err := h.model.CodingAgentBrief(r.Context(), *config.codingAgent, myWorkBriefSystemPrompt, myWorkBriefPrompt(lines))
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "summary unavailable", "detail": safeCodingAgentSummaryError(err)})
+			writeMyWorkSummaryError(w, http.StatusBadGateway, "summary unavailable", safeCodingAgentSummaryError(err), "")
 			return
 		}
 		if err := h.config.RecordCodingAgentUsage(r.Context(), *resolved.OrgID, resolved.UserID, config.codingAgent.connectionID, inputTokens, outputTokens); err != nil {
 			if h.logger != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				h.logger.Error("Go my work summary coding-agent usage update failed", "organizationId", *resolved.OrgID, "userId", resolved.UserID, "error", err)
 			}
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "summary unavailable", "detail": "the selected coding-agent connection could not record usage"})
+			writeMyWorkSummaryError(w, http.StatusBadGateway, "summary unavailable", "the selected coding-agent connection could not record usage", "")
 			return
 		}
 		brief = strings.TrimSpace(brief)
 		if brief == "" {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "summary unavailable"})
+			writeMyWorkSummaryError(w, http.StatusBadGateway, "summary unavailable", "", "")
 			return
 		}
 		model := config.codingAgent.provider + ":" + config.codingAgent.modelID
 		if config.codingAgent.modelID == "" {
 			model = config.codingAgent.provider + ":plan-default"
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"brief": brief, "model": model})
+		writeJSON(w, http.StatusOK, businesscontract.MyWorkSummaryResponse{Brief: brief, Model: model})
 		return
 	}
 	if strings.TrimSpace(config.apiKey) == "" {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error": "summary unavailable",
-			"hint":  "no workspace model credential is configured; the ranked list itself does not depend on it",
-		})
+		writeMyWorkSummaryError(w, http.StatusServiceUnavailable, "summary unavailable", "", "no workspace model credential is configured; the ranked list itself does not depend on it")
 		return
 	}
 	brief, usedModel, err := h.briefWithFallback(r.Context(), config, myWorkBriefPrompt(lines))
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "summary unavailable", "detail": safeMyWorkSummaryError(err)})
+		writeMyWorkSummaryError(w, http.StatusBadGateway, "summary unavailable", safeMyWorkSummaryError(err), "")
 		return
 	}
 	if brief == "" {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "summary unavailable"})
+		writeMyWorkSummaryError(w, http.StatusBadGateway, "summary unavailable", "", "")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"brief": brief, "model": stripMyWorkProviderPrefix(usedModel)})
+	writeJSON(w, http.StatusOK, businesscontract.MyWorkSummaryResponse{Brief: brief, Model: stripMyWorkProviderPrefix(usedModel)})
+}
+
+func writeMyWorkSummaryError(w http.ResponseWriter, status int, message, detail, hint string) {
+	response := businesscontract.MyWorkSummaryError{Error: message}
+	if detail != "" {
+		response.Detail = &detail
+	}
+	if hint != "" {
+		response.Hint = &hint
+	}
+	writeJSON(w, status, response)
 }
 
 func (h *MyWorkSummarySessionHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, error) {
@@ -189,7 +208,7 @@ func (h *MyWorkSummarySessionHandler) resolve(r *http.Request, selector string) 
 
 func decodeMyWorkBriefInput(w http.ResponseWriter, r *http.Request) (myWorkBriefInput, bool) {
 	if r.ContentLength > myWorkBriefMaxBodyBytes {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+		writeMyWorkSummaryError(w, http.StatusRequestEntityTooLarge, "request body too large", "", "")
 		return myWorkBriefInput{}, false
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, myWorkBriefMaxBodyBytes)
@@ -198,43 +217,43 @@ func decodeMyWorkBriefInput(w http.ResponseWriter, r *http.Request) (myWorkBrief
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+			writeMyWorkSummaryError(w, http.StatusRequestEntityTooLarge, "request body too large", "", "")
 			return myWorkBriefInput{}, false
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cards are required"})
+		writeMyWorkSummaryError(w, http.StatusBadRequest, "cards are required", "", "")
 		return myWorkBriefInput{}, false
 	}
 	if !utf8.Valid(body) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cards are required"})
+		writeMyWorkSummaryError(w, http.StatusBadRequest, "cards are required", "", "")
 		return myWorkBriefInput{}, false
 	}
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(body, &raw) != nil || raw == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cards are required"})
+		writeMyWorkSummaryError(w, http.StatusBadRequest, "cards are required", "", "")
 		return myWorkBriefInput{}, false
 	}
 	cardsRaw, exists := raw["cards"]
 	var cards []json.RawMessage
 	if !exists || json.Unmarshal(cardsRaw, &cards) != nil || len(cards) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cards are required"})
+		writeMyWorkSummaryError(w, http.StatusBadRequest, "cards are required", "", "")
 		return myWorkBriefInput{}, false
 	}
 	if len(cards) > 30 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many cards"})
+		writeMyWorkSummaryError(w, http.StatusBadRequest, "too many cards", "", "")
 		return myWorkBriefInput{}, false
 	}
 	input := myWorkBriefInput{Cards: make([]myWorkBriefCard, 0, len(cards))}
 	for _, item := range cards {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(item, &fields) != nil || fields == nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid card"})
+			writeMyWorkSummaryError(w, http.StatusBadRequest, "invalid card", "", "")
 			return myWorkBriefInput{}, false
 		}
 		var card myWorkBriefCard
 		if !decodeMyWorkBriefString(fields, "kind", &card.Kind) || card.Kind == "" ||
 			!decodeMyWorkBriefString(fields, "title", &card.Title) || card.Title == "" ||
 			!decodeMyWorkBriefString(fields, "detail", &card.Detail) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid card"})
+			writeMyWorkSummaryError(w, http.StatusBadRequest, "invalid card", "", "")
 			return myWorkBriefInput{}, false
 		}
 		input.Cards = append(input.Cards, card)

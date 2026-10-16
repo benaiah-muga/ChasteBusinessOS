@@ -184,6 +184,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/my-work/summarize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Summarize permission-scoped work cards
+         * @description Creates a short model-generated brief from the supplied work cards. The API requires an authenticated, verified user with an organization session. Cookie sessions use the active-organization cookie unless X-Organization-ID is supplied; bearer tokens are resolved against the selected organization. A supplied selector must match the resolved membership. The caller sends only card kind, title, and detail; model credentials and coding-agent credentials are loaded and used on the server and are never accepted in the request. Cards must contain 1 to 30 items. The encoded body is limited to 1 MiB. Each kind, title, and detail value is limited to 4,096 UTF-16 code units, and the composed prompt is limited to 32,000 UTF-16 code units. Unknown request object properties are ignored. Missing workspace credentials produce a 503 response; provider and coding-agent failures produce a sanitized 502 response. Cookie-authenticated requests require a same-origin Origin header; bearer requests do not use this cookie CSRF check. This operation may invoke a model and may record coding-agent usage, so retries can repeat provider work and usage recording. No idempotency key is supported. Responses include Cache-Control: no-store and Pragma: no-cache. Unsupported methods on this exact path receive 405 while the Go route is enabled; suffix paths and a disabled route remain on the base router.
+         */
+        post: operations["summarizeMyWork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ledger": {
         parameters: {
             query?: never;
@@ -681,6 +701,31 @@ export interface components {
             /** @description Same-origin application path beginning with a single slash. The Vite runtime validator also rejects paths that resolve outside the application origin. */
             href: string;
             done: boolean;
+        };
+        /** @description Unknown object properties are ignored by the Go decoder. Body size, per-field UTF-16 units, and composed-prompt limits are documented on the operation because JSON Schema maxLength counts Unicode code points, not the UTF-16 units used by the server. */
+        MyWorkSummaryInput: {
+            cards: components["schemas"]["MyWorkSummaryCard"][];
+        };
+        /** @description Unknown object properties are ignored by the Go decoder. */
+        MyWorkSummaryCard: {
+            /** @description Limited to 4,096 UTF-16 code units. */
+            kind: string;
+            /** @description Limited to 4,096 UTF-16 code units. */
+            title: string;
+            /** @description Limited to 4,096 UTF-16 code units; empty is allowed. */
+            detail: string;
+        };
+        MyWorkSummaryResponse: {
+            brief: string;
+            /** @description Selected model identifier without provider credential data. */
+            model: string;
+        };
+        MyWorkSummaryError: {
+            error: string;
+            /** @description Optional sanitized provider or coding-agent failure detail. */
+            detail?: string;
+            /** @description Optional user-facing setup hint; never includes credentials. */
+            hint?: string;
         };
         MyWorkResponse: {
             cards: components["schemas"]["MyWorkCard"][];
@@ -1992,6 +2037,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    summarizeMyWork: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects an organization membership for this request. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MyWorkSummaryInput"];
+            };
+        };
+        responses: {
+            /** @description Generated work brief and selected model identifier. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkSummaryResponse"];
+                };
+            };
+            /** @description The selector or request body is malformed or exceeds card limits. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkSummaryError"];
+                };
+            };
+            /** @description No valid session exists, or the resolved identity is unverified or invalid. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkSummaryError"];
+                };
+            };
+            /** @description The explicit organization selector does not match the authenticated membership, or a cookie-authenticated request lacks a valid same-origin Origin header. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkSummaryError"];
+                };
+            };
+            /** @description Only POST is supported on the Go-owned exact path. */
+            405: {
+                headers: {
+                    /** @description Allowed request method. */
+                    Allow?: "POST";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkSummaryError"];
+                };
+            };
+            /** @description The encoded request body exceeds 1 MiB. */
+            413: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkSummaryError"];
+                };
+            };
+            /** @description Session resolution or organization-scoped configuration access failed unexpectedly. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkSummaryError"];
+                };
+            };
+            /** @description The selected provider failed or returned no usable brief; detail is sanitized. */
+            502: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkSummaryError"];
+                };
+            };
+            /** @description Summary configuration is unavailable or no workspace model credential is configured. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkSummaryError"];
                 };
             };
         };

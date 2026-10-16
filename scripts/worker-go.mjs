@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { jobsWorkerKeys, selectedEnvironment } from "./worker-go-env.mjs";
+import { jobsWorkerEnvironment, selectedEnvironment } from "./worker-go-env.mjs";
 
 const workerNames = ["jobs-worker", "outbox-worker", "marketing-email-worker", "notification-email-worker"];
 const directory = mkdtempSync(join(tmpdir(), "chaste-workers-"));
@@ -95,11 +95,7 @@ try {
     if (stopping) break;
   }
   if (!stopping) {
-    run("jobs-worker", {
-      ...selectedEnvironment(jobsWorkerKeys),
-      GO_ROUTINE_SCHEDULER: process.env.GO_ROUTINE_SCHEDULER ?? "1",
-      GO_ROUTINE_AGENT_RUNNER: process.env.GO_ROUTINE_AGENT_RUNNER ?? "1",
-    });
+    run("jobs-worker", jobsWorkerEnvironment());
     run("outbox-worker", selectedEnvironment(["OUTBOX_WORKER_DATABASE_URL", "OUTBOX_WORKER_ID"]));
     run("marketing-email-worker", selectedEnvironment([
       "MARKETING_EMAIL_OUTBOX_WORKER_DATABASE_URL",

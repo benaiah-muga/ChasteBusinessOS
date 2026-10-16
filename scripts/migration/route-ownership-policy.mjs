@@ -44,3 +44,19 @@ export function allowsPendingGoPolicyOwner(kind, path, method, owner, parity) {
     && owner === "go"
     && parity === "pending";
 }
+
+export function allowsPendingGoAttachmentDownloadOwner(kind, path, method, owner, parity) {
+  return kind === "api"
+    && path === "/api/message-attachments/[id]"
+    && method === "GET"
+    && owner === "go"
+    && parity === "pending";
+}
+
+export function allowsPendingGoMessagingAgentOwner(kind, path, method, owner, parity) {
+  return kind === "api"
+    && path === "/api/conversations/[id]/agent-reply"
+    && method === "POST"
+    && owner === "go"
+    && parity === "pending";
+}

@@ -358,6 +358,13 @@
     },
     {
       "kind": "api",
+      "path": "/api/routines/webhook/[token]",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
       "path": "/api/sales",
       "method": "GET",
       "owner": "go",
@@ -409,15 +416,15 @@
       "kind": "api",
       "path": "/api/scim/v2/Users/[id]",
       "method": "DELETE",
-      "owner": "go",
-      "parity": "verified"
+      "owner": "legacy",
+      "parity": "pending"
     },
     {
       "kind": "api",
       "path": "/api/scim/v2/Users/[id]",
       "method": "GET",
-      "owner": "go",
-      "parity": "verified"
+      "owner": "legacy",
+      "parity": "pending"
     },
     {
       "kind": "api",
@@ -792,6 +799,13 @@
     },
     {
       "kind": "api",
+      "path": "/api/message-attachments/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
       "path": "/api/pos",
       "method": "POST",
       "owner": "go",
@@ -827,6 +841,22 @@
     }
   ],
   "goRoutes": [
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/agent-reply",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/messaging_agent_session.go",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/go/documents/[id]/content",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/document_content_download.go",
+      "owner": "go",
+      "parity": "verified"
+    },
     {
       "kind": "api",
       "path": "/api/pos/customers",

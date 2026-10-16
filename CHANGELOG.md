@@ -26,6 +26,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - The public OpenAPI contract now covers Go GET `/api/signals`, including cookie and bearer authentication, organization membership checks, first-value filters, UTF-8 byte bounds, cache headers, and error statuses. Go and Vite consume generated signal models with runtime validation; malformed filters return 400, permission or organization mismatches return generic 403, and session resolver infrastructure failures no longer appear as unauthorized.
 - The public OpenAPI contract now covers Go GET `/api/my-work`, including cookie and bearer authentication, organization selection, permission-scoped cards, cache headers, and error statuses. Go and Vite use generated response models with runtime validation; invalid signal projections fail closed and the enabled exact-path mount rejects unsupported methods.
 - The public OpenAPI contract now covers Go GET `/api/ledger`, including cookie and bearer authentication, accounting-read permission, organization selection, pagination coercion and cursors, raw JSON payloads, nullable audit fields, cache headers, and errors. Go and Vite use generated event models with runtime validation; sequence numbers are bounded to JavaScript's exact integer range, the public response omits internal auth-session IDs, resolver infrastructure failures return a generic 500, short secrets return 503, and the enabled exact-path mount rejects unsupported methods.
+- The public OpenAPI contract now covers Go POST `/api/my-work/summarize`, including cookie and bearer authentication, same-origin enforcement for cookie requests, verified organization selection, card and UTF-16 prompt limits, provider/configuration outcomes, sanitized errors, and cache headers. Go and Vite use generated request, response, and error models with runtime validation; resolver infrastructure failures return a logged generic 500, short secrets return 503, and the enabled exact-path mount rejects unsupported methods.
 - Go now owns organization-scoped SSO connection listing and routes SSO creation, disablement, and restoration through audited, reversible `iam.admin` capabilities.
 - Go routine agents now expose the legacy manufacturing read tools for production runs, work orders, BOM trees and reports, cost previews, lot traceability, and production feasibility through existing governed capabilities.
 - Go now accepts session-authenticated durable-run creation requests and dispatches ordered, approval-gated steps through the Go jobs worker.
@@ -77,6 +78,10 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Inventory can page through stock movement history beyond the latest 100 entries using the authenticated Go reader.
 - Vite CRM can record a deal's source and owner through Go, and the pipeline shows those attribution details after reload.
 - Vite Hiring can hire offer-stage applicants as employees through Go `hr.hireApplicant`.
+
+### Fixed
+
+- The Go worker supervisor keeps routine scheduling and agent execution opt-in until their migration parity gates pass, while preserving explicit `GO_ROUTINE_SCHEDULER=1` and `GO_ROUTINE_AGENT_RUNNER=1` configuration.
 - Vite Purchasing shows receipt progress per order line and prevents entries above the remaining quantity.
 - Vite Projects can delete and undo tasks through Go using a guarded task snapshot.
 - Vite Sales shows order-line fulfillment details from Go and validates CRM deal lists against the Go response contract.
@@ -84,8 +89,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Accounting can match bank lines to exact remaining payments or whole journal entries through Go.
 - Vite Support can insert organization-scoped saved replies into inbox drafts without sending them.
 - Vite Approvals reads and submits decisions through the Go session routes with explicit organization scope and strict response validation.
-
-### Fixed
+- Go message attachment downloads encode filenames with RFC 5987, escaping header delimiters and control bytes in untrusted names.
 
 - Go AI settings now count input limits in JavaScript-compatible UTF-16 units and accept the full encrypted representation of a maximum-length provider key.
 - Go routine and public support workers validate stored AI configuration with a bounded parser and fail closed on malformed settings.

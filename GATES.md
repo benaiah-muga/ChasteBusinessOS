@@ -664,3 +664,27 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /ok.*internal\/httpapi|Tests\s+.*passed/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Go unit tests reject missing, cross-origin, and ambiguous Origin values before organization-switch cookies or persona writes; runtime-role RLS persona read/write passed. The Vite organization client suite passed, and authenticated `agent-browser` saved the owner persona through PATCH with HTTP 200 and confirmed it persisted after reload. The handler receives configured trusted proxy CIDRs so same-origin checks work behind the approved HTTPS proxy boundary.
+
+- [x] G128: Go POST `/api/my-work/summarize` has a generated OpenAPI contract and enforces same-origin requests for cookie-authenticated provider calls.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v22.16.0/bin:/home/benaiah/.local/share/go/1.27.1/bin:$PATH pnpm migration:contracts:check && go -C apps/api test ./internal/httpapi -run 'TestMyWorkSummaryHandler|TestMountMyWorkSummaryRoute' -count=1
+  EXPECT: business contract output is current
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Generated Go and TypeScript contracts are current. Focused Go tests passed for valid cookie requests, missing and cross-origin Origin rejection before provider/config calls, Bearer requests without Origin, resolver status classification, input bounds, and exact-path method behavior.
+
+- [x] G129: Route ownership marks attachment and messaging parity honestly, uses canonical dynamic path syntax, and protects attachment filenames.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v22.16.0/bin:/home/benaiah/.local/share/go/1.27.1/bin:$PATH pnpm migration:routes:check && node --test scripts/migration/route-ownership.test.mjs && go -C apps/api test ./internal/httpapi -run 'TestMessageAttachmentDownload|TestMountGoMessageAttachmentDownload' -count=1
+  EXPECT: /Routes: 94 files, 165 methods, 30 pages\.|# pass 26|ok.*internal\/httpapi/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Route generator and all 26 ownership tests passed. Attachment GET remains Go-owned with parity pending until a valid browser proof runs; SCIM user-item methods remain legacy/pending; agent-reply is Go/pending. Attachment handler tests passed, including RFC 5987 delimiter, UTF-8, and control-byte cases.
+
+- [x] G130: Go routine scheduling and agent execution remain opt-in until their staged migration gates pass.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v22.16.0/bin:/home/benaiah/.local/share/go/1.27.1/bin:$PATH node --test scripts/worker-go-env.test.mjs
+  EXPECT: /# pass 4/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Four supervisor environment tests passed, covering both default-off settings and explicit routine scheduler and agent-runner opt-ins.
+
+- [ ] G131: The full workspace test suite passes without Vite UI timeouts.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v22.16.0/bin:/home/benaiah/.local/share/go/1.27.1/bin:$PATH pnpm test
+  EXPECT: Tasks:
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Three full-suite attempts each reported at least one Vite UI failure under the parallel package test workload. The affected Ledger, Accounting, and Manufacturing files passed focused reruns; the latest failing test was ManufacturingPage at line 139. Re-run after addressing test-suite stability.

@@ -54,6 +54,24 @@ func TestMessageAttachmentDownloadStreamsBinaryWithLegacyHeaders(t *testing.T) {
 	}
 }
 
+func TestEncodeRFC5987Filename(t *testing.T) {
+	for _, test := range []struct {
+		filename string
+		want     string
+	}{
+		{filename: `semi;quote".txt`, want: "semi%3Bquote%22.txt"},
+		{filename: "résumé.txt", want: "r%C3%A9sum%C3%A9.txt"},
+		{filename: "line\r\nbreak.txt", want: "line%0D%0Abreak.txt"},
+		{filename: "nul\x00name.txt", want: "nul%00name.txt"},
+	} {
+		t.Run(test.filename, func(t *testing.T) {
+			if got := encodeRFC5987Filename(test.filename); got != test.want {
+				t.Fatalf("encodeRFC5987Filename(%q) = %q, want %q", test.filename, got, test.want)
+			}
+		})
+	}
+}
+
 func TestMessageAttachmentDownloadRejectsMissingPermissionAndHidesMissingFile(t *testing.T) {
 	identity := directTestIdentity()
 	reader := &messageAttachmentDownloadTestReader{file: &messageAttachmentDownload{Filename: "secret", MimeType: "application/octet-stream"}}

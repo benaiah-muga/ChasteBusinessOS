@@ -163,6 +163,25 @@ describe("dashboard API client", () => {
     }));
   });
 
+  it("enforces the server's UTF-16 card-field and composed-prompt bounds", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ brief: "Review work.", model: "test-model" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const baseCard = myWorkFixture.find(() => true);
+    if (!baseCard) throw new Error("My Work fixture must contain a card");
+
+    const oversizedField = [{ ...baseCard, title: "😀".repeat(2049) }];
+    await expect(summarizeWork(oversizedField)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const oversizedPrompt = Array.from({ length: 9 }, () => ({
+      ...baseCard,
+      title: "t",
+      detail: "x".repeat(4096),
+    }));
+    await expect(summarizeWork(oversizedPrompt)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("preserves the server hint when the model brief is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "summary unavailable", hint: "No workspace model credential is configured." }, { status: 503 })));
 

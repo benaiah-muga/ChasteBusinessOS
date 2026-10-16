@@ -72,7 +72,7 @@ describe("Vite ledger page", () => {
   it("loads the next Go-backed page before the oldest visible sequence", async () => {
     const makeEvent = (seq: number) => ({ ...events[0], seq, kind: `event-${seq}`, hash: String(seq).padStart(32, "0") });
     const firstPage = Array.from({ length: 101 }, (_, index) => makeEvent(200 - index));
-    const olderPage = Array.from({ length: 101 }, (_, index) => makeEvent(100 - index));
+    const olderPage = Array.from({ length: 100 }, (_, index) => makeEvent(100 - index));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes("before=")
       ? Response.json({ events: olderPage })
       : Response.json({ events: firstPage }));

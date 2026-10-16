@@ -1494,6 +1494,194 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/my-work/summarize:
+    post:
+      operationId: summarizeMyWork
+      summary: Summarize permission-scoped work cards
+      description: >-
+        Creates a short model-generated brief from the supplied work cards.
+        The API requires an authenticated, verified user with an organization
+        session. Cookie sessions use the active-organization cookie unless
+        X-Organization-ID is supplied; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        membership. The caller sends only card kind, title, and detail; model
+        credentials and coding-agent credentials are loaded and used on the
+        server and are never accepted in the request. Cards must contain 1 to
+        30 items. The encoded body is limited to 1 MiB. Each kind, title, and
+        detail value is limited to 4,096 UTF-16 code units, and the composed
+        prompt is limited to 32,000 UTF-16 code units. Unknown request object
+        properties are ignored. Missing workspace credentials produce a 503
+        response; provider and coding-agent failures produce a sanitized 502
+        response. Cookie-authenticated requests require a same-origin Origin
+        header; bearer requests do not use this cookie CSRF check. This
+        operation may invoke a model and may record coding-agent
+        usage, so retries can repeat provider work and usage recording. No
+        idempotency key is supported. Responses include Cache-Control: no-store
+        and Pragma: no-cache. Unsupported methods on this exact path receive
+        405 while the Go route is enabled; suffix paths and a disabled route
+        remain on the base router.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for this request.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MyWorkSummaryInput"
+      responses:
+        "200":
+          description: Generated work brief and selected model identifier.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryResponse"
+        "400":
+          description: The selector or request body is malformed or exceeds card limits.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "401":
+          description: No valid session exists, or the resolved identity is unverified or invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "403":
+          description: The explicit organization selector does not match the authenticated membership, or a cookie-authenticated request lacks a valid same-origin Origin header.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "405":
+          description: Only POST is supported on the Go-owned exact path.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: POST
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "413":
+          description: The encoded request body exceeds 1 MiB.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "500":
+          description: Session resolution or organization-scoped configuration access failed unexpectedly.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "502":
+          description: The selected provider failed or returned no usable brief; detail is sanitized.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "503":
+          description: Summary configuration is unavailable or no workspace model credential is configured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
   /api/ledger:
     get:
       operationId: getLedgerEvents
@@ -3309,6 +3497,62 @@ components:
             application origin.
         done:
           type: boolean
+    MyWorkSummaryInput:
+      type: object
+      required: [cards]
+      description: >-
+        Unknown object properties are ignored by the Go decoder. Body size,
+        per-field UTF-16 units, and composed-prompt limits are documented on
+        the operation because JSON Schema maxLength counts Unicode code points,
+        not the UTF-16 units used by the server.
+      properties:
+        cards:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/MyWorkSummaryCard"
+    MyWorkSummaryCard:
+      type: object
+      required: [kind, title, detail]
+      description: Unknown object properties are ignored by the Go decoder.
+      properties:
+        kind:
+          type: string
+          minLength: 1
+          description: Limited to 4,096 UTF-16 code units.
+        title:
+          type: string
+          minLength: 1
+          description: Limited to 4,096 UTF-16 code units.
+        detail:
+          type: string
+          description: Limited to 4,096 UTF-16 code units; empty is allowed.
+    MyWorkSummaryResponse:
+      type: object
+      additionalProperties: false
+      required: [brief, model]
+      properties:
+        brief:
+          type: string
+          minLength: 1
+        model:
+          type: string
+          minLength: 1
+          description: Selected model identifier without provider credential data.
+    MyWorkSummaryError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+          description: Optional sanitized provider or coding-agent failure detail.
+        hint:
+          type: string
+          description: Optional user-facing setup hint; never includes credentials.
     MyWorkResponse:
       type: object
       additionalProperties: false

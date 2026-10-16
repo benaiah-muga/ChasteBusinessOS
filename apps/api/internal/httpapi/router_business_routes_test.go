@@ -393,7 +393,6 @@ func TestMountMyWorkSummaryRouteMountsOnlyThePostEndpoint(t *testing.T) {
 		want   string
 	}{
 		{method: http.MethodPost, path: "/api/my-work/summarize", want: "summary"},
-		{method: http.MethodGet, path: "/api/my-work/summarize", want: "legacy"},
 		{method: http.MethodPost, path: "/api/my-work/summarize/extra", want: "legacy"},
 		{method: http.MethodPost, path: "/api/my-work", want: "legacy"},
 	} {
@@ -404,6 +403,12 @@ func TestMountMyWorkSummaryRouteMountsOnlyThePostEndpoint(t *testing.T) {
 		}
 	}
 	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/my-work/summarize", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodPost ||
+		response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("GET exact summary response = %d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	response = httptest.NewRecorder()
 	MountMyWorkSummaryRoute(legacy, nil).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/my-work/summarize", nil))
 	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
 		t.Fatalf("disabled summary route response = %d %q, want legacy fallback", response.Code, response.Body.String())

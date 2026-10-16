@@ -957,7 +957,7 @@ describe("AccountingPage governed writes", () => {
     await screen.findByRole("navigation", { name: "Accounting sections" });
     fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
     fireEvent.click(screen.getByRole("button", { name: "New invoice" }));
-    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    fireEvent.change(await screen.findByLabelText("Customer"), { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
     fireEvent.change(screen.getByLabelText("Line 1 description"), { target: { value: "Advisory" } });
     fireEvent.change(screen.getByLabelText("Line 1 unit price"), { target: { value: "25" } });
     fireEvent.click(screen.getByRole("button", { name: "Post invoice" }));
@@ -990,7 +990,7 @@ describe("AccountingPage governed writes", () => {
     await renderReady();
     fireEvent.click(screen.getByRole("button", { name: /Receivables/ }));
     fireEvent.click(screen.getByRole("button", { name: "New invoice" }));
-    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    fireEvent.change(await screen.findByLabelText("Customer"), { target: { value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
     fireEvent.change(screen.getByLabelText("Line 1 description"), { target: { value: "Advisory" } });
     fireEvent.change(screen.getByLabelText("Line 1 unit price"), { target: { value: "25" } });
     fireEvent.click(screen.getByRole("button", { name: "Post invoice" }));

@@ -16,6 +16,14 @@ export const jobsWorkerKeys = [
   "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "SMTP_SECURE", "SMTP_TO",
 ];
 
+export function jobsWorkerEnvironment(source = process.env) {
+  return {
+    ...selectedEnvironment(jobsWorkerKeys, source),
+    GO_ROUTINE_SCHEDULER: source.GO_ROUTINE_SCHEDULER ?? "0",
+    GO_ROUTINE_AGENT_RUNNER: source.GO_ROUTINE_AGENT_RUNNER ?? "0",
+  };
+}
+
 export function selectedEnvironment(keys, source = process.env) {
   const result = {};
   for (const key of new Set([...commonKeys, ...keys])) {

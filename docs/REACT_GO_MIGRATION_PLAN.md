@@ -379,8 +379,10 @@ The census leaves several explicit decisions before the related routes or
 workers move: marketplace reads return unverified statuses and installer-org
 IDs, and plugin verification lacks the capability permission check; creating a
 webhook routine exposes its bearer token in the model tool result; the SCIM
-item-route expiry and throttling behavior needs a direct proof; no general
-production durable-run dispatcher or outbox reconciliation endpoint was found.
+item-route expiry and throttling behavior needs a direct proof. The earlier
+census found no general production durable-run dispatcher, but the Go dispatcher
+and worker proof are now recorded in item 467. Outbox reconciliation still has
+no production API or UI caller.
 The earlier async OCR gap is now covered by the database-backed Go uploaded-file
 worker proof in `apps/api/internal/jobs/document_ocr_worker_integration_test.go`,
 which uses a deterministic parser and makes no provider request. The other
@@ -5089,4 +5091,17 @@ new owners and the manifest shows zero legacy runtime paths.
      IDs. Resolver infrastructure failures return logged
      generic 500, short auth secrets return 503, and the enabled exact-path
      mount returns 405 with `Allow: GET`; suffix and disabled-route fallback
+     remain intact.
+
+477. (Focused verified; Go summary/mount tests, 13 Vite API tests, typecheck,
+     targeted lint, contract drift check, and diff check passed) The public
+     business OpenAPI contract now describes Go POST
+     `/api/my-work/summarize`, including cookie and bearer auth, verified
+     organization selection, same-origin cookie requests, card/body/UTF-16
+     prompt limits, provider/config
+     outcomes, sanitized errors, cache headers, and non-idempotent provider
+     behavior. Go and Vite use generated request, response, and error models
+     with runtime validation. Resolver infrastructure failures return a logged
+     generic 500, short auth secrets return 503, and the enabled exact-path
+     mount returns 405 with `Allow: POST`; suffix and disabled-route fallback
      remain intact.

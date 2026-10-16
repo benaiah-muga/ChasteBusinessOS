@@ -110,10 +110,58 @@ func myWorkSummaryRequest(method, body string) *http.Request {
 	request.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: "work-cookie"})
 	request.AddCookie(&http.Cookie{Name: session.ActiveOrgCookieName, Value: "11111111-1111-4111-8111-111111111111"})
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "http://example.com")
 	return request
 }
 
 const validMyWorkSummaryBody = `{"cards":[{"kind":"approval","title":"Approval needed","detail":"Review order 42"}]}`
+
+func TestMyWorkSummaryHandlerRequiresSameOriginForCookieRequests(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		origin        string
+		includeOrigin bool
+	}{
+		{name: "cross origin", origin: "https://attacker.example", includeOrigin: true},
+		{name: "missing origin"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			identity := directTestIdentity()
+			config := &fakeMyWorkSummaryConfigReader{config: myWorkSummaryConfig{apiKey: "secret"}}
+			model := &fakeMyWorkSummaryModel{briefs: []string{"Brief"}}
+			request := myWorkSummaryRequest(http.MethodPost, validMyWorkSummaryBody)
+			if !test.includeOrigin {
+				request.Header.Del("Origin")
+			} else {
+				request.Header.Set("Origin", test.origin)
+			}
+			response := httptest.NewRecorder()
+
+			NewMyWorkSummarySessionHandler(&fakeDirectSessionResolver{resolved: identity}, config, model, nil).ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden || config.calls != 0 || model.calls != 0 {
+				t.Fatalf("status=%d configCalls=%d modelCalls=%d body=%s", response.Code, config.calls, model.calls, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestMyWorkSummaryHandlerAllowsBearerWithoutOrigin(t *testing.T) {
+	identity := directTestIdentity()
+	config := &fakeMyWorkSummaryConfigReader{config: myWorkSummaryConfig{apiKey: "secret"}}
+	model := &fakeMyWorkSummaryModel{briefs: []string{"Brief"}}
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	request := myWorkSummaryRequest(http.MethodPost, validMyWorkSummaryBody)
+	request.Header.Del("Origin")
+	request.Header.Set("Authorization", "Bearer api-token")
+	response := httptest.NewRecorder()
+
+	NewMyWorkSummarySessionHandler(resolver, config, model, nil).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || resolver.bearerCalls != 1 || config.calls != 1 || model.calls != 1 {
+		t.Fatalf("status=%d bearerCalls=%d configCalls=%d modelCalls=%d body=%s", response.Code, resolver.bearerCalls, config.calls, model.calls, response.Body.String())
+	}
+}
 
 func myWorkSummaryBoundaryCards(lastDetailUnits int) []myWorkBriefCard {
 	cards := make([]myWorkBriefCard, 8)
@@ -341,6 +389,31 @@ func TestMyWorkSummaryHandlerRequiresVerifiedSessionAndOrganizationMatch(t *test
 	NewMyWorkSummarySessionHandler(&fakeDirectSessionResolver{resolved: identity}, config, model, nil).ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden || config.calls != 0 {
 		t.Fatalf("cross-org status=%d config calls=%d body=%s", response.Code, config.calls, response.Body.String())
+	}
+}
+
+func TestMyWorkSummaryHandlerClassifiesResolverFailures(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "missing session", err: session.ErrNoSession, want: http.StatusUnauthorized},
+		{name: "resolver infrastructure failure", err: errors.New("private resolver detail"), want: http.StatusInternalServerError},
+		{name: "short session secret", err: session.ErrSecretTooShort, want: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := &fakeMyWorkSummaryConfigReader{}
+			response := httptest.NewRecorder()
+			NewMyWorkSummarySessionHandler(&fakeDirectSessionResolver{err: test.err}, config, &fakeMyWorkSummaryModel{}, nil).
+				ServeHTTP(response, myWorkSummaryRequest(http.MethodPost, validMyWorkSummaryBody))
+			if response.Code != test.want || config.calls != 0 || strings.Contains(response.Body.String(), "private resolver detail") {
+				t.Fatalf("status=%d config calls=%d body=%q, want status %d without leaked resolver details", response.Code, config.calls, response.Body.String(), test.want)
+			}
+			if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+				t.Fatalf("privacy headers missing: %v", response.Header())
+			}
+		})
 	}
 }
 

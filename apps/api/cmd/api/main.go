@@ -600,7 +600,7 @@ func run(logger *slog.Logger) error {
 		if resolverErr != nil {
 			return resolverErr
 		}
-		myWorkSummaryRoute = httpapi.NewMyWorkSummarySessionHandler(resolver, httpapi.NewMyWorkSummaryPostgresReader(pool), nil, logger)
+		myWorkSummaryRoute = httpapi.NewMyWorkSummarySessionHandler(resolver, httpapi.NewMyWorkSummaryPostgresReader(pool), nil, logger, trustedProxyCIDRs...)
 		logger.Info("Go my work summary route mounted", "path", "POST /api/my-work/summarize")
 	}
 	var sessionsListRoute, sessionsDetailRoute http.Handler

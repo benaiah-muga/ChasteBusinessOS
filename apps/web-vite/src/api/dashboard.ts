@@ -100,17 +100,38 @@ export const MyWorkResponseSchema: z.ZodType<components["schemas"]["MyWorkRespon
   generatedAt: z.string().datetime({ offset: true }),
 }).strict();
 
-const WorkBriefInputSchema = z.object({
-  cards: z.array(z.object({
-    kind: z.string().min(1),
-    title: z.string().min(1),
-    detail: z.string(),
-  }).strict()).min(1).max(30),
+const WorkBriefCardSchema: z.ZodType<components["schemas"]["MyWorkSummaryCard"]> = z.object({
+  kind: z.string().min(1),
+  title: z.string().min(1),
+  detail: z.string(),
 }).strict();
 
-const WorkBriefResponseSchema = z.object({
+const WorkBriefInputSchema: z.ZodType<components["schemas"]["MyWorkSummaryInput"]> = z.object({
+  cards: z.array(WorkBriefCardSchema).min(1).max(30),
+}).strict().superRefine((input, context) => {
+  const lines: string[] = [];
+  input.cards.forEach((card, index) => {
+    for (const field of ["kind", "title", "detail"] as const) {
+      if (card[field].length > 4096) {
+        context.addIssue({ code: "custom", path: ["cards", index, field], message: "Card field exceeds the UTF-16 code unit limit" });
+      }
+    }
+    lines.push(`- [${card.kind}] ${card.title}: ${card.detail}`);
+  });
+  if (`Pending work:\n${lines.join("\n")}`.length > 32_000) {
+    context.addIssue({ code: "custom", path: ["cards"], message: "Composed prompt exceeds the UTF-16 code unit limit" });
+  }
+});
+
+const WorkBriefResponseSchema: z.ZodType<components["schemas"]["MyWorkSummaryResponse"]> = z.object({
   brief: z.string().min(1),
   model: z.string().min(1),
+}).strict();
+
+const WorkBriefErrorSchema: z.ZodType<components["schemas"]["MyWorkSummaryError"]> = z.object({
+  error: z.string(),
+  detail: z.string().optional(),
+  hint: z.string().optional(),
 }).strict();
 
 const ApiErrorBodySchema = z.object({
@@ -158,7 +179,7 @@ async function readApiHint(response: Response): Promise<string | undefined> {
   return parsed.success ? parsed.data.hint : undefined;
 }
 
-async function postJson(path: string, body: unknown): Promise<unknown> {
+async function postJson(path: string, body: components["schemas"]["MyWorkSummaryInput"]): Promise<unknown> {
   const response = await fetch(path, {
     method: "POST",
     credentials: "same-origin",
@@ -170,7 +191,9 @@ async function postJson(path: string, body: unknown): Promise<unknown> {
     const message = response.status === 401
       ? "Your session has expired. Sign in again to continue."
       : "The work brief is unavailable right now. The ranked list is still available.";
-    throw new DashboardApiError(response.status, message, await readApiHint(response));
+    const errorBody = await response.json().catch(() => null);
+    const parsedError = WorkBriefErrorSchema.safeParse(errorBody);
+    throw new DashboardApiError(response.status, message, parsedError.success ? parsedError.data.hint : undefined);
   }
   try {
     return await response.json();

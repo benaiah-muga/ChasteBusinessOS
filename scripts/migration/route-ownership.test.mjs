@@ -8,6 +8,8 @@ import {
   allowsPendingGoModuleSettingsOwner,
   allowsPendingGoPolicyOwner,
   allowsPendingGoRoutineCollectionOwner,
+  allowsPendingGoAttachmentDownloadOwner,
+  allowsPendingGoMessagingAgentOwner,
 } from "./route-ownership-policy.mjs";
 
 const manifest = JSON.parse(readFileSync("docs/migration/route-ownership.json", "utf8"));
@@ -130,9 +132,115 @@ test("pending Go policy ownership is limited to exact collection GET and POST ov
   }
 });
 
-test("generated Go route declarations still require verified parity", () => {
+test("pending Go attachment ownership is limited to exact attachment GET", () => {
+  assert.equal(allowsPendingGoAttachmentDownloadOwner("api", "/api/message-attachments/[id]", "GET", "go", "pending"), true);
+  for (const candidate of [
+    ["page", "/api/message-attachments/[id]", "GET", "go", "pending"],
+    ["api", "/api/message-attachments/[id]", "POST", "go", "pending"],
+    ["api", "/api/message-attachments/[id]/extra", "GET", "go", "pending"],
+    ["api", "/api/message-attachments/[id]", "GET", "legacy", "pending"],
+    ["api", "/api/message-attachments/[id]", "GET", "go", "verified"],
+  ]) {
+    assert.equal(allowsPendingGoAttachmentDownloadOwner(...candidate), false, JSON.stringify(candidate));
+  }
+});
+
+test("pending Go messaging agent ownership is limited to exact POST", () => {
+  assert.equal(allowsPendingGoMessagingAgentOwner("api", "/api/conversations/[id]/agent-reply", "POST", "go", "pending"), true);
+  for (const candidate of [
+    ["page", "/api/conversations/[id]/agent-reply", "POST", "go", "pending"],
+    ["api", "/api/conversations/[id]/agent-reply", "GET", "go", "pending"],
+    ["api", "/api/conversations/[id]/agent-reply/extra", "POST", "go", "pending"],
+    ["api", "/api/conversations/[id]/agent-reply", "POST", "legacy", "pending"],
+    ["api", "/api/conversations/[id]/agent-reply", "POST", "go", "verified"],
+  ]) {
+    assert.equal(allowsPendingGoMessagingAgentOwner(...candidate), false, JSON.stringify(candidate));
+  }
+});
+
+test("generated Go route declarations require verified parity except the exact pending messaging proof", () => {
   assert.ok(overrides.goRoutes.length > 0);
-  assert.ok(overrides.goRoutes.every((route) => route.kind === "api" && route.owner === "go" && route.parity === "verified"));
+  assert.ok(overrides.goRoutes.every((route) => route.kind === "api" && route.owner === "go" && (
+    route.parity === "verified"
+    || route.path === "/api/conversations/[id]/agent-reply" && route.method === "POST" && route.parity === "pending"
+  )));
+});
+
+test("attachment and routine webhook ownership is method-specific", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.path === "/api/message-attachments/[id]"),
+    [{
+      kind: "api",
+      path: "/api/message-attachments/[id]",
+      method: "GET",
+      source: "apps/web/src/app/api/message-attachments/[id]/route.ts",
+      owner: "go",
+      parity: "pending",
+    }],
+  );
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.path === "/api/routines/webhook/[token]"),
+    [
+      {
+        kind: "api",
+        path: "/api/routines/webhook/[token]",
+        method: "GET",
+        source: "apps/web/src/app/api/routines/webhook/[token]/route.ts",
+        owner: "legacy",
+        parity: "pending",
+      },
+      {
+        kind: "api",
+        path: "/api/routines/webhook/[token]",
+        method: "POST",
+        source: "apps/web/src/app/api/routines/webhook/[token]/route.ts",
+        owner: "go",
+        parity: "verified",
+      },
+    ],
+  );
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.path === "/api/scim/v2/Users" && entry.method === "DELETE"),
+    [{
+      kind: "api",
+      path: "/api/scim/v2/Users",
+      method: "DELETE",
+      source: "apps/web/src/app/api/scim/v2/Users/route.ts",
+      owner: "legacy",
+      parity: "pending",
+    }],
+  );
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.path === "/api/scim/v2/Users/[id]"),
+    [
+      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "GET", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "legacy", parity: "pending" },
+      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "DELETE", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "legacy", parity: "pending" },
+    ],
+  );
+});
+
+test("Vite-only Go endpoints have generated ownership without Next source entries", () => {
+  assert.deepEqual(
+    manifest.entries.filter((entry) => entry.path === "/api/conversations/[id]/agent-reply" || entry.path === "/api/go/documents/[id]/content"),
+    [
+      {
+        kind: "api",
+        path: "/api/conversations/[id]/agent-reply",
+        method: "POST",
+        source: "apps/api/internal/httpapi/messaging_agent_session.go",
+        owner: "go",
+        parity: "pending",
+      },
+      {
+        kind: "api",
+        path: "/api/go/documents/[id]/content",
+        method: "GET",
+        source: "apps/api/internal/httpapi/document_content_download.go",
+        owner: "go",
+        parity: "verified",
+      },
+    ],
+  );
 });
 
 test("organization persona manifest ownership is verified Go", () => {

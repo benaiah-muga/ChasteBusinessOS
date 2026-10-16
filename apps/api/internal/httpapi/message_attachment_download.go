@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
@@ -135,13 +134,33 @@ func (handler *MessageAttachmentDownloadHandler) ServeHTTP(w http.ResponseWriter
 	}
 
 	w.Header().Set("Content-Type", file.MimeType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", url.PathEscape(file.Filename)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", encodeRFC5987Filename(file.Filename)))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(file.Content)))
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if _, err := io.Copy(w, bytes.NewReader(file.Content)); err != nil {
 		handler.logger.Error("Go message attachment response stream failed", "error", err)
 	}
+}
+
+func encodeRFC5987Filename(filename string) string {
+	const hex = "0123456789ABCDEF"
+	var encoded strings.Builder
+	for _, value := range []byte(filename) {
+		if value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9' {
+			encoded.WriteByte(value)
+			continue
+		}
+		switch value {
+		case '!', '#', '$', '&', '+', '-', '.', '^', '_', '`', '|', '~':
+			encoded.WriteByte(value)
+		default:
+			encoded.WriteByte('%')
+			encoded.WriteByte(hex[value>>4])
+			encoded.WriteByte(hex[value&0x0f])
+		}
+	}
+	return encoded.String()
 }
 
 func (handler *MessageAttachmentDownloadHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, error) {
