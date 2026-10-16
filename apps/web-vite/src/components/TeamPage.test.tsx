@@ -4,12 +4,12 @@ import { TeamPage } from "./TeamPage";
 
 const fixture = {
   members: [
-    { userId: "owner-1", name: "Ada Lovelace", email: "ada@example.com", roleKeys: ["owner"] },
-    { userId: "member-1", name: "Grace Hopper", email: "grace@example.com", roleKeys: ["bookkeeper"] },
+    { userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Ada Lovelace", email: "ada@example.com", roleKeys: ["owner"] },
+    { userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Grace Hopper", email: "grace@example.com", roleKeys: ["bookkeeper"] },
   ],
   roles: [
-    { id: "role-owner", key: "owner", name: "Owner", isSystem: true, permissions: ["*"] },
-    { id: "role-bookkeeper", key: "bookkeeper", name: "Bookkeeper", isSystem: false, permissions: ["accounting.read"] },
+    { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", key: "owner", name: "Owner", isSystem: true, permissions: ["*"] },
+    { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", key: "bookkeeper", name: "Bookkeeper", isSystem: false, permissions: ["accounting.read"] },
   ],
   catalog: ["accounting.read", "accounting.write", "iam.read"],
 };
@@ -47,12 +47,12 @@ describe("Vite team page", () => {
     render(<TeamPage />);
     await screen.findByRole("heading", { name: "Team & roles" });
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Change role for Grace Hopper" }), { target: { value: "role-owner" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Change role for Grace Hopper" }), { target: { value: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } });
 
     expect(await screen.findByText("Role assignment needs human approval, check the Approvals inbox.")).not.toBeNull();
     const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(postCall).toBeDefined();
-    expect(JSON.parse(String(postCall?.[1]?.body))).toMatchObject({ action: "assignRole", userId: "member-1", roleId: "role-owner" });
+    expect(JSON.parse(String(postCall?.[1]?.body))).toMatchObject({ action: "assignRole", userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", roleId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
@@ -75,14 +75,14 @@ describe("Vite team page", () => {
     await screen.findByRole("heading", { name: "Team & roles" });
 
     fireEvent.change(screen.getByLabelText("Invite email address"), { target: { value: "new@example.com" } });
-    fireEvent.change(screen.getByLabelText("Role for invite"), { target: { value: "role-bookkeeper" } });
+    fireEvent.change(screen.getByLabelText("Role for invite"), { target: { value: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" } });
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
     expect(await screen.findByText("Invite created for new@example.com. Share this link:")).not.toBeNull();
     expect(screen.getByRole("link", { name: `${window.location.origin}/invite/invite-abc` })).not.toBeNull();
     await waitFor(() => expect((screen.getByLabelText("Invite email address") as HTMLInputElement).value).toBe(""));
     const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
-    expect(JSON.parse(String(postCall?.[1]?.body))).toMatchObject({ action: "invite", email: "new@example.com", roleId: "role-bookkeeper" });
+    expect(JSON.parse(String(postCall?.[1]?.body))).toMatchObject({ action: "invite", email: "new@example.com", roleId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" });
   });
 
   it("saves edited permissions and reports a governed action refusal", async () => {
@@ -101,14 +101,14 @@ describe("Vite team page", () => {
     const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(JSON.parse(String(postCall?.[1]?.body))).toMatchObject({
       action: "setPermissions",
-      roleId: "role-bookkeeper",
+      roleId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       permissions: ["accounting.read", "accounting.write"],
     });
   });
 
   it("normalizes custom role keys", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === "POST") return jsonResponse({ ok: true, data: { roleId: "role-reporter" } });
+      if (init?.method === "POST") return jsonResponse({ ok: true, data: { roleId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" } });
       return jsonResponse(fixture);
     });
     vi.stubGlobal("fetch", fetchMock);

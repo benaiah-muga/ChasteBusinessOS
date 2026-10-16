@@ -157,8 +157,8 @@ beforeEach(() => {
       { status: "done", tasks: [] },
     ] });
     if (path === "/api/team") return Response.json({
-      members: [{ userId: "user-1", name: "Ada Lovelace", email: "ada@example.test", roleKeys: ["owner"] }],
-      roles: [{ id: "role-bookkeeper", key: "bookkeeper", name: "Bookkeeper", isSystem: false, permissions: ["accounting.read"] }],
+      members: [{ userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Ada Lovelace", email: "ada@example.test", roleKeys: ["owner"] }],
+      roles: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", key: "bookkeeper", name: "Bookkeeper", isSystem: false, permissions: ["accounting.read"] }],
       catalog: ["accounting.read", "accounting.write"],
     });
     if (path === "/api/crm?deals=1") return Response.json({ deals: [] });

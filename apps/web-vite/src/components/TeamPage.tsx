@@ -61,7 +61,7 @@ export function TeamPage() {
       if (result.kind === "pending") {
         setNotice({ tone: "pending", message: `${label} needs human approval, check the Approvals inbox.` });
       } else if (action.action === "invite") {
-        const inviteUrl = `${window.location.origin}/invite/${typeof result.data.token === "string" ? result.data.token : ""}`;
+        const inviteUrl = `${window.location.origin}/invite/${"token" in result.data ? result.data.token : ""}`;
         setNotice({ tone: "success", message: `Invite created for ${inviteEmail}. Share this link:`, inviteUrl });
         await copyInviteUrl(inviteUrl);
         setInviteEmail("");

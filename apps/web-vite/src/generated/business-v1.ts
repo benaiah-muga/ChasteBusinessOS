@@ -148,6 +148,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/team": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List organization members, roles, and grantable permissions
+         * @description Returns organization-scoped members and roles plus the sorted capability permission catalog. Cookie sessions use their active organization unless X-Organization-ID is supplied; bearer tokens are resolved against the selected organization. A malformed or repeated selector returns 400; selector mismatch or resolver failure returns 401. Reads require a verified active organization and iam.read (or the wildcard permission), rechecked against database membership and grants. Reads do not require Origin. All responses include Cache-Control: no-store and Pragma: no-cache. If Authorization is present, it must be a valid Bearer value and invalid authorization does not fall back to a session cookie.
+         */
+        get: operations["getTeam"];
+        put?: never;
+        /**
+         * Perform a governed organization team action
+         * @description Executes one of createRole, setPermissions, assignRole, or invite through its governed IAM capability. Cookie and bearer authentication are supported. Cookie-authenticated requests require an exact same- origin Origin header (no Referer fallback); bearer requests bypass this browser-origin check. A supplied Authorization value must be a valid Bearer value and never falls back to the cookie. With no X-Organization-ID, the active-organization cookie/session is used; an explicit selector must match the resolved organization. Invalid organization selection returns 401 on this write route. Requests use an `intentId` to make capability execution replay-safe. The per-action input body is limited to 65536 bytes. Unknown object properties are accepted and ignored by Go. All responses include Cache-Control: no-store. Unsupported methods return 405 before authentication; Allow lists the currently enabled Go methods.
+         */
+        post: operations["executeTeamAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/support/channels": {
         parameters: {
             query?: never;
@@ -429,6 +453,133 @@ export interface components {
             /** @constant */
             ok: false;
             error: string;
+        };
+        TeamResponse: {
+            members: components["schemas"]["TeamMember"][];
+            roles: components["schemas"]["TeamRole"][];
+            /** @description Sorted, deduplicated permission keys currently grantable through the team role editor. */
+            catalog: string[];
+        };
+        TeamMember: {
+            /** Format: uuid */
+            userId: string;
+            name: string | null;
+            /**
+             * Format: email
+             * @description ASCII email using the same practical validation profile as Zod 4 string.email().
+             */
+            email: string;
+            roleKeys: string[];
+        };
+        TeamRole: {
+            /** Format: uuid */
+            id: string;
+            key: string;
+            name: string;
+            isSystem: boolean;
+            permissions: string[];
+        };
+        /** @description One of the four action variants listed in x-actionVariants. Go accepts and ignores unknown properties, while Vite emits only the selected action's fields. */
+        TeamWriteRequest: ({
+            /** @enum {string} */
+            action: "createRole" | "setPermissions" | "assignRole" | "invite";
+            /** @description Required retry identity. Must contain 1 through 200 UTF-16 code units, have non-whitespace content under ECMAScript trim semantics, and contain no CR, LF, or NUL. */
+            intentId: string;
+            /** @description Required for createRole. */
+            key?: string;
+            /** @description Required for createRole; length is measured in UTF-16 code units. */
+            name?: string;
+            /** @description Required for setPermissions, assignRole, and invite. */
+            roleId?: string;
+            /** @description Required for setPermissions; empty arrays clear all permissions, and each item must be non-empty. */
+            permissions?: string[];
+            /** @description Required for assignRole. */
+            userId?: string;
+            /**
+             * Format: email
+             * @description Required for invite. Uses the same ASCII practical email profile as Go validation and Zod 4 string.email().
+             */
+            email?: string;
+        } & {
+            [key: string]: unknown;
+        }) & (components["schemas"]["TeamCreateRoleRequest"] | components["schemas"]["TeamSetPermissionsRequest"] | components["schemas"]["TeamAssignRoleRequest"] | components["schemas"]["TeamInviteRequest"]);
+        TeamCreateRoleRequest: {
+            /** @constant */
+            action: "createRole";
+            intentId: components["schemas"]["TeamIntentId"];
+            key: string;
+            name: string;
+        } & {
+            [key: string]: unknown;
+        };
+        TeamSetPermissionsRequest: {
+            /** @constant */
+            action: "setPermissions";
+            intentId: components["schemas"]["TeamIntentId"];
+            roleId: string;
+            permissions: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        TeamAssignRoleRequest: {
+            /** @constant */
+            action: "assignRole";
+            intentId: components["schemas"]["TeamIntentId"];
+            userId: string;
+            roleId: string;
+        } & {
+            [key: string]: unknown;
+        };
+        TeamInviteRequest: {
+            /** @constant */
+            action: "invite";
+            intentId: components["schemas"]["TeamIntentId"];
+            /** Format: email */
+            email: string;
+            roleId: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description Must contain 1 through 200 UTF-16 code units, have non-whitespace content under ECMAScript trim semantics, and contain no CR, LF, or NUL. */
+        TeamIntentId: string;
+        TeamWriteSuccess: {
+            /** @constant */
+            ok: true;
+            /** @description Action-specific result matching the selected Team action. */
+            data: components["schemas"]["TeamCreateRoleResult"] | components["schemas"]["TeamSetPermissionsResult"] | components["schemas"]["TeamAssignRoleResult"] | components["schemas"]["TeamInviteResult"];
+        };
+        TeamWritePending: {
+            /** @constant */
+            ok: false;
+            /** @constant */
+            pendingApproval: true;
+            reason: string;
+        };
+        TeamWriteFailure: {
+            /** @constant */
+            ok: false;
+            error: string;
+        };
+        TeamCreateRoleResult: {
+            /** Format: uuid */
+            roleId: string;
+        };
+        TeamSetPermissionsResult: {
+            permissionCount: number;
+        };
+        TeamAssignRoleResult: {
+            /** @description False is a valid idempotent result when the requested role assignment already exists. */
+            assigned: boolean;
+        };
+        TeamInviteResult: {
+            /** Format: uuid */
+            invitationId: string;
+            token: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 UTC expiration timestamp.
+             */
+            expiresAt: string;
         };
         NotificationsResponse: {
             notifications: components["schemas"]["NotificationRow"][];
@@ -1609,6 +1760,215 @@ export interface operations {
                 };
             };
             /** @description The notification service is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getTeam: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects an organization membership for this request. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Members, roles, and the sorted permission catalog. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamResponse"];
+                };
+            };
+            /** @description The organization selector is malformed or repeated. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid, unverified, missing an organization, or does not match the requested organization. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks iam.read or the database recheck denied membership or permission. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The exact-path mount rejected an unsupported method before authentication. */
+            405: {
+                headers: {
+                    /** @description Currently enabled GET and POST methods. The value reflects feature-flag configuration. */
+                    Allow?: string;
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The tenant-scoped team query failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The team service dependencies are unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    executeTeamAction: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects an organization membership and must match the session. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description JSON request body limited to 65536 bytes. Unknown properties are ignored by Go. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description The selected action completed. The data shape depends on action. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamWriteSuccess"];
+                };
+            };
+            /** @description Capability execution requires approval and has not completed. */
+            202: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamWritePending"];
+                };
+            };
+            /** @description The request body, action, intent, or action-specific fields are invalid. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session, organization selection, or capability scope is invalid. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The cookie request origin is not same-origin or the actor is not an organization member. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The exact-path mount rejected an unsupported method before authentication. */
+            405: {
+                headers: {
+                    /** @description Currently enabled GET and POST methods. The value reflects feature-flag configuration. */
+                    Allow?: string;
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The governed IAM capability refused the mutation. */
+            422: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamWriteFailure"];
+                };
+            };
+            /** @description Capability execution failed unexpectedly. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Team dependencies are unavailable or the capability returned malformed success data. */
             503: {
                 headers: {
                     "Cache-Control"?: "no-store";

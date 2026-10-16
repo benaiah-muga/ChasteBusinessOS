@@ -328,6 +328,126 @@ func (e SupportChannelsPatchRegenerateToken) Valid() bool {
 	}
 }
 
+// Defines values for TeamAssignRoleRequestAction.
+const (
+	AssignRole TeamAssignRoleRequestAction = "assignRole"
+)
+
+// Valid indicates whether the value is a known member of the TeamAssignRoleRequestAction enum.
+func (e TeamAssignRoleRequestAction) Valid() bool {
+	switch e {
+	case AssignRole:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamCreateRoleRequestAction.
+const (
+	CreateRole TeamCreateRoleRequestAction = "createRole"
+)
+
+// Valid indicates whether the value is a known member of the TeamCreateRoleRequestAction enum.
+func (e TeamCreateRoleRequestAction) Valid() bool {
+	switch e {
+	case CreateRole:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamInviteRequestAction.
+const (
+	Invite TeamInviteRequestAction = "invite"
+)
+
+// Valid indicates whether the value is a known member of the TeamInviteRequestAction enum.
+func (e TeamInviteRequestAction) Valid() bool {
+	switch e {
+	case Invite:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamSetPermissionsRequestAction.
+const (
+	SetPermissions TeamSetPermissionsRequestAction = "setPermissions"
+)
+
+// Valid indicates whether the value is a known member of the TeamSetPermissionsRequestAction enum.
+func (e TeamSetPermissionsRequestAction) Valid() bool {
+	switch e {
+	case SetPermissions:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamWriteFailureOk.
+const (
+	TeamWriteFailureOkFalse TeamWriteFailureOk = false
+)
+
+// Valid indicates whether the value is a known member of the TeamWriteFailureOk enum.
+func (e TeamWriteFailureOk) Valid() bool {
+	switch e {
+	case TeamWriteFailureOkFalse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamWritePendingOk.
+const (
+	TeamWritePendingOkFalse TeamWritePendingOk = false
+)
+
+// Valid indicates whether the value is a known member of the TeamWritePendingOk enum.
+func (e TeamWritePendingOk) Valid() bool {
+	switch e {
+	case TeamWritePendingOkFalse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamWritePendingPendingApproval.
+const (
+	TeamWritePendingPendingApprovalTrue TeamWritePendingPendingApproval = true
+)
+
+// Valid indicates whether the value is a known member of the TeamWritePendingPendingApproval enum.
+func (e TeamWritePendingPendingApproval) Valid() bool {
+	switch e {
+	case TeamWritePendingPendingApprovalTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamWriteSuccessOk.
+const (
+	TeamWriteSuccessOkTrue TeamWriteSuccessOk = true
+)
+
+// Valid indicates whether the value is a known member of the TeamWriteSuccessOk enum.
+func (e TeamWriteSuccessOk) Valid() bool {
+	switch e {
+	case TeamWriteSuccessOkTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentSoulResponse defines model for AgentSoulResponse.
 type AgentSoulResponse struct {
 	AgentSoul string `json:"agentSoul"`
@@ -698,6 +818,175 @@ type SupportChannelsResponse struct {
 	Greeting         string  `json:"greeting"`
 }
 
+// TeamAssignRoleRequest defines model for TeamAssignRoleRequest.
+type TeamAssignRoleRequest struct {
+	Action TeamAssignRoleRequestAction `json:"action"`
+
+	// IntentId Must contain 1 through 200 UTF-16 code units, have non-whitespace content under ECMAScript trim semantics, and contain no CR, LF, or NUL.
+	IntentId             TeamIntentId           `json:"intentId"`
+	RoleId               string                 `json:"roleId"`
+	UserId               string                 `json:"userId"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// TeamAssignRoleRequestAction defines model for TeamAssignRoleRequest.Action.
+type TeamAssignRoleRequestAction string
+
+// TeamAssignRoleResult defines model for TeamAssignRoleResult.
+type TeamAssignRoleResult struct {
+	// Assigned False is a valid idempotent result when the requested role assignment already exists.
+	Assigned bool `json:"assigned"`
+}
+
+// TeamCreateRoleRequest defines model for TeamCreateRoleRequest.
+type TeamCreateRoleRequest struct {
+	Action TeamCreateRoleRequestAction `json:"action"`
+
+	// IntentId Must contain 1 through 200 UTF-16 code units, have non-whitespace content under ECMAScript trim semantics, and contain no CR, LF, or NUL.
+	IntentId             TeamIntentId           `json:"intentId"`
+	Key                  string                 `json:"key"`
+	Name                 string                 `json:"name"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// TeamCreateRoleRequestAction defines model for TeamCreateRoleRequest.Action.
+type TeamCreateRoleRequestAction string
+
+// TeamCreateRoleResult defines model for TeamCreateRoleResult.
+type TeamCreateRoleResult struct {
+	RoleId string `json:"roleId"`
+}
+
+// TeamIntentId Must contain 1 through 200 UTF-16 code units, have non-whitespace content under ECMAScript trim semantics, and contain no CR, LF, or NUL.
+type TeamIntentId = string
+
+// TeamInviteRequest defines model for TeamInviteRequest.
+type TeamInviteRequest struct {
+	Action TeamInviteRequestAction `json:"action"`
+	Email  openapi_types.Email     `json:"email"`
+
+	// IntentId Must contain 1 through 200 UTF-16 code units, have non-whitespace content under ECMAScript trim semantics, and contain no CR, LF, or NUL.
+	IntentId             TeamIntentId           `json:"intentId"`
+	RoleId               string                 `json:"roleId"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// TeamInviteRequestAction defines model for TeamInviteRequest.Action.
+type TeamInviteRequestAction string
+
+// TeamInviteResult defines model for TeamInviteResult.
+type TeamInviteResult struct {
+	// ExpiresAt RFC 3339 UTC expiration timestamp.
+	ExpiresAt    time.Time `json:"expiresAt"`
+	InvitationId string    `json:"invitationId"`
+	Token        string    `json:"token"`
+}
+
+// TeamMember defines model for TeamMember.
+type TeamMember struct {
+	// Email ASCII email using the same practical validation profile as Zod 4 string.email().
+	Email    string   `json:"email"`
+	Name     *string  `json:"name"`
+	RoleKeys []string `json:"roleKeys"`
+	UserId   string   `json:"userId"`
+}
+
+// TeamResponse defines model for TeamResponse.
+type TeamResponse struct {
+	// Catalog Sorted, deduplicated permission keys currently grantable through the team role editor.
+	Catalog []string     `json:"catalog"`
+	Members []TeamMember `json:"members"`
+	Roles   []TeamRole   `json:"roles"`
+}
+
+// TeamRole defines model for TeamRole.
+type TeamRole struct {
+	Id          string   `json:"id"`
+	IsSystem    bool     `json:"isSystem"`
+	Key         string   `json:"key"`
+	Name        string   `json:"name"`
+	Permissions []string `json:"permissions"`
+}
+
+// TeamSetPermissionsRequest defines model for TeamSetPermissionsRequest.
+type TeamSetPermissionsRequest struct {
+	Action TeamSetPermissionsRequestAction `json:"action"`
+
+	// IntentId Must contain 1 through 200 UTF-16 code units, have non-whitespace content under ECMAScript trim semantics, and contain no CR, LF, or NUL.
+	IntentId             TeamIntentId           `json:"intentId"`
+	Permissions          []string               `json:"permissions"`
+	RoleId               string                 `json:"roleId"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// TeamSetPermissionsRequestAction defines model for TeamSetPermissionsRequest.Action.
+type TeamSetPermissionsRequestAction string
+
+// TeamSetPermissionsResult defines model for TeamSetPermissionsResult.
+type TeamSetPermissionsResult struct {
+	PermissionCount int `json:"permissionCount"`
+}
+
+// TeamWriteFailure defines model for TeamWriteFailure.
+type TeamWriteFailure struct {
+	Error string             `json:"error"`
+	Ok    TeamWriteFailureOk `json:"ok"`
+}
+
+// TeamWriteFailureOk defines model for TeamWriteFailure.Ok.
+type TeamWriteFailureOk bool
+
+// TeamWritePending defines model for TeamWritePending.
+type TeamWritePending struct {
+	Ok              TeamWritePendingOk              `json:"ok"`
+	PendingApproval TeamWritePendingPendingApproval `json:"pendingApproval"`
+	Reason          string                          `json:"reason"`
+}
+
+// TeamWritePendingOk defines model for TeamWritePending.Ok.
+type TeamWritePendingOk bool
+
+// TeamWritePendingPendingApproval defines model for TeamWritePending.PendingApproval.
+type TeamWritePendingPendingApproval bool
+
+// TeamWriteRequest One of the four action variants listed in x-actionVariants. Go accepts and ignores unknown properties, while Vite emits only the selected action's fields.
+type TeamWriteRequest struct {
+	Action string `json:"action"`
+
+	// Email Required for invite. Uses the same ASCII practical email profile as Go validation and Zod 4 string.email().
+	Email *json.RawMessage `json:"email,omitempty"`
+
+	// IntentId Required retry identity. Must contain 1 through 200 UTF-16 code units, have non-whitespace content under ECMAScript trim semantics, and contain no CR, LF, or NUL.
+	IntentId string `json:"intentId"`
+
+	// Key Required for createRole.
+	Key *json.RawMessage `json:"key,omitempty"`
+
+	// Name Required for createRole; length is measured in UTF-16 code units.
+	Name *json.RawMessage `json:"name,omitempty"`
+
+	// Permissions Required for setPermissions; empty arrays clear all permissions, and each item must be non-empty.
+	Permissions *json.RawMessage `json:"permissions,omitempty"`
+
+	// RoleId Required for setPermissions, assignRole, and invite.
+	RoleId *json.RawMessage `json:"roleId,omitempty"`
+
+	// UserId Required for assignRole.
+	UserId               *json.RawMessage       `json:"userId,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+	union                json.RawMessage
+}
+
+// TeamWriteSuccess defines model for TeamWriteSuccess.
+type TeamWriteSuccess struct {
+	// Data Action-specific result matching the selected Team action.
+	Data apicontract.RawJSON `json:"data"`
+	Ok   TeamWriteSuccessOk  `json:"ok"`
+}
+
+// TeamWriteSuccessOk defines model for TeamWriteSuccess.Ok.
+type TeamWriteSuccessOk bool
+
 // GetApprovalInboxParams defines parameters for GetApprovalInbox.
 type GetApprovalInboxParams struct {
 	// XOrganizationID Selects an organization membership for the request.
@@ -783,6 +1072,18 @@ type UpdateSupportChannelsParams struct {
 	IdempotencyKey openapi_types.UUID `json:"Idempotency-Key"`
 }
 
+// GetTeamParams defines parameters for GetTeam.
+type GetTeamParams struct {
+	// XOrganizationID Selects an organization membership for this request.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// ExecuteTeamActionParams defines parameters for ExecuteTeamAction.
+type ExecuteTeamActionParams struct {
+	// XOrganizationID Selects an organization membership and must match the session.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
 // DecideApprovalJSONRequestBody defines body for DecideApproval for application/json ContentType.
 type DecideApprovalJSONRequestBody = ApprovalDecisionRequest
 
@@ -803,6 +1104,9 @@ type SwitchActiveOrganizationJSONRequestBody = OrganizationSwitchRequest
 
 // UpdateSupportChannelsJSONRequestBody defines body for UpdateSupportChannels for application/json ContentType.
 type UpdateSupportChannelsJSONRequestBody = SupportChannelsPatch
+
+// ExecuteTeamActionJSONRequestBody defines body for ExecuteTeamAction for application/json ContentType.
+type ExecuteTeamActionJSONRequestBody = TeamWriteRequest
 
 // Getter for additional properties for OrganizationSoulPatchRequest. Returns the specified
 // element and whether it was found
@@ -934,6 +1238,549 @@ func (a OrganizationSwitchRequest) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(object)
+}
+
+// Getter for additional properties for TeamAssignRoleRequest. Returns the specified
+// element and whether it was found
+func (a TeamAssignRoleRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for TeamAssignRoleRequest
+func (a *TeamAssignRoleRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for TeamAssignRoleRequest to handle AdditionalProperties
+func (a *TeamAssignRoleRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["action"]; found {
+		err = json.Unmarshal(raw, &a.Action)
+		if err != nil {
+			return fmt.Errorf("error reading 'action': %w", err)
+		}
+		delete(object, "action")
+	}
+
+	if raw, found := object["intentId"]; found {
+		err = json.Unmarshal(raw, &a.IntentId)
+		if err != nil {
+			return fmt.Errorf("error reading 'intentId': %w", err)
+		}
+		delete(object, "intentId")
+	}
+
+	if raw, found := object["roleId"]; found {
+		err = json.Unmarshal(raw, &a.RoleId)
+		if err != nil {
+			return fmt.Errorf("error reading 'roleId': %w", err)
+		}
+		delete(object, "roleId")
+	}
+
+	if raw, found := object["userId"]; found {
+		err = json.Unmarshal(raw, &a.UserId)
+		if err != nil {
+			return fmt.Errorf("error reading 'userId': %w", err)
+		}
+		delete(object, "userId")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for TeamAssignRoleRequest to handle AdditionalProperties
+func (a TeamAssignRoleRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["action"], err = json.Marshal(a.Action)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'action': %w", err)
+	}
+
+	object["intentId"], err = json.Marshal(a.IntentId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'intentId': %w", err)
+	}
+
+	object["roleId"], err = json.Marshal(a.RoleId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'roleId': %w", err)
+	}
+
+	object["userId"], err = json.Marshal(a.UserId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'userId': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for TeamCreateRoleRequest. Returns the specified
+// element and whether it was found
+func (a TeamCreateRoleRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for TeamCreateRoleRequest
+func (a *TeamCreateRoleRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for TeamCreateRoleRequest to handle AdditionalProperties
+func (a *TeamCreateRoleRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["action"]; found {
+		err = json.Unmarshal(raw, &a.Action)
+		if err != nil {
+			return fmt.Errorf("error reading 'action': %w", err)
+		}
+		delete(object, "action")
+	}
+
+	if raw, found := object["intentId"]; found {
+		err = json.Unmarshal(raw, &a.IntentId)
+		if err != nil {
+			return fmt.Errorf("error reading 'intentId': %w", err)
+		}
+		delete(object, "intentId")
+	}
+
+	if raw, found := object["key"]; found {
+		err = json.Unmarshal(raw, &a.Key)
+		if err != nil {
+			return fmt.Errorf("error reading 'key': %w", err)
+		}
+		delete(object, "key")
+	}
+
+	if raw, found := object["name"]; found {
+		err = json.Unmarshal(raw, &a.Name)
+		if err != nil {
+			return fmt.Errorf("error reading 'name': %w", err)
+		}
+		delete(object, "name")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for TeamCreateRoleRequest to handle AdditionalProperties
+func (a TeamCreateRoleRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["action"], err = json.Marshal(a.Action)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'action': %w", err)
+	}
+
+	object["intentId"], err = json.Marshal(a.IntentId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'intentId': %w", err)
+	}
+
+	object["key"], err = json.Marshal(a.Key)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'key': %w", err)
+	}
+
+	object["name"], err = json.Marshal(a.Name)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'name': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for TeamInviteRequest. Returns the specified
+// element and whether it was found
+func (a TeamInviteRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for TeamInviteRequest
+func (a *TeamInviteRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for TeamInviteRequest to handle AdditionalProperties
+func (a *TeamInviteRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["action"]; found {
+		err = json.Unmarshal(raw, &a.Action)
+		if err != nil {
+			return fmt.Errorf("error reading 'action': %w", err)
+		}
+		delete(object, "action")
+	}
+
+	if raw, found := object["email"]; found {
+		err = json.Unmarshal(raw, &a.Email)
+		if err != nil {
+			return fmt.Errorf("error reading 'email': %w", err)
+		}
+		delete(object, "email")
+	}
+
+	if raw, found := object["intentId"]; found {
+		err = json.Unmarshal(raw, &a.IntentId)
+		if err != nil {
+			return fmt.Errorf("error reading 'intentId': %w", err)
+		}
+		delete(object, "intentId")
+	}
+
+	if raw, found := object["roleId"]; found {
+		err = json.Unmarshal(raw, &a.RoleId)
+		if err != nil {
+			return fmt.Errorf("error reading 'roleId': %w", err)
+		}
+		delete(object, "roleId")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for TeamInviteRequest to handle AdditionalProperties
+func (a TeamInviteRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["action"], err = json.Marshal(a.Action)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'action': %w", err)
+	}
+
+	object["email"], err = json.Marshal(a.Email)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'email': %w", err)
+	}
+
+	object["intentId"], err = json.Marshal(a.IntentId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'intentId': %w", err)
+	}
+
+	object["roleId"], err = json.Marshal(a.RoleId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'roleId': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for TeamSetPermissionsRequest. Returns the specified
+// element and whether it was found
+func (a TeamSetPermissionsRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for TeamSetPermissionsRequest
+func (a *TeamSetPermissionsRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for TeamSetPermissionsRequest to handle AdditionalProperties
+func (a *TeamSetPermissionsRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["action"]; found {
+		err = json.Unmarshal(raw, &a.Action)
+		if err != nil {
+			return fmt.Errorf("error reading 'action': %w", err)
+		}
+		delete(object, "action")
+	}
+
+	if raw, found := object["intentId"]; found {
+		err = json.Unmarshal(raw, &a.IntentId)
+		if err != nil {
+			return fmt.Errorf("error reading 'intentId': %w", err)
+		}
+		delete(object, "intentId")
+	}
+
+	if raw, found := object["permissions"]; found {
+		err = json.Unmarshal(raw, &a.Permissions)
+		if err != nil {
+			return fmt.Errorf("error reading 'permissions': %w", err)
+		}
+		delete(object, "permissions")
+	}
+
+	if raw, found := object["roleId"]; found {
+		err = json.Unmarshal(raw, &a.RoleId)
+		if err != nil {
+			return fmt.Errorf("error reading 'roleId': %w", err)
+		}
+		delete(object, "roleId")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for TeamSetPermissionsRequest to handle AdditionalProperties
+func (a TeamSetPermissionsRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["action"], err = json.Marshal(a.Action)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'action': %w", err)
+	}
+
+	object["intentId"], err = json.Marshal(a.IntentId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'intentId': %w", err)
+	}
+
+	if a.Permissions != nil {
+		object["permissions"], err = json.Marshal(a.Permissions)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'permissions': %w", err)
+		}
+	}
+
+	object["roleId"], err = json.Marshal(a.RoleId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'roleId': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for TeamWriteRequest. Returns the specified
+// element and whether it was found
+func (a TeamWriteRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for TeamWriteRequest
+func (a *TeamWriteRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// AsTeamCreateRoleRequest returns the union data inside the TeamWriteRequest as a TeamCreateRoleRequest
+func (t TeamWriteRequest) AsTeamCreateRoleRequest() (TeamCreateRoleRequest, error) {
+	var body TeamCreateRoleRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTeamCreateRoleRequest overwrites any union data inside the TeamWriteRequest as the provided TeamCreateRoleRequest
+func (t *TeamWriteRequest) FromTeamCreateRoleRequest(v TeamCreateRoleRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTeamCreateRoleRequest performs a merge with any union data inside the TeamWriteRequest, using the provided TeamCreateRoleRequest
+func (t *TeamWriteRequest) MergeTeamCreateRoleRequest(v TeamCreateRoleRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTeamSetPermissionsRequest returns the union data inside the TeamWriteRequest as a TeamSetPermissionsRequest
+func (t TeamWriteRequest) AsTeamSetPermissionsRequest() (TeamSetPermissionsRequest, error) {
+	var body TeamSetPermissionsRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTeamSetPermissionsRequest overwrites any union data inside the TeamWriteRequest as the provided TeamSetPermissionsRequest
+func (t *TeamWriteRequest) FromTeamSetPermissionsRequest(v TeamSetPermissionsRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTeamSetPermissionsRequest performs a merge with any union data inside the TeamWriteRequest, using the provided TeamSetPermissionsRequest
+func (t *TeamWriteRequest) MergeTeamSetPermissionsRequest(v TeamSetPermissionsRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTeamAssignRoleRequest returns the union data inside the TeamWriteRequest as a TeamAssignRoleRequest
+func (t TeamWriteRequest) AsTeamAssignRoleRequest() (TeamAssignRoleRequest, error) {
+	var body TeamAssignRoleRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTeamAssignRoleRequest overwrites any union data inside the TeamWriteRequest as the provided TeamAssignRoleRequest
+func (t *TeamWriteRequest) FromTeamAssignRoleRequest(v TeamAssignRoleRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTeamAssignRoleRequest performs a merge with any union data inside the TeamWriteRequest, using the provided TeamAssignRoleRequest
+func (t *TeamWriteRequest) MergeTeamAssignRoleRequest(v TeamAssignRoleRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTeamInviteRequest returns the union data inside the TeamWriteRequest as a TeamInviteRequest
+func (t TeamWriteRequest) AsTeamInviteRequest() (TeamInviteRequest, error) {
+	var body TeamInviteRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTeamInviteRequest overwrites any union data inside the TeamWriteRequest as the provided TeamInviteRequest
+func (t *TeamWriteRequest) FromTeamInviteRequest(v TeamInviteRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTeamInviteRequest performs a merge with any union data inside the TeamWriteRequest, using the provided TeamInviteRequest
+func (t *TeamWriteRequest) MergeTeamInviteRequest(v TeamInviteRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
 }
 
 // AsErrorResponse returns the union data inside the DecideApproval400JSONResponseBody as a ErrorResponse
@@ -1244,4 +2091,170 @@ func (t ExecuteCapability422JSONResponseBody) MarshalJSON() ([]byte, error) {
 func (t *ExecuteCapability422JSONResponseBody) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
+}
+
+// Override default JSON handling for TeamWriteRequest to handle AdditionalProperties and union
+func (a *TeamWriteRequest) UnmarshalJSON(b []byte) error {
+	err := a.union.UnmarshalJSON(b)
+	if err != nil {
+		return err
+	}
+	object := make(map[string]json.RawMessage)
+	err = json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["action"]; found {
+		err = json.Unmarshal(raw, &a.Action)
+		if err != nil {
+			return fmt.Errorf("error reading 'action': %w", err)
+		}
+		delete(object, "action")
+	}
+
+	if raw, found := object["email"]; found {
+		err = json.Unmarshal(raw, &a.Email)
+		if err != nil {
+			return fmt.Errorf("error reading 'email': %w", err)
+		}
+		delete(object, "email")
+	}
+
+	if raw, found := object["intentId"]; found {
+		err = json.Unmarshal(raw, &a.IntentId)
+		if err != nil {
+			return fmt.Errorf("error reading 'intentId': %w", err)
+		}
+		delete(object, "intentId")
+	}
+
+	if raw, found := object["key"]; found {
+		err = json.Unmarshal(raw, &a.Key)
+		if err != nil {
+			return fmt.Errorf("error reading 'key': %w", err)
+		}
+		delete(object, "key")
+	}
+
+	if raw, found := object["name"]; found {
+		err = json.Unmarshal(raw, &a.Name)
+		if err != nil {
+			return fmt.Errorf("error reading 'name': %w", err)
+		}
+		delete(object, "name")
+	}
+
+	if raw, found := object["permissions"]; found {
+		err = json.Unmarshal(raw, &a.Permissions)
+		if err != nil {
+			return fmt.Errorf("error reading 'permissions': %w", err)
+		}
+		delete(object, "permissions")
+	}
+
+	if raw, found := object["roleId"]; found {
+		err = json.Unmarshal(raw, &a.RoleId)
+		if err != nil {
+			return fmt.Errorf("error reading 'roleId': %w", err)
+		}
+		delete(object, "roleId")
+	}
+
+	if raw, found := object["userId"]; found {
+		err = json.Unmarshal(raw, &a.UserId)
+		if err != nil {
+			return fmt.Errorf("error reading 'userId': %w", err)
+		}
+		delete(object, "userId")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for TeamWriteRequest to handle AdditionalProperties and union
+func (a TeamWriteRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	b, err := a.union.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	object := make(map[string]json.RawMessage)
+	if a.union != nil {
+		err = json.Unmarshal(b, &object)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	object["action"], err = json.Marshal(a.Action)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'action': %w", err)
+	}
+
+	if a.Email != nil {
+		object["email"], err = json.Marshal(a.Email)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'email': %w", err)
+		}
+	}
+
+	object["intentId"], err = json.Marshal(a.IntentId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'intentId': %w", err)
+	}
+
+	if a.Key != nil {
+		object["key"], err = json.Marshal(a.Key)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'key': %w", err)
+		}
+	}
+
+	if a.Name != nil {
+		object["name"], err = json.Marshal(a.Name)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'name': %w", err)
+		}
+	}
+
+	if a.Permissions != nil {
+		object["permissions"], err = json.Marshal(a.Permissions)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'permissions': %w", err)
+		}
+	}
+
+	if a.RoleId != nil {
+		object["roleId"], err = json.Marshal(a.RoleId)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'roleId': %w", err)
+		}
+	}
+
+	if a.UserId != nil {
+		object["userId"], err = json.Marshal(a.UserId)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'userId': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
 }

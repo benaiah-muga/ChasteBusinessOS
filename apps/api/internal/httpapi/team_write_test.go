@@ -31,7 +31,7 @@ func TestTeamWriteHandlerExecutesGovernedIAMActions(t *testing.T) {
 			body:       `{"action":"createRole","key":"finance-admin","name":"Finance Admin","intentId":"role-intent"}`,
 			capability: "iam.createRole",
 			input:      `{"key":"finance-admin","name":"Finance Admin"}`,
-			output:     `{"roleId":"role-1"}`,
+			output:     `{"roleId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}`,
 		},
 		{
 			name:       "set permissions",
@@ -48,11 +48,18 @@ func TestTeamWriteHandlerExecutesGovernedIAMActions(t *testing.T) {
 			output:     `{"assigned":true}`,
 		},
 		{
+			name:       "assignment already exists",
+			body:       `{"action":"assignRole","userId":"user-1","roleId":"role-1","intentId":"assign-existing-intent"}`,
+			capability: "iam.assignRole",
+			input:      `{"userId":"user-1","roleId":"role-1"}`,
+			output:     `{"assigned":false}`,
+		},
+		{
 			name:       "invite",
 			body:       `{"action":"invite","email":"teammate@example.com","roleId":"role-1","intentId":"invite-intent"}`,
 			capability: "iam.inviteMember",
 			input:      `{"email":"teammate@example.com","roleId":"role-1"}`,
-			output:     `{"invitationId":"invite-1","token":"opaque-token","expiresAt":"2026-10-05T00:00:00Z"}`,
+			output:     `{"invitationId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","token":"opaque-token","expiresAt":"2026-10-05T00:00:00Z"}`,
 		},
 	}
 	for _, test := range tests {
@@ -81,6 +88,34 @@ func TestTeamWriteHandlerExecutesGovernedIAMActions(t *testing.T) {
 	}
 }
 
+func TestTeamEmailValidationMatchesZodPracticalEmailProfile(t *testing.T) {
+	for _, value := range []string{"person@example.com", "o'hara+tag@example.test", "a_b@example-domain.co"} {
+		if !validTeamEmail(value) {
+			t.Errorf("valid practical email %q was rejected", value)
+		}
+	}
+	for _, value := range []string{"", ".person@example.com", "first..last@example.com", "person@localhost", "person@example.c", "person@exämple.com"} {
+		if validTeamEmail(value) {
+			t.Errorf("invalid practical email %q was accepted", value)
+		}
+	}
+}
+
+func TestValidTeamWriteOutputRequiresContractShapedIdentifiersAndTimestamp(t *testing.T) {
+	for _, test := range []struct {
+		capabilityID string
+		body         string
+	}{
+		{capabilityID: "iam.createRole", body: `{"roleId":"role-1"}`},
+		{capabilityID: "iam.updateRolePermissions", body: `{"permissionCount":-1}`},
+		{capabilityID: "iam.inviteMember", body: `{"invitationId":"invite-1","token":"token","expiresAt":"tomorrow"}`},
+	} {
+		if validTeamWriteOutput(test.capabilityID, json.RawMessage(test.body)) {
+			t.Errorf("accepted malformed %s output %s", test.capabilityID, test.body)
+		}
+	}
+}
+
 func TestTeamWriteHandlerPreservesApprovalAndValidationEnvelopes(t *testing.T) {
 	body := `{"action":"assignRole","userId":"user-1","roleId":"role-1","intentId":"assign-intent"}`
 	t.Run("approval", func(t *testing.T) {
@@ -103,7 +138,7 @@ func TestTeamWriteHandlerPreservesApprovalAndValidationEnvelopes(t *testing.T) {
 		executor := &fakeDirectCapabilityExecutor{err: capability.IAMDomainError("role not found")}
 		response := httptest.NewRecorder()
 		NewTeamWriteHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, executor, nil).ServeHTTP(response, teamWriteRequest(body))
-		if response.Code != http.StatusUnprocessableEntity || response.Body.String() != "{\"ok\":false,\"error\":\"role not found\"}\n" {
+		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `"ok":false`) || !strings.Contains(response.Body.String(), `"error":"role not found"`) {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
 	})
@@ -132,9 +167,11 @@ func TestTeamWriteHandlerRejectsInvalidBodiesBeforeExecution(t *testing.T) {
 		`{"action":"assignRole","userId":"user-1","roleId":"role-1","intentId":"  "}`,
 		`{"action":"assignRole","userId":"user-1","roleId":"role-1","intentId":null}`,
 		`{"action":"assignRole","userId":"user-1","roleId":"role-1","intentId":"` + strings.Repeat("x", 201) + `"}`,
+		`{"action":"assignRole","userId":"user-1","roleId":"role-1","intentId":"` + strings.Repeat("🙂", 101) + `"}`,
 		`{"action":"assignRole","userId":"user-1","roleId":"role-1","intentId":"bad\nintent"}`,
 		`{"action":"createRole","key":"Bad Key","name":"Name"}`,
 		`{"action":"createRole","key":"valid-key","name":""}`,
+		`{"action":"createRole","key":"valid-key","name":"` + strings.Repeat("🙂", 31) + `","intentId":"create-role-intent"}`,
 		`{"action":"setPermissions","roleId":"role-1","permissions":[""]}`,
 		`{"action":"assignRole","userId":"","roleId":"role-1"}`,
 		`{"action":"invite","email":"not-an-email","roleId":"role-1"}`,
@@ -202,11 +239,32 @@ func TestTeamWriteHandlerRequiresVerifiedOrgAndCookieOrigin(t *testing.T) {
 		request.Header.Set("Origin", "https://client.example")
 		identity := directTestIdentity()
 		resolver := &fakeDirectSessionResolver{resolved: identity}
-		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"roleId":"role-1"}`)}}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"roleId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}`)}}
 		response := httptest.NewRecorder()
 		NewTeamWriteHandler(resolver, executor, nil).ServeHTTP(response, request)
 		if response.Code != http.StatusOK || resolver.bearerCalls != 1 || resolver.bearer != "opaque-session-token" || executor.calls != 1 {
 			t.Fatalf("status=%d resolver=%+v calls=%d body=%s", response.Code, resolver, executor.calls, response.Body.String())
+		}
+	})
+}
+
+func TestTeamWriteHandlerIgnoresUnknownPropertiesAndEnforcesBodyLimit(t *testing.T) {
+	t.Run("unknown properties are ignored", func(t *testing.T) {
+		body := `{"action":"assignRole","userId":"user-1","roleId":"role-1","intentId":"assign-intent","futureField":{"ignored":true}}`
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"assigned":true}`)}}
+		response := httptest.NewRecorder()
+		NewTeamWriteHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, executor, nil).ServeHTTP(response, teamWriteRequest(body))
+		if response.Code != http.StatusOK || executor.calls != 1 {
+			t.Fatalf("status=%d calls=%d body=%s", response.Code, executor.calls, response.Body.String())
+		}
+	})
+	t.Run("oversized body is rejected", func(t *testing.T) {
+		body := `{"action":"assignRole","userId":"user-1","roleId":"role-1","intentId":"assign-intent","padding":"` + strings.Repeat("x", teamWriteBodyLimit) + `"}`
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"assigned":true}`)}}
+		response := httptest.NewRecorder()
+		NewTeamWriteHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, executor, nil).ServeHTTP(response, teamWriteRequest(body))
+		if response.Code != http.StatusBadRequest || executor.calls != 0 {
+			t.Fatalf("status=%d calls=%d body=%s", response.Code, executor.calls, response.Body.String())
 		}
 	})
 }
@@ -223,5 +281,29 @@ func TestTeamWriteHandlerMethodAndExecutorErrors(t *testing.T) {
 	NewTeamWriteHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, &fakeDirectCapabilityExecutor{err: errors.New("database unavailable")}, nil).ServeHTTP(response, teamWriteRequest(`{"action":"createRole","key":"finance-admin","name":"Finance","intentId":"create-role-intent"}`))
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMountGoTeamRouteOwnsUnsupportedMethodsAndPreservesFlagFallback(t *testing.T) {
+	base := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+	read := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	write := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })
+	route := MountGoTeamRoute(base, read, write)
+	response := httptest.NewRecorder()
+	route.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/team", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "GET, POST" || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	route.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/team/", nil))
+	if response.Code != http.StatusTeapot {
+		t.Fatalf("non-exact path status=%d", response.Code)
+	}
+	response = httptest.NewRecorder()
+	MountGoTeamRoute(base, nil, write).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/team", nil))
+	if response.Code != http.StatusTeapot {
+		t.Fatalf("disabled method did not fall back: status=%d", response.Code)
 	}
 }

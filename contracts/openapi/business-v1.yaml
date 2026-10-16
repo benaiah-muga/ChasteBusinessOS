@@ -1364,6 +1364,296 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/team:
+    get:
+      operationId: getTeam
+      summary: List organization members, roles, and grantable permissions
+      description: >-
+        Returns organization-scoped members and roles plus the sorted
+        capability permission catalog. Cookie sessions use their active
+        organization unless X-Organization-ID is supplied; bearer tokens are
+        resolved against the selected organization. A malformed or repeated
+        selector returns 400; selector mismatch or resolver failure returns
+        401. Reads require a verified active organization and iam.read (or the
+        wildcard permission), rechecked against database membership and grants.
+        Reads do not require Origin. All responses include Cache-Control:
+        no-store and Pragma: no-cache. If Authorization is present, it must be
+        a valid Bearer value and invalid authorization does not fall back to a
+        session cookie.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for this request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Members, roles, and the sorted permission catalog.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid, unverified, missing an organization, or does not match the requested organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The actor lacks iam.read or the database recheck denied membership or permission.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The tenant-scoped team query failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The team service dependencies are unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The exact-path mount rejected an unsupported method before authentication.
+          headers:
+            Allow:
+              description: Currently enabled GET and POST methods. The value reflects feature-flag configuration.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: executeTeamAction
+      summary: Perform a governed organization team action
+      description: >-
+        Executes one of createRole, setPermissions, assignRole, or invite
+        through its governed IAM capability. Cookie and bearer authentication
+        are supported. Cookie-authenticated requests require an exact same-
+        origin Origin header (no Referer fallback); bearer requests bypass
+        this browser-origin check. A supplied Authorization value must be a
+        valid Bearer value and never falls back to the cookie. With no
+        X-Organization-ID, the active-organization cookie/session is used; an
+        explicit selector must match the resolved organization. Invalid
+        organization selection returns 401 on this write route. Requests use
+        an `intentId` to make capability execution replay-safe. The per-action
+        input body is limited to 65536 bytes. Unknown object
+        properties are accepted and ignored by Go. All responses include
+        Cache-Control: no-store. Unsupported methods return 405 before
+        authentication; Allow lists the currently enabled Go methods.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership and must match the session.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        description: JSON request body limited to 65536 bytes. Unknown properties are ignored by Go.
+        x-maxBodyBytes: 65536
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamWriteRequest"
+      responses:
+        "200":
+          description: The selected action completed. The data shape depends on action.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamWriteSuccess"
+        "202":
+          description: Capability execution requires approval and has not completed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamWritePending"
+        "400":
+          description: The request body, action, intent, or action-specific fields are invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session, organization selection, or capability scope is invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The cookie request origin is not same-origin or the actor is not an organization member.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The governed IAM capability refused the mutation.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamWriteFailure"
+        "500":
+          description: Capability execution failed unexpectedly.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Team dependencies are unavailable or the capability returned malformed success data.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The exact-path mount rejected an unsupported method before authentication.
+          headers:
+            Allow:
+              description: Currently enabled GET and POST methods. The value reflects feature-flag configuration.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/support/channels:
     get:
       operationId: getSupportChannels
@@ -2076,6 +2366,289 @@ components:
           const: false
         error:
           type: string
+    TeamResponse:
+      type: object
+      additionalProperties: false
+      required: [members, roles, catalog]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamMember"
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamRole"
+        catalog:
+          type: array
+          description: Sorted, deduplicated permission keys currently grantable through the team role editor.
+          items:
+            type: string
+    TeamMember:
+      type: object
+      additionalProperties: false
+      required: [userId, name, email, roleKeys]
+      properties:
+        userId:
+          type: string
+          format: uuid
+          x-go-type: string
+        name:
+          type: [string, "null"]
+        email:
+          type: string
+          format: email
+          pattern: "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          description: ASCII email using the same practical validation profile as Zod 4 string.email().
+          x-go-type: string
+        roleKeys:
+          type: array
+          items:
+            type: string
+    TeamRole:
+      type: object
+      additionalProperties: false
+      required: [id, key, name, isSystem, permissions]
+      properties:
+        id:
+          type: string
+          format: uuid
+          x-go-type: string
+        key:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        isSystem:
+          type: boolean
+        permissions:
+          type: array
+          items:
+            type: string
+    TeamWriteRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId]
+      description: >-
+        One of the four action variants listed in x-actionVariants. Go accepts
+        and ignores unknown properties, while Vite emits only the selected
+        action's fields.
+      oneOf:
+        - $ref: "#/components/schemas/TeamCreateRoleRequest"
+        - $ref: "#/components/schemas/TeamSetPermissionsRequest"
+        - $ref: "#/components/schemas/TeamAssignRoleRequest"
+        - $ref: "#/components/schemas/TeamInviteRequest"
+      x-actionVariants:
+        - $ref: "#/components/schemas/TeamCreateRoleRequest"
+        - $ref: "#/components/schemas/TeamSetPermissionsRequest"
+        - $ref: "#/components/schemas/TeamAssignRoleRequest"
+        - $ref: "#/components/schemas/TeamInviteRequest"
+      properties:
+        action:
+          type: string
+          enum: [createRole, setPermissions, assignRole, invite]
+          x-go-type: string
+        intentId:
+          type: string
+          x-maxUtf16Length: 200
+          description: >-
+            Required retry identity. Must contain 1 through 200 UTF-16 code
+            units, have non-whitespace content under ECMAScript trim semantics,
+            and contain no CR, LF, or NUL.
+        key:
+          type: string
+          pattern: "^[a-z][a-z0-9-]*$"
+          description: Required for createRole.
+          x-go-type: json.RawMessage
+        name:
+          type: string
+          minLength: 1
+          x-maxUtf16Length: 60
+          description: Required for createRole; length is measured in UTF-16 code units.
+          x-go-type: json.RawMessage
+        roleId:
+          type: string
+          minLength: 1
+          description: Required for setPermissions, assignRole, and invite.
+          x-go-type: json.RawMessage
+        permissions:
+          type: array
+          maxItems: 200
+          description: Required for setPermissions; empty arrays clear all permissions, and each item must be non-empty.
+          items:
+            type: string
+            minLength: 1
+          x-go-type: json.RawMessage
+        userId:
+          type: string
+          minLength: 1
+          description: Required for assignRole.
+          x-go-type: json.RawMessage
+        email:
+          type: string
+          format: email
+          pattern: "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          description: Required for invite. Uses the same ASCII practical email profile as Go validation and Zod 4 string.email().
+          x-go-type: json.RawMessage
+    TeamCreateRoleRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId, key, name]
+      properties:
+        action:
+          type: string
+          const: createRole
+        intentId:
+          $ref: "#/components/schemas/TeamIntentId"
+        key:
+          type: string
+          pattern: "^[a-z][a-z0-9-]*$"
+        name:
+          type: string
+          minLength: 1
+          x-maxUtf16Length: 60
+    TeamSetPermissionsRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId, roleId, permissions]
+      properties:
+        action:
+          type: string
+          const: setPermissions
+        intentId:
+          $ref: "#/components/schemas/TeamIntentId"
+        roleId:
+          type: string
+          minLength: 1
+        permissions:
+          type: array
+          maxItems: 200
+          items:
+            type: string
+            minLength: 1
+    TeamAssignRoleRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId, userId, roleId]
+      properties:
+        action:
+          type: string
+          const: assignRole
+        intentId:
+          $ref: "#/components/schemas/TeamIntentId"
+        userId:
+          type: string
+          minLength: 1
+        roleId:
+          type: string
+          minLength: 1
+    TeamInviteRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId, email, roleId]
+      properties:
+        action:
+          type: string
+          const: invite
+        intentId:
+          $ref: "#/components/schemas/TeamIntentId"
+        email:
+          type: string
+          format: email
+          pattern: "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        roleId:
+          type: string
+          minLength: 1
+    TeamIntentId:
+      type: string
+      x-maxUtf16Length: 200
+      description: >-
+        Must contain 1 through 200 UTF-16 code units, have non-whitespace
+        content under ECMAScript trim semantics, and contain no CR, LF, or NUL.
+    TeamWriteSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, data]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        data:
+          description: Action-specific result matching the selected Team action.
+          oneOf:
+            - $ref: "#/components/schemas/TeamCreateRoleResult"
+            - $ref: "#/components/schemas/TeamSetPermissionsResult"
+            - $ref: "#/components/schemas/TeamAssignRoleResult"
+            - $ref: "#/components/schemas/TeamInviteResult"
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+    TeamWritePending:
+      type: object
+      additionalProperties: false
+      required: [ok, pendingApproval, reason]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        pendingApproval:
+          type: boolean
+          const: true
+        reason:
+          type: string
+    TeamWriteFailure:
+      type: object
+      additionalProperties: false
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        error:
+          type: string
+    TeamCreateRoleResult:
+      type: object
+      additionalProperties: false
+      required: [roleId]
+      properties:
+        roleId:
+          type: string
+          format: uuid
+          x-go-type: string
+    TeamSetPermissionsResult:
+      type: object
+      additionalProperties: false
+      required: [permissionCount]
+      properties:
+        permissionCount:
+          type: integer
+          minimum: 0
+    TeamAssignRoleResult:
+      type: object
+      additionalProperties: false
+      required: [assigned]
+      properties:
+        assigned:
+          type: boolean
+          description: False is a valid idempotent result when the requested role assignment already exists.
+    TeamInviteResult:
+      type: object
+      additionalProperties: false
+      required: [invitationId, token, expiresAt]
+      properties:
+        invitationId:
+          type: string
+          format: uuid
+          x-go-type: string
+        token:
+          type: string
+          minLength: 1
+        expiresAt:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC expiration timestamp.
     NotificationsResponse:
       type: object
       additionalProperties: false

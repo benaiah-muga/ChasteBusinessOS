@@ -32,17 +32,20 @@ type teamResolverStub struct {
 	err              error
 	resolvedCookie   string
 	resolvedSelector string
+	resolveCalls     int
 	bearer           string
 	bearerSelector   string
 }
 
 func (s *teamResolverStub) Resolve(_ context.Context, cookie, activeOrg string) (*session.ResolvedUser, error) {
+	s.resolveCalls++
 	s.resolvedCookie = cookie
 	s.resolvedSelector = activeOrg
 	return s.resolved, s.err
 }
 
 func (s *teamResolverStub) ResolveBearerToken(_ context.Context, bearer, activeOrg string) (*session.ResolvedUser, error) {
+	s.resolveCalls++
 	s.bearer = bearer
 	s.bearerSelector = activeOrg
 	return s.resolved, s.err
@@ -132,6 +135,20 @@ func TestGoTeamHandlerResolvesBearerAndExplicitOrganization(t *testing.T) {
 	}
 	if resolver.bearer != "api-token" || resolver.bearerSelector != teamTestOrgID {
 		t.Fatalf("bearer resolver received token=%q selector=%q", resolver.bearer, resolver.bearerSelector)
+	}
+}
+
+func TestGoTeamHandlerRejectsPresentEmptyOrganizationSelector(t *testing.T) {
+	handler, resolver := teamTestHandler(teamTestResolved(map[string]bool{"iam.read": true}), func(context.Context, string, string) (teamReadData, bool, error) {
+		t.Fatal("team loader should not run for an invalid selector")
+		return teamReadData{}, false, nil
+	})
+	request := teamRequest()
+	request.Header.Set("X-Organization-ID", "")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || resolver.resolveCalls != 0 {
+		t.Fatalf("status=%d resolver=%+v body=%s", response.Code, resolver, response.Body.String())
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 	"github.com/jackc/pgx/v5"
@@ -78,7 +79,7 @@ func (h *GoTeamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	selector, valid := modulesOrganizationSelector(r)
+	selector, valid := activeOrganizationSelector(r)
 	if !valid {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid organization selector"})
 		return
@@ -125,11 +126,19 @@ func (h *GoTeamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if data.Roles == nil {
 		data.Roles = []teamReadRole{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"members": data.Members,
-		"roles":   data.Roles,
-		"catalog": h.catalog,
-	})
+	members := make([]businesscontract.TeamMember, len(data.Members))
+	for i, member := range data.Members {
+		members[i] = businesscontract.TeamMember{
+			UserId: member.UserID, Name: member.Name, Email: member.Email, RoleKeys: member.RoleKeys,
+		}
+	}
+	roles := make([]businesscontract.TeamRole, len(data.Roles))
+	for i, role := range data.Roles {
+		roles[i] = businesscontract.TeamRole{
+			Id: role.ID, Key: role.Key, Name: role.Name, IsSystem: role.IsSystem, Permissions: role.Permissions,
+		}
+	}
+	writeJSON(w, http.StatusOK, businesscontract.TeamResponse{Members: members, Roles: roles, Catalog: h.catalog})
 }
 
 func writeTeamUnauthorized(w http.ResponseWriter) {

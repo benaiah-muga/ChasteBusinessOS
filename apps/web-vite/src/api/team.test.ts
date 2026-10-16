@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchTeam, submitTeamAction, TeamApiError } from "./team";
 
 const teamData = {
-  members: [{ userId: "user-1", name: "Ada Lovelace", email: "ada@example.com", roleKeys: ["owner"] }],
-  roles: [{ id: "role-1", key: "bookkeeper", name: "Bookkeeper", isSystem: false, permissions: ["accounting.read"] }],
+  members: [{ userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Ada Lovelace", email: "ada@example.com", roleKeys: ["owner"] }],
+  roles: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", key: "bookkeeper", name: "Bookkeeper", isSystem: false, permissions: ["accounting.read"] }],
   catalog: ["accounting.read", "accounting.write"],
 };
 
@@ -79,10 +79,38 @@ describe("Vite team API", () => {
       .rejects.toMatchObject({ status: 422, message: "Role is protected" });
   });
 
+  it("uses UTF-16 bounds and the shared email profile before sending writes", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitTeamAction({ action: "createRole", key: "finance", name: "🙂".repeat(31) }, "intent-name"))
+      .rejects.toMatchObject({ status: 0 });
+    await expect(submitTeamAction({ action: "assignRole", userId: "user-1", roleId: "role-1" }, "🙂".repeat(101)))
+      .rejects.toMatchObject({ status: 0 });
+    await expect(submitTeamAction({ action: "invite", email: "first..last@example.com", roleId: "role-1" }, "intent-email"))
+      .rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("tells callers to check team status before retrying an unconfirmed success", async () => {
+    const fetchMock = vi.fn(async () => Response.json(
+      { error: "team service unavailable; check team status before retrying" },
+      { status: 503 },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitTeamAction({ action: "assignRole", userId: "user-1", roleId: "role-1" }, "same-intent"))
+      .rejects.toMatchObject({
+        status: 503,
+        message: "The team service could not confirm whether this action completed. Refresh team status before retrying.",
+      });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("validates each Go capability result against the submitted action", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { roleId: "role-2" } })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { roleId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } })));
     await expect(submitTeamAction({ action: "createRole", key: "bookkeeper", name: "Bookkeeper" }, "intent-create"))
-      .resolves.toEqual({ kind: "completed", data: { roleId: "role-2" } });
+      .resolves.toEqual({ kind: "completed", data: { roleId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } });
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { permissionCount: 2, extra: true } })));
     await expect(submitTeamAction({ action: "setPermissions", roleId: "role-1", permissions: ["accounting.read"] }, "intent-permissions"))
@@ -90,7 +118,7 @@ describe("Vite team API", () => {
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { assigned: false } })));
     await expect(submitTeamAction({ action: "assignRole", userId: "user-1", roleId: "role-1" }, "intent-assign"))
-      .rejects.toMatchObject({ message: "The team service returned an unexpected action response." });
+      .resolves.toEqual({ kind: "completed", data: { assigned: false } });
   });
 
   it.each([" \t ", "i".repeat(201), "bad\nkey", "bad\rkey", "bad\0key"])(

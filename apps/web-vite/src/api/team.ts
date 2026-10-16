@@ -1,21 +1,24 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 
-const MemberSchema = z.object({
-  userId: z.string().min(1),
+const TEAM_EMAIL_PATTERN = /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+.-]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
+
+const MemberSchema: z.ZodType<components["schemas"]["TeamMember"]> = z.object({
+  userId: z.string().uuid(),
   name: z.string().nullable(),
-  email: z.string().email(),
+  email: z.string().regex(TEAM_EMAIL_PATTERN),
   roleKeys: z.array(z.string()),
 }).strict();
 
-const RoleSchema = z.object({
-  id: z.string().min(1),
+const RoleSchema: z.ZodType<components["schemas"]["TeamRole"]> = z.object({
+  id: z.string().uuid(),
   key: z.string().min(1),
   name: z.string().min(1),
   isSystem: z.boolean(),
   permissions: z.array(z.string()),
 }).strict();
 
-const TeamDataSchema = z.object({
+const TeamDataSchema: z.ZodType<components["schemas"]["TeamResponse"]> = z.object({
   members: z.array(MemberSchema),
   roles: z.array(RoleSchema),
   catalog: z.array(z.string()),
@@ -24,7 +27,7 @@ const TeamDataSchema = z.object({
 const CreateRoleSchema = z.object({
   action: z.literal("createRole"),
   key: z.string().regex(/^[a-z][a-z0-9-]*$/),
-  name: z.string().min(1).max(60),
+  name: z.string().min(1).refine((value) => value.length <= 60),
 }).strict();
 const SetPermissionsSchema = z.object({
   action: z.literal("setPermissions"),
@@ -38,7 +41,7 @@ const AssignRoleSchema = z.object({
 }).strict();
 const InviteSchema = z.object({
   action: z.literal("invite"),
-  email: z.string().email(),
+  email: z.string().regex(TEAM_EMAIL_PATTERN),
   roleId: z.string().min(1),
 }).strict();
 
@@ -54,28 +57,46 @@ const ErrorBodySchema = z.object({
   error: z.string().optional(),
   message: z.string().optional(),
 }).strict();
-const PendingActionSchema = z.object({
+const PendingActionSchema: z.ZodType<components["schemas"]["TeamWritePending"]> = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
   reason: z.string(),
 }).strict();
+const CreateRoleResultSchema = z.object({
+  roleId: z.string().uuid(),
+}).strict() satisfies z.ZodType<components["schemas"]["TeamCreateRoleResult"]>;
+const SetPermissionsResultSchema = z.object({
+  permissionCount: z.number().int().nonnegative(),
+}).strict() satisfies z.ZodType<components["schemas"]["TeamSetPermissionsResult"]>;
+const AssignRoleResultSchema = z.object({
+  assigned: z.boolean(),
+}).strict() satisfies z.ZodType<components["schemas"]["TeamAssignRoleResult"]>;
+const InviteResultSchema = z.object({
+  invitationId: z.string().uuid(),
+  token: z.string().min(1),
+  expiresAt: z.string().datetime({ offset: true }),
+}).strict() satisfies z.ZodType<components["schemas"]["TeamInviteResult"]>;
+const SuccessActionSchema: z.ZodType<components["schemas"]["TeamWriteSuccess"]> = z.object({
+  ok: z.literal(true),
+  data: z.union([CreateRoleResultSchema, SetPermissionsResultSchema, AssignRoleResultSchema, InviteResultSchema]),
+}).strict();
 const ActionOutputSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("createRole"), roleId: z.string().min(1) }).strict(),
+  z.object({ action: z.literal("createRole"), roleId: z.string().uuid() }).strict(),
   z.object({ action: z.literal("setPermissions"), permissionCount: z.number().int().nonnegative() }).strict(),
-  z.object({ action: z.literal("assignRole"), assigned: z.literal(true) }).strict(),
-  z.object({
-    action: z.literal("invite"),
-    invitationId: z.string().uuid(),
-    token: z.string().min(1),
-    expiresAt: z.string().datetime({ offset: true }),
-  }).strict(),
+  z.object({ action: z.literal("assignRole"), assigned: z.boolean() }).strict(),
+  z.object({ action: z.literal("invite"), invitationId: z.string().uuid(), token: z.string().min(1), expiresAt: z.string().datetime({ offset: true }) }).strict(),
 ]);
-const SuccessActionSchema = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).strict();
-
-export type TeamData = z.infer<typeof TeamDataSchema>;
-export type TeamAction = z.infer<typeof TeamActionSchema>;
+export type TeamData = components["schemas"]["TeamResponse"];
+export type TeamAction =
+  | Omit<components["schemas"]["TeamCreateRoleRequest"], "intentId">
+  | Omit<components["schemas"]["TeamSetPermissionsRequest"], "intentId">
+  | Omit<components["schemas"]["TeamAssignRoleRequest"], "intentId">
+  | Omit<components["schemas"]["TeamInviteRequest"], "intentId">;
 export type TeamActionOutcome =
-  | { kind: "completed"; data: Record<string, unknown> }
+  | {
+      kind: "completed";
+      data: components["schemas"]["TeamWriteSuccess"]["data"];
+    }
   | { kind: "pending"; reason: string };
 
 export class TeamApiError extends Error {
@@ -105,6 +126,9 @@ function errorMessage(status: number, raw: unknown): string {
   if (status === 403) return "You do not have permission to view or change team roles.";
   if (status === 404) return "That member or role no longer exists. Refresh the team and try again.";
   if (status === 409) return "The team changed elsewhere. Refresh the page and try again.";
+  if (status === 503 && serverMessage?.includes("check team status before retrying")) {
+    return "The team service could not confirm whether this action completed. Refresh team status before retrying.";
+  }
   if (status >= 500) return "The team service is unavailable. Try again.";
   if (serverMessage && serverMessage.length <= 240 && !/[{}<>]/.test(serverMessage)) return serverMessage;
   return "The team request could not be completed. Check the details and try again.";
@@ -148,11 +172,12 @@ export async function submitTeamAction(
 
   let response: Response;
   try {
+    const requestBody: components["schemas"]["TeamWriteRequest"] = { ...parsedAction.data, intentId };
     response = await fetch("/api/team", {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ ...parsedAction.data, intentId }),
+      body: JSON.stringify(requestBody),
       signal: requestSignal(undefined, 20_000),
     });
   } catch (error) {
@@ -174,6 +199,5 @@ export async function submitTeamAction(
   if (!success.success) throw new TeamApiError(response.status, "The team service returned an unexpected action response.");
   const output = ActionOutputSchema.safeParse({ action: parsedAction.data.action, ...success.data.data });
   if (!output.success) throw new TeamApiError(response.status, "The team service returned an unexpected action response.");
-  const { action: _action, ...data } = output.data;
-  return { kind: "completed", data };
+  return { kind: "completed", data: success.data.data };
 }

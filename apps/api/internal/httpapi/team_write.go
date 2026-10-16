@@ -10,8 +10,11 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf16"
 
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract"
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
@@ -26,17 +29,6 @@ type TeamWriteHandler struct {
 	executor          CapabilityExecutor
 	logger            *slog.Logger
 	trustedProxyCIDRs []*net.IPNet
-}
-
-type teamWriteBody struct {
-	Action      json.RawMessage `json:"action"`
-	IntentID    json.RawMessage `json:"intentId"`
-	Key         json.RawMessage `json:"key"`
-	Name        json.RawMessage `json:"name"`
-	RoleID      json.RawMessage `json:"roleId"`
-	Permissions json.RawMessage `json:"permissions"`
-	UserID      json.RawMessage `json:"userId"`
-	Email       json.RawMessage `json:"email"`
 }
 
 func NewTeamWriteHandler(resolver DirectCapabilitySessionResolver, executor CapabilityExecutor, logger *slog.Logger, trustedProxyCIDRs ...[]*net.IPNet) http.Handler {
@@ -75,7 +67,7 @@ func (h *TeamWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, teamWriteBodyLimit)
 	decoder := json.NewDecoder(r.Body)
-	var body teamWriteBody
+	var body businesscontract.TeamWriteRequest
 	if decoder.Decode(&body) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
@@ -103,25 +95,26 @@ func (h *TeamWriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if reason == "" {
 			reason = result.Error
 		}
-		writeJSON(w, http.StatusAccepted, struct {
-			OK              bool   `json:"ok"`
-			PendingApproval bool   `json:"pendingApproval"`
-			Reason          string `json:"reason"`
-		}{OK: false, PendingApproval: true, Reason: reason})
+		writeJSON(w, http.StatusAccepted, businesscontract.TeamWritePending{
+			Ok:              businesscontract.TeamWritePendingOkFalse,
+			PendingApproval: businesscontract.TeamWritePendingPendingApprovalTrue,
+			Reason:          reason,
+		})
 		return
 	}
 	if !result.OK {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "error": result.Error})
+		writeJSON(w, http.StatusUnprocessableEntity, businesscontract.TeamWriteFailure{
+			Ok: businesscontract.TeamWriteFailureOkFalse, Error: result.Error,
+		})
 		return
 	}
 	if !validTeamWriteOutput(capabilityID, result.Data) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "team service unavailable; check team status before retrying"})
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
-		OK   bool            `json:"ok"`
-		Data json.RawMessage `json:"data"`
-	}{OK: true, Data: result.Data})
+	writeJSON(w, http.StatusOK, businesscontract.TeamWriteSuccess{
+		Ok: businesscontract.TeamWriteSuccessOkTrue, Data: apicontract.RawJSON(result.Data),
+	})
 }
 
 func (h *TeamWriteHandler) resolve(r *http.Request) (*session.ResolvedUser, bool, bool) {
@@ -151,10 +144,9 @@ func (h *TeamWriteHandler) writeExecutionError(w http.ResponseWriter, err error)
 	default:
 		var domainError capability.IAMDomainError
 		if errors.As(err, &domainError) {
-			writeJSON(w, http.StatusUnprocessableEntity, struct {
-				OK    bool   `json:"ok"`
-				Error string `json:"error"`
-			}{OK: false, Error: domainError.Error()})
+			writeJSON(w, http.StatusUnprocessableEntity, businesscontract.TeamWriteFailure{
+				Ok: businesscontract.TeamWriteFailureOkFalse, Error: domainError.Error(),
+			})
 			return
 		}
 		h.logger.Error("Go team capability execution failed", "error", err)
@@ -162,19 +154,20 @@ func (h *TeamWriteHandler) writeExecutionError(w http.ResponseWriter, err error)
 	}
 }
 
-func parseTeamWrite(body teamWriteBody) (intentID, capabilityID string, input json.RawMessage, valid bool) {
-	var action string
-	if !readTeamString(body.Action, &action) {
+func parseTeamWrite(body businesscontract.TeamWriteRequest) (intentID, capabilityID string, input json.RawMessage, valid bool) {
+	action := body.Action
+	if action == "" {
 		return "", "", nil, false
 	}
-	if !readTeamString(body.IntentID, &intentID) || !validTeamIntentID(intentID) {
+	intentID = body.IntentId
+	if !validTeamIntentID(intentID) {
 		return "", "", nil, false
 	}
 	var payload any
 	switch action {
 	case "createRole":
 		var key, name string
-		if !readTeamString(body.Key, &key) || !teamRoleKeyPattern.MatchString(key) || !readTeamString(body.Name, &name) || len(utf16.Encode([]rune(name))) > 60 {
+		if !readTeamString(teamRawValue(body.Key), &key) || !teamRoleKeyPattern.MatchString(key) || !readTeamString(teamRawValue(body.Name), &name) || len(utf16.Encode([]rune(name))) > 60 {
 			return "", "", nil, false
 		}
 		payload = struct {
@@ -185,7 +178,7 @@ func parseTeamWrite(body teamWriteBody) (intentID, capabilityID string, input js
 	case "setPermissions":
 		var roleID string
 		var permissions []string
-		if !readTeamString(body.RoleID, &roleID) || !readTeamStringArray(body.Permissions, &permissions) || len(permissions) > 200 {
+		if !readTeamString(teamRawValue(body.RoleId), &roleID) || !readTeamStringArray(teamRawValue(body.Permissions), &permissions) || len(permissions) > 200 {
 			return "", "", nil, false
 		}
 		for _, permission := range permissions {
@@ -200,7 +193,7 @@ func parseTeamWrite(body teamWriteBody) (intentID, capabilityID string, input js
 		capabilityID = "iam.updateRolePermissions"
 	case "assignRole":
 		var userID, roleID string
-		if !readTeamString(body.UserID, &userID) || !readTeamString(body.RoleID, &roleID) {
+		if !readTeamString(teamRawValue(body.UserId), &userID) || !readTeamString(teamRawValue(body.RoleId), &roleID) {
 			return "", "", nil, false
 		}
 		payload = struct {
@@ -210,7 +203,7 @@ func parseTeamWrite(body teamWriteBody) (intentID, capabilityID string, input js
 		capabilityID = "iam.assignRole"
 	case "invite":
 		var email, roleID string
-		if !readTeamString(body.Email, &email) || !validTeamEmail(email) || !readTeamString(body.RoleID, &roleID) {
+		if !readTeamString(teamRawValue(body.Email), &email) || !validTeamEmail(email) || !readTeamString(teamRawValue(body.RoleId), &roleID) {
 			return "", "", nil, false
 		}
 		payload = struct {
@@ -226,6 +219,13 @@ func parseTeamWrite(body teamWriteBody) (intentID, capabilityID string, input js
 		return "", "", nil, false
 	}
 	return intentID, capabilityID, input, true
+}
+
+func teamRawValue(raw *json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	return *raw
 }
 
 func validTeamIntentID(value string) bool {
@@ -274,12 +274,12 @@ func validTeamWriteOutput(capabilityID string, raw json.RawMessage) bool {
 		var output struct {
 			RoleID string `json:"roleId"`
 		}
-		return decoder.Decode(&output) == nil && output.RoleID != "" && decoder.Decode(new(any)) == io.EOF
+		return decoder.Decode(&output) == nil && isUUID(output.RoleID) && decoder.Decode(new(any)) == io.EOF
 	case "iam.updateRolePermissions":
 		var output struct {
 			PermissionCount *int `json:"permissionCount"`
 		}
-		return decoder.Decode(&output) == nil && output.PermissionCount != nil && decoder.Decode(new(any)) == io.EOF
+		return decoder.Decode(&output) == nil && output.PermissionCount != nil && *output.PermissionCount >= 0 && decoder.Decode(new(any)) == io.EOF
 	case "iam.assignRole":
 		var output struct {
 			Assigned *bool `json:"assigned"`
@@ -291,7 +291,11 @@ func validTeamWriteOutput(capabilityID string, raw json.RawMessage) bool {
 			Token        string `json:"token"`
 			ExpiresAt    string `json:"expiresAt"`
 		}
-		return decoder.Decode(&output) == nil && output.InvitationID != "" && output.Token != "" && output.ExpiresAt != "" && decoder.Decode(new(any)) == io.EOF
+		if decoder.Decode(&output) != nil || !isUUID(output.InvitationID) || output.Token == "" || decoder.Decode(new(any)) != io.EOF {
+			return false
+		}
+		_, err := time.Parse(time.RFC3339, output.ExpiresAt)
+		return err == nil
 	default:
 		return false
 	}

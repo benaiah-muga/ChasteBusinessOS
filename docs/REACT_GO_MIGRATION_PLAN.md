@@ -5035,3 +5035,11 @@ new owners and the manifest shows zero legacy runtime paths.
      runtime validation. The exact-path mount preserves per-method flag
      fallback and returns 405 with the configured `Allow` methods for other
      methods once either Go method owns the path.
+
+472. (Focused verified) The public business OpenAPI contract now describes
+     Go GET and POST `/api/team`, including action-discriminated role, grant,
+     assignment, and invitation inputs and results. Go handlers and the Vite
+     client consume generated models while retaining runtime validation. The
+     exact-path mount returns 405 with the configured `Allow` methods for
+     unsupported methods and preserves feature-flag fallback for disabled
+     GET/POST methods.

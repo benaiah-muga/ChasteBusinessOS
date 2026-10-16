@@ -895,6 +895,7 @@ func run(logger *slog.Logger) error {
 	apiMux.Handle("/api/email", emailRoute)
 	apiMux.Handle("/", apiHandler)
 	apiHandler = httpapi.MountGoTeamSSORoute(apiMux, teamSSORoute)
+	apiHandler = httpapi.MountGoTeamRoute(apiHandler, teamReadRoute, teamWriteRoute)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiHandler,

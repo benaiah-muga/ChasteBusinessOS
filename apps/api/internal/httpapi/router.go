@@ -911,6 +911,59 @@ func MountGoNotificationsRoute(base, notificationsRoute, notificationReadRoute h
 	return mux
 }
 
+// MountGoTeamRoute gives the active Go team methods exact-path ownership while
+// leaving disabled GET/POST methods available to the existing compatibility route.
+func MountGoTeamRoute(base, teamReadRoute, teamWriteRoute http.Handler) http.Handler {
+	if teamReadRoute == nil && teamWriteRoute == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	methods := make([]string, 0, 2)
+	if teamReadRoute != nil {
+		methods = append(methods, http.MethodGet)
+	}
+	if teamWriteRoute != nil {
+		methods = append(methods, http.MethodPost)
+	}
+	mux.HandleFunc("/api/team", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/team" {
+			if base != nil {
+				base.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			if teamReadRoute != nil {
+				teamReadRoute.ServeHTTP(w, r)
+				return
+			}
+		case http.MethodPost:
+			if teamWriteRoute != nil {
+				teamWriteRoute.ServeHTTP(w, r)
+				return
+			}
+		default:
+			w.Header().Set("Allow", strings.Join(methods, ", "))
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 func NewRouterWithApprovalInbox(pinger Pinger, logger *slog.Logger, bridgeSecret string, policyReader PolicyReader, ledgerReader LedgerReader, orgMembershipChecker OrgMembershipChecker, capabilityExecutor CapabilityExecutor, metricsReader MetricsReader, approvalInboxReader ApprovalInboxReader, approvalDeciders ...ApprovalDecisionDecider) http.Handler {
 	return newRouterWithApprovalInbox(pinger, logger, bridgeSecret, policyReader, ledgerReader, orgMembershipChecker, capabilityExecutor, metricsReader, approvalInboxReader, nil, approvalDeciders...)
 }
