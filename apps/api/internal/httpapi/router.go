@@ -85,7 +85,16 @@ func MountSignalsRoute(base, signalsRoute http.Handler) http.Handler {
 		return base
 	}
 	mux := http.NewServeMux()
-	mux.Handle("GET /api/signals", signalsRoute)
+	mux.Handle("/api/signals", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		signalsRoute.ServeHTTP(w, r)
+	}))
 	if base != nil {
 		mux.Handle("/", base)
 	}

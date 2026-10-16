@@ -1497,12 +1497,13 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/branding/")).toBe(true);
   });
 
-  it("keeps the signals namespace on Go for unsupported methods and paths", () => {
+  it("routes the exact signals path to Go for 405 handling when enabled", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SIGNALS_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "GET", "/api/signals?severity=orange&module=sales")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/signals")).toBe(true);
-    expect(isGoRouteRequest(flags, "GET", "/api/signals/extra")).toBe(true);
-    expect(isGoRouteRequest(flags, "GET", "/api/signals/")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/signals/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/signals/")).toBe(false);
+    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_SIGNALS_ROUTE: "0" }), "GET", "/api/signals")).toBe(false);
   });
 
   it("keeps the My Work namespace on Go regardless of route flags", () => {
@@ -2310,8 +2311,6 @@ describe("Vite Go route proxy selection", () => {
       ["POST", "/api/my-work/summarize/extra"],
       ["POST", "/api/signals"],
       ["DELETE", "/api/signals"],
-      ["GET", "/api/signals/extra"],
-      ["GET", "/api/signals/"],
       ["PATCH", "/api/scim/tokens"],
       ["PUT", "/api/scim/tokens"],
       ["GET", "/api/scim/tokens/extra"],

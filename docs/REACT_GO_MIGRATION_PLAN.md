@@ -5058,3 +5058,14 @@ new owners and the manifest shows zero legacy runtime paths.
      allowing fixture and future checklist lengths. The enabled Go mount owns
      the exact path, returns 405 with `Allow: GET` for other methods, and keeps
      suffix paths on the base router.
+
+474. (Focused verified) The public business OpenAPI contract now describes
+     Go GET `/api/signals`, including cookie and bearer authentication,
+     organization membership checks, first-value severity/module filters,
+     UTF-8 byte limits, cache headers, and error statuses. Go and Vite consume generated
+     signal models while retaining runtime validation. Invalid query values
+     return 400, missing `signals.read` permission returns a generic 403, and
+     the enabled exact-path mount owns unsupported methods with `Allow: GET`
+     while suffix paths and disabled feature flags keep their fallback. Resolver
+     infrastructure failures return a logged generic 500, short auth secrets
+     return 503, and invalid sessions remain 401.

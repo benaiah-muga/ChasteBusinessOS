@@ -285,7 +285,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     ledger: true,
     metrics: env.CHASTE_GO_METRICS_ROUTE !== "0",
     myWorkSummary: true,
-    signals: true,
+    signals: env.CHASTE_GO_SIGNALS_ROUTE !== "0",
     scimTokens: true,
     sessions: env.CHASTE_GO_SESSIONS_ROUTE !== "0",
     durableRuns: env.CHASTE_GO_DURABLE_RUNS_ROUTE !== "0",
@@ -318,7 +318,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   // These namespaces have Go handlers for their active Vite flows. Keep malformed
   // paths and unsupported methods on Go so they cannot silently invoke Next.
-  if (/^\/api\/(?:branding|ledger|signals|notifications|onboarding|support\/public|my-work|modules|scim\/tokens|scim\/v2\/Users|sessions|durable-runs)(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
+  if (/^\/api\/(?:branding|ledger|notifications|onboarding|support\/public|my-work|modules|scim\/tokens|scim\/v2\/Users|sessions|durable-runs)(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
   if (/^\/api\/routines(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
   const attachmentID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
   if (method === "GET" && new RegExp(`^/api/go/documents/${attachmentID}/content(?:\\?.*)?$`, "i").test(path)) return true;
@@ -357,7 +357,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.analyticsReport && method === "POST" && /^\/api\/analytics(?:\?.*)?$/.test(path)) return true;
   if (flags.myWork && method === "GET" && /^\/api\/my-work(?:\?.*)?$/.test(path)) return true;
   if (flags.myWorkSummary && method === "POST" && /^\/api\/my-work\/summarize(?:\?.*)?$/.test(path)) return true;
-  if (flags.signals && method === "GET" && /^\/api\/signals(?:\?.*)?$/.test(path)) return true;
+  if (flags.signals && /^\/api\/signals(?:\?.*)?$/.test(path)) return true;
   if (flags.scimTokens && ["GET", "POST", "DELETE"].includes(method ?? "") && /^\/api\/scim\/tokens(?:\?.*)?$/.test(path)) return true;
   const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
   if (flags.sessions && method === "GET" && new RegExp(`^/api/sessions(?:/${uuid}(?:/replay)?)?(?:\\?.*)?$`, "i").test(path)) return true;

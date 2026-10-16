@@ -23,11 +23,11 @@ func TestSignalsSessionHandlerExecutesGovernedListAndReturnsLegacyEnvelope(t *te
 	identity := directTestIdentity()
 	identity.Permissions["signals.read"] = true
 	resolver := &fakeDirectSessionResolver{resolved: identity}
-	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"signals":[{"id":"cash.low","severity":"orange"}]}`)}}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"signals":[{"id":"cash.low","severity":"orange","module":"cash","subject":"Low cash","detail":"Cash is low"}]}`)}}
 	response := httptest.NewRecorder()
 	NewSignalsSessionHandler(resolver, executor, nil).ServeHTTP(response, signalsRequest(http.MethodGet, "/api/signals?severity=orange&severity=red&module=sales&ignored=value"))
 
-	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"signals":[{"id":"cash.low","severity":"orange"}]}` {
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"signals":[{"detail":"Cash is low","id":"cash.low","module":"cash","severity":"orange","subject":"Low cash"}]}` {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	if resolver.resolveCalls != 1 || resolver.cookie != "signals-cookie" || resolver.activeOrg != *identity.OrgID {
@@ -49,6 +49,7 @@ func TestSignalsSessionHandlerExecutesGovernedListAndReturnsLegacyEnvelope(t *te
 
 func TestSignalsSessionHandlerSupportsBearerAndEmptyQuery(t *testing.T) {
 	identity := directTestIdentity()
+	identity.Permissions["signals.read"] = true
 	resolver := &fakeDirectSessionResolver{resolved: identity}
 	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"signals":[]}`)}}
 	request := httptest.NewRequest(http.MethodGet, "/api/signals", nil)
@@ -87,33 +88,119 @@ func TestSignalsSessionHandlerRequiresVerifiedOrgSession(t *testing.T) {
 	}
 }
 
-func TestSignalsSessionHandlerPreservesLegacyFailureSemantics(t *testing.T) {
-	t.Run("capability validation and permission failures", func(t *testing.T) {
-		for _, message := range []string{"severity must be red, orange or green", "forbidden: missing permission: signals.read"} {
-			t.Run(message, func(t *testing.T) {
-				executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: false, Error: message}}
-				response := httptest.NewRecorder()
-				NewSignalsSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, executor, nil).ServeHTTP(response, signalsRequest(http.MethodGet, "/api/signals?severity=blue"))
-				if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), message) {
-					t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-				}
-			})
-		}
-	})
-	t.Run("executor error", func(t *testing.T) {
-		response := httptest.NewRecorder()
-		NewSignalsSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, &fakeDirectCapabilityExecutor{err: errors.New("database detail")}, nil).ServeHTTP(response, signalsRequest(http.MethodGet, "/api/signals"))
-		if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "database detail") {
-			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-		}
-	})
-	t.Run("wrong method", func(t *testing.T) {
-		response := httptest.NewRecorder()
-		NewSignalsSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, &fakeDirectCapabilityExecutor{}, nil).ServeHTTP(response, signalsRequest(http.MethodPost, "/api/signals"))
-		if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet {
-			t.Fatalf("status=%d Allow=%q", response.Code, response.Header().Get("Allow"))
-		}
-	})
+func TestSignalsSessionHandlerRejectsOrganizationOutsideMembership(t *testing.T) {
+	for _, auth := range []string{"cookie", "bearer"} {
+		t.Run(auth, func(t *testing.T) {
+			identity := directTestIdentity()
+			identity.Permissions["signals.read"] = true
+			request := signalsRequest(http.MethodGet, "/api/signals")
+			request.Header.Set("X-Organization-ID", "99999999-9999-4999-8999-999999999999")
+			resolver := &fakeDirectSessionResolver{resolved: identity}
+			if auth == "bearer" {
+				request.Header.Set("Authorization", "Bearer access-token")
+			}
+			response := httptest.NewRecorder()
+			executor := &fakeDirectCapabilityExecutor{}
+			NewSignalsSessionHandler(resolver, executor, nil).ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden || strings.TrimSpace(response.Body.String()) != `{"error":"forbidden"}` || executor.calls != 0 {
+				t.Fatalf("status=%d calls=%d body=%s", response.Code, executor.calls, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestSignalsSessionHandlerClassifiesResolverFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{name: "invalid session", err: session.ErrNoSession, status: http.StatusUnauthorized},
+		{name: "short secret", err: session.ErrSecretTooShort, status: http.StatusServiceUnavailable},
+		{name: "resolver infrastructure failure", err: errors.New("database credentials leaked"), status: http.StatusInternalServerError},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			NewSignalsSessionHandler(&fakeDirectSessionResolver{err: test.err}, &fakeDirectCapabilityExecutor{}, nil).ServeHTTP(response, signalsRequest(http.MethodGet, "/api/signals"))
+			if response.Code != test.status || strings.Contains(response.Body.String(), "database credentials") {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if test.status == http.StatusUnauthorized && response.Header().Get("WWW-Authenticate") == "" {
+				t.Fatalf("unauthorized response is missing bearer challenge: %v", response.Header())
+			}
+		})
+	}
+}
+
+func TestSignalsSessionHandlerMapsInvalidFiltersToBadRequest(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["signals.read"] = true
+	for _, path := range []string{"/api/signals?severity=blue", "/api/signals?module=x", "/api/signals?module=%ZZ"} {
+		t.Run(path, func(t *testing.T) {
+			executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"signals":[]}`)}}
+			response := httptest.NewRecorder()
+			NewSignalsSessionHandler(&fakeDirectSessionResolver{resolved: identity}, executor, nil).ServeHTTP(response, signalsRequest(http.MethodGet, path))
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid query parameters") || executor.calls != 0 {
+				t.Fatalf("status=%d calls=%d body=%s", response.Code, executor.calls, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestSignalsSessionHandlerRejectsMissingReadPermissionWithoutLeakingDetails(t *testing.T) {
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: false, Error: "forbidden: missing permission: signals.read"}}
+	response := httptest.NewRecorder()
+	NewSignalsSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, executor, nil).ServeHTTP(response, signalsRequest(http.MethodGet, "/api/signals"))
+	if response.Code != http.StatusForbidden || strings.TrimSpace(response.Body.String()) != `{"error":"forbidden"}` || executor.calls != 0 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, executor.calls, response.Body.String())
+	}
+}
+
+func TestSignalsSessionHandlerHidesCapabilityFailure(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["signals.read"] = true
+	response := httptest.NewRecorder()
+	NewSignalsSessionHandler(&fakeDirectSessionResolver{resolved: identity}, &fakeDirectCapabilityExecutor{result: capability.Result{OK: false, Error: "database detail"}}, nil).ServeHTTP(response, signalsRequest(http.MethodGet, "/api/signals"))
+	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "database detail") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestSignalsSessionHandlerRejectsMalformedGeneratedSignalResponse(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["signals.read"] = true
+	for _, data := range []string{
+		`{"signals":[{"id":"cash.low","severity":"orange","module":"cash","detail":"Cash is low"}]}`,
+		`{"signals":[{"id":"cash.low","severity":"orange","module":"cash","subject":"Low cash","detail":"Cash is low","extra":true}]}`,
+	} {
+		t.Run(data, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(data)}}
+			NewSignalsSessionHandler(&fakeDirectSessionResolver{resolved: identity}, executor, nil).ServeHTTP(response, signalsRequest(http.MethodGet, "/api/signals"))
+			if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "extra") {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestSignalsSessionHandlerHidesExecutorFailure(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["signals.read"] = true
+	response := httptest.NewRecorder()
+	NewSignalsSessionHandler(&fakeDirectSessionResolver{resolved: identity}, &fakeDirectCapabilityExecutor{err: errors.New("database detail")}, nil).ServeHTTP(response, signalsRequest(http.MethodGet, "/api/signals"))
+	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "database detail") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestSignalsSessionHandlerWrongMethod(t *testing.T) {
+	response := httptest.NewRecorder()
+	NewSignalsSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, &fakeDirectCapabilityExecutor{}, nil).ServeHTTP(response, signalsRequest(http.MethodPost, "/api/signals"))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet {
+		t.Fatalf("status=%d Allow=%q", response.Code, response.Header().Get("Allow"))
+	}
 }
 
 func TestMountSignalsRouteIsOptIn(t *testing.T) {
@@ -123,11 +210,29 @@ func TestMountSignalsRouteIsOptIn(t *testing.T) {
 	if response.Code != http.StatusTeapot {
 		t.Fatalf("nil Go route status=%d, want legacy handler status %d", response.Code, http.StatusTeapot)
 	}
+	for _, path := range []string{"/api/signals", "/api/signals/export"} {
+		response = httptest.NewRecorder()
+		MountSignalsRoute(base, nil).ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, nil))
+		if response.Code != http.StatusTeapot {
+			t.Fatalf("disabled route %s status=%d, want base handler status %d", path, response.Code, http.StatusTeapot)
+		}
+	}
 	goRoute := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) })
+	mounted := MountSignalsRoute(base, goRoute)
 	response = httptest.NewRecorder()
-	MountSignalsRoute(base, goRoute).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/signals", nil))
+	mounted.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/signals", nil))
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("mounted Go route status=%d", response.Code)
+	}
+	response = httptest.NewRecorder()
+	mounted.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/signals", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("unsupported exact method status=%d headers=%v", response.Code, response.Header())
+	}
+	response = httptest.NewRecorder()
+	mounted.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/signals/export", nil))
+	if response.Code != http.StatusTeapot {
+		t.Fatalf("suffix fallback status=%d, want base handler", response.Code)
 	}
 }
 

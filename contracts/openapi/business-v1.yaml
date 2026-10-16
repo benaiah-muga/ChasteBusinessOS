@@ -360,6 +360,162 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/signals:
+    get:
+      operationId: getSignals
+      summary: Read organization signals
+      description: >-
+        Lists signals for the authenticated organization through the governed
+        signals.list capability. Cookie sessions use the active organization
+        from session context unless X-Organization-ID is supplied; bearer
+        tokens are resolved against that selected organization. An explicit
+        selector must be a single valid UUID matching the actor's membership.
+        Invalid nonempty Authorization does not fall back to the cookie. The
+        first severity or module query value is used and additional values are
+        ignored. Unknown query keys are ignored. Invalid filters return 400.
+        The module filter is limited to 2-40 UTF-8 bytes. Missing signals.read
+        permission or organization membership returns a generic 403. All
+        responses include Cache-Control: no-store and Pragma: no-cache.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization and must match the authenticated membership.
+          schema:
+            type: string
+            format: uuid
+        - name: severity
+          in: query
+          required: false
+          description: First value is used; additional values are ignored.
+          schema:
+            type: string
+            enum: [red, orange, green]
+        - name: module
+          in: query
+          required: false
+          description: First value is used; additional values are ignored. Length is measured in UTF-8 bytes.
+          schema:
+            type: string
+            x-minBytes: 2
+            x-maxBytes: 40
+      responses:
+        "200":
+          description: Signals for the active organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalResponse"
+        "400":
+          description: The organization selector or query parameters are malformed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the identity is not verified or does not resolve to an organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the resolved membership, or the actor lacks signals.read. The message is generic.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The exact path is owned by Go and only GET is enabled. Suffix paths continue to the configured fallback.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure, the signal capability, or its response failed. The message is generic.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Signals dependencies or session configuration are unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/dashboard:
     get:
       operationId: getDashboard
@@ -1988,7 +2144,7 @@ components:
         ok:
           type: boolean
           const: true
-    DashboardSignal:
+    Signal:
       type: object
       additionalProperties: false
       required: [id, severity, module, subject, detail]
@@ -2030,6 +2186,17 @@ components:
               x-go-type-import:
                 path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
                 name: apicontract
+    SignalResponse:
+      type: object
+      additionalProperties: false
+      required: [signals]
+      properties:
+        signals:
+          type: array
+          items:
+            $ref: "#/components/schemas/Signal"
+    DashboardSignal:
+      $ref: "#/components/schemas/Signal"
     DashboardResponse:
       type: object
       additionalProperties: false

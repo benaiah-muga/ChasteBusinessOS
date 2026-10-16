@@ -1,21 +1,9 @@
 import { z } from "zod";
 import type { components } from "../generated/business-v1";
+import { SignalSchema } from "./signals";
 
 const MinorUnitsSchema = z.number().int().safe();
 const CountSchema = z.number().int().nonnegative().safe();
-const SignalSchema = z.object({
-  id: z.string().min(1),
-  severity: z.enum(["red", "orange", "green"]),
-  module: z.string().min(1),
-  subject: z.string(),
-  detail: z.string(),
-  evidence: z.object({ refType: z.string(), refId: z.string().nullable().optional() }).strict().nullable().optional(),
-  suggestedAction: z.object({
-    capabilityId: z.string().min(1),
-    inputDraft: z.record(z.string(), z.unknown()).optional(),
-  }).strict().nullable().optional(),
-}).strict();
-
 export const DashboardResponseSchema = z.object({
   signals: z.array(SignalSchema).max(8),
   money: z.object({

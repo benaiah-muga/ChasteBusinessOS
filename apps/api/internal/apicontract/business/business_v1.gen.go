@@ -217,27 +217,6 @@ func (e DashboardResponsePipelineStagesStage) Valid() bool {
 	}
 }
 
-// Defines values for DashboardSignalSeverity.
-const (
-	Green  DashboardSignalSeverity = "green"
-	Orange DashboardSignalSeverity = "orange"
-	Red    DashboardSignalSeverity = "red"
-)
-
-// Valid indicates whether the value is a known member of the DashboardSignalSeverity enum.
-func (e DashboardSignalSeverity) Valid() bool {
-	switch e {
-	case Green:
-		return true
-	case Orange:
-		return true
-	case Red:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ModuleSwitchboardPendingPendingApproval.
 const (
 	ModuleSwitchboardPendingPendingApprovalTrue ModuleSwitchboardPendingPendingApproval = true
@@ -307,6 +286,27 @@ const (
 func (e PendingApprovalResponsePendingApproval) Valid() bool {
 	switch e {
 	case PendingApprovalResponsePendingApprovalTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SignalSeverity.
+const (
+	SignalSeverityGreen  SignalSeverity = "green"
+	SignalSeverityOrange SignalSeverity = "orange"
+	SignalSeverityRed    SignalSeverity = "red"
+)
+
+// Valid indicates whether the value is a known member of the SignalSeverity enum.
+func (e SignalSeverity) Valid() bool {
+	switch e {
+	case SignalSeverityGreen:
+		return true
+	case SignalSeverityOrange:
+		return true
+	case SignalSeverityRed:
 		return true
 	default:
 		return false
@@ -442,6 +442,27 @@ const (
 func (e TeamWriteSuccessOk) Valid() bool {
 	switch e {
 	case TeamWriteSuccessOkTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetSignalsParamsSeverity.
+const (
+	GetSignalsParamsSeverityGreen  GetSignalsParamsSeverity = "green"
+	GetSignalsParamsSeverityOrange GetSignalsParamsSeverity = "orange"
+	GetSignalsParamsSeverityRed    GetSignalsParamsSeverity = "red"
+)
+
+// Valid indicates whether the value is a known member of the GetSignalsParamsSeverity enum.
+func (e GetSignalsParamsSeverity) Valid() bool {
+	switch e {
+	case GetSignalsParamsSeverityGreen:
+		return true
+	case GetSignalsParamsSeverityOrange:
+		return true
+	case GetSignalsParamsSeverityRed:
 		return true
 	default:
 		return false
@@ -650,24 +671,7 @@ type DashboardResponse struct {
 type DashboardResponsePipelineStagesStage string
 
 // DashboardSignal defines model for DashboardSignal.
-type DashboardSignal struct {
-	Detail   string `json:"detail"`
-	Evidence *struct {
-		RefId   *string `json:"refId,omitempty"`
-		RefType string  `json:"refType"`
-	} `json:"evidence,omitempty"`
-	Id              string                  `json:"id"`
-	Module          string                  `json:"module"`
-	Severity        DashboardSignalSeverity `json:"severity"`
-	Subject         string                  `json:"subject"`
-	SuggestedAction *struct {
-		CapabilityId string               `json:"capabilityId"`
-		InputDraft   *apicontract.RawJSON `json:"inputDraft,omitempty"`
-	} `json:"suggestedAction,omitempty"`
-}
-
-// DashboardSignalSeverity defines model for DashboardSignal.Severity.
-type DashboardSignalSeverity string
+type DashboardSignal = Signal
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
@@ -818,6 +822,31 @@ type SetupResponse struct {
 
 	// Remaining Number of checklist entries whose done value is false.
 	Remaining int64 `json:"remaining"`
+}
+
+// Signal defines model for Signal.
+type Signal struct {
+	Detail   string `json:"detail"`
+	Evidence *struct {
+		RefId   *string `json:"refId,omitempty"`
+		RefType string  `json:"refType"`
+	} `json:"evidence,omitempty"`
+	Id              string         `json:"id"`
+	Module          string         `json:"module"`
+	Severity        SignalSeverity `json:"severity"`
+	Subject         string         `json:"subject"`
+	SuggestedAction *struct {
+		CapabilityId string               `json:"capabilityId"`
+		InputDraft   *apicontract.RawJSON `json:"inputDraft,omitempty"`
+	} `json:"suggestedAction,omitempty"`
+}
+
+// SignalSeverity defines model for Signal.Severity.
+type SignalSeverity string
+
+// SignalResponse defines model for SignalResponse.
+type SignalResponse struct {
+	Signals []Signal `json:"signals"`
 }
 
 // SupportChannelsPatch defines model for SupportChannelsPatch.
@@ -1091,6 +1120,21 @@ type GetSetupChecklistParams struct {
 	// XOrganizationID Selects an organization membership for the request.
 	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
 }
+
+// GetSignalsParams defines parameters for GetSignals.
+type GetSignalsParams struct {
+	// Severity First value is used; additional values are ignored.
+	Severity *GetSignalsParamsSeverity `form:"severity,omitempty" json:"severity,omitempty"`
+
+	// Module First value is used; additional values are ignored. Length is measured in UTF-8 bytes.
+	Module *string `form:"module,omitempty" json:"module,omitempty"`
+
+	// XOrganizationID Selects an organization and must match the authenticated membership.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// GetSignalsParamsSeverity defines parameters for GetSignals.
+type GetSignalsParamsSeverity string
 
 // UpdateSupportChannelsParams defines parameters for UpdateSupportChannels.
 type UpdateSupportChannelsParams struct {

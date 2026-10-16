@@ -36,6 +36,26 @@ export interface paths {
         patch: operations["updateOrganizationAgentSoul"];
         trace?: never;
     };
+    "/api/signals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read organization signals
+         * @description Lists signals for the authenticated organization through the governed signals.list capability. Cookie sessions use the active organization from session context unless X-Organization-ID is supplied; bearer tokens are resolved against that selected organization. An explicit selector must be a single valid UUID matching the actor's membership. Invalid nonempty Authorization does not fall back to the cookie. The first severity or module query value is used and additional values are ignored. Unknown query keys are ignored. Invalid filters return 400. The module filter is limited to 2-40 UTF-8 bytes. Missing signals.read permission or organization membership returns a generic 403. All responses include Cache-Control: no-store and Pragma: no-cache.
+         */
+        get: operations["getSignals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/dashboard": {
         parameters: {
             query?: never;
@@ -254,7 +274,7 @@ export interface components {
             /** @constant */
             ok: true;
         };
-        DashboardSignal: {
+        Signal: {
             id: string;
             /** @enum {string} */
             severity: "red" | "orange" | "green";
@@ -272,6 +292,10 @@ export interface components {
                 };
             } | null;
         };
+        SignalResponse: {
+            signals: components["schemas"]["Signal"][];
+        };
+        DashboardSignal: components["schemas"]["Signal"];
         DashboardResponse: {
             signals: components["schemas"]["DashboardSignal"][];
             money: {
@@ -980,6 +1004,105 @@ export interface operations {
             503: {
                 headers: {
                     "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getSignals: {
+        parameters: {
+            query?: {
+                /** @description First value is used; additional values are ignored. */
+                severity?: "red" | "orange" | "green";
+                /** @description First value is used; additional values are ignored. Length is measured in UTF-8 bytes. */
+                module?: string;
+            };
+            header?: {
+                /** @description Selects an organization and must match the authenticated membership. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signals for the active organization. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalResponse"];
+                };
+            };
+            /** @description The organization selector or query parameters are malformed. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid or the identity is not verified or does not resolve to an organization. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The explicit organization selector does not match the resolved membership, or the actor lacks signals.read. The message is generic. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The exact path is owned by Go and only GET is enabled. Suffix paths continue to the configured fallback. */
+            405: {
+                headers: {
+                    Allow?: "GET";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session resolution infrastructure, the signal capability, or its response failed. The message is generic. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Signals dependencies or session configuration are unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
                     [name: string]: unknown;
                 };
                 content: {
