@@ -6,11 +6,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dashboard"
@@ -34,17 +36,7 @@ type MyWorkSessionHandler struct {
 	now      func() time.Time
 }
 
-type MyWorkCard struct {
-	Kind         string  `json:"kind"`
-	ID           string  `json:"id"`
-	Title        string  `json:"title"`
-	Detail       string  `json:"detail"`
-	WhyItMatters string  `json:"whyItMatters"`
-	ActionLabel  string  `json:"actionLabel"`
-	ActionHref   string  `json:"actionHref"`
-	CreatedAt    *string `json:"createdAt"`
-	Rank         int     `json:"rank"`
-}
+type MyWorkCard = businesscontract.MyWorkCard
 
 func NewMyWorkSessionHandler(resolver myWorkSessionResolver, reader myWorkReader, executor CapabilityExecutor, logger *slog.Logger) http.Handler {
 	return &MyWorkSessionHandler{resolver: resolver, reader: reader, executor: executor, logger: logger, now: time.Now}
@@ -68,7 +60,23 @@ func (h *MyWorkSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	resolved, err := h.resolve(r, selector)
-	if err != nil || resolved == nil || !resolved.EmailVerified || resolved.OrgID == nil ||
+	if err != nil {
+		if errors.Is(err, session.ErrNoSession) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="chaste"`)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		if errors.Is(err, session.ErrSecretTooShort) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "my work service unavailable"})
+			return
+		}
+		if h.logger != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			h.logger.Error("Go my work session resolution failed", "error", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if resolved == nil || !resolved.EmailVerified || resolved.OrgID == nil ||
 		!isUUID(resolved.UserID) || !isUUID(*resolved.OrgID) || resolved.AuthSessionID == "" {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="chaste"`)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -89,27 +97,30 @@ func (h *MyWorkSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	cards := make([]MyWorkCard, 0, len(data.Approvals)+len(data.Remainders))
 	for _, approval := range data.Approvals {
 		permission, known := capability.PermissionForCapability(approval.CapabilityID)
-		if !known || !myWorkHasPermission(resolved, permission) {
+		if !known || !myWorkHasPermission(resolved, permission) || strings.TrimSpace(approval.ID) == "" || strings.TrimSpace(approval.CapabilityID) == "" {
 			continue
 		}
 		detail := approval.RiskClass + " action waiting for a decision"
-		if approval.Rationale != nil {
+		if approval.Rationale != nil && strings.TrimSpace(*approval.Rationale) != "" {
 			detail = *approval.Rationale
 		}
-		createdAt := approval.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z")
+		createdAt := approval.CreatedAt.UTC().Truncate(time.Millisecond)
 		cards = append(cards, MyWorkCard{
-			Kind: "approval", ID: approval.ID, Title: "Approval needed: " + approval.CapabilityID,
+			Kind: businesscontract.MyWorkCardKindApproval, Id: approval.ID, Title: "Approval needed: " + approval.CapabilityID,
 			Detail: detail, WhyItMatters: "Someone or something asked for a gated action; nothing happens until a human decides.",
 			ActionLabel: "Review approval", ActionHref: "/approvals", CreatedAt: &createdAt, Rank: 0,
 		})
 	}
 	for _, remainder := range data.Remainders {
+		if strings.TrimSpace(remainder.PurchaseOrderID) == "" || remainder.Number <= 0 {
+			continue
+		}
 		lines := make([]string, 0, len(remainder.Lines))
 		for _, line := range remainder.Lines {
 			lines = append(lines, "line "+strconv.FormatInt(line.Position, 10)+" \""+line.Description+"\"")
 		}
 		cards = append(cards, MyWorkCard{
-			Kind: "receipt_remainder", ID: remainder.PurchaseOrderID,
+			Kind: businesscontract.MyWorkCardKindReceiptRemainder, Id: remainder.PurchaseOrderID,
 			Title:  "PO " + strconv.FormatInt(remainder.Number, 10) + ": " + dashboard.FormatWorkThousandths(remainder.Remaining) + " still outstanding",
 			Detail: strings.Join(lines, ", "), WhyItMatters: "The supplier has not delivered everything ordered; the shortfall is visible and can be chased or closed.",
 			ActionLabel: "Open receiving desk", ActionHref: "/purchasing/receiving?poNumber=" + strconv.FormatInt(remainder.Number, 10),
@@ -119,6 +130,13 @@ func (h *MyWorkSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if myWorkHasPermission(resolved, "signals.read") {
 		cards = append(cards, h.signalCards(r, resolved)...)
 	}
+	validCards := cards[:0]
+	for _, card := range cards {
+		if validMyWorkCard(card) {
+			validCards = append(validCards, card)
+		}
+	}
+	cards = validCards
 	sort.SliceStable(cards, func(i, j int) bool { return cards[i].Rank < cards[j].Rank })
 	if len(cards) > 30 {
 		cards = cards[:30]
@@ -127,11 +145,8 @@ func (h *MyWorkSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if h.now != nil {
 		now = h.now
 	}
-	generatedAt := now().UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
-	writeJSON(w, http.StatusOK, struct {
-		Cards       []MyWorkCard `json:"cards"`
-		GeneratedAt string       `json:"generatedAt"`
-	}{Cards: cards, GeneratedAt: generatedAt})
+	generatedAt := now().UTC().Truncate(time.Millisecond)
+	writeJSON(w, http.StatusOK, businesscontract.MyWorkResponse{Cards: cards, GeneratedAt: generatedAt})
 }
 
 func (h *MyWorkSessionHandler) signalCards(r *http.Request, resolved *session.ResolvedUser) []MyWorkCard {
@@ -158,10 +173,14 @@ func (h *MyWorkSessionHandler) signalCards(r *http.Request, resolved *session.Re
 	}
 	cards := make([]MyWorkCard, 0, len(output.Signals))
 	for _, signal := range output.Signals {
+		module := strings.TrimSpace(signal.Module)
+		if strings.TrimSpace(signal.ID) == "" || strings.TrimSpace(signal.Subject) == "" || !validMyWorkModule(module) {
+			return []MyWorkCard{myWorkSignalsUnavailable()}
+		}
 		cards = append(cards, MyWorkCard{
-			Kind: "signal", ID: signal.ID, Title: signal.Module + ": " + signal.Subject, Detail: signal.Detail,
+			Kind: businesscontract.MyWorkCardKindSignal, Id: signal.ID, Title: module + ": " + signal.Subject, Detail: signal.Detail,
 			WhyItMatters: "A module check flagged this condition; it stays visible until the underlying state changes.",
-			ActionLabel:  "Open module", ActionHref: "/" + signal.Module, CreatedAt: nil, Rank: 2,
+			ActionLabel:  "Open module", ActionHref: "/" + module, CreatedAt: nil, Rank: 2,
 		})
 	}
 	return cards
@@ -169,11 +188,42 @@ func (h *MyWorkSessionHandler) signalCards(r *http.Request, resolved *session.Re
 
 func myWorkSignalsUnavailable() MyWorkCard {
 	return MyWorkCard{
-		Kind: "signal", ID: "signals-unavailable", Title: "Signal checks unavailable",
+		Kind: businesscontract.MyWorkCardKindSignal, Id: "signals-unavailable", Title: "Signal checks unavailable",
 		Detail:       "The signal sweep could not run right now; this is not a report of zero problems.",
 		WhyItMatters: "Coverage must be honest: an unavailable check is visible instead of silently passing.",
 		ActionLabel:  "Retry later", ActionHref: "/", CreatedAt: nil, Rank: 3,
 	}
+}
+
+func validMyWorkModule(module string) bool {
+	if module == "" || module[0] < 'a' || module[0] > 'z' {
+		return false
+	}
+	for _, char := range module {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validMyWorkActionHref(href string) bool {
+	if !strings.HasPrefix(href, "/") || strings.HasPrefix(href, "//") || strings.HasPrefix(href, "/\\") || strings.Contains(href, "\\") {
+		return false
+	}
+	for _, char := range href {
+		if char < 0x20 || char == 0x7f {
+			return false
+		}
+	}
+	parsed, err := url.Parse(href)
+	return err == nil && !parsed.IsAbs() && parsed.Host == ""
+}
+
+func validMyWorkCard(card MyWorkCard) bool {
+	return card.Kind.Valid() && strings.TrimSpace(card.Id) != "" && strings.TrimSpace(card.Title) != "" &&
+		strings.TrimSpace(card.ActionLabel) != "" && card.Rank >= 0 && validMyWorkActionHref(card.ActionHref)
 }
 
 func myWorkHasPermission(resolved *session.ResolvedUser, permission string) bool {

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dashboard"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
@@ -146,10 +147,7 @@ func TestPostgresMyWorkSessionHandlerMatchesCardContractAndScopesOrganizations(t
 		if response.Code != http.StatusOK {
 			t.Fatalf("org %s status=%d body=%s", fixture.orgID, response.Code, response.Body.String())
 		}
-		var got struct {
-			Cards       []MyWorkCard `json:"cards"`
-			GeneratedAt string       `json:"generatedAt"`
-		}
+		var got businesscontract.MyWorkResponse
 		if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
 			t.Fatal(err)
 		}
@@ -157,16 +155,16 @@ func TestPostgresMyWorkSessionHandlerMatchesCardContractAndScopesOrganizations(t
 			t.Fatalf("org %s got %d cards, want its approval and partial PO only: %+v", fixture.orgID, len(got.Cards), got.Cards)
 		}
 		approval, remainder := got.Cards[0], got.Cards[1]
-		if approval.Kind != "approval" || approval.ID != fixture.approvalID || approval.Title != "Approval needed: iam.setModules" || approval.Detail != fixture.approvalReason || approval.CreatedAt == nil || *approval.CreatedAt != "2026-10-01T10:20:30.123Z" {
+		if approval.Kind != businesscontract.MyWorkCardKindApproval || approval.Id != fixture.approvalID || approval.Title != "Approval needed: iam.setModules" || approval.Detail != fixture.approvalReason || approval.CreatedAt == nil || !approval.CreatedAt.Equal(createdAt.Truncate(time.Millisecond)) {
 			t.Fatalf("org %s approval card differs from the legacy contract: %+v", fixture.orgID, approval)
 		}
 		remaining := fixture.lineQuantity - fixture.accepted - fixture.rejected + fixture.returned
 		wantTitle := fmt.Sprintf("PO %d: %s still outstanding", fixture.poNumber, dashboard.FormatWorkThousandths(int64(remaining)))
 		wantDetail := fmt.Sprintf("line %d \"%s\"", fixture.linePosition, fixture.lineDescription)
-		if remainder.Kind != "receipt_remainder" || remainder.ID == fixture.approvalID || remainder.Title != wantTitle || remainder.Detail != wantDetail || remainder.ActionHref != fmt.Sprintf("/purchasing/receiving?poNumber=%d", fixture.poNumber) {
+		if remainder.Kind != businesscontract.MyWorkCardKindReceiptRemainder || remainder.Id == fixture.approvalID || remainder.Title != wantTitle || remainder.Detail != wantDetail || remainder.ActionHref != fmt.Sprintf("/purchasing/receiving?poNumber=%d", fixture.poNumber) {
 			t.Fatalf("org %s remainder card differs from the legacy contract: %+v", fixture.orgID, remainder)
 		}
-		if got.GeneratedAt != "2026-10-01T11:20:30.123Z" {
+		if !got.GeneratedAt.Equal(createdAt.Add(time.Hour)) {
 			t.Fatalf("org %s generatedAt=%q", fixture.orgID, got.GeneratedAt)
 		}
 	}

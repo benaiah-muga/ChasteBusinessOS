@@ -71,7 +71,24 @@ func MountMyWorkRoute(base, myWorkRoute http.Handler) http.Handler {
 		return base
 	}
 	mux := http.NewServeMux()
-	mux.Handle("GET /api/my-work", myWorkRoute)
+	mux.Handle("/api/my-work", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/my-work" {
+			if base != nil {
+				base.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		myWorkRoute.ServeHTTP(w, r)
+	}))
 	if base != nil {
 		mux.Handle("/", base)
 	}

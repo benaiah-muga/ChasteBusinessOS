@@ -332,26 +332,33 @@ func TestMountSetupRouteKeepsLegacyFallbackWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestMountMyWorkRouteKeepsLegacyFallbackWhenDisabled(t *testing.T) {
+func TestMountMyWorkRouteOwnsExactPathAndRejectsOtherMethods(t *testing.T) {
 	legacy := routeMarker("legacy")
 	handler := MountMyWorkRoute(legacy, routeMarker("my-work"))
-	for _, test := range []struct {
-		method string
-		path   string
-		want   string
-	}{
-		{method: http.MethodGet, path: "/api/my-work", want: "my-work"},
-		{method: http.MethodGet, path: "/api/my-work?source=dashboard", want: "my-work"},
-		{method: http.MethodPost, path: "/api/my-work", want: "legacy"},
-		{method: http.MethodPost, path: "/api/my-work/summarize", want: "legacy"},
-	} {
+	for _, path := range []string{"/api/my-work", "/api/my-work?source=dashboard"} {
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
-		if response.Code != http.StatusOK || response.Body.String() != test.want {
-			t.Fatalf("%s %s response = %d %q, want 200 %q", test.method, test.path, response.Code, response.Body.String(), test.want)
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK || response.Body.String() != "my-work" {
+			t.Fatalf("GET %s response = %d %q, want 200 my-work", path, response.Code, response.Body.String())
 		}
 	}
 	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/my-work", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet ||
+		response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("POST exact my-work response = %d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/my-work/extra", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
+		t.Fatalf("GET my-work suffix response = %d %q, want legacy fallback", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/my-work/summarize", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
+		t.Fatalf("POST my-work summarize response = %d %q, want legacy fallback", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
 	MountMyWorkRoute(legacy, nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/my-work", nil))
 	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
 		t.Fatalf("disabled my-work route response = %d %q, want legacy fallback", response.Code, response.Body.String())

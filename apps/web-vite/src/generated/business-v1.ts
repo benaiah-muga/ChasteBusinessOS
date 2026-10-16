@@ -164,6 +164,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/my-work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read permission-scoped work cards for the organization
+         * @description Returns pending approvals visible to the authenticated actor, receipt remainders when the actor has purchasing.read, and signals when the actor has signals.read. Approval cards are filtered by the permission required by their capability. Query parameters and request bodies are ignored. Cookie sessions use the active-organization cookie unless X-Organization-ID is supplied; bearer tokens are resolved against the selected organization. A supplied selector must match the resolved membership. Every response includes Cache-Control: no-store and Pragma: no-cache. Unsupported methods on this exact path receive 405 while this Go route is enabled; suffix paths remain on the base router.
+         */
+        get: operations["getMyWork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notifications": {
         parameters: {
             query?: never;
@@ -641,6 +661,28 @@ export interface components {
             /** @description Same-origin application path beginning with a single slash. The Vite runtime validator also rejects paths that resolve outside the application origin. */
             href: string;
             done: boolean;
+        };
+        MyWorkResponse: {
+            cards: components["schemas"]["MyWorkCard"][];
+            /**
+             * Format: date-time
+             * @description UTC timestamp when the response was assembled.
+             */
+            generatedAt: string;
+        };
+        MyWorkCard: {
+            /** @enum {string} */
+            kind: "approval" | "receipt_remainder" | "signal";
+            id: string;
+            title: string;
+            detail: string;
+            whyItMatters: string;
+            actionLabel: string;
+            /** @description Same-origin application path beginning with a single slash. */
+            actionHref: string;
+            /** Format: date-time */
+            createdAt: string | null;
+            rank: number;
         };
         NotificationsResponse: {
             notifications: components["schemas"]["NotificationRow"][];
@@ -1806,6 +1848,101 @@ export interface operations {
             503: {
                 headers: {
                     "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getMyWork: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects an organization membership for this request. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ranked work cards visible to the authenticated actor. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWorkResponse"];
+                };
+            };
+            /** @description The organization selector is malformed or repeated. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid, unverified, or lacks an authenticated organization session. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The explicit organization selector does not match the authenticated actor's organization. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Only GET is supported. */
+            405: {
+                headers: {
+                    /** @description Allowed request method. */
+                    Allow?: "GET";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session resolution or the organization-scoped work read failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The work service or session configuration is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
                     [name: string]: unknown;
                 };
                 content: {

@@ -74,7 +74,7 @@ export const SetupResponseSchema: z.ZodType<components["schemas"]["SetupResponse
   remaining: CountSchema,
 }).strict();
 
-const LocalPathSchema = z.string().refine((value) => {
+const LocalPathSchema: z.ZodType<components["schemas"]["MyWorkCard"]["actionHref"]> = z.string().refine((value) => {
   if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return false;
   try {
     return new URL(value, "https://chaste.invalid").origin === "https://chaste.invalid";
@@ -83,7 +83,7 @@ const LocalPathSchema = z.string().refine((value) => {
   }
 }, "Expected a local path");
 
-export const WorkCardSchema = z.object({
+export const WorkCardSchema: z.ZodType<components["schemas"]["MyWorkCard"]> = z.object({
   kind: z.enum(["approval", "receipt_remainder", "signal"]),
   id: z.string().min(1),
   title: z.string().min(1),
@@ -95,7 +95,7 @@ export const WorkCardSchema = z.object({
   rank: CountSchema,
 }).strict();
 
-const MyWorkResponseSchema = z.object({
+export const MyWorkResponseSchema: z.ZodType<components["schemas"]["MyWorkResponse"]> = z.object({
   cards: z.array(WorkCardSchema).max(30),
   generatedAt: z.string().datetime({ offset: true }),
 }).strict();
@@ -120,7 +120,7 @@ const ApiErrorBodySchema = z.object({
 
 export type DashboardData = components["schemas"]["DashboardResponse"];
 export type SetupItem = components["schemas"]["SetupItem"];
-export type WorkCard = z.infer<typeof WorkCardSchema>;
+export type WorkCard = components["schemas"]["MyWorkCard"];
 
 export class DashboardApiError extends Error {
   constructor(readonly status: number, message: string, readonly hint?: string) {

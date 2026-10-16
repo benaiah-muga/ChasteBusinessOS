@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dashboard"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
@@ -62,26 +64,23 @@ func TestMyWorkSessionHandlerReturnsPermissionScopedRankedCards(t *testing.T) {
 	if response.Code != http.StatusOK || reader.orgID != *identity.OrgID || !reader.includePurchasing {
 		t.Fatalf("status=%d org=%q purchasing=%t body=%s", response.Code, reader.orgID, reader.includePurchasing, response.Body.String())
 	}
-	var got struct {
-		Cards       []MyWorkCard `json:"cards"`
-		GeneratedAt string       `json:"generatedAt"`
-	}
+	var got businesscontract.MyWorkResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Cards) != 4 {
 		t.Fatalf("cards=%+v, want two permitted approvals, one remainder, and one signal", got.Cards)
 	}
-	if got.Cards[0].ID != "approval-1" || got.Cards[1].ID != "approval-2" || got.Cards[2].ID != "po-1" || got.Cards[3].ID != "cash.low" {
+	if got.Cards[0].Id != "approval-1" || got.Cards[1].Id != "approval-2" || got.Cards[2].Id != "po-1" || got.Cards[3].Id != "cash.low" {
 		t.Fatalf("cards are not ranked in legacy order: %+v", got.Cards)
 	}
-	if got.Cards[0].Detail != "money action waiting for a decision" || got.Cards[0].CreatedAt == nil || *got.Cards[0].CreatedAt != "2026-10-04T07:08:09.123Z" {
+	if got.Cards[0].Detail != "money action waiting for a decision" || got.Cards[0].CreatedAt == nil || !got.Cards[0].CreatedAt.Equal(createdAt.Truncate(time.Millisecond)) {
 		t.Fatalf("approval semantics differ: %+v", got.Cards[0])
 	}
 	if got.Cards[2].Title != "PO 42: 1.25 units still outstanding" || got.Cards[2].Detail != `line 2 "Beans"` || got.Cards[2].ActionHref != "/purchasing/receiving?poNumber=42" {
 		t.Fatalf("receipt remainder semantics differ: %+v", got.Cards[2])
 	}
-	if got.GeneratedAt != "2026-10-04T09:00:00.987Z" {
+	if !got.GeneratedAt.Equal(time.Date(2026, 10, 4, 9, 0, 0, 987000000, time.UTC)) {
 		t.Fatalf("generatedAt=%q", got.GeneratedAt)
 	}
 	if resolver.resolveCalls == 0 {
@@ -97,9 +96,7 @@ func TestMyWorkSessionHandlerDoesNotQueryPurchasingForUnauthorizedViewer(t *test
 	if response.Code != http.StatusOK || reader.includePurchasing || reader.calls != 1 {
 		t.Fatalf("status=%d purchasing=%t calls=%d body=%s", response.Code, reader.includePurchasing, reader.calls, response.Body.String())
 	}
-	var got struct {
-		Cards []MyWorkCard `json:"cards"`
-	}
+	var got businesscontract.MyWorkResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil || len(got.Cards) != 0 {
 		t.Fatalf("expected an empty work queue, err=%v cards=%+v", err, got.Cards)
 	}
@@ -113,6 +110,22 @@ func TestMyWorkSessionHandlerRequiresVerifiedOrganizationSession(t *testing.T) {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
 	})
+	t.Run("resolver infrastructure failure", func(t *testing.T) {
+		response := httptest.NewRecorder()
+		NewMyWorkSessionHandler(&fakeDirectSessionResolver{err: errors.New("private resolver detail")}, &fakeMyWorkReader{}, &fakeDashboardExecutor{}, nil).
+			ServeHTTP(response, myWorkRequest(http.MethodGet))
+		if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "private resolver detail") {
+			t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+		}
+	})
+	t.Run("short auth secret is unavailable", func(t *testing.T) {
+		response := httptest.NewRecorder()
+		NewMyWorkSessionHandler(&fakeDirectSessionResolver{err: session.ErrSecretTooShort}, &fakeMyWorkReader{}, &fakeDashboardExecutor{}, nil).
+			ServeHTTP(response, myWorkRequest(http.MethodGet))
+		if response.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+		}
+	})
 	t.Run("wrong method", func(t *testing.T) {
 		response := httptest.NewRecorder()
 		NewMyWorkSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, &fakeMyWorkReader{}, &fakeDashboardExecutor{}, nil).ServeHTTP(response, myWorkRequest(http.MethodPost))
@@ -120,6 +133,17 @@ func TestMyWorkSessionHandlerRequiresVerifiedOrganizationSession(t *testing.T) {
 			t.Fatalf("status=%d Allow=%q body=%s", response.Code, response.Header().Get("Allow"), response.Body.String())
 		}
 	})
+}
+
+func TestMyWorkSessionHandlerRejectsOrganizationMismatch(t *testing.T) {
+	reader := &fakeMyWorkReader{}
+	request := myWorkRequest(http.MethodGet)
+	request.Header.Set("X-Organization-ID", "44444444-4444-4444-8444-444444444444")
+	response := httptest.NewRecorder()
+	NewMyWorkSessionHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, reader, &fakeDashboardExecutor{}, nil).ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || reader.calls != 0 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, reader.calls, response.Body.String())
+	}
 }
 
 func TestMyWorkSessionHandlerHidesReaderErrors(t *testing.T) {
@@ -143,15 +167,33 @@ func TestMyWorkSessionHandlerOmitsUnknownApprovalCapabilitiesForWildcard(t *test
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	var got struct {
-		Cards []MyWorkCard `json:"cards"`
-	}
+	var got businesscontract.MyWorkResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	for _, card := range got.Cards {
-		if card.ID == "approval-hidden" {
+		if card.Id == "approval-hidden" {
 			t.Fatalf("unknown capability approval was exposed to wildcard user: %+v", card)
 		}
+	}
+}
+
+func TestMyWorkSessionHandlerFailsClosedOnMalformedSignalModule(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["signals.read"] = true
+	executor := dashboardExecutorWithSuccess()
+	executor.results["signals.list"] = capability.Result{OK: true, Data: json.RawMessage(`{"signals":[{"id":"bad","severity":"red","module":"//evil.test","subject":"Bad","detail":"unsafe"}]}`)}
+	response := httptest.NewRecorder()
+	NewMyWorkSessionHandler(&fakeDirectSessionResolver{resolved: identity}, &fakeMyWorkReader{}, executor, nil).
+		ServeHTTP(response, myWorkRequest(http.MethodGet))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var got businesscontract.MyWorkResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Cards) != 1 || got.Cards[0].Id != "signals-unavailable" || !validMyWorkActionHref(got.Cards[0].ActionHref) {
+		t.Fatalf("unsafe signal projection was not replaced with the unavailable card: %+v", got.Cards)
 	}
 }

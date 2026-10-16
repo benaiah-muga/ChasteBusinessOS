@@ -1353,6 +1353,147 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/my-work:
+    get:
+      operationId: getMyWork
+      summary: Read permission-scoped work cards for the organization
+      description: >-
+        Returns pending approvals visible to the authenticated actor, receipt
+        remainders when the actor has purchasing.read, and signals when the
+        actor has signals.read. Approval cards are filtered by the permission
+        required by their capability. Query parameters and request bodies are
+        ignored. Cookie sessions use the active-organization cookie unless
+        X-Organization-ID is supplied; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        membership. Every response includes Cache-Control: no-store and
+        Pragma: no-cache. Unsupported methods on this exact path receive 405
+        while this Go route is enabled; suffix paths remain on the base router.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for this request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ranked work cards visible to the authenticated actor.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid, unverified, or lacks an authenticated organization session.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the authenticated actor's organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution or the organization-scoped work read failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The work service or session configuration is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/notifications:
     get:
       operationId: getNotifications
@@ -3000,6 +3141,52 @@ components:
             application origin.
         done:
           type: boolean
+    MyWorkResponse:
+      type: object
+      additionalProperties: false
+      required: [cards, generatedAt]
+      properties:
+        cards:
+          type: array
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/MyWorkCard"
+        generatedAt:
+          type: string
+          format: date-time
+          description: UTC timestamp when the response was assembled.
+    MyWorkCard:
+      type: object
+      additionalProperties: false
+      required: [kind, id, title, detail, whyItMatters, actionLabel, actionHref, createdAt, rank]
+      properties:
+        kind:
+          type: string
+          enum: [approval, receipt_remainder, signal]
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+        detail:
+          type: string
+        whyItMatters:
+          type: string
+        actionLabel:
+          type: string
+          minLength: 1
+        actionHref:
+          type: string
+          pattern: '^/(?![/\\])'
+          description: Same-origin application path beginning with a single slash.
+        createdAt:
+          type: [string, "null"]
+          format: date-time
+        rank:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
     NotificationsResponse:
       type: object
       additionalProperties: false

@@ -232,6 +232,27 @@ func (e ModuleSwitchboardPendingPendingApproval) Valid() bool {
 	}
 }
 
+// Defines values for MyWorkCardKind.
+const (
+	MyWorkCardKindApproval         MyWorkCardKind = "approval"
+	MyWorkCardKindReceiptRemainder MyWorkCardKind = "receipt_remainder"
+	MyWorkCardKindSignal           MyWorkCardKind = "signal"
+)
+
+// Valid indicates whether the value is a known member of the MyWorkCardKind enum.
+func (e MyWorkCardKind) Valid() bool {
+	switch e {
+	case MyWorkCardKindApproval:
+		return true
+	case MyWorkCardKindReceiptRemainder:
+		return true
+	case MyWorkCardKindSignal:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NotificationReadSuccessOk.
 const (
 	NotificationReadSuccessOkTrue NotificationReadSuccessOk = true
@@ -710,6 +731,31 @@ type ModuleSwitchboardResponse struct {
 	UsingDefaults  bool         `json:"usingDefaults"`
 }
 
+// MyWorkCard defines model for MyWorkCard.
+type MyWorkCard struct {
+	// ActionHref Same-origin application path beginning with a single slash.
+	ActionHref   string         `json:"actionHref"`
+	ActionLabel  string         `json:"actionLabel"`
+	CreatedAt    *time.Time     `json:"createdAt"`
+	Detail       string         `json:"detail"`
+	Id           string         `json:"id"`
+	Kind         MyWorkCardKind `json:"kind"`
+	Rank         int            `json:"rank"`
+	Title        string         `json:"title"`
+	WhyItMatters string         `json:"whyItMatters"`
+}
+
+// MyWorkCardKind defines model for MyWorkCard.Kind.
+type MyWorkCardKind string
+
+// MyWorkResponse defines model for MyWorkResponse.
+type MyWorkResponse struct {
+	Cards []MyWorkCard `json:"cards"`
+
+	// GeneratedAt UTC timestamp when the response was assembled.
+	GeneratedAt time.Time `json:"generatedAt"`
+}
+
 // NotificationReadFailure defines model for NotificationReadFailure.
 type NotificationReadFailure struct {
 	// Error Governed capability refusal message.
@@ -1097,6 +1143,12 @@ type GetModuleSwitchboardParams struct {
 // SetModuleSwitchboardParams defines parameters for SetModuleSwitchboard.
 type SetModuleSwitchboardParams struct {
 	// XOrganizationID Selects the organization for this request and must match an organization membership.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// GetMyWorkParams defines parameters for GetMyWork.
+type GetMyWorkParams struct {
+	// XOrganizationID Selects an organization membership for this request.
 	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
 }
 

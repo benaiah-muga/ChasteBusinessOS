@@ -5069,3 +5069,13 @@ new owners and the manifest shows zero legacy runtime paths.
      while suffix paths and disabled feature flags keep their fallback. Resolver
      infrastructure failures return a logged generic 500, short auth secrets
      return 503, and invalid sessions remain 401.
+
+475. (Focused verified; Go handler/mount tests, 12 Vite API tests, typecheck,
+     targeted lint, contract drift, and diff checks passed) The public business OpenAPI contract
+     now describes Go GET `/api/my-work`, including cookie and bearer auth,
+     organization selection, permission-scoped approval/purchasing/signal cards,
+     ignored query/body inputs, cache headers, and errors. Go and Vite use
+     generated response models with runtime validation. Resolver infrastructure
+     failures return a logged generic 500, short auth secrets return 503, and
+     the enabled exact-path mount returns 405 with `Allow: GET`; suffix and
+     disabled-flag fallback behavior remains intact.
