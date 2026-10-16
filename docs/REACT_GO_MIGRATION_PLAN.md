@@ -203,6 +203,12 @@ The dashboard response, organization selector, cache headers, authentication
 challenge, and handler error statuses are now documented in the generated
 business OpenAPI contract. Vite keeps its strict Zod validation and uses the
 generated OpenAPI response type for dashboard data.
+The dashboard setup checklist response and authentication behavior are also
+documented in the business OpenAPI contract. The Go handler and Vite client use
+generated response models, with Vite retaining its runtime check that checklist
+links stay on the application origin. Query parameters remain ignored. When
+enabled, the exact Go route owns `/api/setup` for every method and rejects
+unsupported methods before auth; suffix paths continue to the base router.
 The existing Next.js application continues to own production traffic during
 the transition. Vite routes use their paired selectors independently.
 The Vite `/approvals` preview reads the tenant-scoped inbox through Go and
@@ -5043,3 +5049,12 @@ new owners and the manifest shows zero legacy runtime paths.
      exact-path mount returns 405 with the configured `Allow` methods for
      unsupported methods and preserves feature-flag fallback for disabled
      GET/POST methods.
+
+473. (Focused verified) The public business OpenAPI contract now describes
+     Go GET `/api/setup`, including cookie and bearer auth, active-organization
+     selection, the `iam.admin` gate, ignored query/body inputs, cache headers,
+     and the checklist response. Go and Vite use generated response models;
+     Vite retains safe-local-path and safe-integer runtime validation while
+     allowing fixture and future checklist lengths. The enabled Go mount owns
+     the exact path, returns 405 with `Allow: GET` for other methods, and keeps
+     suffix paths on the base router.

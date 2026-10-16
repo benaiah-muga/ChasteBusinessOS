@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dashboard"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
@@ -70,7 +71,13 @@ func (h *SetupSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, payload)
+	items := make([]businesscontract.SetupItem, len(payload.Items))
+	for i, item := range payload.Items {
+		items[i] = businesscontract.SetupItem{
+			Id: item.ID, Title: item.Title, Why: item.Why, Href: item.Href, Done: item.Done,
+		}
+	}
+	writeJSON(w, http.StatusOK, businesscontract.SetupResponse{Items: items, Remaining: payload.Remaining})
 }
 
 func (h *SetupSessionHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, error) {

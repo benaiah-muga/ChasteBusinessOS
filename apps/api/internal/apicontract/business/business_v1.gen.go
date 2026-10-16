@@ -800,6 +800,26 @@ type PendingApprovalResponse struct {
 // PendingApprovalResponsePendingApproval defines model for PendingApprovalResponse.PendingApproval.
 type PendingApprovalResponsePendingApproval bool
 
+// SetupItem defines model for SetupItem.
+type SetupItem struct {
+	Done bool `json:"done"`
+
+	// Href Same-origin application path beginning with a single slash. The Vite runtime validator also rejects paths that resolve outside the application origin.
+	Href  string `json:"href"`
+	Id    string `json:"id"`
+	Title string `json:"title"`
+	Why   string `json:"why"`
+}
+
+// SetupResponse defines model for SetupResponse.
+type SetupResponse struct {
+	// Items Current setup checklist entries. The Go runtime currently returns seven entries, while clients should allow the list to grow.
+	Items []SetupItem `json:"items"`
+
+	// Remaining Number of checklist entries whose done value is false.
+	Remaining int64 `json:"remaining"`
+}
+
 // SupportChannelsPatch defines model for SupportChannelsPatch.
 type SupportChannelsPatch struct {
 	AutoReplyEnabled *bool                                `json:"autoReplyEnabled,omitempty"`
@@ -1062,6 +1082,12 @@ type GetNotificationsParams struct {
 
 // MarkNotificationReadParams defines parameters for MarkNotificationRead.
 type MarkNotificationReadParams struct {
+	// XOrganizationID Selects an organization membership for the request.
+	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
+}
+
+// GetSetupChecklistParams defines parameters for GetSetupChecklist.
+type GetSetupChecklistParams struct {
 	// XOrganizationID Selects an organization membership for the request.
 	XOrganizationID *openapi_types.UUID `json:"X-Organization-ID,omitempty"`
 }

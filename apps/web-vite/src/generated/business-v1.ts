@@ -56,6 +56,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the organization setup checklist
+         * @description Returns the setup checklist for the authenticated organization. The checklist's completion flags include organization-scoped counts plus runtime configuration for SMTP_HOST and installed coding-agent executables. Cookie sessions use the active-organization cookie unless X-Organization-ID is supplied; bearer tokens are resolved against the selected organization. A supplied selector must match the resolved organization. The verified actor must have iam.admin or wildcard permission, and the request must resolve to an authenticated session with an active organization. This read does not require Origin. Query parameters and request bodies are ignored. Responses include Cache-Control: no-store and Pragma: no-cache. The router mounts only GET for this exact path while the handler is enabled; unsupported methods receive 405, and suffix paths continue to the base handler.
+         */
+        get: operations["getSetupChecklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/capabilities/execute": {
         parameters: {
             query?: never;
@@ -581,6 +601,23 @@ export interface components {
              */
             expiresAt: string;
         };
+        SetupResponse: {
+            /** @description Current setup checklist entries. The Go runtime currently returns seven entries, while clients should allow the list to grow. */
+            items: components["schemas"]["SetupItem"][];
+            /**
+             * Format: int64
+             * @description Number of checklist entries whose done value is false.
+             */
+            remaining: number;
+        };
+        SetupItem: {
+            id: string;
+            title: string;
+            why: string;
+            /** @description Same-origin application path beginning with a single slash. The Vite runtime validator also rejects paths that resolve outside the application origin. */
+            href: string;
+            done: boolean;
+        };
         NotificationsResponse: {
             notifications: components["schemas"]["NotificationRow"][];
             /** @description Count of all unread notifications visible to this user, independent of the list limit. */
@@ -1036,6 +1073,101 @@ export interface operations {
                 };
             };
             /** @description The dashboard service is unavailable. */
+            503: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getSetupChecklist: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Selects an organization membership for the request. */
+                "X-Organization-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The organization setup checklist. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupResponse"];
+                };
+            };
+            /** @description The organization selector is malformed or repeated. */
+            400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The session is invalid, unverified, missing an active organization, or missing its authenticated session identity. */
+            401: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    /** @description Bearer authentication challenge. */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The selected organization does not match the resolved session or the actor lacks iam.admin or wildcard permission. */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The exact setup path received an unsupported method before authentication. */
+            405: {
+                headers: {
+                    /** @description The supported request method. */
+                    Allow?: "GET";
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The tenant-scoped setup checklist read failed. */
+            500: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    Pragma?: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The setup service dependencies are unavailable. */
             503: {
                 headers: {
                     "Cache-Control"?: "no-store";

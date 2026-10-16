@@ -295,15 +295,32 @@ func TestMountGoBusinessRoutesKeepsTeamMethodsAndPathsOptIn(t *testing.T) {
 	}
 }
 
+func TestMountSetupRouteOwnsExactPathAndRejectsOtherMethods(t *testing.T) {
+	legacy := routeMarker("legacy")
+	handler := MountSetupRoute(legacy, NewSetupSessionHandler(nil, nil, nil))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/setup", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet ||
+		response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("POST exact setup response = %d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/setup/extra", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
+		t.Fatalf("GET setup suffix response = %d %q, want legacy fallback", response.Code, response.Body.String())
+	}
+}
+
 func TestMountSetupRouteKeepsLegacyFallbackWhenDisabled(t *testing.T) {
 	legacy := routeMarker("legacy")
-	handler := MountSetupRoute(legacy, routeMarker("setup"))
+	handler := MountSetupRoute(legacy, nil)
 	for _, test := range []struct {
 		method string
 		path   string
 		want   string
 	}{
-		{method: http.MethodGet, path: "/api/setup", want: "setup"},
+		{method: http.MethodGet, path: "/api/setup", want: "legacy"},
 		{method: http.MethodPost, path: "/api/setup", want: "legacy"},
 		{method: http.MethodGet, path: "/api/other", want: "legacy"},
 	} {
@@ -312,11 +329,6 @@ func TestMountSetupRouteKeepsLegacyFallbackWhenDisabled(t *testing.T) {
 		if response.Code != http.StatusOK || response.Body.String() != test.want {
 			t.Fatalf("%s %s response = %d %q, want 200 %q", test.method, test.path, response.Code, response.Body.String(), test.want)
 		}
-	}
-	response := httptest.NewRecorder()
-	MountSetupRoute(legacy, nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/setup", nil))
-	if response.Code != http.StatusOK || response.Body.String() != "legacy" {
-		t.Fatalf("disabled setup route response = %d %q, want legacy fallback", response.Code, response.Body.String())
 	}
 }
 

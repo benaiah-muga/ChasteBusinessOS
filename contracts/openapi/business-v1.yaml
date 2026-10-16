@@ -502,6 +502,150 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/setup:
+    get:
+      operationId: getSetupChecklist
+      summary: Read the organization setup checklist
+      description: >-
+        Returns the setup checklist for the authenticated organization. The
+        checklist's completion flags include organization-scoped counts plus
+        runtime configuration for SMTP_HOST and installed coding-agent
+        executables. Cookie sessions use the active-organization cookie unless
+        X-Organization-ID is supplied; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        organization. The verified actor must have iam.admin or wildcard
+        permission, and the request must resolve to an authenticated session
+        with an active organization. This read does not require Origin. Query
+        parameters and request bodies are ignored. Responses include
+        Cache-Control: no-store and Pragma: no-cache. The router mounts only
+        GET for this exact path while the handler is enabled; unsupported
+        methods receive 405, and suffix paths continue to the base handler.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for the request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The organization setup checklist.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid, unverified, missing an active organization, or missing its authenticated session identity.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The selected organization does not match the resolved session or the actor lacks iam.admin or wildcard permission.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The exact setup path received an unsupported method before authentication.
+          headers:
+            Allow:
+              description: The supported request method.
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The tenant-scoped setup checklist read failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The setup service dependencies are unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/capabilities/execute:
     post:
       operationId: executeCapability
@@ -2649,6 +2793,46 @@ components:
           type: string
           format: date-time
           description: RFC 3339 UTC expiration timestamp.
+    SetupResponse:
+      type: object
+      additionalProperties: false
+      required: [items, remaining]
+      properties:
+        items:
+          type: array
+          description: >-
+            Current setup checklist entries. The Go runtime currently returns
+            seven entries, while clients should allow the list to grow.
+          items:
+            $ref: "#/components/schemas/SetupItem"
+        remaining:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+          description: Number of checklist entries whose done value is false.
+    SetupItem:
+      type: object
+      additionalProperties: false
+      required: [id, title, why, href, done]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+        why:
+          type: string
+        href:
+          type: string
+          pattern: '^/(?![/\\])'
+          description: >-
+            Same-origin application path beginning with a single slash. The
+            Vite runtime validator also rejects paths that resolve outside the
+            application origin.
+        done:
+          type: boolean
     NotificationsResponse:
       type: object
       additionalProperties: false

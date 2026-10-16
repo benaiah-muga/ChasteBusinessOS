@@ -58,7 +58,7 @@ func MountSetupRoute(base, setupRoute http.Handler) http.Handler {
 		return base
 	}
 	mux := http.NewServeMux()
-	mux.Handle("GET /api/setup", setupRoute)
+	mux.Handle("/api/setup", setupRoute)
 	if base != nil {
 		mux.Handle("/", base)
 	}

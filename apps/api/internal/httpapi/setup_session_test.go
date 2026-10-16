@@ -42,10 +42,15 @@ func TestSetupSessionHandlerReturnsTenantScopedChecklist(t *testing.T) {
 	}}
 	resolver := &fakeDirectSessionResolver{resolved: identity}
 	response := httptest.NewRecorder()
-	NewSetupSessionHandler(resolver, reader, nil).ServeHTTP(response, setupRequest(http.MethodGet))
+	request := setupRequest(http.MethodGet)
+	request.URL.RawQuery = "source=dashboard"
+	NewSetupSessionHandler(resolver, reader, nil).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK || reader.orgID != *identity.OrgID || reader.calls != 1 {
 		t.Fatalf("status=%d org=%q calls=%d body=%s", response.Code, reader.orgID, reader.calls, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("privacy headers missing: %v", response.Header())
 	}
 	var got dashboard.SetupPayload
 	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
@@ -53,6 +58,22 @@ func TestSetupSessionHandlerReturnsTenantScopedChecklist(t *testing.T) {
 	}
 	if got.Remaining != 1 || len(got.Items) != 1 || got.Items[0].ID != "products" {
 		t.Fatalf("unexpected setup payload: %+v", got)
+	}
+}
+
+func TestSetupSessionHandlerResolvesBearerAndExplicitOrganization(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["iam.admin"] = true
+	reader := &fakeSetupReader{}
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	request := setupRequest(http.MethodGet)
+	request.Header.Set("Authorization", "Bearer setup-token")
+	request.Header.Set("X-Organization-ID", *identity.OrgID)
+	response := httptest.NewRecorder()
+	NewSetupSessionHandler(resolver, reader, nil).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || resolver.bearerCalls != 1 || resolver.bearer != "setup-token" || resolver.activeOrg != *identity.OrgID {
+		t.Fatalf("status=%d resolver=%+v body=%s", response.Code, resolver, response.Body.String())
 	}
 }
 
@@ -108,6 +129,9 @@ func TestSetupSessionHandlerRejectsUnauthenticatedAndWrongMethod(t *testing.T) {
 		if response.Code != http.StatusUnauthorized {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
+		if response.Header().Get("WWW-Authenticate") != `Bearer realm="chaste"` {
+			t.Fatalf("WWW-Authenticate=%q", response.Header().Get("WWW-Authenticate"))
+		}
 	})
 	t.Run("wrong method", func(t *testing.T) {
 		response := httptest.NewRecorder()
@@ -116,4 +140,18 @@ func TestSetupSessionHandlerRejectsUnauthenticatedAndWrongMethod(t *testing.T) {
 			t.Fatalf("status=%d Allow=%q body=%s", response.Code, response.Header().Get("Allow"), response.Body.String())
 		}
 	})
+}
+
+func TestSetupSessionHandlerRejectsRepeatedOrganizationSelector(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["iam.admin"] = true
+	request := setupRequest(http.MethodGet)
+	request.Header.Add("X-Organization-ID", *identity.OrgID)
+	request.Header.Add("X-Organization-ID", *identity.OrgID)
+	reader := &fakeSetupReader{}
+	response := httptest.NewRecorder()
+	NewSetupSessionHandler(&fakeDirectSessionResolver{resolved: identity}, reader, nil).ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || reader.calls != 0 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, reader.calls, response.Body.String())
+	}
 }

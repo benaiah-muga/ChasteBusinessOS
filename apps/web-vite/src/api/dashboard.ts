@@ -66,7 +66,7 @@ export const DashboardResponseSchema = z.object({
   }).strict()).max(8),
 }).strict();
 
-const SetupItemSchema = z.object({
+const SetupItemSchema: z.ZodType<components["schemas"]["SetupItem"]> = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   why: z.string(),
@@ -81,7 +81,7 @@ const SetupItemSchema = z.object({
   done: z.boolean(),
 }).strict();
 
-export const SetupResponseSchema = z.object({
+export const SetupResponseSchema: z.ZodType<components["schemas"]["SetupResponse"]> = z.object({
   items: z.array(SetupItemSchema),
   remaining: CountSchema,
 }).strict();
@@ -131,7 +131,7 @@ const ApiErrorBodySchema = z.object({
 });
 
 export type DashboardData = components["schemas"]["DashboardResponse"];
-export type SetupItem = z.infer<typeof SetupItemSchema>;
+export type SetupItem = components["schemas"]["SetupItem"];
 export type WorkCard = z.infer<typeof WorkCardSchema>;
 
 export class DashboardApiError extends Error {

@@ -96,12 +96,22 @@ describe("dashboard API client", () => {
     const safeResponse = vi.fn(async () => Response.json({ items: setupFixture, remaining: 1 }));
     vi.stubGlobal("fetch", safeResponse);
     expect(await fetchSetup()).toHaveLength(4);
+    expect(safeResponse).toHaveBeenCalledWith("/api/setup", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({
       items: [{ ...setupFixture[0], href: "//attacker.example/path" }],
       remaining: 1,
     })));
     await expect(fetchSetup()).rejects.toBeInstanceOf(DashboardApiError);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ items: setupFixture, remaining: Number.MAX_SAFE_INTEGER + 1 })));
+    await expect(fetchSetup()).rejects.toMatchObject({
+      status: 200,
+      message: "The setup service returned data in an unexpected format.",
+    });
   });
 
   it("maps an unauthorized dashboard response to an explicit session error", async () => {
