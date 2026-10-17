@@ -13,6 +13,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Go now owns the remaining legacy messaging, documents, CRM, and purchasing collection routes: conversations and messages, docs and folders, document ingest, deals, customers, views, import, purchasing reads and writes, and payment runs. Requests resolve cookie or bearer sessions, enforce same-origin cookie writes, validate input strictly, execute through the governed capability kernel under tenant-scoped transactions, and keep the legacy envelopes for refusals and pending approvals.
 - A versioned public OpenAPI contract now generates Go and Vite TypeScript models for the Support channel settings API.
 - The public OpenAPI contract now describes the generic Go capability execution request and its success, approval-pending, refusal, and authentication/error response envelopes. Vite Support uses the generated request and success-envelope types while retaining runtime validation.
 - The public OpenAPI contract now covers GET and POST for the Go module switchboard. Vite Settings uses generated response types, validates module write requests, and retains runtime response validation.
@@ -83,6 +84,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- CRM and purchasing Go routes now answer capability domain refusals with 422, 404, or 403 instead of a generic 500, while genuine database and context failures still return a logged 500. CRM import now requires a same-origin cookie write like its sibling collection routes.
 - Go accounts receivable parsers now reject non-UUID customer IDs and malformed non-empty `fxRate` and `settleFxRate` values before any database access, so malformed capability requests get a governed refusal instead of a PostgreSQL cast error surfaced as a 500, and an invalid rate is no longer silently replaced by the latest stored rate. The contract now documents that an empty `currency`, `fxRate`, or `settleFxRate` selects the base currency or latest stored rate, matching the legacy clients.
 - The Go auth integration suites now run the email outbox on a session-local shadow table with a single-connection pool, so they pass while the development API's outbox worker is running instead of racing it for the same rows.
 - The Go worker supervisor keeps routine scheduling and agent execution opt-in until their migration parity gates pass, while preserving explicit `GO_ROUTINE_SCHEDULER=1` and `GO_ROUTINE_AGENT_RUNNER=1` configuration.

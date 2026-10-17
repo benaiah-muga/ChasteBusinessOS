@@ -838,6 +838,258 @@
       "method": "POST",
       "owner": "go",
       "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/messages",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/messages",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/read",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/people",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/attachments",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/attachments",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]/pin",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]/reactions",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/search",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/folders",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/folders",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/next-number",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/records",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/documents",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/documents",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/documents/[id]/content",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm/views",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm/views",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/customers",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/deals",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/deals",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/import",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing/payment-runs",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing/payment-runs",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
     }
   ],
   "goRoutes": [

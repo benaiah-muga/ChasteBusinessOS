@@ -11,6 +11,7 @@ import {
   allowsPendingGoRoutineCollectionOwner,
   allowsPendingGoAttachmentDownloadOwner,
   allowsPendingGoMessagingAgentOwner,
+  allowsPendingGoWave3Owner,
 } from "./route-ownership-policy.mjs";
 
 const require = createRequire(import.meta.url);
@@ -120,7 +121,8 @@ if (existsSync(overridePath)) {
       || allowsPendingGoPolicyOwner(kind, path, method, owner, parity)
       || allowsPendingGoRoutineCollectionOwner(kind, path, method, owner, parity)
       || allowsPendingGoAttachmentDownloadOwner(kind, path, method, owner, parity)
-      || allowsPendingGoMessagingAgentOwner(kind, path, method, owner, parity);
+      || allowsPendingGoMessagingAgentOwner(kind, path, method, owner, parity)
+      || allowsPendingGoWave3Owner(kind, path, method, owner, parity);
     if (owner !== "legacy" && parity !== "verified" && !pendingOwnerAllowed) {
       throw new Error(`Route ${path} cannot move to ${owner} before parity is verified.`);
     }

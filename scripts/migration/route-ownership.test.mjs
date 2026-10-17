@@ -10,6 +10,7 @@ import {
   allowsPendingGoRoutineCollectionOwner,
   allowsPendingGoAttachmentDownloadOwner,
   allowsPendingGoMessagingAgentOwner,
+  allowsPendingGoWave3Owner,
 } from "./route-ownership-policy.mjs";
 
 const manifest = JSON.parse(readFileSync("docs/migration/route-ownership.json", "utf8"));
@@ -155,6 +156,22 @@ test("pending Go messaging agent ownership is limited to exact POST", () => {
     ["api", "/api/conversations/[id]/agent-reply", "POST", "go", "verified"],
   ]) {
     assert.equal(allowsPendingGoMessagingAgentOwner(...candidate), false, JSON.stringify(candidate));
+  }
+});
+
+test("pending Go wave 3 ownership is limited to exact collection routes", () => {
+  assert.equal(allowsPendingGoWave3Owner("api", "/api/conversations", "GET", "go", "pending"), true);
+  assert.equal(allowsPendingGoWave3Owner("api", "/api/purchasing/payment-runs", "POST", "go", "pending"), true);
+  assert.equal(allowsPendingGoWave3Owner("api", "/api/deals", "POST", "go", "pending"), true);
+  for (const candidate of [
+    ["page", "/api/conversations", "GET", "go", "pending"],
+    ["api", "/api/conversations", "DELETE", "go", "pending"],
+    ["api", "/api/conversations", "GET", "legacy", "pending"],
+    ["api", "/api/conversations", "GET", "go", "verified"],
+    ["api", "/api/conversations/extra", "GET", "go", "pending"],
+    ["api", "/api/deals", "PATCH", "go", "pending"],
+  ]) {
+    assert.equal(allowsPendingGoWave3Owner(...candidate), false, JSON.stringify(candidate));
   }
 });
 
@@ -395,7 +412,7 @@ test("approvals page has verified Vite ownership after the authenticated decisio
   );
 });
 
-test("CRM reads have verified Go ownership after the authenticated Vite browser proof", () => {
+test("CRM reads have verified Go ownership and collection writes are Go-pending", () => {
   assert.deepEqual(
     manifest.entries.filter((entry) => entry.kind === "api" && entry.path === "/api/crm"),
     [
@@ -412,7 +429,7 @@ test("CRM reads have verified Go ownership after the authenticated Vite browser 
         path: "/api/crm",
         method: "POST",
         source: "apps/web/src/app/api/crm/route.ts",
-        owner: "legacy",
+        owner: "go",
         parity: "pending",
       },
     ],
