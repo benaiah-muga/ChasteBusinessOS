@@ -6,7 +6,9 @@
  * the local mailpit sink, onboards an organization, then probes each pending
  * method with a minimal request. A probe passes when the route answers an
  * authenticated outcome (200, 400, 403, 404, 405, 422): 401 means the session
- * never reached the handler and 5xx means the handler failed.
+ * never reached the handler and 5xx means the handler failed. Machine-token
+ * routes (SCIM, AI tools MCP) are probed without their bearer token; their own
+ * JSON 401 answer counts as reached.
  *
  * Usage:
  *   pnpm exec tsx scripts/gates/go-live-pending.ts
@@ -103,6 +105,12 @@ async function main(): Promise<void> {
   console.log(`[live] probing ${entries.length} Go-pending methods`);
 
   let failures = 0;
+  const machineAuthProbes = new Set([
+    "POST /api/ai-tools/mcp",
+    "DELETE /api/scim/v2/Users",
+    "GET /api/scim/v2/Users/[id]",
+    "DELETE /api/scim/v2/Users/[id]",
+  ]);
   for (const entry of entries) {
     const path = entry.path.replace(/\[id\]/g, "00000000-0000-4000-8000-000000000000");
     const query = entry.method === "GET" && entry.path === "/api/messages/search" ? "?q=live" : "";
@@ -126,7 +134,9 @@ async function main(): Promise<void> {
     } catch (error) {
       text = String(error);
     }
-    const bad = status === 401 || status >= 500 || status === 0;
+    const machineProbe = machineAuthProbes.has(`${entry.method} ${entry.path}`);
+    const machineAnswered = machineProbe && status === 401 && /scim|jsonrpc/i.test(text);
+    const bad = (!machineAnswered && status === 401) || status >= 500 || status === 0;
     if (bad) failures++;
     console.log(`${bad ? "FAIL" : "ok  "} ${entry.method.padEnd(6)} ${entry.path} -> ${status} ${text}`);
   }

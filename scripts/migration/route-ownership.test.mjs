@@ -203,7 +203,7 @@ test("attachment and routine webhook ownership is method-specific", () => {
         path: "/api/routines/webhook/[token]",
         method: "GET",
         source: "apps/web/src/app/api/routines/webhook/[token]/route.ts",
-        owner: "legacy",
+        owner: "go",
         parity: "pending",
       },
       {
@@ -223,15 +223,15 @@ test("attachment and routine webhook ownership is method-specific", () => {
       path: "/api/scim/v2/Users",
       method: "DELETE",
       source: "apps/web/src/app/api/scim/v2/Users/route.ts",
-      owner: "legacy",
+      owner: "go",
       parity: "pending",
     }],
   );
   assert.deepEqual(
     manifest.entries.filter((entry) => entry.path === "/api/scim/v2/Users/[id]"),
     [
-      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "GET", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "legacy", parity: "pending" },
-      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "DELETE", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "legacy", parity: "pending" },
+      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "GET", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "go", parity: "pending" },
+      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "DELETE", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "go", parity: "pending" },
     ],
   );
 });

@@ -865,6 +865,69 @@ func run(logger *slog.Logger) error {
 	logger.Info("Go purchasing collection route mounted", "path", "/api/purchasing")
 	purchasingPaymentRunsRoute := httpapi.NewPurchasingPaymentRunsSessionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
 	logger.Info("Go purchasing payment runs route mounted", "path", "/api/purchasing/payment-runs")
+	quotesRoute := httpapi.NewQuotesSessionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go quotes route mounted", "path", "/api/quotes")
+	recurringRoute := httpapi.NewRecurringSessionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go recurring route mounted", "path", "/api/recurring")
+	reportsRoute := httpapi.NewReportsSessionHandler(emailResolver, capabilityExecutor, logger)
+	logger.Info("Go reports route mounted", "path", "/api/reports")
+	salesWriteRoute := httpapi.NewSalesOrdersWriteSessionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go sales write route mounted", "path", "POST /api/sales")
+	inventoryWriteRoute := httpapi.NewInventoryWriteSessionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go inventory write route mounted", "path", "POST /api/inventory")
+	aiConnectionsRoute, err := httpapi.NewAIConnectionsHandler(pool, emailResolver, trustedProxyCIDRs, logger)
+	if err != nil {
+		return err
+	}
+	logger.Info("Go AI connections route mounted", "path", "/api/ai-connections")
+	aiToolsMCPRoute, err := httpapi.NewAIToolsMCPHandler(pool, capabilityExecutor, logger)
+	if err != nil {
+		return err
+	}
+	logger.Info("Go AI tools MCP route mounted", "path", "POST /api/ai-tools/mcp")
+	capabilityGapsRoute, err := httpapi.NewCapabilityGapsHandler(emailResolver, capabilityExecutor, trustedProxyCIDRs, logger)
+	if err != nil {
+		return err
+	}
+	logger.Info("Go capability gaps route mounted", "path", "/api/capability-gaps")
+	harnessCompositionsRoute, err := httpapi.NewHarnessCompositionsHandler(emailResolver, capabilityExecutor, trustedProxyCIDRs, logger)
+	if err != nil {
+		return err
+	}
+	logger.Info("Go harness compositions route mounted", "path", "/api/harness/compositions")
+	proposalsRoute, err := httpapi.NewProposalsHandler(emailResolver, capabilityExecutor, trustedProxyCIDRs, logger)
+	if err != nil {
+		return err
+	}
+	logger.Info("Go proposals route mounted", "path", "/api/proposals")
+	marketplaceRoute, err := httpapi.NewMarketplaceHandler(emailResolver, capabilityExecutor, trustedProxyCIDRs, logger)
+	if err != nil {
+		return err
+	}
+	logger.Info("Go marketplace route mounted", "path", "/api/marketplace")
+	creatorEvolutionRoute, err := httpapi.NewCreatorEvolutionHandler(emailResolver, capabilityExecutor, trustedProxyCIDRs, logger)
+	if err != nil {
+		return err
+	}
+	creatorAgentRoute, err := httpapi.NewCreatorAgentHandler(emailResolver, trustedProxyCIDRs, logger)
+	if err != nil {
+		return err
+	}
+	logger.Info("Go creator routes mounted", "paths", []string{"GET /api/creator/agent", "POST /api/creator/evolution"})
+	supportAdminRoute, err := httpapi.NewSupportAdminHandler(pool, emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	if err != nil {
+		return err
+	}
+	logger.Info("Go support admin route mounted", "path", "/api/support")
+	manufacturingCollectionRoute := httpapi.NewManufacturingCollectionHandler(emailResolver, capabilityExecutor, logger, trustedProxyCIDRs)
+	logger.Info("Go manufacturing collection route mounted", "path", "/api/manufacturing")
+	scimCollectionDeleteRoute, err := httpapi.NewSCIMCollectionDeleteHandlerWithLimiter(pool, trustedProxyCIDRs, logger, scimRateLimiter)
+	if err != nil {
+		return err
+	}
+	logger.Info("Go SCIM collection delete route mounted", "path", "DELETE /api/scim/v2/Users")
+	routinesWebhookReadRoute := httpapi.NewRoutinesWebhookReadHandler()
+	logger.Info("Go routines webhook read route mounted", "path", "GET /api/routines/webhook/{token}")
 
 	apiHandler := httpapi.MountGoMessageAttachmentDownloadRoute(httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoCRMReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationsRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
 		pool,
@@ -913,6 +976,23 @@ func run(logger *slog.Logger) error {
 	apiHandler = httpapi.MountGoCRMImportRoute(apiHandler, crmImportRoute)
 	apiHandler = httpapi.MountGoPurchasingCollectionRoute(apiHandler, purchasingCollectionRoute)
 	apiHandler = httpapi.MountGoPurchasingPaymentRunsRoute(apiHandler, purchasingPaymentRunsRoute)
+	apiHandler = httpapi.MountGoQuotesRoute(apiHandler, quotesRoute)
+	apiHandler = httpapi.MountGoRecurringRoute(apiHandler, recurringRoute)
+	apiHandler = httpapi.MountGoReportsRoute(apiHandler, reportsRoute)
+	apiHandler = httpapi.MountGoSalesWriteRoute(apiHandler, salesWriteRoute)
+	apiHandler = httpapi.MountGoInventoryWriteRoute(apiHandler, inventoryWriteRoute)
+	apiHandler = httpapi.MountGoAIConnectionsRoute(apiHandler, aiConnectionsRoute)
+	apiHandler = httpapi.MountGoAIToolsMCPRoute(apiHandler, aiToolsMCPRoute)
+	apiHandler = httpapi.MountGoCapabilityGapsRoute(apiHandler, capabilityGapsRoute)
+	apiHandler = httpapi.MountGoHarnessCompositionsRoute(apiHandler, harnessCompositionsRoute)
+	apiHandler = httpapi.MountGoProposalsRoute(apiHandler, proposalsRoute)
+	apiHandler = httpapi.MountGoMarketplaceRoute(apiHandler, marketplaceRoute)
+	apiHandler = httpapi.MountGoCreatorRoutes(apiHandler, creatorAgentRoute, creatorEvolutionRoute)
+	apiHandler = httpapi.MountGoInviteTokenRoute(apiHandler, invitationRoute)
+	apiHandler = httpapi.MountGoSupportAdminRoute(apiHandler, supportAdminRoute)
+	apiHandler = httpapi.MountGoManufacturingCollectionRoute(apiHandler, manufacturingCollectionRoute)
+	apiHandler = httpapi.MountGoSCIMCollectionDeleteRoute(apiHandler, scimCollectionDeleteRoute)
+	apiHandler = httpapi.MountGoRoutinesWebhookReadRoute(apiHandler, routinesWebhookReadRoute)
 	apiMux := http.NewServeMux()
 	apiMux.Handle("/api/email", emailRoute)
 	apiMux.Handle("/", apiHandler)

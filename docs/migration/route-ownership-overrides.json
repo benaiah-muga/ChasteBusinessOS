@@ -416,14 +416,14 @@
       "kind": "api",
       "path": "/api/scim/v2/Users/[id]",
       "method": "DELETE",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
       "kind": "api",
       "path": "/api/scim/v2/Users/[id]",
       "method": "GET",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1088,6 +1088,188 @@
       "kind": "api",
       "path": "/api/purchasing/payment-runs",
       "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/quotes",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/quotes",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/recurring",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/recurring",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/reports",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sales",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/inventory",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-connections",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-connections",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-tools/mcp",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/capability-gaps",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/harness/compositions",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/proposals",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/proposals",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketplace",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketplace",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/creator/agent",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/creator/evolution",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/invite/[token]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/invite/[token]",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/manufacturing",
+      "method": "GET",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/manufacturing",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines/webhook/[token]",
+      "method": "GET",
       "owner": "go",
       "parity": "pending"
     }

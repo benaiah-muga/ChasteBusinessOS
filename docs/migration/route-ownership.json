@@ -86,7 +86,7 @@
       "path": "/api/ai-connections",
       "method": "GET",
       "source": "apps/web/src/app/api/ai-connections/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -94,7 +94,7 @@
       "path": "/api/ai-connections",
       "method": "POST",
       "source": "apps/web/src/app/api/ai-connections/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -102,7 +102,7 @@
       "path": "/api/ai-tools/mcp",
       "method": "POST",
       "source": "apps/web/src/app/api/ai-tools/mcp/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -190,7 +190,7 @@
       "path": "/api/capability-gaps",
       "method": "GET",
       "source": "apps/web/src/app/api/capability-gaps/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -310,7 +310,7 @@
       "path": "/api/creator/agent",
       "method": "GET",
       "source": "apps/web/src/app/api/creator/agent/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -318,7 +318,7 @@
       "path": "/api/creator/evolution",
       "method": "POST",
       "source": "apps/web/src/app/api/creator/evolution/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -574,7 +574,7 @@
       "path": "/api/harness/compositions",
       "method": "GET",
       "source": "apps/web/src/app/api/harness/compositions/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -622,7 +622,7 @@
       "path": "/api/inventory",
       "method": "POST",
       "source": "apps/web/src/app/api/inventory/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -630,7 +630,7 @@
       "path": "/api/invite/[token]",
       "method": "GET",
       "source": "apps/web/src/app/api/invite/[token]/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -638,7 +638,7 @@
       "path": "/api/invite/[token]",
       "method": "POST",
       "source": "apps/web/src/app/api/invite/[token]/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -654,7 +654,7 @@
       "path": "/api/manufacturing",
       "method": "GET",
       "source": "apps/web/src/app/api/manufacturing/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -662,7 +662,7 @@
       "path": "/api/manufacturing",
       "method": "POST",
       "source": "apps/web/src/app/api/manufacturing/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -686,7 +686,7 @@
       "path": "/api/marketplace",
       "method": "GET",
       "source": "apps/web/src/app/api/marketplace/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -694,7 +694,7 @@
       "path": "/api/marketplace",
       "method": "POST",
       "source": "apps/web/src/app/api/marketplace/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -966,7 +966,7 @@
       "path": "/api/proposals",
       "method": "GET",
       "source": "apps/web/src/app/api/proposals/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -974,7 +974,7 @@
       "path": "/api/proposals",
       "method": "POST",
       "source": "apps/web/src/app/api/proposals/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1014,7 +1014,7 @@
       "path": "/api/quotes",
       "method": "GET",
       "source": "apps/web/src/app/api/quotes/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1022,7 +1022,7 @@
       "path": "/api/quotes",
       "method": "POST",
       "source": "apps/web/src/app/api/quotes/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1030,7 +1030,7 @@
       "path": "/api/recurring",
       "method": "GET",
       "source": "apps/web/src/app/api/recurring/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1038,7 +1038,7 @@
       "path": "/api/recurring",
       "method": "POST",
       "source": "apps/web/src/app/api/recurring/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1046,7 +1046,7 @@
       "path": "/api/reports",
       "method": "GET",
       "source": "apps/web/src/app/api/reports/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1070,7 +1070,7 @@
       "path": "/api/routines/webhook/[token]",
       "method": "GET",
       "source": "apps/web/src/app/api/routines/webhook/[token]/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1094,7 +1094,7 @@
       "path": "/api/sales",
       "method": "POST",
       "source": "apps/web/src/app/api/sales/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1158,7 +1158,7 @@
       "path": "/api/scim/v2/Users",
       "method": "DELETE",
       "source": "apps/web/src/app/api/scim/v2/Users/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1166,7 +1166,7 @@
       "path": "/api/scim/v2/Users/[id]",
       "method": "GET",
       "source": "apps/web/src/app/api/scim/v2/Users/[id]/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1174,7 +1174,7 @@
       "path": "/api/scim/v2/Users/[id]",
       "method": "DELETE",
       "source": "apps/web/src/app/api/scim/v2/Users/[id]/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1222,7 +1222,7 @@
       "path": "/api/support",
       "method": "GET",
       "source": "apps/web/src/app/api/support/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -1230,7 +1230,7 @@
       "path": "/api/support",
       "method": "POST",
       "source": "apps/web/src/app/api/support/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
