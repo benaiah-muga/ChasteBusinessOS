@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 import { normalizeRetryActorId } from "./retry-scope";
 import { payPurchasingBill } from "./purchasing";
 
@@ -378,7 +379,7 @@ const StatementSchema = z.object({
       balanceMinor: minor,
     }).strict()),
   }).strict()),
-}).strict();
+}).strict() satisfies z.ZodType<components["schemas"]["AccountingCustomerStatementOutput"]>;
 
 const ErrorResponseSchema = z.object({ error: z.string().optional(), message: z.string().optional() });
 const EnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
@@ -408,7 +409,7 @@ const RecordPaymentOutputSchema = z.object({
   gainLossMinor: minor.optional(),
   baseEntryId: z.string().uuid().optional(),
   foreignEntryId: z.string().uuid().optional(),
-}).strict();
+}).strict() satisfies z.ZodType<components["schemas"]["AccountingRecordPaymentOutput"]>;
 const RECORD_PAYMENT_ATTEMPT_PREFIX = "chaste:accounting:record-payment:go:attempt:v1:";
 const CreateInvoiceActionSchema = z.object({
   action: z.literal("createInvoice"),
@@ -436,7 +437,7 @@ const CreateInvoiceOutputSchema = z.object({
   totalMinor: minor,
   entryId: z.string().uuid(),
   currency: z.string().min(3).max(3),
-}).strict();
+}).strict() satisfies z.ZodType<components["schemas"]["AccountingCreateInvoiceOutput"]>;
 const CREATE_INVOICE_ATTEMPT_PREFIX = "chaste:accounting:create-invoice:go:attempt:v1:";
 const CreditNoteActionSchema = z.object({
   action: z.literal("creditNote"),
@@ -453,7 +454,7 @@ const CreditNoteOutputSchema = z.object({
   entryId: z.string().uuid(),
   creditedMinor: minor,
   invoiceBalanceMinor: minor,
-}).strict();
+}).strict() satisfies z.ZodType<components["schemas"]["AccountingCreditNoteOutput"]>;
 const CREDIT_NOTE_ATTEMPT_PREFIX = "chaste:accounting:credit-note:go:attempt:v1:";
 const ReverseEntryActionSchema = z.object({
   action: z.literal("reverse"),
@@ -481,7 +482,7 @@ const ReversePaymentOutputSchema = z.object({
   refundedMinor: minor,
   invoiceNumber: z.number().int().safe(),
   outstandingMinor: minor,
-}).strict();
+}).strict() satisfies z.ZodType<components["schemas"]["AccountingReversePaymentOutput"]>;
 const REVERSE_PAYMENT_ATTEMPT_PREFIX = "chaste:accounting:reverse-payment:go:attempt:v1:";
 const CloseYearActionSchema = z.object({
   action: z.literal("closeYear"),
@@ -635,7 +636,7 @@ export type AccountingBudgetScenario = z.infer<typeof BudgetScenarioSchema>;
 export type AccountingBudgetActualVsPlan = z.infer<typeof BudgetActualVsPlanSchema>;
 export type AccountingForecast = z.infer<typeof ForecastSchema>;
 export type AccountingReminder = z.infer<typeof ReminderSchema>;
-export type AccountingStatement = z.infer<typeof StatementSchema>;
+export type AccountingStatement = components["schemas"]["AccountingCustomerStatementOutput"];
 
 export class AccountingApiError extends Error {
   constructor(readonly status: number, message: string, readonly requestMayHaveReachedServer = false) {
@@ -995,14 +996,15 @@ export async function fetchCustomerStatement(customerId: string, signal?: AbortS
 }
 
 async function readGoCustomerStatement(customerId: string, signal?: AbortSignal): Promise<AccountingStatement> {
+  const request: components["schemas"]["AccountingCustomerStatementExecutionRequest"] = {
+    capabilityId: "accounting.customerStatement",
+    input: { customerId },
+    intentId: crypto.randomUUID(),
+  };
   const { response, body } = await getJson("/api/capabilities/execute", {
     method: "POST",
     cache: "no-store",
-    body: JSON.stringify({
-      capabilityId: "accounting.customerStatement",
-      input: { customerId },
-      intentId: crypto.randomUUID(),
-    }),
+    body: JSON.stringify(request),
   }, signal);
   if (response.status === 202) {
     const pending = PendingSchema.safeParse(body);
@@ -1282,12 +1284,17 @@ async function submitGoAccountingReversePayment(
   signal?: AbortSignal,
 ): Promise<AccountingActionOutcome> {
   const attempt = await accountingReversePaymentAttempt(action, scope.scopeHash);
+  const request: components["schemas"]["AccountingReversePaymentExecutionRequest"] = {
+    capabilityId: "accounting.reversePayment",
+    input: reversePaymentCapabilityInput(action),
+    intentId: attempt.intentId,
+  };
   let response: Response;
   let body: unknown;
   try {
     ({ response, body } = await getJson("/api/capabilities/execute", {
       method: "POST",
-      body: JSON.stringify({ capabilityId: "accounting.reversePayment", input: reversePaymentCapabilityInput(action), intentId: attempt.intentId }),
+      body: JSON.stringify(request),
     }, signal));
   } catch (error) {
     if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
@@ -1312,7 +1319,7 @@ async function submitGoAccountingReversePayment(
   return { kind: "completed" };
 }
 
-function reversePaymentCapabilityInput(action: AccountingReversePaymentAction): Record<string, unknown> {
+function reversePaymentCapabilityInput(action: AccountingReversePaymentAction): components["schemas"]["AccountingReversePaymentInput"] {
   const { action: _action, ...input } = action;
   return input;
 }
@@ -1328,13 +1335,18 @@ async function submitGoAccountingCreditNote(
   signal?: AbortSignal,
 ): Promise<AccountingActionOutcome> {
   const attempt = await accountingCreditNoteAttempt(action, scope.scopeHash);
+  const request: components["schemas"]["AccountingCreditNoteExecutionRequest"] = {
+    capabilityId: "accounting.creditNote",
+    input: creditNoteCapabilityInput(action),
+    intentId: attempt.intentId,
+  };
   let response: Response;
   let body: unknown;
   try {
     ({ response, body } = await getJson("/api/capabilities/execute", {
       method: "POST",
       headers: { "X-Organization-ID": scope.organizationId },
-      body: JSON.stringify({ capabilityId: "accounting.creditNote", input: creditNoteCapabilityInput(action), intentId: attempt.intentId }),
+      body: JSON.stringify(request),
     }, signal));
   } catch (error) {
     if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
@@ -1359,7 +1371,7 @@ async function submitGoAccountingCreditNote(
   return { kind: "completed" };
 }
 
-function creditNoteCapabilityInput(action: AccountingCreditNoteAction): Record<string, unknown> {
+function creditNoteCapabilityInput(action: AccountingCreditNoteAction): components["schemas"]["AccountingCreditNoteInput"] {
   const { action: _action, ...input } = action;
   return input;
 }
@@ -1370,13 +1382,18 @@ async function submitGoAccountingCreateInvoice(
   signal?: AbortSignal,
 ): Promise<AccountingActionOutcome> {
   const attempt = await accountingCreateInvoiceAttempt(action, scope.scopeHash);
+  const request: components["schemas"]["AccountingCreateInvoiceExecutionRequest"] = {
+    capabilityId: "accounting.createInvoice",
+    input: createInvoiceCapabilityInput(action),
+    intentId: attempt.intentId,
+  };
   let response: Response;
   let body: unknown;
   try {
     ({ response, body } = await getJson("/api/capabilities/execute", {
       method: "POST",
       headers: { "X-Organization-ID": scope.organizationId },
-      body: JSON.stringify({ capabilityId: "accounting.createInvoice", input: createInvoiceCapabilityInput(action), intentId: attempt.intentId }),
+      body: JSON.stringify(request),
     }, signal));
   } catch (error) {
     if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
@@ -1401,7 +1418,7 @@ async function submitGoAccountingCreateInvoice(
   return { kind: "completed" };
 }
 
-function createInvoiceCapabilityInput(action: AccountingCreateInvoiceAction): Record<string, unknown> {
+function createInvoiceCapabilityInput(action: AccountingCreateInvoiceAction): components["schemas"]["AccountingCreateInvoiceInput"] {
   const { action: _action, ...input } = action;
   return input;
 }
@@ -1412,13 +1429,18 @@ async function submitGoAccountingRecordPayment(
   signal?: AbortSignal,
 ): Promise<AccountingActionOutcome> {
   const attempt = await accountingRecordPaymentAttempt(action, scope.scopeHash);
+  const request: components["schemas"]["AccountingRecordPaymentExecutionRequest"] = {
+    capabilityId: "accounting.recordPayment",
+    input: recordPaymentCapabilityInput(action),
+    intentId: attempt.intentId,
+  };
   let response: Response;
   let body: unknown;
   try {
     ({ response, body } = await getJson("/api/capabilities/execute", {
       method: "POST",
       headers: { "X-Organization-ID": scope.organizationId },
-      body: JSON.stringify({ capabilityId: "accounting.recordPayment", input: recordPaymentCapabilityInput(action), intentId: attempt.intentId }),
+      body: JSON.stringify(request),
     }, signal));
   } catch (error) {
     if (error instanceof AccountingApiError) throw new AccountingApiError(error.status, error.message, true);
@@ -1443,7 +1465,7 @@ async function submitGoAccountingRecordPayment(
   return { kind: "completed" };
 }
 
-function recordPaymentCapabilityInput(action: AccountingRecordPaymentAction): Record<string, unknown> {
+function recordPaymentCapabilityInput(action: AccountingRecordPaymentAction): components["schemas"]["AccountingRecordPaymentInput"] {
   const { action: _action, ...input } = action;
   return input;
 }

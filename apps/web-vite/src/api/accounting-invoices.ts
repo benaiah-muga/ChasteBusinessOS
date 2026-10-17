@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { components } from "../generated/business-v1";
 
 const SwitchboardSchema = z.object({
   catalog: z.array(z.object({
@@ -17,7 +18,7 @@ const invoiceFields = {
   number: z.number().int().positive().safe(),
   customerId: z.string().min(1),
   customerName: z.string(),
-  status: z.string().min(1),
+  status: z.enum(["draft", "sent", "paid", "void"]),
   currency: z.string().regex(/^[A-Z]{3}$/),
   totalMinor: z.number().int().safe(),
   paidMinor: z.number().int().safe(),
@@ -29,11 +30,11 @@ const GoInvoiceSchema = z.object({
   ...invoiceFields,
   creditedMinor: z.number().int().safe(),
 }).strict();
-const GoAccountingInvoicesSchema = z.object({ invoices: z.array(GoInvoiceSchema) }).strict();
+const GoAccountingInvoicesSchema = z.object({ invoices: z.array(GoInvoiceSchema) }).strict() satisfies z.ZodType<components["schemas"]["AccountingListInvoicesOutput"]>;
 const CapabilityEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
 const CapabilityErrorSchema = z.object({ ok: z.literal(false), error: z.string().max(500) }).strict();
 
-export type AccountingInvoice = Omit<z.infer<typeof GoInvoiceSchema>, "creditedMinor">;
+export type AccountingInvoice = Omit<components["schemas"]["AccountingInvoiceRow"], "creditedMinor">;
 
 export class AccountingInvoicesApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -60,10 +61,14 @@ export async function fetchAccountingEnabled(signal?: AbortSignal): Promise<bool
 }
 
 export async function fetchAccountingInvoices(signal?: AbortSignal): Promise<AccountingInvoice[]> {
+  const request: components["schemas"]["AccountingListInvoicesExecutionRequest"] = {
+    capabilityId: "accounting.listInvoices",
+    input: {},
+  };
   const { response, body } = await getJson("/api/capabilities/execute", signal, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ capabilityId: "accounting.listInvoices", input: {} }),
+    body: JSON.stringify(request),
   });
   if (!response.ok) {
     const parsedError = CapabilityErrorSchema.safeParse(body);

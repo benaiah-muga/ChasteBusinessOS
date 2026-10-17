@@ -806,7 +806,15 @@ paths:
     post:
       operationId: executeCapability
       summary: Execute an authenticated business capability
-      description: Executes one capability through the governed kernel using the authenticated actor and active organization. Input and output remain open-ended at this generic boundary; capability-specific shapes are checked by runtime validators. Cookie-authenticated requests must include a same-origin Origin header. Bearer-authenticated requests do not use the browser origin check. If X-Organization-ID is provided, it must match the authenticated active organization.
+      description: >-
+        Executes one capability through the governed kernel using the
+        authenticated actor and active organization. The six accounts
+        receivable capability inputs below are described as named schemas;
+        other capability inputs and outputs remain open-ended at this generic
+        boundary and are checked by runtime validators. Cookie-authenticated
+        requests must include a same-origin Origin header. Bearer-authenticated
+        requests do not use the browser origin check. If X-Organization-ID is
+        provided, it must match the authenticated active organization.
       security:
         - sessionCookie: []
         - bearerAuth: []
@@ -3164,17 +3172,45 @@ components:
                 type: string
                 format: date-time
     CapabilityExecutionRequest:
+      x-go-type: apicontract.CapabilityExecutionRequest
+      x-go-type-import:
+        path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+        name: apicontract
+      description: >-
+        The six named AR capability variants provide concrete input schemas.
+        The generic branch retains compatibility with every other registered
+        capability and future capability identifiers.
+      oneOf:
+        - $ref: "#/components/schemas/AccountingListInvoicesExecutionRequest"
+        - $ref: "#/components/schemas/AccountingCreateInvoiceExecutionRequest"
+        - $ref: "#/components/schemas/AccountingRecordPaymentExecutionRequest"
+        - $ref: "#/components/schemas/AccountingReversePaymentExecutionRequest"
+        - $ref: "#/components/schemas/AccountingCreditNoteExecutionRequest"
+        - $ref: "#/components/schemas/AccountingCustomerStatementExecutionRequest"
+        - $ref: "#/components/schemas/GenericCapabilityExecutionRequest"
+    GenericCapabilityExecutionRequest:
       type: object
       additionalProperties: false
       required: [capabilityId, input]
+      not:
+        required: [capabilityId]
+        properties:
+          capabilityId:
+            enum:
+              - accounting.listInvoices
+              - accounting.createInvoice
+              - accounting.recordPayment
+              - accounting.reversePayment
+              - accounting.creditNote
+              - accounting.customerStatement
       properties:
         capabilityId:
           type: string
           minLength: 1
           maxLength: 200
-          description: Capability registry identifier, limited to 200 Unicode code points by the server. Capability-specific input is validated by its runtime parser.
+          description: Capability identifier other than one of the six AR variants documented here.
         input:
-          description: Arbitrary JSON value. The Go implementation retains the raw JSON bytes for exact capability parsing and hashing.
+          description: Arbitrary JSON value retained by Go for capability-specific parsing and hashing.
           x-go-type: apicontract.RawJSON
           x-go-type-import:
             path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
@@ -3183,6 +3219,209 @@ components:
           type: [string, "null"]
           maxLength: 200
           description: Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+    AccountingListInvoicesExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.listInvoices
+        input:
+          $ref: "#/components/schemas/AccountingListInvoicesInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingCreateInvoiceExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.createInvoice
+        input:
+          $ref: "#/components/schemas/AccountingCreateInvoiceInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingRecordPaymentExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.recordPayment
+        input:
+          $ref: "#/components/schemas/AccountingRecordPaymentInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingReversePaymentExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.reversePayment
+        input:
+          $ref: "#/components/schemas/AccountingReversePaymentInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingCreditNoteExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.creditNote
+        input:
+          $ref: "#/components/schemas/AccountingCreditNoteInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingCustomerStatementExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.customerStatement
+        input:
+          $ref: "#/components/schemas/AccountingCustomerStatementInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    CapabilityExecutionIntentId:
+      type: [string, "null"]
+      maxLength: 200
+      description: Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+    AccountingListInvoicesInput:
+      type: object
+      description: Unknown properties are ignored by the Go parser. If omitted, limit defaults to 50.
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [draft, sent, paid, void]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Defaults to 50 when omitted.
+      additionalProperties: true
+    AccountingCreateInvoiceInput:
+      type: object
+      description: Unknown properties are ignored by the Go parser. At least one line is required.
+      required: [customerId, lines]
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        memo:
+          type: string
+        lines:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/AccountingCreateInvoiceLine"
+        currency:
+          type: string
+          description: Currency code. Omitted or empty uses the organization base currency; the server validates supported currencies and currency minor units.
+        fxRate:
+          type: string
+          description: Optional decimal exchange rate. Omitted or empty uses the latest stored rate; a non-empty value must be a positive decimal with up to 9 integer and 12 fractional digits.
+        dueAt:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+          description: Optional UTC ISO datetime. Must end in Z; numeric offsets are rejected.
+      additionalProperties: true
+    AccountingCreateInvoiceLine:
+      type: object
+      required: [description, quantity, unitPriceMinor]
+      properties:
+        description:
+          type: string
+          minLength: 1
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        unitPriceMinor:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        taxMinor:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        taxCodeId:
+          type: string
+          format: uuid
+      allOf:
+        - not:
+            required: [taxMinor, taxCodeId]
+      additionalProperties: true
+    AccountingRecordPaymentInput:
+      type: object
+      description: Unknown properties are ignored by the Go parser. method defaults to bank_transfer when omitted.
+      required: [invoiceNumber, amountMinor]
+      properties:
+        invoiceNumber:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        amountMinor:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        method:
+          type: string
+          enum: [cash, bank_transfer, card]
+        settleFxRate:
+          type: string
+          description: Optional decimal settlement exchange rate. Omitted or empty uses the latest stored rate; a non-empty value must be a positive decimal with up to 9 integer and 12 fractional digits.
+      additionalProperties: true
+    AccountingReversePaymentInput:
+      type: object
+      required: [paymentId, reason]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          description: The server requires 3 to 500 UTF-16 code units.
+      additionalProperties: true
+    AccountingCreditNoteInput:
+      type: object
+      required: [invoiceId, amountMinor, reason]
+      properties:
+        invoiceId:
+          type: string
+          format: uuid
+        amountMinor:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          description: The server requires 3 to 500 UTF-16 code units.
+      additionalProperties: true
+    AccountingCustomerStatementInput:
+      type: object
+      required: [customerId]
+      properties:
+        customerId:
+          type: string
+          format: uuid
+      additionalProperties: true
     CapabilityExecutionSuccess:
       type: object
       additionalProperties: false
@@ -3192,11 +3431,180 @@ components:
           type: boolean
           const: true
         data:
-          description: Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients.
+          description: >-
+            Capability result. The six AR result forms are described below;
+            results from all other capabilities remain arbitrary JSON. Raw JSON
+            avoids rounding large integer values in Go clients.
+          anyOf:
+            - $ref: "#/components/schemas/AccountingListInvoicesOutput"
+            - $ref: "#/components/schemas/AccountingCreateInvoiceOutput"
+            - $ref: "#/components/schemas/AccountingRecordPaymentOutput"
+            - $ref: "#/components/schemas/AccountingReversePaymentOutput"
+            - $ref: "#/components/schemas/AccountingCreditNoteOutput"
+            - $ref: "#/components/schemas/AccountingCustomerStatementOutput"
+            - {}
           x-go-type: apicontract.RawJSON
           x-go-type-import:
             path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
             name: apicontract
+    AccountingListInvoicesOutput:
+      type: object
+      required: [invoices]
+      properties:
+        invoices:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountingInvoiceRow"
+      additionalProperties: false
+    AccountingInvoiceRow:
+      type: object
+      required: [id, number, customerId, customerName, status, currency, totalMinor, paidMinor, creditedMinor, outstandingMinor, issuedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        customerId:
+          type: string
+          format: uuid
+        customerName:
+          type: string
+        status:
+          type: string
+          enum: [draft, sent, paid, void]
+        currency:
+          type: string
+        totalMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        paidMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        creditedMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        outstandingMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        issuedAt:
+          type: [string, "null"]
+          format: date-time
+      additionalProperties: false
+    AccountingCreateInvoiceOutput:
+      type: object
+      required: [invoiceId, invoiceNumber, totalMinor, entryId, currency]
+      properties:
+        invoiceId:
+          type: string
+          format: uuid
+        invoiceNumber:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        totalMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        entryId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+      additionalProperties: false
+    AccountingRecordPaymentOutput:
+      type: object
+      required: [paymentId, entryId, fullyPaid]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        entryId:
+          type: string
+          format: uuid
+        fullyPaid:
+          type: boolean
+        gainLossMinor:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        baseEntryId:
+          type: string
+          format: uuid
+        foreignEntryId:
+          type: string
+          format: uuid
+      additionalProperties: false
+    AccountingReversePaymentOutput:
+      type: object
+      required: [reversalEntryIds, refundedMinor, invoiceNumber, outstandingMinor]
+      properties:
+        reversalEntryIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        refundedMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        invoiceNumber:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        outstandingMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+      additionalProperties: false
+    AccountingCreditNoteOutput:
+      type: object
+      required: [entryId, creditedMinor, invoiceBalanceMinor]
+      properties:
+        entryId:
+          type: string
+          format: uuid
+        creditedMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        invoiceBalanceMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+      additionalProperties: false
+    AccountingCustomerStatementOutput:
+      type: object
+      required: [currencies]
+      properties:
+        currencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountingCustomerStatementCurrency"
+      additionalProperties: false
+    AccountingCustomerStatementCurrency:
+      type: object
+      required: [currency, openingBalanceMinor, closingBalanceMinor, rows]
+      properties:
+        currency:
+          type: string
+        openingBalanceMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        closingBalanceMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountingCustomerStatementRow"
+      additionalProperties: false
+    AccountingCustomerStatementRow:
+      type: object
+      required: [date, kind, ref, amountMinor, balanceMinor]
+      properties:
+        date:
+          type: string
+          format: date-time
+        kind:
+          type: string
+        ref:
+          type: string
+        amountMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        balanceMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+      additionalProperties: false
+    AccountingSafeInteger:
+      type: integer
+      minimum: -9007199254740991
+      maximum: 9007199254740991
     CapabilityExecutionPending:
       type: object
       additionalProperties: false

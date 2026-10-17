@@ -13,6 +13,165 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AccountingCreateInvoiceExecutionRequestCapabilityId.
+const (
+	AccountingCreateInvoice AccountingCreateInvoiceExecutionRequestCapabilityId = "accounting.createInvoice"
+)
+
+// Valid indicates whether the value is a known member of the AccountingCreateInvoiceExecutionRequestCapabilityId enum.
+func (e AccountingCreateInvoiceExecutionRequestCapabilityId) Valid() bool {
+	switch e {
+	case AccountingCreateInvoice:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountingCreditNoteExecutionRequestCapabilityId.
+const (
+	AccountingCreditNote AccountingCreditNoteExecutionRequestCapabilityId = "accounting.creditNote"
+)
+
+// Valid indicates whether the value is a known member of the AccountingCreditNoteExecutionRequestCapabilityId enum.
+func (e AccountingCreditNoteExecutionRequestCapabilityId) Valid() bool {
+	switch e {
+	case AccountingCreditNote:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountingCustomerStatementExecutionRequestCapabilityId.
+const (
+	AccountingCustomerStatement AccountingCustomerStatementExecutionRequestCapabilityId = "accounting.customerStatement"
+)
+
+// Valid indicates whether the value is a known member of the AccountingCustomerStatementExecutionRequestCapabilityId enum.
+func (e AccountingCustomerStatementExecutionRequestCapabilityId) Valid() bool {
+	switch e {
+	case AccountingCustomerStatement:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountingInvoiceRowStatus.
+const (
+	AccountingInvoiceRowStatusDraft AccountingInvoiceRowStatus = "draft"
+	AccountingInvoiceRowStatusPaid  AccountingInvoiceRowStatus = "paid"
+	AccountingInvoiceRowStatusSent  AccountingInvoiceRowStatus = "sent"
+	AccountingInvoiceRowStatusVoid  AccountingInvoiceRowStatus = "void"
+)
+
+// Valid indicates whether the value is a known member of the AccountingInvoiceRowStatus enum.
+func (e AccountingInvoiceRowStatus) Valid() bool {
+	switch e {
+	case AccountingInvoiceRowStatusDraft:
+		return true
+	case AccountingInvoiceRowStatusPaid:
+		return true
+	case AccountingInvoiceRowStatusSent:
+		return true
+	case AccountingInvoiceRowStatusVoid:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountingListInvoicesExecutionRequestCapabilityId.
+const (
+	AccountingListInvoices AccountingListInvoicesExecutionRequestCapabilityId = "accounting.listInvoices"
+)
+
+// Valid indicates whether the value is a known member of the AccountingListInvoicesExecutionRequestCapabilityId enum.
+func (e AccountingListInvoicesExecutionRequestCapabilityId) Valid() bool {
+	switch e {
+	case AccountingListInvoices:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountingListInvoicesInputStatus.
+const (
+	AccountingListInvoicesInputStatusDraft AccountingListInvoicesInputStatus = "draft"
+	AccountingListInvoicesInputStatusPaid  AccountingListInvoicesInputStatus = "paid"
+	AccountingListInvoicesInputStatusSent  AccountingListInvoicesInputStatus = "sent"
+	AccountingListInvoicesInputStatusVoid  AccountingListInvoicesInputStatus = "void"
+)
+
+// Valid indicates whether the value is a known member of the AccountingListInvoicesInputStatus enum.
+func (e AccountingListInvoicesInputStatus) Valid() bool {
+	switch e {
+	case AccountingListInvoicesInputStatusDraft:
+		return true
+	case AccountingListInvoicesInputStatusPaid:
+		return true
+	case AccountingListInvoicesInputStatusSent:
+		return true
+	case AccountingListInvoicesInputStatusVoid:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountingRecordPaymentExecutionRequestCapabilityId.
+const (
+	AccountingRecordPayment AccountingRecordPaymentExecutionRequestCapabilityId = "accounting.recordPayment"
+)
+
+// Valid indicates whether the value is a known member of the AccountingRecordPaymentExecutionRequestCapabilityId enum.
+func (e AccountingRecordPaymentExecutionRequestCapabilityId) Valid() bool {
+	switch e {
+	case AccountingRecordPayment:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountingRecordPaymentInputMethod.
+const (
+	BankTransfer AccountingRecordPaymentInputMethod = "bank_transfer"
+	Card         AccountingRecordPaymentInputMethod = "card"
+	Cash         AccountingRecordPaymentInputMethod = "cash"
+)
+
+// Valid indicates whether the value is a known member of the AccountingRecordPaymentInputMethod enum.
+func (e AccountingRecordPaymentInputMethod) Valid() bool {
+	switch e {
+	case BankTransfer:
+		return true
+	case Card:
+		return true
+	case Cash:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountingReversePaymentExecutionRequestCapabilityId.
+const (
+	AccountingReversePayment AccountingReversePaymentExecutionRequestCapabilityId = "accounting.reversePayment"
+)
+
+// Valid indicates whether the value is a known member of the AccountingReversePaymentExecutionRequestCapabilityId enum.
+func (e AccountingReversePaymentExecutionRequestCapabilityId) Valid() bool {
+	switch e {
+	case AccountingReversePayment:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ApprovalDecisionFailureOk.
 const (
 	ApprovalDecisionFailureOkFalse ApprovalDecisionFailureOk = false
@@ -535,6 +694,244 @@ func (e GetSignalsParamsSeverity) Valid() bool {
 	}
 }
 
+// AccountingCreateInvoiceExecutionRequest defines model for AccountingCreateInvoiceExecutionRequest.
+type AccountingCreateInvoiceExecutionRequest struct {
+	CapabilityId AccountingCreateInvoiceExecutionRequestCapabilityId `json:"capabilityId"`
+
+	// Input Unknown properties are ignored by the Go parser. At least one line is required.
+	Input AccountingCreateInvoiceInput `json:"input"`
+
+	// IntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+	IntentId *CapabilityExecutionIntentId `json:"intentId,omitempty"`
+}
+
+// AccountingCreateInvoiceExecutionRequestCapabilityId defines model for AccountingCreateInvoiceExecutionRequest.CapabilityId.
+type AccountingCreateInvoiceExecutionRequestCapabilityId string
+
+// AccountingCreateInvoiceInput Unknown properties are ignored by the Go parser. At least one line is required.
+type AccountingCreateInvoiceInput struct {
+	// Currency Currency code. Omitted or empty uses the organization base currency; the server validates supported currencies and currency minor units.
+	Currency   *string            `json:"currency,omitempty"`
+	CustomerId openapi_types.UUID `json:"customerId"`
+
+	// DueAt Optional UTC ISO datetime. Must end in Z; numeric offsets are rejected.
+	DueAt *time.Time `json:"dueAt,omitempty"`
+
+	// FxRate Optional decimal exchange rate. Omitted or empty uses the latest stored rate; a non-empty value must be a positive decimal with up to 9 integer and 12 fractional digits.
+	FxRate               *string                       `json:"fxRate,omitempty"`
+	Lines                []AccountingCreateInvoiceLine `json:"lines"`
+	Memo                 *string                       `json:"memo,omitempty"`
+	AdditionalProperties map[string]interface{}        `json:"-"`
+}
+
+// AccountingCreateInvoiceLine defines model for AccountingCreateInvoiceLine.
+type AccountingCreateInvoiceLine struct {
+	Description          string                 `json:"description"`
+	Quantity             int                    `json:"quantity"`
+	TaxCodeId            *openapi_types.UUID    `json:"taxCodeId,omitempty"`
+	TaxMinor             *int                   `json:"taxMinor,omitempty"`
+	UnitPriceMinor       int                    `json:"unitPriceMinor"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// AccountingCreateInvoiceOutput defines model for AccountingCreateInvoiceOutput.
+type AccountingCreateInvoiceOutput struct {
+	Currency      string                `json:"currency"`
+	EntryId       openapi_types.UUID    `json:"entryId"`
+	InvoiceId     openapi_types.UUID    `json:"invoiceId"`
+	InvoiceNumber int                   `json:"invoiceNumber"`
+	TotalMinor    AccountingSafeInteger `json:"totalMinor"`
+}
+
+// AccountingCreditNoteExecutionRequest defines model for AccountingCreditNoteExecutionRequest.
+type AccountingCreditNoteExecutionRequest struct {
+	CapabilityId AccountingCreditNoteExecutionRequestCapabilityId `json:"capabilityId"`
+	Input        AccountingCreditNoteInput                        `json:"input"`
+
+	// IntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+	IntentId *CapabilityExecutionIntentId `json:"intentId,omitempty"`
+}
+
+// AccountingCreditNoteExecutionRequestCapabilityId defines model for AccountingCreditNoteExecutionRequest.CapabilityId.
+type AccountingCreditNoteExecutionRequestCapabilityId string
+
+// AccountingCreditNoteInput defines model for AccountingCreditNoteInput.
+type AccountingCreditNoteInput struct {
+	AmountMinor int                `json:"amountMinor"`
+	InvoiceId   openapi_types.UUID `json:"invoiceId"`
+
+	// Reason The server requires 3 to 500 UTF-16 code units.
+	Reason               string                 `json:"reason"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// AccountingCreditNoteOutput defines model for AccountingCreditNoteOutput.
+type AccountingCreditNoteOutput struct {
+	CreditedMinor       AccountingSafeInteger `json:"creditedMinor"`
+	EntryId             openapi_types.UUID    `json:"entryId"`
+	InvoiceBalanceMinor AccountingSafeInteger `json:"invoiceBalanceMinor"`
+}
+
+// AccountingCustomerStatementCurrency defines model for AccountingCustomerStatementCurrency.
+type AccountingCustomerStatementCurrency struct {
+	ClosingBalanceMinor AccountingSafeInteger            `json:"closingBalanceMinor"`
+	Currency            string                           `json:"currency"`
+	OpeningBalanceMinor AccountingSafeInteger            `json:"openingBalanceMinor"`
+	Rows                []AccountingCustomerStatementRow `json:"rows"`
+}
+
+// AccountingCustomerStatementExecutionRequest defines model for AccountingCustomerStatementExecutionRequest.
+type AccountingCustomerStatementExecutionRequest struct {
+	CapabilityId AccountingCustomerStatementExecutionRequestCapabilityId `json:"capabilityId"`
+	Input        AccountingCustomerStatementInput                        `json:"input"`
+
+	// IntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+	IntentId *CapabilityExecutionIntentId `json:"intentId,omitempty"`
+}
+
+// AccountingCustomerStatementExecutionRequestCapabilityId defines model for AccountingCustomerStatementExecutionRequest.CapabilityId.
+type AccountingCustomerStatementExecutionRequestCapabilityId string
+
+// AccountingCustomerStatementInput defines model for AccountingCustomerStatementInput.
+type AccountingCustomerStatementInput struct {
+	CustomerId           openapi_types.UUID     `json:"customerId"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// AccountingCustomerStatementOutput defines model for AccountingCustomerStatementOutput.
+type AccountingCustomerStatementOutput struct {
+	Currencies []AccountingCustomerStatementCurrency `json:"currencies"`
+}
+
+// AccountingCustomerStatementRow defines model for AccountingCustomerStatementRow.
+type AccountingCustomerStatementRow struct {
+	AmountMinor  AccountingSafeInteger `json:"amountMinor"`
+	BalanceMinor AccountingSafeInteger `json:"balanceMinor"`
+	Date         time.Time             `json:"date"`
+	Kind         string                `json:"kind"`
+	Ref          string                `json:"ref"`
+}
+
+// AccountingInvoiceRow defines model for AccountingInvoiceRow.
+type AccountingInvoiceRow struct {
+	CreditedMinor    AccountingSafeInteger      `json:"creditedMinor"`
+	Currency         string                     `json:"currency"`
+	CustomerId       openapi_types.UUID         `json:"customerId"`
+	CustomerName     string                     `json:"customerName"`
+	Id               openapi_types.UUID         `json:"id"`
+	IssuedAt         *time.Time                 `json:"issuedAt"`
+	Number           int                        `json:"number"`
+	OutstandingMinor AccountingSafeInteger      `json:"outstandingMinor"`
+	PaidMinor        AccountingSafeInteger      `json:"paidMinor"`
+	Status           AccountingInvoiceRowStatus `json:"status"`
+	TotalMinor       AccountingSafeInteger      `json:"totalMinor"`
+}
+
+// AccountingInvoiceRowStatus defines model for AccountingInvoiceRow.Status.
+type AccountingInvoiceRowStatus string
+
+// AccountingListInvoicesExecutionRequest defines model for AccountingListInvoicesExecutionRequest.
+type AccountingListInvoicesExecutionRequest struct {
+	CapabilityId AccountingListInvoicesExecutionRequestCapabilityId `json:"capabilityId"`
+
+	// Input Unknown properties are ignored by the Go parser. If omitted, limit defaults to 50.
+	Input AccountingListInvoicesInput `json:"input"`
+
+	// IntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+	IntentId *CapabilityExecutionIntentId `json:"intentId,omitempty"`
+}
+
+// AccountingListInvoicesExecutionRequestCapabilityId defines model for AccountingListInvoicesExecutionRequest.CapabilityId.
+type AccountingListInvoicesExecutionRequestCapabilityId string
+
+// AccountingListInvoicesInput Unknown properties are ignored by the Go parser. If omitted, limit defaults to 50.
+type AccountingListInvoicesInput struct {
+	CustomerId *openapi_types.UUID `json:"customerId,omitempty"`
+
+	// Limit Defaults to 50 when omitted.
+	Limit                *int                               `json:"limit,omitempty"`
+	Status               *AccountingListInvoicesInputStatus `json:"status,omitempty"`
+	AdditionalProperties map[string]interface{}             `json:"-"`
+}
+
+// AccountingListInvoicesInputStatus defines model for AccountingListInvoicesInput.Status.
+type AccountingListInvoicesInputStatus string
+
+// AccountingListInvoicesOutput defines model for AccountingListInvoicesOutput.
+type AccountingListInvoicesOutput struct {
+	Invoices []AccountingInvoiceRow `json:"invoices"`
+}
+
+// AccountingRecordPaymentExecutionRequest defines model for AccountingRecordPaymentExecutionRequest.
+type AccountingRecordPaymentExecutionRequest struct {
+	CapabilityId AccountingRecordPaymentExecutionRequestCapabilityId `json:"capabilityId"`
+
+	// Input Unknown properties are ignored by the Go parser. method defaults to bank_transfer when omitted.
+	Input AccountingRecordPaymentInput `json:"input"`
+
+	// IntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+	IntentId *CapabilityExecutionIntentId `json:"intentId,omitempty"`
+}
+
+// AccountingRecordPaymentExecutionRequestCapabilityId defines model for AccountingRecordPaymentExecutionRequest.CapabilityId.
+type AccountingRecordPaymentExecutionRequestCapabilityId string
+
+// AccountingRecordPaymentInput Unknown properties are ignored by the Go parser. method defaults to bank_transfer when omitted.
+type AccountingRecordPaymentInput struct {
+	AmountMinor   int                                 `json:"amountMinor"`
+	InvoiceNumber int                                 `json:"invoiceNumber"`
+	Method        *AccountingRecordPaymentInputMethod `json:"method,omitempty"`
+
+	// SettleFxRate Optional decimal settlement exchange rate. Omitted or empty uses the latest stored rate; a non-empty value must be a positive decimal with up to 9 integer and 12 fractional digits.
+	SettleFxRate         *string                `json:"settleFxRate,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// AccountingRecordPaymentInputMethod defines model for AccountingRecordPaymentInput.Method.
+type AccountingRecordPaymentInputMethod string
+
+// AccountingRecordPaymentOutput defines model for AccountingRecordPaymentOutput.
+type AccountingRecordPaymentOutput struct {
+	BaseEntryId    *openapi_types.UUID `json:"baseEntryId,omitempty"`
+	EntryId        openapi_types.UUID  `json:"entryId"`
+	ForeignEntryId *openapi_types.UUID `json:"foreignEntryId,omitempty"`
+	FullyPaid      bool                `json:"fullyPaid"`
+	GainLossMinor  *int                `json:"gainLossMinor,omitempty"`
+	PaymentId      openapi_types.UUID  `json:"paymentId"`
+}
+
+// AccountingReversePaymentExecutionRequest defines model for AccountingReversePaymentExecutionRequest.
+type AccountingReversePaymentExecutionRequest struct {
+	CapabilityId AccountingReversePaymentExecutionRequestCapabilityId `json:"capabilityId"`
+	Input        AccountingReversePaymentInput                        `json:"input"`
+
+	// IntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+	IntentId *CapabilityExecutionIntentId `json:"intentId,omitempty"`
+}
+
+// AccountingReversePaymentExecutionRequestCapabilityId defines model for AccountingReversePaymentExecutionRequest.CapabilityId.
+type AccountingReversePaymentExecutionRequestCapabilityId string
+
+// AccountingReversePaymentInput defines model for AccountingReversePaymentInput.
+type AccountingReversePaymentInput struct {
+	PaymentId openapi_types.UUID `json:"paymentId"`
+
+	// Reason The server requires 3 to 500 UTF-16 code units.
+	Reason               string                 `json:"reason"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// AccountingReversePaymentOutput defines model for AccountingReversePaymentOutput.
+type AccountingReversePaymentOutput struct {
+	InvoiceNumber    int                   `json:"invoiceNumber"`
+	OutstandingMinor AccountingSafeInteger `json:"outstandingMinor"`
+	RefundedMinor    AccountingSafeInteger `json:"refundedMinor"`
+	ReversalEntryIds []openapi_types.UUID  `json:"reversalEntryIds"`
+}
+
+// AccountingSafeInteger defines model for AccountingSafeInteger.
+type AccountingSafeInteger = int
+
 // AgentSoulResponse defines model for AgentSoulResponse.
 type AgentSoulResponse struct {
 	AgentSoul string `json:"agentSoul"`
@@ -626,6 +1023,9 @@ type ApprovalInboxRowRaisedByKind string
 // ApprovalInboxRowStatus defines model for ApprovalInboxRow.Status.
 type ApprovalInboxRowStatus string
 
+// CapabilityExecutionIntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+type CapabilityExecutionIntentId = string
+
 // CapabilityExecutionPending defines model for CapabilityExecutionPending.
 type CapabilityExecutionPending struct {
 	ApprovalId      *string                                   `json:"approvalId,omitempty"`
@@ -655,21 +1055,12 @@ type CapabilityExecutionRefusal struct {
 // CapabilityExecutionRefusalOk defines model for CapabilityExecutionRefusal.Ok.
 type CapabilityExecutionRefusalOk bool
 
-// CapabilityExecutionRequest defines model for CapabilityExecutionRequest.
-type CapabilityExecutionRequest struct {
-	// CapabilityId Capability registry identifier, limited to 200 Unicode code points by the server. Capability-specific input is validated by its runtime parser.
-	CapabilityId string `json:"capabilityId"`
-
-	// Input Arbitrary JSON value. The Go implementation retains the raw JSON bytes for exact capability parsing and hashing.
-	Input apicontract.RawJSON `json:"input"`
-
-	// IntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
-	IntentId *string `json:"intentId,omitempty"`
-}
+// CapabilityExecutionRequest The six named AR capability variants provide concrete input schemas. The generic branch retains compatibility with every other registered capability and future capability identifiers.
+type CapabilityExecutionRequest = apicontract.CapabilityExecutionRequest
 
 // CapabilityExecutionSuccess defines model for CapabilityExecutionSuccess.
 type CapabilityExecutionSuccess struct {
-	// Data Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients.
+	// Data Capability result. The six AR result forms are described below; results from all other capabilities remain arbitrary JSON. Raw JSON avoids rounding large integer values in Go clients.
 	Data apicontract.RawJSON          `json:"data"`
 	Ok   CapabilityExecutionSuccessOk `json:"ok"`
 }
@@ -774,6 +1165,18 @@ type DashboardSignal = Signal
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// GenericCapabilityExecutionRequest defines model for GenericCapabilityExecutionRequest.
+type GenericCapabilityExecutionRequest struct {
+	// CapabilityId Capability identifier other than one of the six AR variants documented here.
+	CapabilityId string `json:"capabilityId"`
+
+	// Input Arbitrary JSON value retained by Go for capability-specific parsing and hashing.
+	Input apicontract.RawJSON `json:"input"`
+
+	// IntentId Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+	IntentId *string `json:"intentId,omitempty"`
 }
 
 // LedgerEvent defines model for LedgerEvent.
@@ -1397,6 +1800,713 @@ type UpdateSupportChannelsJSONRequestBody = SupportChannelsPatch
 
 // ExecuteTeamActionJSONRequestBody defines body for ExecuteTeamAction for application/json ContentType.
 type ExecuteTeamActionJSONRequestBody = TeamWriteRequest
+
+// Getter for additional properties for AccountingCreateInvoiceInput. Returns the specified
+// element and whether it was found
+func (a AccountingCreateInvoiceInput) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for AccountingCreateInvoiceInput
+func (a *AccountingCreateInvoiceInput) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for AccountingCreateInvoiceInput to handle AdditionalProperties
+func (a *AccountingCreateInvoiceInput) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["currency"]; found {
+		err = json.Unmarshal(raw, &a.Currency)
+		if err != nil {
+			return fmt.Errorf("error reading 'currency': %w", err)
+		}
+		delete(object, "currency")
+	}
+
+	if raw, found := object["customerId"]; found {
+		err = json.Unmarshal(raw, &a.CustomerId)
+		if err != nil {
+			return fmt.Errorf("error reading 'customerId': %w", err)
+		}
+		delete(object, "customerId")
+	}
+
+	if raw, found := object["dueAt"]; found {
+		err = json.Unmarshal(raw, &a.DueAt)
+		if err != nil {
+			return fmt.Errorf("error reading 'dueAt': %w", err)
+		}
+		delete(object, "dueAt")
+	}
+
+	if raw, found := object["fxRate"]; found {
+		err = json.Unmarshal(raw, &a.FxRate)
+		if err != nil {
+			return fmt.Errorf("error reading 'fxRate': %w", err)
+		}
+		delete(object, "fxRate")
+	}
+
+	if raw, found := object["lines"]; found {
+		err = json.Unmarshal(raw, &a.Lines)
+		if err != nil {
+			return fmt.Errorf("error reading 'lines': %w", err)
+		}
+		delete(object, "lines")
+	}
+
+	if raw, found := object["memo"]; found {
+		err = json.Unmarshal(raw, &a.Memo)
+		if err != nil {
+			return fmt.Errorf("error reading 'memo': %w", err)
+		}
+		delete(object, "memo")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for AccountingCreateInvoiceInput to handle AdditionalProperties
+func (a AccountingCreateInvoiceInput) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Currency != nil {
+		object["currency"], err = json.Marshal(a.Currency)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'currency': %w", err)
+		}
+	}
+
+	object["customerId"], err = json.Marshal(a.CustomerId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'customerId': %w", err)
+	}
+
+	if a.DueAt != nil {
+		object["dueAt"], err = json.Marshal(a.DueAt)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'dueAt': %w", err)
+		}
+	}
+
+	if a.FxRate != nil {
+		object["fxRate"], err = json.Marshal(a.FxRate)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'fxRate': %w", err)
+		}
+	}
+
+	if a.Lines != nil {
+		object["lines"], err = json.Marshal(a.Lines)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'lines': %w", err)
+		}
+	}
+
+	if a.Memo != nil {
+		object["memo"], err = json.Marshal(a.Memo)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'memo': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for AccountingCreateInvoiceLine. Returns the specified
+// element and whether it was found
+func (a AccountingCreateInvoiceLine) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for AccountingCreateInvoiceLine
+func (a *AccountingCreateInvoiceLine) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for AccountingCreateInvoiceLine to handle AdditionalProperties
+func (a *AccountingCreateInvoiceLine) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["description"]; found {
+		err = json.Unmarshal(raw, &a.Description)
+		if err != nil {
+			return fmt.Errorf("error reading 'description': %w", err)
+		}
+		delete(object, "description")
+	}
+
+	if raw, found := object["quantity"]; found {
+		err = json.Unmarshal(raw, &a.Quantity)
+		if err != nil {
+			return fmt.Errorf("error reading 'quantity': %w", err)
+		}
+		delete(object, "quantity")
+	}
+
+	if raw, found := object["taxCodeId"]; found {
+		err = json.Unmarshal(raw, &a.TaxCodeId)
+		if err != nil {
+			return fmt.Errorf("error reading 'taxCodeId': %w", err)
+		}
+		delete(object, "taxCodeId")
+	}
+
+	if raw, found := object["taxMinor"]; found {
+		err = json.Unmarshal(raw, &a.TaxMinor)
+		if err != nil {
+			return fmt.Errorf("error reading 'taxMinor': %w", err)
+		}
+		delete(object, "taxMinor")
+	}
+
+	if raw, found := object["unitPriceMinor"]; found {
+		err = json.Unmarshal(raw, &a.UnitPriceMinor)
+		if err != nil {
+			return fmt.Errorf("error reading 'unitPriceMinor': %w", err)
+		}
+		delete(object, "unitPriceMinor")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for AccountingCreateInvoiceLine to handle AdditionalProperties
+func (a AccountingCreateInvoiceLine) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["description"], err = json.Marshal(a.Description)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'description': %w", err)
+	}
+
+	object["quantity"], err = json.Marshal(a.Quantity)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'quantity': %w", err)
+	}
+
+	if a.TaxCodeId != nil {
+		object["taxCodeId"], err = json.Marshal(a.TaxCodeId)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'taxCodeId': %w", err)
+		}
+	}
+
+	if a.TaxMinor != nil {
+		object["taxMinor"], err = json.Marshal(a.TaxMinor)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'taxMinor': %w", err)
+		}
+	}
+
+	object["unitPriceMinor"], err = json.Marshal(a.UnitPriceMinor)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'unitPriceMinor': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for AccountingCreditNoteInput. Returns the specified
+// element and whether it was found
+func (a AccountingCreditNoteInput) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for AccountingCreditNoteInput
+func (a *AccountingCreditNoteInput) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for AccountingCreditNoteInput to handle AdditionalProperties
+func (a *AccountingCreditNoteInput) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["amountMinor"]; found {
+		err = json.Unmarshal(raw, &a.AmountMinor)
+		if err != nil {
+			return fmt.Errorf("error reading 'amountMinor': %w", err)
+		}
+		delete(object, "amountMinor")
+	}
+
+	if raw, found := object["invoiceId"]; found {
+		err = json.Unmarshal(raw, &a.InvoiceId)
+		if err != nil {
+			return fmt.Errorf("error reading 'invoiceId': %w", err)
+		}
+		delete(object, "invoiceId")
+	}
+
+	if raw, found := object["reason"]; found {
+		err = json.Unmarshal(raw, &a.Reason)
+		if err != nil {
+			return fmt.Errorf("error reading 'reason': %w", err)
+		}
+		delete(object, "reason")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for AccountingCreditNoteInput to handle AdditionalProperties
+func (a AccountingCreditNoteInput) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["amountMinor"], err = json.Marshal(a.AmountMinor)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'amountMinor': %w", err)
+	}
+
+	object["invoiceId"], err = json.Marshal(a.InvoiceId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'invoiceId': %w", err)
+	}
+
+	object["reason"], err = json.Marshal(a.Reason)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'reason': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for AccountingCustomerStatementInput. Returns the specified
+// element and whether it was found
+func (a AccountingCustomerStatementInput) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for AccountingCustomerStatementInput
+func (a *AccountingCustomerStatementInput) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for AccountingCustomerStatementInput to handle AdditionalProperties
+func (a *AccountingCustomerStatementInput) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["customerId"]; found {
+		err = json.Unmarshal(raw, &a.CustomerId)
+		if err != nil {
+			return fmt.Errorf("error reading 'customerId': %w", err)
+		}
+		delete(object, "customerId")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for AccountingCustomerStatementInput to handle AdditionalProperties
+func (a AccountingCustomerStatementInput) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["customerId"], err = json.Marshal(a.CustomerId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'customerId': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for AccountingListInvoicesInput. Returns the specified
+// element and whether it was found
+func (a AccountingListInvoicesInput) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for AccountingListInvoicesInput
+func (a *AccountingListInvoicesInput) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for AccountingListInvoicesInput to handle AdditionalProperties
+func (a *AccountingListInvoicesInput) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["customerId"]; found {
+		err = json.Unmarshal(raw, &a.CustomerId)
+		if err != nil {
+			return fmt.Errorf("error reading 'customerId': %w", err)
+		}
+		delete(object, "customerId")
+	}
+
+	if raw, found := object["limit"]; found {
+		err = json.Unmarshal(raw, &a.Limit)
+		if err != nil {
+			return fmt.Errorf("error reading 'limit': %w", err)
+		}
+		delete(object, "limit")
+	}
+
+	if raw, found := object["status"]; found {
+		err = json.Unmarshal(raw, &a.Status)
+		if err != nil {
+			return fmt.Errorf("error reading 'status': %w", err)
+		}
+		delete(object, "status")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for AccountingListInvoicesInput to handle AdditionalProperties
+func (a AccountingListInvoicesInput) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.CustomerId != nil {
+		object["customerId"], err = json.Marshal(a.CustomerId)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'customerId': %w", err)
+		}
+	}
+
+	if a.Limit != nil {
+		object["limit"], err = json.Marshal(a.Limit)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'limit': %w", err)
+		}
+	}
+
+	if a.Status != nil {
+		object["status"], err = json.Marshal(a.Status)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'status': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for AccountingRecordPaymentInput. Returns the specified
+// element and whether it was found
+func (a AccountingRecordPaymentInput) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for AccountingRecordPaymentInput
+func (a *AccountingRecordPaymentInput) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for AccountingRecordPaymentInput to handle AdditionalProperties
+func (a *AccountingRecordPaymentInput) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["amountMinor"]; found {
+		err = json.Unmarshal(raw, &a.AmountMinor)
+		if err != nil {
+			return fmt.Errorf("error reading 'amountMinor': %w", err)
+		}
+		delete(object, "amountMinor")
+	}
+
+	if raw, found := object["invoiceNumber"]; found {
+		err = json.Unmarshal(raw, &a.InvoiceNumber)
+		if err != nil {
+			return fmt.Errorf("error reading 'invoiceNumber': %w", err)
+		}
+		delete(object, "invoiceNumber")
+	}
+
+	if raw, found := object["method"]; found {
+		err = json.Unmarshal(raw, &a.Method)
+		if err != nil {
+			return fmt.Errorf("error reading 'method': %w", err)
+		}
+		delete(object, "method")
+	}
+
+	if raw, found := object["settleFxRate"]; found {
+		err = json.Unmarshal(raw, &a.SettleFxRate)
+		if err != nil {
+			return fmt.Errorf("error reading 'settleFxRate': %w", err)
+		}
+		delete(object, "settleFxRate")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for AccountingRecordPaymentInput to handle AdditionalProperties
+func (a AccountingRecordPaymentInput) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["amountMinor"], err = json.Marshal(a.AmountMinor)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'amountMinor': %w", err)
+	}
+
+	object["invoiceNumber"], err = json.Marshal(a.InvoiceNumber)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'invoiceNumber': %w", err)
+	}
+
+	if a.Method != nil {
+		object["method"], err = json.Marshal(a.Method)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'method': %w", err)
+		}
+	}
+
+	if a.SettleFxRate != nil {
+		object["settleFxRate"], err = json.Marshal(a.SettleFxRate)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'settleFxRate': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for AccountingReversePaymentInput. Returns the specified
+// element and whether it was found
+func (a AccountingReversePaymentInput) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for AccountingReversePaymentInput
+func (a *AccountingReversePaymentInput) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for AccountingReversePaymentInput to handle AdditionalProperties
+func (a *AccountingReversePaymentInput) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["paymentId"]; found {
+		err = json.Unmarshal(raw, &a.PaymentId)
+		if err != nil {
+			return fmt.Errorf("error reading 'paymentId': %w", err)
+		}
+		delete(object, "paymentId")
+	}
+
+	if raw, found := object["reason"]; found {
+		err = json.Unmarshal(raw, &a.Reason)
+		if err != nil {
+			return fmt.Errorf("error reading 'reason': %w", err)
+		}
+		delete(object, "reason")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for AccountingReversePaymentInput to handle AdditionalProperties
+func (a AccountingReversePaymentInput) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["paymentId"], err = json.Marshal(a.PaymentId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'paymentId': %w", err)
+	}
+
+	object["reason"], err = json.Marshal(a.Reason)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'reason': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // Getter for additional properties for OrganizationSoulPatchRequest. Returns the specified
 // element and whether it was found

@@ -107,7 +107,7 @@ export interface paths {
         put?: never;
         /**
          * Execute an authenticated business capability
-         * @description Executes one capability through the governed kernel using the authenticated actor and active organization. Input and output remain open-ended at this generic boundary; capability-specific shapes are checked by runtime validators. Cookie-authenticated requests must include a same-origin Origin header. Bearer-authenticated requests do not use the browser origin check. If X-Organization-ID is provided, it must match the authenticated active organization.
+         * @description Executes one capability through the governed kernel using the authenticated actor and active organization. The six accounts receivable capability inputs below are described as named schemas; other capability inputs and outputs remain open-ended at this generic boundary and are checked by runtime validators. Cookie-authenticated requests must include a same-origin Origin header. Bearer-authenticated requests do not use the browser origin check. If X-Organization-ID is provided, it must match the authenticated active organization.
          */
         post: operations["executeCapability"];
         delete?: never;
@@ -481,20 +481,204 @@ export interface components {
                 occurredAt: string;
             }[];
         };
-        CapabilityExecutionRequest: {
-            /** @description Capability registry identifier, limited to 200 Unicode code points by the server. Capability-specific input is validated by its runtime parser. */
+        /** @description The six named AR capability variants provide concrete input schemas. The generic branch retains compatibility with every other registered capability and future capability identifiers. */
+        CapabilityExecutionRequest: components["schemas"]["AccountingListInvoicesExecutionRequest"] | components["schemas"]["AccountingCreateInvoiceExecutionRequest"] | components["schemas"]["AccountingRecordPaymentExecutionRequest"] | components["schemas"]["AccountingReversePaymentExecutionRequest"] | components["schemas"]["AccountingCreditNoteExecutionRequest"] | components["schemas"]["AccountingCustomerStatementExecutionRequest"] | components["schemas"]["GenericCapabilityExecutionRequest"];
+        GenericCapabilityExecutionRequest: {
+            /** @description Capability identifier other than one of the six AR variants documented here. */
             capabilityId: string;
-            /** @description Arbitrary JSON value. The Go implementation retains the raw JSON bytes for exact capability parsing and hashing. */
+            /** @description Arbitrary JSON value retained by Go for capability-specific parsing and hashing. */
             input: unknown;
             /** @description Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters. */
             intentId?: string | null;
         };
+        AccountingListInvoicesExecutionRequest: {
+            /** @constant */
+            capabilityId: "accounting.listInvoices";
+            input: components["schemas"]["AccountingListInvoicesInput"];
+            intentId?: components["schemas"]["CapabilityExecutionIntentId"];
+        };
+        AccountingCreateInvoiceExecutionRequest: {
+            /** @constant */
+            capabilityId: "accounting.createInvoice";
+            input: components["schemas"]["AccountingCreateInvoiceInput"];
+            intentId?: components["schemas"]["CapabilityExecutionIntentId"];
+        };
+        AccountingRecordPaymentExecutionRequest: {
+            /** @constant */
+            capabilityId: "accounting.recordPayment";
+            input: components["schemas"]["AccountingRecordPaymentInput"];
+            intentId?: components["schemas"]["CapabilityExecutionIntentId"];
+        };
+        AccountingReversePaymentExecutionRequest: {
+            /** @constant */
+            capabilityId: "accounting.reversePayment";
+            input: components["schemas"]["AccountingReversePaymentInput"];
+            intentId?: components["schemas"]["CapabilityExecutionIntentId"];
+        };
+        AccountingCreditNoteExecutionRequest: {
+            /** @constant */
+            capabilityId: "accounting.creditNote";
+            input: components["schemas"]["AccountingCreditNoteInput"];
+            intentId?: components["schemas"]["CapabilityExecutionIntentId"];
+        };
+        AccountingCustomerStatementExecutionRequest: {
+            /** @constant */
+            capabilityId: "accounting.customerStatement";
+            input: components["schemas"]["AccountingCustomerStatementInput"];
+            intentId?: components["schemas"]["CapabilityExecutionIntentId"];
+        };
+        /** @description Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters. */
+        CapabilityExecutionIntentId: string | null;
+        /** @description Unknown properties are ignored by the Go parser. If omitted, limit defaults to 50. */
+        AccountingListInvoicesInput: {
+            /** Format: uuid */
+            customerId?: string;
+            /** @enum {string} */
+            status?: "draft" | "sent" | "paid" | "void";
+            /** @description Defaults to 50 when omitted. */
+            limit?: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description Unknown properties are ignored by the Go parser. At least one line is required. */
+        AccountingCreateInvoiceInput: {
+            /** Format: uuid */
+            customerId: string;
+            memo?: string;
+            lines: components["schemas"]["AccountingCreateInvoiceLine"][];
+            /** @description Currency code. Omitted or empty uses the organization base currency; the server validates supported currencies and currency minor units. */
+            currency?: string;
+            /** @description Optional decimal exchange rate. Omitted or empty uses the latest stored rate; a non-empty value must be a positive decimal with up to 9 integer and 12 fractional digits. */
+            fxRate?: string;
+            /**
+             * Format: date-time
+             * @description Optional UTC ISO datetime. Must end in Z; numeric offsets are rejected.
+             */
+            dueAt?: string;
+        } & {
+            [key: string]: unknown;
+        };
+        AccountingCreateInvoiceLine: ({
+            description: string;
+            quantity: number;
+            unitPriceMinor: number;
+            taxMinor?: number;
+            /** Format: uuid */
+            taxCodeId?: string;
+        } & {
+            [key: string]: unknown;
+        }) & unknown;
+        /** @description Unknown properties are ignored by the Go parser. method defaults to bank_transfer when omitted. */
+        AccountingRecordPaymentInput: {
+            invoiceNumber: number;
+            amountMinor: number;
+            /** @enum {string} */
+            method?: "cash" | "bank_transfer" | "card";
+            /** @description Optional decimal settlement exchange rate. Omitted or empty uses the latest stored rate; a non-empty value must be a positive decimal with up to 9 integer and 12 fractional digits. */
+            settleFxRate?: string;
+        } & {
+            [key: string]: unknown;
+        };
+        AccountingReversePaymentInput: {
+            /** Format: uuid */
+            paymentId: string;
+            /** @description The server requires 3 to 500 UTF-16 code units. */
+            reason: string;
+        } & {
+            [key: string]: unknown;
+        };
+        AccountingCreditNoteInput: {
+            /** Format: uuid */
+            invoiceId: string;
+            amountMinor: number;
+            /** @description The server requires 3 to 500 UTF-16 code units. */
+            reason: string;
+        } & {
+            [key: string]: unknown;
+        };
+        AccountingCustomerStatementInput: {
+            /** Format: uuid */
+            customerId: string;
+        } & {
+            [key: string]: unknown;
+        };
         CapabilityExecutionSuccess: {
             /** @constant */
             ok: true;
-            /** @description Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients. */
-            data: unknown;
+            /** @description Capability result. The six AR result forms are described below; results from all other capabilities remain arbitrary JSON. Raw JSON avoids rounding large integer values in Go clients. */
+            data: components["schemas"]["AccountingListInvoicesOutput"] | components["schemas"]["AccountingCreateInvoiceOutput"] | components["schemas"]["AccountingRecordPaymentOutput"] | components["schemas"]["AccountingReversePaymentOutput"] | components["schemas"]["AccountingCreditNoteOutput"] | components["schemas"]["AccountingCustomerStatementOutput"] | unknown;
         };
+        AccountingListInvoicesOutput: {
+            invoices: components["schemas"]["AccountingInvoiceRow"][];
+        };
+        AccountingInvoiceRow: {
+            /** Format: uuid */
+            id: string;
+            number: number;
+            /** Format: uuid */
+            customerId: string;
+            customerName: string;
+            /** @enum {string} */
+            status: "draft" | "sent" | "paid" | "void";
+            currency: string;
+            totalMinor: components["schemas"]["AccountingSafeInteger"];
+            paidMinor: components["schemas"]["AccountingSafeInteger"];
+            creditedMinor: components["schemas"]["AccountingSafeInteger"];
+            outstandingMinor: components["schemas"]["AccountingSafeInteger"];
+            /** Format: date-time */
+            issuedAt: string | null;
+        };
+        AccountingCreateInvoiceOutput: {
+            /** Format: uuid */
+            invoiceId: string;
+            invoiceNumber: number;
+            totalMinor: components["schemas"]["AccountingSafeInteger"];
+            /** Format: uuid */
+            entryId: string;
+            currency: string;
+        };
+        AccountingRecordPaymentOutput: {
+            /** Format: uuid */
+            paymentId: string;
+            /** Format: uuid */
+            entryId: string;
+            fullyPaid: boolean;
+            gainLossMinor?: number;
+            /** Format: uuid */
+            baseEntryId?: string;
+            /** Format: uuid */
+            foreignEntryId?: string;
+        };
+        AccountingReversePaymentOutput: {
+            reversalEntryIds: string[];
+            refundedMinor: components["schemas"]["AccountingSafeInteger"];
+            invoiceNumber: number;
+            outstandingMinor: components["schemas"]["AccountingSafeInteger"];
+        };
+        AccountingCreditNoteOutput: {
+            /** Format: uuid */
+            entryId: string;
+            creditedMinor: components["schemas"]["AccountingSafeInteger"];
+            invoiceBalanceMinor: components["schemas"]["AccountingSafeInteger"];
+        };
+        AccountingCustomerStatementOutput: {
+            currencies: components["schemas"]["AccountingCustomerStatementCurrency"][];
+        };
+        AccountingCustomerStatementCurrency: {
+            currency: string;
+            openingBalanceMinor: components["schemas"]["AccountingSafeInteger"];
+            closingBalanceMinor: components["schemas"]["AccountingSafeInteger"];
+            rows: components["schemas"]["AccountingCustomerStatementRow"][];
+        };
+        AccountingCustomerStatementRow: {
+            /** Format: date-time */
+            date: string;
+            kind: string;
+            ref: string;
+            amountMinor: components["schemas"]["AccountingSafeInteger"];
+            balanceMinor: components["schemas"]["AccountingSafeInteger"];
+        };
+        AccountingSafeInteger: number;
         CapabilityExecutionPending: {
             /** @constant */
             ok: false;

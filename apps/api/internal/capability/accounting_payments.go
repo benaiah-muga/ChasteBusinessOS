@@ -68,6 +68,10 @@ func ParseRecordPaymentInput(raw json.RawMessage) (RecordPaymentInput, error) {
 	}
 	if input.SettleFXRate, err = optionalString(fields, "settleFxRate"); err != nil {
 		return RecordPaymentInput{}, err
+	} else if input.SettleFXRate != nil && *input.SettleFXRate != "" {
+		if _, err := parseFXRateDecimal(*input.SettleFXRate); err != nil {
+			return RecordPaymentInput{}, errors.New("settleFxRate must be a positive decimal with up to 9 integer and 12 fractional digits")
+		}
 	}
 	return input, nil
 }
@@ -273,7 +277,7 @@ func settleFXRate(ctx context.Context, tx pgx.Tx, orgID, base, quote string, exp
 	if explicit != nil && *explicit != "" {
 		rate, err := parseFXRateDecimal(*explicit)
 		if err != nil {
-			return nil, nil
+			return nil, err
 		}
 		return rate, nil
 	}

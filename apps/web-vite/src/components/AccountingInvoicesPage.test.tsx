@@ -7,7 +7,7 @@ const invoice = {
   number: 1042,
   customerId: "customer-1",
   customerName: "Kampala Coffee",
-  status: "partially_paid",
+  status: "sent",
   currency: "UGX",
   totalMinor: 125_000,
   paidMinor: 25_000,
@@ -42,7 +42,7 @@ describe("Vite Accounting invoices preview", () => {
     expect(await screen.findByRole("heading", { name: "Accounting invoices" })).not.toBeNull();
     expect(screen.getByText("Kampala Coffee")).not.toBeNull();
     expect(screen.getByText("#1042")).not.toBeNull();
-    expect(screen.getByText("Partially Paid")).not.toBeNull();
+    expect(screen.getByText("Sent")).not.toBeNull();
     expect(screen.getAllByText(/UGX/)).toHaveLength(3);
     expect(screen.getByText((value) => value.includes("100,000"))).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open full Accounting workspace" }).getAttribute("href")).toBe("/accounting?tab=receivables");

@@ -5124,3 +5124,25 @@ new owners and the manifest shows zero legacy runtime paths.
      path returns 405 with `Allow: POST`; suffix paths remain on the base
      router. Route ownership remains Go with parity pending until agent-browser
      exercises an agent-enabled conversation and an `@agent` mention.
+
+480. (Contract and implementation added; focused Go and Vite verification
+     passed) The public business OpenAPI contract now describes the six
+     accounts receivable capability execution requests and outputs:
+     accounting.listInvoices, accounting.createInvoice,
+     accounting.recordPayment, accounting.reversePayment,
+     accounting.creditNote, and accounting.customerStatement. Inputs declare
+     strict bounds, ISO currency and date shapes, and safe-integer money
+     fields; outputs declare the invoice status enum (draft, sent, paid,
+     void) and per-action result fields. Go and Vite consume generated
+     request, result, and envelope models while retaining runtime validation;
+     Vite rejects invoice rows outside the contract status enum. Contract
+     drift, Go parser and handler tests, Vite typecheck, and the focused
+     accounting API and page suites pass.
+481. (Reviewer notes registered; not yet scheduled) The AR contract review
+     flagged three follow-ups outside the contract closure: invoices.status
+     has no database check constraint matching the draft, sent, paid, void
+     enum; accounting.customerStatement output openingBalanceMinor is always
+     0; and recordPayment's foreign-currency path computes fullyPaid without
+     credited minor while the base path includes it, so the two paths can
+     disagree about whether an invoice is fully settled (prioritize this as
+     data correctness before scheduling the other two).

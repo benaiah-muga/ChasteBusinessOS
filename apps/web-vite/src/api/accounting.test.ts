@@ -43,7 +43,7 @@ const invoice = {
   number: 1042,
   customerId: "customer-1",
   customerName: "Kampala Coffee",
-  status: "partially_paid",
+  status: "sent",
   currency: "USD",
   totalMinor: 12_500,
   paidMinor: 2_500,

@@ -287,6 +287,8 @@ func ParseListInvoicesInput(raw json.RawMessage) (ListInvoicesInput, error) {
 	var input ListInvoicesInput
 	if input.CustomerID, err = optionalString(fields, "customerId"); err != nil {
 		return ListInvoicesInput{}, err
+	} else if input.CustomerID != nil && !isZodUUID(*input.CustomerID) {
+		return ListInvoicesInput{}, errors.New("customerId must be a UUID")
 	}
 	if input.Status, err = optionalString(fields, "status"); err != nil {
 		return ListInvoicesInput{}, err

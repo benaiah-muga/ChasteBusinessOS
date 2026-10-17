@@ -48,6 +48,8 @@ func TestParseCreateInvoiceInputRejectsInvalidContractValues(t *testing.T) {
 		{name: "negative manual tax", json: `{"customerId":"` + validCustomer + `","lines":[{"description":"x","quantity":1,"unitPriceMinor":1,"taxMinor":-1}]}`},
 		{name: "tax code and manual tax", json: `{"customerId":"` + validCustomer + `","lines":[{"description":"x","quantity":1,"unitPriceMinor":1,"taxMinor":0,"taxCodeId":"` + validTaxCode + `"}]}`},
 		{name: "offset due date", json: `{"customerId":"` + validCustomer + `","lines":[{"description":"x","quantity":1,"unitPriceMinor":1}],"dueAt":"2026-09-27T10:30:00+03:00"}`},
+		{name: "invalid fx rate", json: `{"customerId":"` + validCustomer + `","fxRate":"abc","lines":[{"description":"x","quantity":1,"unitPriceMinor":1}]}`},
+		{name: "zero fx rate", json: `{"customerId":"` + validCustomer + `","currency":"EUR","fxRate":"0","lines":[{"description":"x","quantity":1,"unitPriceMinor":1}]}`},
 		{name: "trailing json", json: `{"customerId":"` + validCustomer + `","lines":[{"description":"x","quantity":1,"unitPriceMinor":1}]} {}`},
 	}
 	for _, test := range cases {
@@ -56,6 +58,17 @@ func TestParseCreateInvoiceInputRejectsInvalidContractValues(t *testing.T) {
 				t.Fatalf("ParseCreateInvoiceInput(%s) succeeded, want validation error", test.json)
 			}
 		})
+	}
+}
+
+func TestParseCreateInvoiceInputKeepsLegacyEmptyCurrencyAndRateForDefaulting(t *testing.T) {
+	validCustomer := "01234567-89ab-4cde-8fab-0123456789ab"
+	input, err := ParseCreateInvoiceInput(json.RawMessage(`{"customerId":"` + validCustomer + `","currency":"","fxRate":"","lines":[{"description":"x","quantity":1,"unitPriceMinor":1}]}`))
+	if err != nil {
+		t.Fatalf("ParseCreateInvoiceInput(legacy empty currency and fxRate) error = %v", err)
+	}
+	if input.Currency == nil || *input.Currency != "" || input.FXRate == nil || *input.FXRate != "" {
+		t.Fatalf("ParseCreateInvoiceInput(legacy empty currency and fxRate) = %+v, want empty strings preserved for base-currency and latest-rate defaulting", input)
 	}
 }
 

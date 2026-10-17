@@ -56,7 +56,7 @@ const openInvoice: AccountingInvoice = {
   number: 1042,
   customerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   customerName: "Kampala Coffee",
-  status: "partially_paid",
+  status: "sent",
   currency: "USD",
   totalMinor: 12_500,
   paidMinor: 2_500,

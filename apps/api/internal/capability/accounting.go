@@ -81,6 +81,10 @@ func ParseCreateInvoiceInput(raw json.RawMessage) (CreateInvoiceInput, error) {
 	}
 	if input.FXRate, err = optionalString(fields, "fxRate"); err != nil {
 		return CreateInvoiceInput{}, err
+	} else if input.FXRate != nil && *input.FXRate != "" {
+		if _, err := parseFXRateDecimal(*input.FXRate); err != nil {
+			return CreateInvoiceInput{}, errors.New("fxRate must be a positive decimal with up to 9 integer and 12 fractional digits")
+		}
 	}
 	if input.DueAt, err = optionalString(fields, "dueAt"); err != nil {
 		return CreateInvoiceInput{}, err
@@ -291,7 +295,10 @@ func createInvoice(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityC
 		}
 		if *input.Currency != baseCurrency {
 			if input.FXRate != nil && *input.FXRate != "" {
-				invoiceRate, _ = parseFXRateDecimal(*input.FXRate)
+				invoiceRate, err = parseFXRateDecimal(*input.FXRate)
+				if err != nil {
+					return out, err
+				}
 			} else {
 				invoiceRate, err = latestFXRate(ctx, tx, claims.OrganizationID, baseCurrency, *input.Currency, now)
 				if err != nil {

@@ -53,6 +53,7 @@ func TestAccountingReportsParsersMirrorZodContracts(t *testing.T) {
 		`{"limit":50.5}`,
 		`{"limit":null}`,
 		`{"customerId":null}`,
+		`{"customerId":"not-a-uuid"}`,
 	} {
 		if _, err := ParseListInvoicesInput(json.RawMessage(bad)); err == nil {
 			t.Errorf("ParseListInvoicesInput accepted %s", bad)

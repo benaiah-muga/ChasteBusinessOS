@@ -23,11 +23,19 @@ func TestAuthFlowIsCompatibleWithRuntimeBetterAuthSchema(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pool, err := pgxpool.New(ctx, runtimeURL)
+	poolConfig, err := pgxpool.ParseConfig(runtimeURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poolConfig.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	if err := createAuthEmailOutboxShadow(ctx, t, pool); err != nil {
+		t.Fatalf("isolate auth outbox from running workers: %v", err)
+	}
 	secret := "better-auth-compatibility-test-secret-0123456789"
 	recoveryLink := make(chan string, 4)
 	verificationLinks := make(chan string, 4)
