@@ -141,6 +141,12 @@ tables in `packages/db/src/schema/index.ts:287-317,3176-3206`.
   covers lifecycle, version-pinned composition identity, same-input replay,
   and changed-input rejection. `scripts/gates/durable-po-run.ts:159-224`
   exercises approval, linked job, receipt replay, and one committed step.
+  `apps/api/internal/jobs/durable_purchase_order_run_integration_test.go`
+  proves the Go path end to end: a real policy-held purchase order approval,
+  a composition approval decided through `ApprovalDecider.DecideForSession`,
+  the production dispatcher binding the stored canonical approval payload,
+  and two runtime worker passes that commit both steps, one action receipt,
+  the system audit event, and the executed approval.
 - **Open questions:** Decide whether initial durable run/step transition
   failures should be caught inside the heartbeat cleanup scope. Decide whether
   simultaneous first writes to one run step must return the same checkpoint
@@ -197,6 +203,11 @@ table shape `packages/db/src/schema/index.ts:2776-2809`.
   covers provider-received-before-crash, no automatic resend, late fencing,
   reconciliation, and duplicate enqueue convergence. No dedicated demo script
   that drains this worker was found.
+  `apps/api/internal/outbox/marketing_email_worker_smtp_integration_test.go`
+  proves the Go marketing email worker delivering to an in-process STARTTLS
+  SMTP sink through the runtime claim path, the receipt message id, the
+  dispatch-time eligibility recheck, and the fenced acknowledgement that
+  leaves a stale worker unable to complete the row.
 - **Go parity:** Keep the outbox rows, payload validation, dedupe key,
   provider operation ID, lease/fencing, provider receipt, recipient recheck,
   and conservative unknown state. Reconciliation must remain org-bound. Preserve
