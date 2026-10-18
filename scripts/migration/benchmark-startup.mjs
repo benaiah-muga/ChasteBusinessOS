@@ -10,7 +10,6 @@ import { fileURLToPath, URL } from "node:url";
 
 const ROOT = process.cwd();
 const TARGETS = [
-  { name: "next", command: "pnpm dev:legacy", args: ["run", "dev:legacy"], url: "http://localhost:3001" },
   { name: "vite", command: "pnpm dev:vite", args: ["run", "dev:vite"], url: "http://localhost:3000" },
 ];
 const DEFAULT_RUNS = 3;
@@ -185,7 +184,7 @@ async function main() {
     },
     protocol: {
       runsPerServer: runs,
-      order: "Next then Vite on odd runs, Vite then Next on even runs",
+      order: "Vite on every run",
       cachePolicy: "shared working tree and compiler caches, left warm between samples",
       measurement: "process spawn to first TCP listener connection on the frontend port; no HTTP or browser check",
       commands: Object.fromEntries(TARGETS.map(({ name, command, url }) => [name, { command, url }])),

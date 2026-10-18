@@ -8,7 +8,6 @@ const ROOT = process.cwd();
 const DEFAULT_RUNS = 10;
 const DEFAULT_OUTPUT = "docs/migration/benchmarks/phase-0-builds.json";
 const BUILD_COMMANDS = [
-  { name: "next", command: "pnpm", args: ["--filter", "web", "build"] },
   { name: "vite", command: "pnpm", args: ["--filter", "@chaste/web-vite", "build"] },
   {
     name: "go",
@@ -165,7 +164,7 @@ function main() {
       },
       protocol: {
         runsPerBuild: runs,
-        order: "Next, Vite, then Go, sequentially per run",
+        order: "Vite, then Go, sequentially per run",
         cachePolicy: "shared working-tree dependency and compiler caches, left warm between samples",
         metrics: "GNU time wall clock and maximum resident set size for each full command",
         commands: Object.fromEntries(selected.map(({ name, command, args }) => [name, [command, ...args]])),

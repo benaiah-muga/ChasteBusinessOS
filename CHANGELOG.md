@@ -139,7 +139,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - The migration route census now records onboarding state reads and updates as Go-owned after authenticated Vite runtime proof.
 - CI now requires the focused Vite and Go verification command while retaining the migration-era workspace checks and live TypeScript proofs; the Next.js production build is no longer required.
 - Vite Messaging refreshes the latest thread page and advances its read cursor only while the reader is near the bottom. Search-around results and older pages remain in place while reading history.
-- The default `pnpm dev` command now starts only the React/Vite app; use `pnpm dev:legacy` explicitly for temporary Next compatibility work.
+- The default `pnpm dev` command starts only the React/Vite app; the temporary `dev:legacy` Next compatibility command no longer exists.
 - The Vite development API proxy now sends unclaimed `/api` paths to Go, where unsupported routes fail with 404 instead of reaching the legacy server.
 - Vite keeps unknown page URLs in its own not-found page instead of redirecting them to the legacy app.
 - Vite Documents capability writes now pin the requested organization in the Go request, and malformed messaging presence or attachment paths stay owned by Go instead of reaching the legacy API proxy.
@@ -2430,6 +2430,13 @@ The full v1 changelog is preserved at the bottom of this file.
 - Mobile app sections use visible, horizontally scrollable tabs again, and narrow app headers wrap action buttons instead of overflowing the page.
 - CRM customer filters and create/import actions fit 320px screens without horizontal scrolling, and saved-view creation stays closed until requested.
 - Empty Products & Services catalogs point to add and spreadsheet-import actions instead of reporting stock as healthy.
+
+### Removed
+
+- The legacy Next.js app and its server-only TypeScript runtime are removed: `apps/web` (routes, server actions, kernel, instrumentation, tests) plus the scripts that drove it (`scripts/probe/*`, `scripts/agent-pilot-eval.ts`, `scripts/test-groq-agents.ts`, `scripts/tool-list-probe.ts`, `scripts/verify-documents-templates.mjs`) and the already-unwired `scripts/worker.ts` with its durable-run pilot gates (`scripts/gates/durable-po-run.ts`, `scripts/gates/supervised-pilot.ts`). Vite and the Go API are now the only runtime; no command path starts a Next server or reaches port 3001.
+- `packages/harness` and the `dev:legacy`, `bench:agents`, `migration:session-parity`, and `migration:permission-parity` package scripts are removed. Demo and node scripts now compile against the root `tsconfig.scripts.json`.
+- The Go internal capability contract no longer emits a TypeScript model file; the retired app was its only consumer.
+- The migration route, server-action, capability, and continuity checkers no longer read deleted sources: they validate against checked-in frozen censuses (`docs/migration/retired-route-census.json`, `retired-server-action-census.json`, `retired-capability-census.json`, `retired-source-census.json`), so the recorded route, action, capability, and citation inventories stay stable without the Next project.
 
 ## [0.5.0] - 2026-09-09
 

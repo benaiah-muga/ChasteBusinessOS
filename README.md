@@ -82,8 +82,6 @@ pnpm db:provision-runtime
 pnpm dev                    # React/Vite app on :3000
 # In another terminal, run the Go API on :8080:
 pnpm dev:api
-# Run the temporary Next compatibility app only when working on an unmigrated legacy flow:
-# pnpm dev:legacy
 # In another terminal, run the Go capability/routine and outbox workers:
 pnpm worker
 ```
@@ -174,12 +172,11 @@ Vite median in this sample:
 
 | Dev server | Command | Median process-spawn to TCP-listener time |
 | --- | --- | ---: |
-| Next.js compatibility app | `pnpm dev:legacy` | 3.491 s |
 | React + Vite app | `pnpm dev:vite` | 2.767 s |
 
-That is about 21% lower for Vite in this three-run sample. The previous sample
-recorded 4.459 s for Vite and 4.341 s for Next, so startup results vary between
-runs. This measurement records when each server first accepts a TCP connection,
+The Next.js compatibility app those samples compared against was retired in the
+React/Go migration, so the benchmark now measures the Vite server alone.
+This measurement records when the server first accepts a TCP connection,
 not when a route finishes rendering or becomes usable in a browser. The full
 samples, method, and machine details are in the
 [startup benchmark report](docs/migration/benchmarks/phase-4-startup.json) for

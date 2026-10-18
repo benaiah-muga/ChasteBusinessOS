@@ -3,7 +3,6 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
-      "@/*": ["../../apps/web/src/*"],
       "@chaste/db": ["../../packages/db/src/index.ts"],
       "@chaste/kernel": ["../../packages/kernel/src/index.ts"]
     }

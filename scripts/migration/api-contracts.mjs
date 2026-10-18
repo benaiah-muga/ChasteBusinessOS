@@ -19,12 +19,10 @@ const contracts = [
   {
     name: "internal",
     specPath: join(root, "contracts/openapi/go-internal-v1.yaml"),
-    tsOutputPath: join(root, "apps/web/src/generated/go-internal-v1.ts"),
     goOutputPath: join(apiDir, "internal/apicontract/go_internal_v1.gen.go"),
     configPath: join(apiDir, "oapi-codegen-policy.yaml"),
     goInputPath: "../../contracts/openapi/go-internal-v1.yaml",
     outputLine: "output: internal/apicontract/go_internal_v1.gen.go",
-    temporaryTS: "go-internal-v1.ts",
     temporaryGo: "go_internal_v1.gen.go",
   },
   {
@@ -95,21 +93,24 @@ function generateGo(contract, configOutput) {
 const temporaryDir = mkdtempSync(join(tmpdir(), "chaste-api-contracts-"));
 try {
   for (const contract of contracts) {
-    const temporaryTS = join(temporaryDir, contract.temporaryTS);
     const temporaryGo = join(temporaryDir, contract.temporaryGo);
-    mkdirSync(dirname(contract.tsOutputPath), { recursive: true });
     mkdirSync(dirname(contract.goOutputPath), { recursive: true });
-    generateTypeScript(
-      contract,
-      checkOnly ? temporaryTS : contract.tsOutputPath,
-    );
+    let temporaryTS = null;
+    if (contract.tsOutputPath) {
+      temporaryTS = join(temporaryDir, contract.temporaryTS);
+      mkdirSync(dirname(contract.tsOutputPath), { recursive: true });
+      generateTypeScript(
+        contract,
+        checkOnly ? temporaryTS : contract.tsOutputPath,
+      );
+    }
     generateGo(contract, checkOnly ? temporaryGo : contract.goOutputPath);
 
     if (checkOnly) {
-      const outputs = [
-        ["TypeScript", contract.tsOutputPath, temporaryTS],
-        ["Go", contract.goOutputPath, temporaryGo],
-      ];
+      const outputs = [["Go", contract.goOutputPath, temporaryGo]];
+      if (contract.tsOutputPath) {
+        outputs.unshift(["TypeScript", contract.tsOutputPath, temporaryTS]);
+      }
       const stale = outputs.filter(([, committedPath, generatedPath]) => {
         try {
           return (

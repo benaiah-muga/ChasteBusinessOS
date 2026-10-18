@@ -1,6 +1,6 @@
 # React and Go migration plan
 
-Status: implementation underway, production routing remains on the legacy owner until parity passes.
+Status: G9 complete. The Next.js app is retired; Vite + Go are the only runtime. Migration censuses that described the retired Next surface are frozen in docs/migration/retired-*.json.
 Date: 2026-09-27. Decision: [ADR 0070](adr/0070-react-vite-and-go-migration.md).
 
 ## Goal and finish line

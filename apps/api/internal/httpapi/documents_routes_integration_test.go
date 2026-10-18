@@ -220,6 +220,12 @@ func TestDocumentsRoutesRuntimeRoleRLSAndTenantDenial(t *testing.T) {
 		fixture.orgA, ingestID).Scan(&jobCount); err != nil || jobCount < 1 {
 		t.Fatalf("parse job rows=%d err=%v", jobCount, err)
 	}
+	if _, err := owner.Exec(ctx, `
+		DELETE FROM jobs
+		WHERE org_id=$1::uuid AND type='documents.parseDocument' AND payload->>'documentId'=$2`,
+		fixture.orgA, ingestID); err != nil {
+		t.Fatalf("clean up parse job rows: %v", err)
+	}
 
 	sync := do(ingest, http.MethodPost, "/api/documents", fixture.orgA, fixture.cookie, `{"action":"parse","documentId":"`+ingestID+`","sync":true}`, true)
 	if sync.Code != http.StatusOK || !strings.Contains(sync.Body.String(), `"status":"parsed"`) {

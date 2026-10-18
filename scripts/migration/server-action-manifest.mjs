@@ -8,6 +8,7 @@ const ts = require("typescript");
 const root = process.cwd();
 const sourceRoot = join(root, "apps/web/src");
 const manifestPath = join(root, "docs/migration/server-actions.json");
+const censusPath = join(root, "docs/migration/retired-server-action-census.json");
 
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -29,48 +30,79 @@ function isAsyncInitializer(node) {
   return false;
 }
 
-const actionFiles = walk(sourceRoot).filter((file) => /\.(?:tsx?|jsx?|mjs|cjs)$/.test(basename(file)));
-const actions = [];
+function collectActions(actionFiles) {
+  const found = [];
+  for (const file of actionFiles) {
+    const source = readFileSync(file, "utf8");
+    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    let hasServerDirective = false;
+    for (const statement of tree.statements) {
+      if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) break;
+      if (statement.expression.text === "use server") hasServerDirective = true;
+    }
+    if (!hasServerDirective) continue;
 
-for (const file of actionFiles) {
-  const source = readFileSync(file, "utf8");
-  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  let hasServerDirective = false;
-  for (const statement of tree.statements) {
-    if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) break;
-    if (statement.expression.text === "use server") hasServerDirective = true;
-  }
-  if (!hasServerDirective) continue;
-
-  for (const statement of tree.statements) {
-    let name;
-    if (ts.isFunctionDeclaration(statement) && isExported(statement) && isAsync(statement) && statement.name) {
-      name = statement.name.text;
-    } else if (ts.isVariableStatement(statement) && isExported(statement)) {
-      for (const declaration of statement.declarationList.declarations) {
-        if (ts.isIdentifier(declaration.name) && declaration.initializer && isAsyncInitializer(declaration.initializer)) {
-          actions.push({
-            name: declaration.name.text,
-            source: relative(root, file).split(sep).join("/"),
-            line: tree.getLineAndCharacterOfPosition(declaration.getStart(tree)).line + 1,
-            owner: "legacy",
-            parity: "pending",
-          });
+    for (const statement of tree.statements) {
+      let name;
+      if (ts.isFunctionDeclaration(statement) && isExported(statement) && isAsync(statement) && statement.name) {
+        name = statement.name.text;
+      } else if (ts.isVariableStatement(statement) && isExported(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+          if (ts.isIdentifier(declaration.name) && declaration.initializer && isAsyncInitializer(declaration.initializer)) {
+            found.push({
+              name: declaration.name.text,
+              source: relative(root, file).split(sep).join("/"),
+              line: tree.getLineAndCharacterOfPosition(declaration.getStart(tree)).line + 1,
+              owner: "legacy",
+              parity: "pending",
+            });
+          }
         }
+        continue;
       }
-      continue;
-    }
 
-    if (name) {
-      actions.push({
-        name,
-        source: relative(root, file).split(sep).join("/"),
-        line: tree.getLineAndCharacterOfPosition(statement.getStart(tree)).line + 1,
-        owner: "legacy",
-        parity: "pending",
-      });
+      if (name) {
+        found.push({
+          name,
+          source: relative(root, file).split(sep).join("/"),
+          line: tree.getLineAndCharacterOfPosition(statement.getStart(tree)).line + 1,
+          owner: "legacy",
+          parity: "pending",
+        });
+      }
     }
   }
+  return found;
+}
+
+const discoveryEnabled = existsSync(sourceRoot) && !process.argv.includes("--frozen");
+const actionFiles = discoveryEnabled
+  ? walk(sourceRoot).filter((file) => /\.(?:tsx?|jsx?|mjs|cjs)$/.test(basename(file)))
+  : [];
+const actions = discoveryEnabled ? collectActions(actionFiles) : [];
+if (discoveryEnabled && process.argv.includes("--freeze-census")) {
+  writeFileSync(
+    censusPath,
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        capturedFrom: "apps/web/src",
+        actions,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+if (!discoveryEnabled) {
+  if (!existsSync(censusPath)) {
+    throw new Error("apps/web/src is retired and docs/migration/retired-server-action-census.json is missing.");
+  }
+  const census = JSON.parse(readFileSync(censusPath, "utf8"));
+  if (census.schemaVersion !== 1 || !Array.isArray(census.actions)) {
+    throw new Error("Retired server action census must use schemaVersion 1 with an actions array.");
+  }
+  actions.push(...census.actions);
 }
 
 actions.sort((left, right) => left.source.localeCompare(right.source) || left.name.localeCompare(right.name));

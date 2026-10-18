@@ -10,6 +10,7 @@ const root = process.cwd();
 const appRoot = join(root, "apps/web/src/app");
 const manifestPath = join(root, "docs/migration/route-ownership.json");
 const overridePath = join(root, "docs/migration/route-ownership-overrides.json");
+const censusPath = join(root, "docs/migration/retired-route-census.json");
 const methods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "CONNECT", "TRACE"]);
 const methodOrder = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"];
 
@@ -59,26 +60,71 @@ function pageRoutePath(file) {
   return segments.length === 0 ? "/" : `/${segments.join("/")}`;
 }
 
-const routeFiles = walk(appRoot).filter((file) => /^route\.(?:tsx|ts|jsx|js)$/.test(basename(file)));
-const pageFiles = walk(appRoot).filter((file) => /^page\.(?:tsx|ts|jsx|js)$/.test(basename(file)));
-const entries = [];
-
-for (const file of routeFiles) {
-  const path = appRoutePath(dirname(file));
-  const source = relative(root, file).split(sep).join("/");
-  for (const method of exportedMethods(file)) {
-    entries.push({ kind: "api", path, method, source, owner: "legacy", parity: "pending" });
+function buildCensusEntries(routeFiles, pageFiles) {
+  const built = [];
+  for (const file of routeFiles) {
+    const path = appRoutePath(dirname(file));
+    const source = relative(root, file).split(sep).join("/");
+    for (const method of exportedMethods(file)) {
+      built.push({ kind: "api", path, method, source, owner: "legacy", parity: "pending" });
+    }
   }
+  for (const file of pageFiles) {
+    built.push({
+      kind: "page",
+      path: pageRoutePath(file),
+      source: relative(root, file).split(sep).join("/"),
+      owner: "legacy",
+      parity: "pending",
+    });
+  }
+  return built;
 }
 
-for (const file of pageFiles) {
-  entries.push({
-    kind: "page",
-    path: pageRoutePath(file),
-    source: relative(root, file).split(sep).join("/"),
-    owner: "legacy",
-    parity: "pending",
-  });
+const appWalkFiles = existsSync(appRoot) ? walk(appRoot) : [];
+const hasRouteSource = appWalkFiles.length > 0 && !process.argv.includes("--frozen");
+let routeFileCount;
+let pageFileCount;
+let entries;
+
+if (hasRouteSource) {
+  const routeFiles = appWalkFiles.filter((file) => /^route\.(?:tsx|ts|jsx|js)$/.test(basename(file)));
+  const pageFiles = appWalkFiles.filter((file) => /^page\.(?:tsx|ts|jsx|js)$/.test(basename(file)));
+  routeFileCount = routeFiles.length;
+  pageFileCount = pageFiles.length;
+  entries = buildCensusEntries(routeFiles, pageFiles);
+  if (process.argv.includes("--freeze-census")) {
+    writeFileSync(
+      censusPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          capturedFrom: "apps/web/src/app",
+          routeFiles: routeFiles.map((file) => relative(root, file).split(sep).join("/")),
+          pageFiles: pageFiles.map((file) => relative(root, file).split(sep).join("/")),
+          entries,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  }
+} else {
+  if (!existsSync(censusPath)) {
+    throw new Error("apps/web/src/app is retired and docs/migration/retired-route-census.json is missing.");
+  }
+  const census = JSON.parse(readFileSync(censusPath, "utf8"));
+  if (
+    census.schemaVersion !== 1 ||
+    !Array.isArray(census.routeFiles) ||
+    !Array.isArray(census.pageFiles) ||
+    !Array.isArray(census.entries)
+  ) {
+    throw new Error("Retired route census must use schemaVersion 1 with routeFiles, pageFiles and entries arrays.");
+  }
+  routeFileCount = census.routeFiles.length;
+  pageFileCount = census.pageFiles.length;
+  entries = census.entries;
 }
 
 if (existsSync(overridePath)) {
@@ -155,5 +201,5 @@ if (process.argv.includes("--check")) {
 }
 
 process.stdout.write(
-  `Routes: ${routeFiles.length} files, ${entries.filter((entry) => entry.kind === "api").length} methods, ${pageFiles.length} pages.\n`,
+  `Routes: ${routeFileCount} files, ${entries.filter((entry) => entry.kind === "api").length} methods, ${pageFileCount} pages.\n`,
 );

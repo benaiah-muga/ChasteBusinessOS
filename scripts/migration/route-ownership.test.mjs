@@ -1,10 +1,41 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import process from "node:process";
 import test from "node:test";
 import { allowsPendingAuthOwner } from "./route-ownership-policy.mjs";
 
 const manifest = JSON.parse(readFileSync("docs/migration/route-ownership.json", "utf8"));
 const overrides = JSON.parse(readFileSync("docs/migration/route-ownership-overrides.json", "utf8"));
+const census = JSON.parse(readFileSync("docs/migration/retired-route-census.json", "utf8"));
+
+test("frozen route census reproduces the live manifest byte-for-byte", () => {
+  const output = execFileSync(process.execPath, ["scripts/migration/route-ownership.mjs", "--check", "--frozen"], {
+    encoding: "utf8",
+  });
+  assert.match(output, /Routes: 94 files, 165 methods, 30 pages\./);
+});
+
+test("retired route census keeps every source entry the manifest cites", () => {
+  assert.equal(census.schemaVersion, 1);
+  assert.equal(census.routeFiles.length, 94);
+  assert.equal(census.pageFiles.length, 30);
+  const censusKeys = new Set(census.entries.map((entry) => `${entry.kind}:${entry.path}:${entry.method ?? ""}`));
+  for (const entry of manifest.entries) {
+    if (!entry.source.startsWith("apps/web/")) continue;
+    assert.ok(
+      censusKeys.has(`${entry.kind}:${entry.path}:${entry.method ?? ""}`),
+      `manifest entry ${entry.kind}:${entry.path}:${entry.method ?? ""} is missing from the frozen census`,
+    );
+  }
+});
+
+test("retired route census freezes the full legacy surface", () => {
+  assert.equal(census.entries.filter((entry) => entry.kind === "api").length, 158);
+  assert.equal(census.entries.filter((entry) => entry.kind === "page").length, 30);
+  assert.ok(census.entries.every((entry) => entry.owner === "legacy" && entry.parity === "pending"));
+  assert.ok(census.entries.every((entry) => entry.source.startsWith("apps/web/src/app/")));
+});
 
 test("Go-owned auth namespace stays distinct from pending Better Auth parity", () => {
   const authRoutes = manifest.entries.filter(

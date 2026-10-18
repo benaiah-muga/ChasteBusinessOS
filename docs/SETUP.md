@@ -213,14 +213,10 @@ controls.
 pnpm dev
 ```
 
-Open <http://localhost:3000>. This is the React/Vite app. The legacy
-compatibility server runs on <http://localhost:3001> and serves pages and API
-routes that have not moved yet. Vite proxies supported `/api/auth/*` requests
-to Go by default and other unmigrated API routes to port 3001. Set
-`CHASTE_GO_AUTH_ROUTE=0` only to use the legacy auth bridge for compatibility.
-Use `localhost` for both URLs so the browser sends the existing host-scoped
-session cookie. Set
-`CHASTE_LEGACY_WEB_ORIGIN` if the compatibility server uses a different port.
+Open <http://localhost:3000>. This is the React/Vite app; it is the only web
+runtime since the Next.js compatibility app was retired. Vite proxies the
+business and auth API routes to Go. Use `localhost` so the browser sends the
+existing host-scoped session cookie.
 The Go API runs separately on port 8080 when Go-backed routes are enabled.
 
 Then:
@@ -287,7 +283,6 @@ NVIDIA_API_KEY=""      # default; free tier at build.nvidia.com
 | `Tenant or user not found` (Neon/Supabase) | Wrong host or branch string | Re-copy the connection string from the dashboard |
 | Migrations hang | Another instance holds the advisory lock | Stop other dev servers; check `pg_stat_activity` |
 | Port 3000 in use | Vite uses a strict local port | Stop the conflicting service before running `pnpm dev` |
-| Port 3001 in use | The legacy compatibility server uses this port | Stop the conflicting service or update its port and `CHASTE_LEGACY_WEB_ORIGIN` together |
 | Sign-up succeeds, then loops back to login | `BETTER_AUTH_SECRET` empty or changed | Set a stable secret, restart |
 | Policy screen shows an upstream error | `GO_POLICY_READ=1` but the Go API is stopped or unreachable | Start `pnpm dev:api` or set `GO_POLICY_READ=0` |
 | Ledger screen shows an upstream error | `GO_LEDGER_READ=1` but the Go API is stopped or unreachable | Start `pnpm dev:api` or set `GO_LEDGER_READ=0` |

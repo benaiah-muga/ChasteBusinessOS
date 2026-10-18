@@ -25,16 +25,15 @@ pnpm db:migrate
 pnpm dev
 ```
 
-- API: `http://localhost:3001`
-- Web: `http://localhost:3000` (talks to the API over HTTP only)
+- Web: `http://localhost:3000` (Vite; talks to the Go API over HTTP only)
+- API: `http://localhost:8080` (or `GO_API_ADDR` from your `.env`, commonly `127.0.0.1:18083` in dev)
 
 ## Project layout
 
 | Path | Role |
 |---|---|
-| `apps/api` | HTTP API gateway (only process that loads kernel + modules for requests) |
-| `apps/web` | Next.js UI -- **consumes REST APIs only** (no kernel/db imports) |
-| `apps/worker` | Outbox, jobs, async AI workflows |
+| `apps/api` | Go API gateway, capability kernel, and workers |
+| `apps/web-vite` | React UI built by Vite -- **consumes REST APIs only** (no kernel/db imports) |
 | `packages/*` | Shared libraries (kernel, db, ai-core, schemas, api-client) |
 | `modules/*` | Installable business modules |
 | `docs/` | Architecture, ADRs, module rules |
@@ -42,7 +41,7 @@ pnpm dev
 
 ## Coupling rules (enforced by review)
 
-- **`apps/web` must not import** `@chaste/kernel`, `@chaste/db`, `@chaste/ai-core`, or module packages.
+- **`apps/web-vite` must not import** `@chaste/kernel`, `@chaste/db`, `@chaste/ai-core`, or module packages.
 - Web may import **`@chaste/api-client`** and **`@chaste/ui-schema`** (HTTP types + generative UI schemas only).
 - Business mutations live in **commands**; AI tools wrap commands -- never raw SQL.
 - Modules do not reach into other modules’ private tables.
