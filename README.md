@@ -86,45 +86,38 @@ pnpm dev:api
 pnpm worker
 ```
 
-`pnpm worker` loads the repository `.env`, builds the three Go workers, and runs them
-with signal forwarding for graceful shutdown. Routine scheduling and the Go
-routine agent runner default on for local work; set either
-`GO_ROUTINE_SCHEDULER=0` or `GO_ROUTINE_AGENT_RUNNER=0` to disable it. The jobs
-worker uses `JOBS_WORKER_DATABASE_URL` and `GO_DATABASE_URL`, while the outbox
-worker uses `OUTBOX_WORKER_DATABASE_URL`; the marketing email worker uses
-`MARKETING_EMAIL_OUTBOX_WORKER_DATABASE_URL` and the SMTP settings. Marketing
-campaign messages are rechecked against the current customer email, active
-status, and opt-out flag before delivery. Its database login can read only
-campaign email rows and the customer fields needed for that check.
+`pnpm worker` loads the repository `.env`, builds the four Go workers (jobs,
+outbox, marketing email outbox, notification email outbox), and runs them with
+signal forwarding for graceful shutdown. Routine scheduling and the Go routine
+agent runner are opt-in for local work: set `GO_ROUTINE_SCHEDULER=1` or
+`GO_ROUTINE_AGENT_RUNNER=1` to enable them. The jobs worker uses
+`JOBS_WORKER_DATABASE_URL` and `GO_DATABASE_URL`, the outbox worker uses
+`OUTBOX_WORKER_DATABASE_URL`, the marketing email worker uses
+`MARKETING_EMAIL_OUTBOX_WORKER_DATABASE_URL` and the SMTP settings, and the
+notification email worker uses
+`NOTIFICATION_EMAIL_OUTBOX_WORKER_DATABASE_URL`. Marketing campaign messages
+are rechecked against the current customer email, active status, and opt-out
+flag before delivery; its database login can read only campaign email rows and
+the customer fields needed for that check.
 
-The sample `.env` enables Go onboarding and direct Vite onboarding with
-`GO_ONBOARDING_ROUTE=1` and `CHASTE_GO_ONBOARDING_ROUTE=1`. The Vite selector
-defaults off when unset; setting it to `0` disables specialized routing while
-the Vite API catch-all still sends requests to Go. Go handles onboarding GET,
-POST, and PATCH using the signed-in session. If HTTPS terminates before Go, set
-`GO_API_TRUSTED_PROXY_CIDRS` to the exact reverse-proxy peer CIDRs so Go can verify
-the forwarded scheme without accepting another origin.
-`GO_API_INTERNAL_URL` must identify the trusted Go API endpoint. HTTPS may point
-to a remote or private service you control; the Vite development proxy accepts
-cleartext HTTP only for loopback hosts.
+Go mounts its API route families by default, including onboarding, setup, and
+dashboard, and Vite sends those requests to Go. Set a route's `GO_*_ROUTE`
+switch to `0` to unmount it; the request then returns Go's 404 or 405 instead of
+falling back to a second server. The Vite setup and dashboard selectors
+(`CHASTE_GO_SETUP_ROUTE`, `CHASTE_GO_DASHBOARD_ROUTE`) default on and pick the
+exact Go route. If HTTPS terminates before Go, set `GO_API_TRUSTED_PROXY_CIDRS`
+to the exact reverse-proxy peer CIDRs so Go can verify the forwarded scheme
+without accepting another origin, and set `CHASTE_GO_API_ORIGIN` to the Vite
+development proxy's Go target (the proxy accepts cleartext HTTP only for
+loopback hosts).
 
 Settings SMTP status and test sends, plus Accounting invoice email, use the Go
-`/api/email` route through Vite by default. Setting `GO_EMAIL_ROUTE=0` disables
-the Go email handler; Vite still sends the request to Go. Go verifies the
-session or bearer token and derives the organization server-side. Configure
-`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and
-`SMTP_FROM` for delivery. Set `GO_PUBLIC_APP_URL` to the public app origin when
-invoice emails are sent by bearer clients; cookie-authenticated browser requests
-use their validated same-origin URL when this setting is empty.
-
-The setup checklist read `GET /api/setup` uses Go by default in Vite and the Go
-API. Set both `CHASTE_GO_SETUP_ROUTE=0` and `GO_SETUP_ROUTE=0` to disable the
-Go handler; Vite still sends the request to Go. Go resolves the signed-in
-session and active organization and retains the `iam.admin` permission gate.
-
-The dashboard `GET /api/dashboard` also uses Go by default in Vite and the Go
-API. Set both `CHASTE_GO_DASHBOARD_ROUTE=0` and `GO_DASHBOARD_ROUTE=0` to
-disable the Go handler; Vite still sends the request to Go.
+`/api/email` route. Go verifies the session or bearer token and derives the
+organization server-side. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`,
+`SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` for delivery. Set
+`GO_PUBLIC_APP_URL` to the public app origin when invoice emails are sent by
+bearer clients; cookie-authenticated browser requests use their validated
+same-origin URL when this setting is empty.
 
 ## Why React and Go: measured build benefits
 
@@ -190,569 +183,100 @@ pnpm benchmark:migration:startup --runs 3 --output docs/migration/benchmarks/pha
 Edit-to-ready, route navigation, and demo-fixture comparisons remain to be
 measured before claiming an end-to-end development-speed improvement.
 
-Generate a random `GO_INTERNAL_AUTH_SECRET` in `.env` (for example,
-`openssl rand -hex 32`). Set `GO_POLICY_SHADOW=1` to compare the Go policy read
-with the existing database read during development; shadow comparison runs
-only in development and only over loopback HTTP or HTTPS. `/api/policy` keeps
-the existing response as its default. `GO_POLICY_READ=1` opts the GET into the
-Go result after the signed session and permission checks, and requires the Go
-API to be running. The POST remains on the existing governed capability path.
-`GO_LEDGER_SHADOW=1` compares the ledger response during development while
-still returning legacy data. `GO_LEDGER_READ=1` opts `GET /api/ledger` into Go
-after the signed session and `accounting.read` checks; its route owner stays
-legacy until the Go parity gates pass.
-`GO_PROJECTS_WRITE=1` opts `POST /api/projects` into the signed Go capability
-bridge; it requires `pnpm dev:api` and fails closed if Go is unavailable.
-`GO_PROJECTS_READ=1` opts project list and board reads into the signed Go
-reader; it also requires `pnpm dev:api` and fails closed on errors. The
-development-only `GO_PROJECTS_SHADOW=1` compares the unaudited collection list
-while returning legacy data. Board reads are not shadowed because their
-capability audit entry must stay single.
-`GO_APPROVAL_DECISION=1` opts the legacy Next.js approval POST route into its
-signed Go bridge. It uses the exact payload stored with the pending approval
-and fails closed if Go is unavailable or the outcome is unknown. This selector
-does not control the Vite route.
-`GO_ACCOUNTING_CREATE_INVOICE=1` opts only `action: "createInvoice"` on
-`POST /api/accounting` into the signed Go capability bridge. It requires
-`pnpm dev:api`, keeps the legacy approval response shape, and fails closed when
-the invoice outcome cannot be confirmed. Every other accounting action and
-the GET route remain on the legacy handler. The flag defaults to `0`.
-`GO_ACCOUNTING_REPORTS_READ=1` opts the report capabilities used by
-`GET /api/reports` into the signed Go executor. It requires `pnpm dev:api`,
-preserves the response shape and currency metadata, and fails closed when Go
-is unavailable or returns invalid data. The TypeScript path remains the
-default and the flag defaults to `0`.
-`GO_ACCOUNTING_INVOICE_READS=1` opts only the governed
-`accounting.listInvoices` read inside `GET /api/accounting` into the signed Go
-executor. It requires `pnpm dev:api`, preserves invoice fields, and fails
-closed without a TypeScript retry when Go is unavailable or returns invalid
-data. The TypeScript path remains the default and the flag defaults to `0`.
-`GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1` opts only the
-`customerStatement` action on `POST /api/accounting` into the signed Go
-`accounting.customerStatement` capability. It requires `pnpm dev:api`, keeps
-the `{ ok, data }` response shape, and fails closed without a TypeScript retry
-when Go is unavailable or returns invalid data. The TypeScript path remains
-the default and the flag defaults to `0`.
-`GO_ACCOUNTING_CASH_FORECAST_READS=1` opts the cash forecast action on
-`POST /api/accounting` into the signed Go `accounting.cashForecast` capability.
-It requires `pnpm dev:api`, validates the 13-week forecast response, and fails
-closed when Go is unavailable or returns invalid data. Missing stored scenario
-assumptions use their defaults; explicit null values are rejected. The flag
-defaults to `0`.
-`GO_CRM_DEAL_WRITES=1` opts deal creation, stage changes, and lead conversion
-into the signed Go capability bridge. It requires `pnpm dev:api`; reads and
-other CRM actions remain on the legacy handler, and uncertain writes fail
-closed without a TypeScript retry. The flag defaults to `0`.
-`GO_CRM_DEAL_READS=1` opts `GET /api/deals` into a short-lived signed Go CRM
-read. It requires `pnpm dev:api`, preserves the org-scoped 200-row response,
-and fails closed if Go is unavailable or returns invalid data. The legacy route
-remains the default; the flag defaults to `0`.
-`GO_CRM_VIEW_READS=1` opts `GET /api/crm/views` into the signed Go saved-view
-reader. It requires `pnpm dev:api`, preserves shared views and views created by
-the current user, and fails closed if Go is unavailable or returns invalid
-data. The legacy route remains the default; the flag defaults to `0`.
-`GO_CRM_TIMELINE_READS=1` opts customer timeline reads on
-`GET /api/crm?timeline=<customerId>` into the signed Go read capability. It
-requires `pnpm dev:api`, preserves timeline fields, and fails closed when Go
-is unavailable or returns invalid data. Task reads remain isolated; the legacy
-route remains the default and the flag defaults to `0`.
-`GO_SUPPORT_CONVERSATION_READS=1` opts customer-bound conversation lists on
-`GET /api/support` into the signed Go `support.listConversations` read. It
-requires `pnpm dev:api`; conversation detail and library reads use their own
-flags. The flag defaults to `0`, and unavailable or invalid Go results fail
-closed without a TypeScript retry.
-`GO_SUPPORT_CONVERSATION_DETAIL_READS=1` opts `GET /api/support?id=<id>` into
-the signed Go `support.readConversation` capability. It requires
-`pnpm dev:api`, preserves the full conversation and message fields, returns the
-oldest 200 messages in ascending order like the legacy route, and fails closed
-on unavailable or invalid Go results. The flag defaults to `0`.
-`GO_SUPPORT_LIBRARY_READS=1` opts `GET /api/support?library=1` into the signed
-Go `support.listLibrary` capability. It requires `pnpm dev:api`, preserves
-organization-scoped canned responses and knowledge articles, and returns
-no-store responses while failing closed if Go is unavailable or returns
-invalid data. The flag defaults to `0`.
-`GO_CRM_VIEW_WRITES=1` opts `POST /api/crm/views` into the signed Go capability
-bridge. It requires `pnpm dev:api`, preserves human session checks, approval
-responses, and save/restore audit receipts, and fails closed if Go is
-unavailable or returns invalid data. Other CRM actions remain on their current
-handlers; the legacy executor remains the default and the flag defaults to `0`.
-`GO_CRM_TASK_WRITES=1` opts CRM task creation, completion, and detail updates
-into the signed Go capability bridge. It requires `pnpm dev:api`; reads,
-follow-up drafting, and other CRM actions remain on their existing handlers.
-The flag defaults to `0`, and uncertain task writes fail closed without a
-TypeScript retry.
-`GO_CRM_TASK_READS=1` opts the task-list query on `GET /api/crm` into the
-signed Go `crm.listTasks` capability. It requires `pnpm dev:api`, preserves
-open-task filtering and the existing response shape, and fails closed on
-unavailable or invalid Go results. Other CRM reads remain on their current
-handlers. The flag defaults to `0`.
-Vite CRM list reads for deals, customers, tasks, saved views, and customer
-timelines use Go's direct session-authenticated `GET /api/crm` API. The Go API
-resolves the Better Auth session and active organization itself, so Vite does
-not rely on Next.js to mint a read assertion. The Vite dev proxy selector
-`CHASTE_GO_CRM_READS` and Go mount `GO_CRM_READ_ROUTE` are enabled in
-`.env.example`; set both to `0` to temporarily restore the legacy read routes.
-Go unavailability fails closed without retrying through Next.js.
-`GO_CRM_IMPORT_WRITES=1` opts customer imports and customer import undo into
-the signed Go capability bridge. It requires `pnpm dev:api`; product imports
-remain on `GO_INVENTORY_IMPORT_WRITES`. The flag defaults to `0`, and uncertain
-customer import outcomes fail closed without a TypeScript retry.
-`GO_CRM_CUSTOMER_WRITES=1` opts customer creation, deactivation, merge, merge
-undo, and profile updates into the signed Go capability bridge. It requires
-`pnpm dev:api`; customer reads remain on the existing handler. The flag defaults
-to `0`, and uncertain customer write outcomes fail closed without a TypeScript
-retry.
-`GO_IAM_TEAM=1` opts Team & Roles member and role reads and writes into the
-signed Go capability bridge. It requires `pnpm dev:api`; the complete
-registry-derived permission catalog stays available, identity actions retain
-their approval rules, and uncertain writes fail closed without a TypeScript
-retry. The flag defaults to `0`.
-`GO_APPROVALS_READ=1` opts the legacy Next.js approvals inbox and decision
-history GET into the signed Go read bridge. It requires `pnpm dev:api`; the full TypeScript
-capability registry still controls row visibility, and Go rechecks the active
-session, organization membership, and live permissions. The flag defaults to
-`0`. This is the legacy Next.js bridge selector. Vite sends exact `GET` and
-`POST /api/approvals` requests directly to Go by default using the paired
-`GO_APPROVALS_READ_ROUTE` / `CHASTE_GO_APPROVALS_READ_ROUTE` and
-`GO_APPROVALS_DECISION_ROUTE` / `CHASTE_GO_APPROVALS_DECISION_ROUTE` switches.
-Set both flags in either pair to `0` to roll that method back. Direct Go
-decisions resolve the browser session and organization in Go, require the
-capability permission for both approval and rejection, and use the governed
-approval decider. The authenticated browser proof for Vite decisions passed:
-approve and reject both returned 200, updated the pending and recent decision
-lists, and produced no browser errors.
-`GO_SALES_WRITE=1` opts sales order creation, confirmation, delivery, and
-cancellation into the signed Go capability bridge. It requires `pnpm dev:api`;
-order listing and other sales actions remain on the legacy handler, and
-uncertain writes fail closed without a TypeScript retry. The flag defaults to
-`0`.
-`GO_SALES_LIST_ORDERS_READS=1` opts `GET /api/sales` into the signed Go
-`sales.listOrders` capability. It requires `pnpm dev:api`, preserves status
-filtering and the `{ orders }` response, and fails closed if Go is unavailable
-or returns invalid data. TypeScript remains the default; the flag defaults to
-`0`.
-`GO_DOCUMENTS_LIST_READS=1` opts the authored-document list in `GET /api/docs`
-into the signed Go `documents.listDocs` capability. It requires `pnpm dev:api`;
-template reads remain on the legacy executor, and the combined response is
-preserved. Unavailable or invalid Go results fail closed. TypeScript remains
-the default; the flag defaults to `0`.
-Ingested document list and detail reads in
-`GET /api/documents` into the signed Go
-`documents.listIngestedDocuments` capability. It requires `pnpm dev:api`,
-preserves the list, vendors, detail, and `preview=1` projections, and excludes
-stored raw text and base64 content. Unavailable or invalid Go results fail
-closed. The Go API serves these reads by default; set
-`GO_DOCUMENT_INGESTED_READS=0` to disable them. Vite always calls the Go
-session-capability route and does not have a client-side legacy selector. List
-and preview detail keep the same projections, and uploaded-content links
-remain on their existing path.
-Vite mention and add-member people lookups always use the authenticated Go
-`messaging.listPeople` capability through the session capability route, which
-must be enabled with `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` and
-`GO_SESSION_CAPABILITY_ROUTE=1`. The API enables `messaging.listPeople` by
-default; set `GO_MESSAGING_PEOPLE_READS=0` to disable it, in which case Vite
-shows the Go error without retrying through Next. Initial mention lookup
-requests 100 people; add-member search requests 30 and trims queries to 80
-characters. Presence GET and typing heartbeat POST use the Go route at
-`/api/conversations/:id/presence`. GET checks membership and reads in an
-organization-scoped transaction. POST resolves the Go session and then runs
-`messaging.updateConversationPresence` through the governed capability executor,
-preserving intent receipts, inverses, permissions, and the Messaging module
-gate. Mutations require same-origin requests. Set
-`GO_MESSAGING_PRESENCE_ROUTE=0` on the API or
-`CHASTE_GO_MESSAGING_PRESENCE=0` in Vite to disable the specialized Go route.
-Vite's `/api` catch-all still sends presence requests to Go, so the disabled
-route returns 404 instead of falling back to Next.js. Conversation and thread
-reads continue through Go capabilities. Vite global message search uses
-the Go `messaging.searchMessages` capability through the authenticated session
-capability route. Go trims and bounds the query, scopes results to the active
-organization and joined conversations, excludes deleted records, escapes SQL
-wildcards, and returns the newest 50 matches with the existing snippets and
-sender metadata. A Go failure is shown in Vite without retrying through Next.
-The Vite authored-document editor always uses Go for its primary detail read,
-version history, and archived compare previews. The API enables these
-capabilities by default; set `GO_DOCUMENTS_EDITOR_READS=0` or
-`GO_DOCUMENTS_VERSION_READS=0` to disable the corresponding reads. Invalid or
-unavailable Go responses fail closed. Document content, collaboration, and
-editor writes keep their separate routes.
-The editor's presence, autosave draft, and soft-lock session endpoint is
-available in Go at `POST` and `DELETE /api/docs/:id/workspace`. It writes the
-RLS-guarded `doc_presence` and `doc_drafts` tables directly as specified by
-ADR 0056, without adding autosave traffic to the capability ledger. The API
-mounts this endpoint by default when `GO_DOCUMENTS_EDITOR_WORKSPACE` is unset;
-set it to `0` to roll back to the legacy route. Browser writes require the
-authenticated Go session and same-origin checks.
-Authored document version history and
-single-version reads on `GET /api/docs/:id` into the signed Go
-`documents.listDocVersions` and `documents.getDocVersion` capabilities. It
-requires `pnpm dev:api`, preserves the current document read and public
-response projections, and fails closed after Go dispatch. The API enables
-these reads by default; set `GO_DOCUMENTS_VERSION_READS=0` to disable them.
-`GO_ACCOUNTING_QUOTES_WRITE=1` opts quote creation, acceptance, decline, and
-expiry sweeps into the signed Go capability bridge. It requires `pnpm
-dev:api`; the dedicated quotes route and other accounting actions remain on
-their existing handlers, and uncertain writes fail closed without a
-TypeScript retry. The flag defaults to `0`.
-`GO_ACCOUNTING_QUOTES_READS=1` opts `GET /api/quotes` into the signed Go
-`accounting.listQuotes` read. It requires `pnpm dev:api`, preserves the
-status filter and response shape, and fails closed if Go is unavailable or
-returns invalid data. TypeScript remains the default; the flag defaults to
-`0`.
-`GO_ACCOUNTING_RECORD_PAYMENT_WRITE=1` opts `accounting.recordPayment` on
-`POST /api/accounting` into the signed Go capability bridge. It requires
-`pnpm dev:api`; other accounting actions stay on their existing handlers, and
-uncertain payment outcomes fail closed without a TypeScript retry. The flag
-defaults to `0`.
-`GO_ACCOUNTING_REVERSE_PAYMENT_WRITE=1` opts `accounting.reversePayment` on
-`POST /api/accounting` into the signed Go capability bridge. It requires
-`pnpm dev:api`; approval and error responses are preserved, and uncertain
-outcomes fail closed without a TypeScript retry. The flag defaults to `0`.
-`GO_ACCOUNTING_FX_RATE_WRITE=1` opts `accounting.recordFxRate` on
-`POST /api/accounting` into the signed Go capability bridge. It requires
-`pnpm dev:api`; other accounting actions stay on their existing handlers, and
-uncertain outcomes fail closed without a TypeScript retry. The flag defaults
-to `0`.
-`GO_ACCOUNTING_FX_REVALUATION_WRITE=1` opts the `revalue` action on
-`POST /api/accounting/close` into the signed Go
-`accounting.revalueForeignReceivables` capability. It requires `pnpm dev:api`,
-preserves the permission check, approval responses, and revaluation result,
-and fails closed on unavailable or malformed Go responses without a TypeScript
-retry. Other period-close actions remain controlled by
-`GO_ACCOUNTING_PERIOD_CLOSE_WRITES`; this flag defaults to `0`.
-`GO_ACCOUNTING_RECURRING_WRITE=1` opts recurring invoice template creation,
-pausing, and resumption into the signed Go capability bridge. It requires
-`pnpm dev:api`; the dedicated recurring route and other accounting actions
-remain on their existing handlers, and uncertain writes fail closed without a
-TypeScript retry. The flag defaults to `0`.
-`GO_HR_EMPLOYEE_WRITES=1` opts employee hiring, deactivation, and structure
-updates into the signed Go capability bridge. It requires `pnpm dev:api`;
-leave, payroll, and other HR actions remain on the legacy handler, and
-uncertain writes fail closed without a TypeScript retry. The flag defaults to
-`0`.
-`GO_ACCOUNTING_EXPENSE_WRITES=1` opts expense claim submission, decisions,
-payments, and policy changes into the signed Go capability bridge.
-`GO_ACCOUNTING_EXPENSE_READS=1` opts expense claim and policy reads into Go.
-Both flags require `pnpm dev:api` and default to `0`; other accounting actions
-remain on their existing handlers. Uncertain writes fail closed without a
-TypeScript retry, while unavailable reads fail closed without querying the
-legacy database.
-`GO_PURCHASING_BILL_WRITES=1` opts vendor and bill creation and bill payments
-into the signed Go capability bridge. Other purchasing actions remain on their
-existing handlers. It requires `pnpm dev:api`; uncertain writes fail closed
-without a TypeScript retry. The flag defaults to `0`.
-`GO_PURCHASING_PO_WRITES=1` opts purchase order creation into the signed Go
-capability bridge. Other purchasing actions remain on their existing
-handlers. It requires `pnpm dev:api`; uncertain writes fail closed without a
-TypeScript retry. The flag defaults to `0`.
-`GO_PURCHASING_PO_CLOSE_WRITES=1` opts only `closePurchaseOrder` on
-`POST /api/purchasing` into the signed Go capability bridge. It requires
-`pnpm dev:api`; approval responses are preserved and uncertain outcomes fail
-closed without a TypeScript retry. Purchase order creation and other actions
-remain on their existing handlers. The flag defaults to `0`.
-`GO_PURCHASING_BILL_CREDIT_WRITES=1` opts `billCreditNote` on
-`POST /api/purchasing` into the signed Go capability bridge. It requires
-`pnpm dev:api`; approval responses are preserved and uncertain outcomes fail
-closed without a TypeScript retry. Other purchasing actions remain on their
-existing handlers. The flag defaults to `0`.
-`GO_PURCHASING_REVERSE_VENDOR_PAYMENT_WRITE=1` opts
-`purchasing.reverseVendorPayment` on `POST /api/purchasing` into the signed Go
-capability bridge. It requires `pnpm dev:api`; approval responses are
-preserved and uncertain outcomes fail closed without a TypeScript retry. The
-flag defaults to `0`.
-`GO_PURCHASING_RECEIPT_READS=1` opts the `receiptDetail` action on
-`POST /api/purchasing` into the signed Go read capability. It requires
-`pnpm dev:api`, preserves the receipts and order-line response, and fails
-closed if Go is unavailable or returns invalid data. The TypeScript path
-remains the default and the flag defaults to `0`.
-`GO_PURCHASING_WORKFLOW_READS=1` opts the requests and RFQs section of
-`GET /api/purchasing` into the signed Go `purchasing.listPurchaseWorkflow`
-read. It requires `pnpm dev:api`, preserves decision reasons, vendor names,
-quote notes, ordering, and timestamps, and fails closed when Go is unavailable
-or returns invalid data. Other purchasing reads stay on their existing paths;
-the TypeScript path remains the default and the flag defaults to `0`.
-The Vite page can separately source only its requests and RFQs from the direct
-authenticated capability route with
-`CHASTE_GO_PURCHASING_WORKFLOW_READS=1` and
-`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep
-`GO_PURCHASING_WORKFLOW_READS=1` enabled on the API as the server-side
-capability gate. Vite keeps the aggregate workspace request for its other data
-and replaces only `workspace.requests`; selected Go failures stop the page
-load without a retry through the aggregate request.
-`GO_PURCHASING_AP_AGING_READS=1` opts the accounts payable aging report in
-`GET /api/purchasing` into the signed Go `purchasing.apAging` read. It requires
-`pnpm dev:api`, preserves the current, 31-60 day, 61-90 day, over-90 day, and
-total outstanding buckets in the workspace currency, and fails closed if Go
-is unavailable or returns invalid data. The TypeScript path remains the
-default and the flag defaults to `0`.
-`GO_PURCHASING_SUPPLIER_PERFORMANCE_READS=1` opts the supplier performance
-metrics in `GET /api/purchasing` into the signed Go
-`purchasing.supplierPerformance` read. It requires `pnpm dev:api`, preserves
-vendor order counts, average lead times, on-time and fill rates, and backorder
-counts, and fails closed if Go is unavailable or returns invalid data. The
-TypeScript path remains the default and the flag defaults to `0`.
-`GO_PURCHASING_PAYMENT_RUN_READS=1` opts `GET /api/purchasing/payment-runs`
-into the signed Go `purchasing.listPaymentRuns` read. It requires
-`pnpm dev:api`, preserves run state and bill-level remittance fields, and fails
-closed when Go is unavailable or returns invalid data. The TypeScript path
-remains the default and the flag defaults to `0`. Existing deployments with
-`GO_PURCHASING_PAYMENT_RUN_WRITES=1` continue to route this read through Go.
-`GO_INVENTORY_STOCK_WRITES=1` opts stock adjustments and stock transfer
-creation, confirmation, cancellation, and reversal into the signed Go
-capability bridge. Other inventory actions remain on their existing handlers.
-It requires `pnpm dev:api`; uncertain writes fail closed without a TypeScript
-retry. The flag defaults to `0`.
-The following inventory read flags apply to the legacy Next API handler only.
-Vite's `/api/inventory` GET route uses the direct Go reader described below and
-does not consult these flags.
-`GO_INVENTORY_ITEM_HISTORY_READS=1` opts `GET /api/inventory?sku=...` into
-the signed Go `inventory.itemHistory` read. It requires `pnpm dev:api`, keeps
-the `{ movements }` response and missing-item behavior, and fails closed if
-Go is unavailable or returns invalid data. TypeScript remains the default;
-the flag defaults to `0`.
-Vite sends exact `GET /api/inventory` catalog reads and SKU history queries to
-the direct session-authenticated Go inventory reader. The handler mounts by
-default; set `GO_INVENTORY_READ_ROUTE=0` to unmount it. Go errors are returned
-directly, and the Vite client validates the catalog and movement envelopes.
-Inventory POSTs and nested paths retain their current owners.
-`GO_INVENTORY_STOCK_REPORT_READS=1` opts the stock report and reorder-alert
-reads on `GET /api/inventory` into two signed Go `inventory.stockReport`
-capability calls. It requires `pnpm dev:api`, preserves the report and alert
-fields, and fails closed if Go is unavailable or either result is invalid.
-Other inventory reads remain on their existing handlers unless their dedicated
-read flags below are enabled. TypeScript remains the default; the flag defaults
-to `0`.
-`GO_INVENTORY_ITEM_METADATA_READS=1` opts the item metadata query on
-`GET /api/inventory` into the signed Go `inventory.listItemMetadata` read. It
-requires `pnpm dev:api`, preserves the item IDs and catalog fields merged into
-stock report rows, and fails closed if Go is unavailable or returns invalid
-data. The TypeScript path remains the default and the flag defaults to `0`.
-`GO_INVENTORY_TRANSFER_READS=1` opts the transfer list on `GET /api/inventory`
-into the signed Go `inventory.listTransfers` read. It requires `pnpm dev:api`,
-preserves the 50-row limit, transfer routes, notes, and line quantities, and
-fails closed if Go is unavailable or returns invalid data. The flag defaults
-to `0`.
-`GO_INVENTORY_LOTS_READS=1` opts the lot list on `GET /api/inventory` into the
-signed Go `inventory.listLots` read. It requires `pnpm dev:api`, preserves the
-200-row newest-first order, SKU, lot code, expiration timestamp, and response
-fields, and fails closed if Go is unavailable or returns invalid data. The
-flag defaults to `0`.
-`GO_INVENTORY_RESERVATIONS_READS=1` opts the reservation list on
-`GET /api/inventory` into the signed Go `inventory.listReservations` read. It
-preserves all statuses, the 100-row newest-first order, the full route fields,
-and fails closed if Go is unavailable or returns invalid data. The flag
-defaults to `0`.
-`GO_INVENTORY_CYCLE_COUNTS_READS=1` opts the cycle-count list on
-`GET /api/inventory` into the signed Go `inventory.listCycleCounts` read. It
-requires `pnpm dev:api`, preserves the 20-row newest-first order, location,
-status, note, timestamps, line quantities, and nullable count and variance
-fields, and fails closed if Go is unavailable or returns invalid data. The
-flag defaults to `0`.
-`GO_INVENTORY_LOCATIONS_READS=1` opts the stock location list on
-`GET /api/inventory` into the signed Go `inventory.listLocationRecords` read. It
-requires `pnpm dev:api`, preserves the legacy row fields and code ordering,
-returns full org-scoped rows from Go without a second TypeScript location query,
-and fails closed if Go is unavailable or returns invalid data. The existing
-`inventory.listLocations` routine tool keeps its code/name response shape. The
-flag defaults to `0`.
-`GO_INVENTORY_BARCODE_LOOKUP_READS=1` opts the `lookupByBarcode` action on
-`POST /api/inventory` into the signed Go `inventory.lookupByBarcode` read. It
-requires `pnpm dev:api`, preserves the legacy response envelope and nullable
-item result, validates every item field, and fails closed if Go is unavailable
-or returns invalid data. The flag defaults to `0`.
-`GO_INVENTORY_VALUATION_SUMMARY_WRITE=1` opts the existing
-`postValuationSummary` action on `POST /api/inventory` into the signed Go
-`inventory.postValuationSummary` capability. It requires `pnpm dev:api`,
-preserves the memo, approval, error, and no-op response behavior, and fails
-closed without a TypeScript retry if Go is unavailable or returns invalid data.
-The flag defaults to `0`.
-`GO_POS_WRITES=1` opts register opening, sales, closing, returns, and shift
-summaries into the signed Go capability bridge. It requires `pnpm dev:api`;
-uncertain writes fail closed without a TypeScript retry. The flag defaults to
-`0`.
-`GO_POS_SHIFT_SUMMARY_READS=1` opts only the shift-summary action into Go
-independently of `GO_POS_WRITES`; its default is `0`. When `GO_POS_WRITES=1`,
-the existing Go dispatch behavior for shift summaries is preserved.
-`GO_ACCOUNTING_INVOICE_OPS_WRITE=1` opts credit notes and journal entry
-reversals into the signed Go capability bridge. It requires `pnpm dev:api`;
-other accounting actions remain on their existing handlers, and uncertain
-writes fail closed without a TypeScript retry. The flag defaults to `0`.
-`GO_BANKING_WRITES=1` opts bank account creation, feed imports, transaction
-matching, unmatching, exclusions, and deletion into the signed Go capability
-bridge. It requires `pnpm dev:api`; the reconciliation view and other
-accounting actions remain on their existing handlers, and uncertain writes
-fail closed without a TypeScript retry. The flag defaults to `0`.
-`GO_PURCHASING_REQUEST_WRITES=1` opts purchase requests, request decisions,
-RFQs, quote recording, and winning-quote selection into the signed Go
-capability bridge. It requires `pnpm dev:api`; other purchasing actions remain
-on their existing handlers, and uncertain writes fail closed without a
-TypeScript retry. The flag defaults to `0`.
-`GO_INVENTORY_ITEM_WRITES=1` opts item creation, updates, archiving, and
-location creation into the signed Go capability bridge. It requires `pnpm
-dev:api`; other inventory actions remain on their existing handlers, and
-uncertain writes fail closed without a TypeScript retry. The flag defaults to
-`0`.
-`GO_ACCOUNTING_TAX_RETURNS_WRITE=1` opts sales tax return filing into the
-signed Go capability bridge. It requires `pnpm dev:api`; tax profile and code
-management ride the executor and worker without a route flag, other
-accounting actions remain on their existing handlers, and uncertain writes
-fail closed without a TypeScript retry. The flag defaults to `0`.
-`GO_HR_LEAVE_TIME_WRITES=1` opts leave requests, decisions, cancellation, and
-clock in/out into the signed Go capability bridge. It requires `pnpm dev:api`;
-leave balances, calendars, and reports stay on their existing handlers, and
-uncertain writes fail closed without a TypeScript retry. The flag defaults to
-`0`.
-`GO_HR_PAYROLL_APPLICANT_WRITES=1` opts payroll run creation, execution,
-voiding, and the applicant pipeline through hire into the signed Go
-capability bridge. It requires `pnpm dev:api`; applicant listing has its own
-read flag, and other HR actions remain on their existing handlers. Uncertain
-writes fail closed without a TypeScript retry. The flag defaults to `0`.
-`GO_HR_APPLICANT_READS=1` opts applicant lists in `GET /api/hr` into the signed
-Go `hr.listApplicants` read. It requires `pnpm dev:api`, preserves each
-opening's applicant fields and ordering, and fails closed if Go is unavailable
-or returns invalid data. The TypeScript path remains the default and the flag
-defaults to `0`.
-The Vite HR Overview report now reads the authenticated Go `hr.report`
-capability unconditionally. It requires `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`
-and `GO_SESSION_CAPABILITY_ROUTE=1`; Go errors fail closed without retrying
-through `/api/hr`. Other HR tabs keep their existing report routes.
-`GO_PURCHASING_AP_AGING_READS=1` opts the supplier AP aging read into the
-signed Go capability bridge. It requires `pnpm dev:api`; other purchasing
-reads and all writes remain on their existing handlers. The same default-off
-flag gates `purchasing.apAging` on the session capability route. The flag
-defaults to `0`. Vite direct reads additionally require
-`CHASTE_GO_PURCHASING_AP_AGING_READS=1` and
-`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`.
-`GO_PURCHASING_PRICE_HISTORY_READS=1` opts the supplier price history read into
-the signed Go `purchasing.priceHistory` capability. It requires `pnpm dev:api`,
-preserves the existing response shape, and fails closed if Go is unavailable
-or returns invalid data. Other purchasing reads and all writes remain on their
-existing handlers. The flag defaults to `0`.
-`GO_PURCHASING_SUPPLIER_STATEMENT_READS=1` opts the `supplierStatement` action
-on `POST /api/purchasing` into the signed Go `purchasing.supplierStatement`
-capability. It requires `pnpm dev:api`, preserves the existing response shape,
-and fails closed if Go is unavailable or returns invalid data. Other purchasing
-reads and all writes remain on their existing handlers. The flag defaults to
-`0`.
-`GO_HR_OPENINGS_WRITE=1` opts job opening creation and closure into the
-signed Go capability bridge. It requires `pnpm dev:api`; applicant actions
-remain on their existing handlers, and uncertain writes fail closed without a
-TypeScript retry. The flag defaults to `0`.
-`GO_ACCOUNTING_REMINDERS_READS=1` opts payment reminder building into the
-signed Go capability bridge. It requires `pnpm dev:api`; everything else in
-accounting remains on its existing handlers. The flag defaults to `0`.
+## Routing and operations
+
+Vite owns the browser and talks to Go for every API request. In development,
+Vite's proxy sends each `/api` path to `CHASTE_GO_API_ORIGIN` (default
+`http://127.0.0.1:8080`); exact `CHASTE_GO_*` selectors pick methods and paths
+for Go routes. In the Compose stack, nginx serves the built client and forwards
+`/api/*` to the Go API. Unmounted paths return Go's 404 or 405; nothing falls
+back to a second server.
+
+### Go mounts and capability gates
+
+Go mounts its route families by default. A family's `GO_*_ROUTE` switch (for
+example `GO_NOTIFICATIONS_ROUTE` or `GO_DASHBOARD_ROUTE`) set to `0` unmounts
+it. Two routes require an explicit `1`: `GO_SESSION_CAPABILITY_ROUTE`, which
+mounts the authenticated session capability route, and `GO_CRM_READ_ROUTE`,
+which mounts the CRM collection GET.
+
+Inside the session capability route, these capability slices stay disabled
+until set to `1`: `GO_MANUFACTURING_DEFINE_BOM_SLICE`,
+`GO_INVENTORY_CYCLE_COUNT_WRITES`, `GO_PURCHASING_AP_AGING_READS`, and
+`GO_PURCHASING_WORKFLOW_READS`. Read slices (`GO_DOCUMENT_INGESTED_READS`,
+`GO_DOCUMENTS_EDITOR_READS`, `GO_DOCUMENTS_VERSION_READS`,
+`GO_MESSAGING_PEOPLE_READS`) are enabled unless set to `0`.
+
+Provide a fresh `GO_INTERNAL_AUTH_SECRET` of at least 32 random bytes in every
+environment (`openssl rand -hex 32`); it signs the internal capability
+assertions used by scripts and is verified by the Go API.
+
+### Vite selectors
+
+The `CHASTE_GO_*` selectors pick exact methods and paths in the Vite
+development proxy. Route, inbox, and read selectors default on. Capability
+write slices need an explicit `1` and most also need
+`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` on Vite with
+`GO_SESSION_CAPABILITY_ROUTE=1` on the API, because they call Go capabilities
+directly with the browser session; examples include
+`CHASTE_GO_PROJECTS_WRITES`, `CHASTE_GO_ACCOUNTING_CREATE_INVOICE`,
+`CHASTE_GO_BANK_RECONCILIATION_WRITES`, and
+`CHASTE_GO_MARKETING_CAMPAIGN_WRITES`. Some slices default on once the session
+capability route is enabled. `.env.example` lists the current switches with
+comments, and `docs/migration/route-ownership.json` is the checked-in route
+census.
+
+### Authentication
+
+Go owns the whole `/api/auth` namespace and mounts it whenever
+`BETTER_AUTH_SECRET` is set; `GO_AUTH_MODE` must be `development` or
+`production` and selects the origin and cookie behavior. Production mode
+requires `GO_AUTH_PUBLIC_ORIGIN` to be an HTTPS origin and
+`GO_AUTH_SECURE_COOKIE=true`. Vite has no auth selector: its `/api` catch-all
+sends every method and path under `/api/auth` to Go, and unsupported Better
+Auth paths return 404 or 405. Invitation routes mount with auth. If HTTPS
+terminates upstream, set `GO_AUTH_TRUSTED_PROXY_CIDRS`. Verification and
+recovery emails go through a PostgreSQL outbox with bounded backoff; configure
+the `SMTP_*` settings for delivery.
+
+- **OIDC**: set `GO_OIDC_ENABLED=1` with the issuer, client credentials, and the
+  registered callback URI. The callback validates issuer, signature, audience,
+  nonce, state, and PKCE before creating a Go-owned session and never stores
+  provider tokens. `GO_OIDC_ALLOWED_ENDPOINT_HOSTS` allows discovery endpoints
+  on exact `host[:port]` authorities when they differ from the issuer; every
+  endpoint must use HTTPS, and only authorities you trust accept configuration.
+  Set `GO_OIDC_TRUST_VERIFIED_EMAIL=true` only when the issuer attests
+  `email_verified`. Native clients can opt in with
+  `GO_OIDC_NATIVE_REDIRECT_URI` and exchange the short-lived code at
+  `POST /api/auth/native/exchange` with the PKCE verifier.
+- **SAML**: set `GO_SAML_ENABLED=1` and pin the IdP issuer, HTTPS SSO endpoint,
+  signing certificate, SP entity ID, ACS URL, success URL, and attribute
+  names. The IdP must sign the SAML response, and verified-email linking
+  requires `GO_SAML_TRUST_VERIFIED_EMAIL=true`.
+- **SCIM**: `GO_SCIM_READ_ROUTE` (default on) serves SCIM 2.0 user reads;
+  `GO_SCIM_WRITE_ROUTE` (default on) provisions and deactivates through
+  governed capabilities; `GO_SCIM_TOKENS_ROUTE` (default on) manages hashed,
+  unexpired bearer tokens. Standard SCIM clients can omit `Idempotency-Key`;
+  retries deduplicate within each membership generation.
+
+### Support widget and work brief
+
+`GO_SUPPORT_PUBLIC_ROUTE` (default on) mounts the public
+`/api/support/public` widget, which uses NVIDIA embeddings for published
+knowledge search; configure `NVIDIA_API_KEY` and `GO_SUPPORT_EMBEDDING_MODEL`.
+Run the jobs worker with `GO_SUPPORT_EMBEDDING_WORKER=1` to index published
+articles. Set `GO_SUPPORT_TRUSTED_PROXY_CIDRS` only for trusted reverse proxy
+networks.
+
+`GO_MY_WORK_SUMMARY_ROUTE` (default on) serves the work brief at
+`POST /api/my-work/summarize` using the signed-in user's own default OpenCode
+connection with tools disabled, or their isolated Codex home in read-only CLI
+mode. Missing runtimes, unsupported providers, and provider failures return an
+error without substituting workspace credentials.
+
 Manufacturing and marketing capabilities run on the Go executor and worker
-without route flags: no public route serves them today, so they are reachable
-only through governed agent and worker dispatch.
-
-The local `.env.example` mounts Go authentication. Vite sends the entire
-`/api/auth` namespace to Go by default. Go auth mounts by default and requires
-`BETTER_AUTH_SECRET` plus `GO_AUTH_MODE` set to `development` or `production`.
-Set `GO_AUTH_ROUTE=0` to disable the Go mount. Setting
-`CHASTE_GO_AUTH_ROUTE=0` disables only the specialized Vite proxy selector; the
-Vite `/api` catch-all still sends auth requests to Go, where unsupported paths
-return 404 or 405. These flags do not route requests to Next.js.
-Auth mode is independent of `NODE_ENV`. Production
-mode requires `GO_AUTH_PUBLIC_ORIGIN` to
-be an HTTPS origin and `GO_AUTH_SECURE_COOKIE=true`. Development mode may use
-the local app URL fallback. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`,
-`SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` for verification and recovery email.
-Auth links are stored in a PostgreSQL outbox and retried with bounded backoff;
-delivery jobs expire with their links. Production deployments should enable
-the Go route only after the auth continuity and security gates pass.
-
-An optional provider-neutral OIDC authorization-code flow is available when
-`GO_OIDC_ENABLED=1` is paired with `GO_AUTH_ROUTE=1`. Configure the exact HTTPS
-issuer, client credentials, and registered Go callback URI
-`https://<api-host>/api/auth/callback/oidc`. The callback validates issuer,
-signature, audience, nonce, state, and PKCE before creating a Go-owned session;
-it never stores or returns provider tokens. Set
-`GO_OIDC_ALLOWED_ENDPOINT_HOSTS` to exact comma-separated `host[:port]`
-authorities only when discovery uses endpoints on a different host than the
-configured issuer. Every discovered endpoint, including JWKS, must use HTTPS
-and an allowed authority; requests have bounded timeouts and do not follow
-redirects. Multi-audience ID tokens require `azp` to equal the configured
-client ID. The configured issuer authority and explicit endpoint authorities
-are trusted operator configuration. The transport constrains host and port but
-does not pin DNS-resolved IPs, so a configured authority can resolve to a
-private destination. Only configure authorities you trust, including their DNS
-control and network routing.
-`GO_OIDC_TRUST_VERIFIED_EMAIL=true` only when the issuer is trusted to attest
-`email_verified`, which is required before attaching an OIDC subject to an
-existing email account. Browser clients finish with the existing Go session
-cookie. Native clients can opt in by setting `GO_OIDC_NATIVE_REDIRECT_URI` to
-their exact custom-scheme callback URI. They start `/api/auth/sign-in/oidc`
-with `native_code_challenge` and `native_state`, receive a short-lived code at
-that callback, then exchange it at `POST /api/auth/native/exchange` with the
-PKCE verifier. The reusable bearer token is returned only in that no-store
-JSON response, never in the redirect URL. Leaving the native redirect unset
-disables the handoff. The local Vite development stack routes authentication
-to Go; production ownership still follows the auth continuity and security
-gates.
-
-An optional Go SAML sign-in flow is enabled with `GO_SAML_ENABLED=1` and
-`GO_AUTH_ROUTE=1`. Pin the IdP issuer, HTTPS SSO endpoint, and one signing
-certificate. Configure the SP entity ID, exact HTTPS ACS URL, HTTPS success
-URL, and attribute names. The IdP must sign the SAML response. Verified-email
-trust is explicit through `GO_SAML_TRUST_VERIFIED_EMAIL=true`; the handler
-rejects untrusted email linking. Go mounts `/api/auth/sign-in/saml` and
-`/api/auth/callback/saml` only when both flags are enabled.
-
-The Go API mounts the public `/api/support/public` widget endpoint by default;
-set `GO_SUPPORT_PUBLIC_ROUTE=0` to unmount it. It uses NVIDIA embeddings for
-published knowledge search, so `NVIDIA_API_KEY` and `GO_SUPPORT_EMBEDDING_MODEL` must be
-configured. Run the jobs worker with `GO_SUPPORT_EMBEDDING_WORKER=1` to index
-published articles. Tenant candidates are discovered through a bounded,
-least-privilege worker function; article reads and writes run inside
-`dbx.WithOrgTx`. The Vite proxy sends widget requests to Go by default and
-selects only the exact widget endpoint. The API route and Vite proxy are
-independent processes, so unmounting the API route returns an unavailable
-response from Go rather than falling back to the legacy app. Set
-`GO_SUPPORT_TRUSTED_PROXY_CIDRS` only to trusted
-reverse proxy networks; forwarded addresses from other peers are ignored.
-
-When Go auth is enabled, the Vite development proxy sends every method and path
-under `/api/auth` to Go, including unsupported compatibility paths, which Go
-rejects with 404 or 405. This route ownership does not imply compatibility
-with unsupported Better Auth endpoints. Setting `CHASTE_GO_AUTH_ROUTE=0`
-disables the specialized selector, but the Vite `/api` catch-all still sends
-these requests to Go. Set `CHASTE_GO_AUTH_OIDC_ROUTE=1` or
-`CHASTE_GO_AUTH_SAML_ROUTE=1` alongside the matching Go auth feature flag to
-route those optional federation paths to Go. The temporary Next compatibility
-app has its own legacy fallback behavior. Vite sends unmatched API requests to
-Go and does not forward them to Next.js. Request and response streams, headers,
-query strings, and bodies pass through unchanged.
-Pair `GO_MY_WORK_ROUTE=1` with `CHASTE_GO_MY_WORK_ROUTE=1` to send only
-`GET /api/my-work` to Go. Vite routes analytics discovery, previews, and report
-generation to Go by default through the authenticated Analytics session
-handler. Setting both `GO_ANALYTICS_REPORT_ROUTE=0` and
-`CHASTE_GO_ANALYTICS_REPORT_ROUTE=0` disables the Go report handler, but Vite
-continues sending the request to Go, where it returns 404. GET discovery and
-preview ownership remains controlled by the existing analytics GET selectors.
-Setting both `GO_ANALYTICS_ROUTE=0` and `CHASTE_GO_ANALYTICS_ROUTE=0` has the
-same fail-closed behavior for analytics routes; neither setting restores a
-legacy handler in Vite. Vite's selectors apply only to its development server;
-production reverse-proxy ownership is configured separately. Go also
-implements the work brief at
-`POST /api/my-work/summarize` behind `GO_MY_WORK_SUMMARY_ROUTE=1`. The paired
-Vite method/path selector is enabled by default when
-`CHASTE_GO_MY_WORK_SUMMARY_ROUTE=1`, and selects only that exact POST route.
-The handler uses the authenticated user's own
-default OpenCode connection with tools disabled, or the same user's isolated
-Codex home and read-only CLI mode. Codex requires a persistent home shared with
-the connection setup runtime. Missing runtimes, unsupported providers, and
-provider failures return an error without substituting workspace credentials.
-
-`GO_SCIM_READ_ROUTE=1` opts the Go API into SCIM 2.0 collection and single-user
-reads at `/api/scim/v2/Users`. It resolves hashed, unexpired bearer tokens
-through a narrowly granted database function and runs user reads in an
-organization-scoped transaction. `GO_SCIM_WRITE_ROUTE=1` separately enables
-provisioning and deactivation through governed external-IdP capabilities.
-Standard SCIM clients can omit `Idempotency-Key`; the backend deduplicates
-retries within each membership generation. Clients may send a UUID key to
-define an explicit operation. Go mounts SAML sign-in and assertion-consumer
-routes when the SAML provider configuration is present; Vite forwards those
-routes when `CHASTE_GO_AUTH_SAML_ROUTE=1`. OIDC sign-in can be enabled with
-the provider configuration above.
+behind the Go-owned `GET`/`POST /api/manufacturing` and `GET`/`POST
+/api/marketing` session routes.
 
 For a production-shaped local Docker run, use the Vite and Go Compose stack:
 
@@ -763,9 +287,9 @@ curl http://localhost:3000/api/health
 ```
 
 Compose builds the React/Vite client as static assets served by nginx and the
-Go API, capability jobs worker, webhook outbox worker, and marketing email
-outbox worker as standalone Go
-services. A one-shot setup step creates the least-privilege Go app role
+Go API, capability jobs worker, webhook outbox worker, marketing email outbox
+worker, and notification email outbox worker as standalone Go services. A
+one-shot setup step creates the least-privilege Go app role
 principal, then a second applies Drizzle migrations and requires a matching
 PostgreSQL 16 `pg_dump` snapshot. Final role grants are provisioned after
 migrations, before the API and workers start. The API
@@ -817,8 +341,8 @@ Capabilities carry their own contract: zod schemas, risk class (`read`, `write`,
 CI combines that explicit active-stack check with the full typecheck, lint,
 and test gates, migration manifests, database continuity checks, and live
 business proofs when their provider key is available. The Next.js production
-build is not required. The broader gates remain until the legacy app and
-TypeScript demos have Go replacements.
+build is not required, and every demo proof runs through the Go assertion
+bridge (`scripts/lib/go-driver.ts`).
 
 ## Demo proofs
 
@@ -826,8 +350,13 @@ Each script is an executable specification. If one fails, that's a bug worth kno
 
 ```sh
 pnpm demo:slice   # customer → invoice → gated payment → approval → trial balance
+pnpm demo:m2      # AR aging, period-close gating, agent posts to internal chat
+pnpm demo:m3      # document ingestion → coding suggestions → vendor bill → payment
 pnpm demo:m4      # vendor bill → gated payment → P&L and balance sheet prove out
+pnpm demo:m4b     # hire → leave → prorated payroll → approval → ledger
 pnpm demo:m5      # register session → sales → drawer variance flagged
+pnpm demo:m6      # teams/RBAC, inventory, three-way matching, Creator Mode
+pnpm demo:support # customer care agent grounded in records, injection refused
 pnpm demo:m7      # inventory → GL reconciliation, transfers, products
 pnpm demo:m8      # needs-attention signals, governed reorder approve/decline
 pnpm demo:m9      # quote-to-cash: fulfillment, credit guard, expiry, customer 360
@@ -840,15 +369,14 @@ pnpm demo:m13     # POS returns, shift summaries, marketing-lite
 Most take a subcommand to run one proof, e.g. `pnpm demo:m9 fulfillment`.
 Every demo needs a migrated database. Some also drive the real agent and need a
 model provider key - CI skips the keyed demo set when no key is configured, so
-a missing key looks like a skipped job rather than a failure. The G52
-`demo:slice` proof does not call a model.
+a missing key looks like a skipped job rather than a failure.
 
-For the G52 Go-backed `demo:slice` proof, set `GO_DATABASE_URL` to the
-provisioned `chaste_app` connection and set `GO_INTERNAL_AUTH_SECRET` to at
-least 32 bytes (`openssl rand -hex 32` generates 32 random bytes as hex). Start
-the Go API in another terminal with `pnpm dev:api`, then run `pnpm demo:slice`.
-The proof exercises Go capability, approval, and trial-balance APIs; public
-business routes remain legacy-owned during the migration.
+Demo scripts run through the authenticated Go assertion bridge
+(`scripts/lib/go-driver.ts`). Point `CHASTE_GO_API_ORIGIN` (or
+`GO_API_INTERNAL_URL`) at the running Go API (`pnpm dev:api`), set
+`GO_DATABASE_URL` to the provisioned `chaste_app` connection, and set
+`GO_INTERNAL_AUTH_SECRET` to at least 32 bytes
+(`openssl rand -hex 32`), then run the proof.
 
 ## Upgrading
 
@@ -860,14 +388,13 @@ automatically before any migration runs.
 ```sh
 git pull            # get the new version
 pnpm install
-pnpm --filter @chaste/db db:migrate  # local development
-pnpm dev                              # local development, migrations are explicit
-pnpm build && pnpm start              # production, migrations run on boot
+pnpm --filter @chaste/db db:migrate  # local development, explicit
+pnpm dev                             # local development
 ```
 
-Production applies pending migrations once at boot before accepting requests
-(serialized across instances by a Postgres advisory lock), so a deployment
-doesn't serve new code against an old schema. Local development migrates
+For production, `docker compose up -d --build` runs the `migrate-schema` and
+`migrate` one-shot services before the API and workers start, so a deployment
+never serves new code against an old schema. Local development migrates
 explicitly to keep restarts quick.
 
 Controls and safety nets:
@@ -881,12 +408,6 @@ Controls and safety nets:
 - Set `CHASTE_STRICT_MIGRATION_BACKUP=1` in production to refuse migrating
   when a snapshot cannot be taken (e.g. `pg_dump` not installed and no
   container fallback available).
-- Local `pnpm dev` skips boot migration by default. Apply schema changes with
-  `pnpm --filter @chaste/db db:migrate`, or set `AUTO_MIGRATE_ON_BOOT=1` to
-  opt into boot migration during local development.
-- Production still migrates on boot by default. Set
-  `AUTO_MIGRATE_ON_BOOT=0` only when your release process runs migrations
-  separately before starting the new app version.
 - Upgrade notes for behavioral changes are in [CHANGELOG.md](CHANGELOG.md)
   under the version you're moving to.
 

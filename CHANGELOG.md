@@ -88,6 +88,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- `.env.example` now includes `NOTIFICATION_EMAIL_OUTBOX_WORKER_DATABASE_URL`; `pnpm worker` previously failed at startup because the notification email worker requires it.
 - CRM and purchasing Go routes now answer capability domain refusals with 422, 404, or 403 instead of a generic 500, while genuine database and context failures still return a logged 500. CRM import now requires a same-origin cookie write like its sibling collection routes.
 - Go accounts receivable parsers now reject non-UUID customer IDs and malformed non-empty `fxRate` and `settleFxRate` values before any database access, so malformed capability requests get a governed refusal instead of a PostgreSQL cast error surfaced as a 500, and an invalid rate is no longer silently replaced by the latest stored rate. The contract now documents that an empty `currency`, `fxRate`, or `settleFxRate` selects the base currency or latest stored rate, matching the legacy clients.
 - The Go auth integration suites now run the email outbox on a session-local shadow table with a single-connection pool, so they pass while the development API's outbox worker is running instead of racing it for the same rows.
@@ -135,6 +136,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Documentation now describes the Vite + Go runtime only: the README, setup guide, architecture, roadmap, contributing guide, and migration-plan status were rewritten for the retired Next.js app, and dead `GO_*` and `CHASTE_GO_*` switches were removed from `.env.example`.
 - The Go internal capability bridge now answers executor domain refusals with the legacy 403/404/422 statuses and messages instead of collapsing them to a generic 500, and the Next bridge accepts the new 404 refusal envelope.
 - The migration route census now records onboarding state reads and updates as Go-owned after authenticated Vite runtime proof.
 - CI now requires the focused Vite and Go verification command while retaining the migration-era workspace checks and live TypeScript proofs; the Next.js production build is no longer required.

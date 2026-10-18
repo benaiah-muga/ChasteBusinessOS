@@ -1,6 +1,6 @@
 # React and Go migration plan
 
-Status: G9 complete. The Next.js app is retired; Vite + Go are the only runtime. Migration censuses that described the retired Next surface are frozen in docs/migration/retired-*.json.
+Status: G9 complete, G10 in progress. All porting waves are done: the Next.js app was retired on 2026-10-19 (b050abf1) and Vite + Go are the only runtime. All 165 API methods are accounted for: 163 are Go-owned and verified, and the two Better Auth catch-all methods stay auth-owned pending by design. Migration censuses that described the retired Next surface are frozen in docs/migration/retired-*.json, and gate evidence lives in .unlazy/react-go-full-migration/GATES.md.
 Date: 2026-09-27. Decision: [ADR 0070](adr/0070-react-vite-and-go-migration.md).
 
 ## Goal and finish line

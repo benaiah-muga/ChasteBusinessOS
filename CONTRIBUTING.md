@@ -13,16 +13,17 @@ modularity, and trust.
 
 Requirements:
 
-- Node.js 22+ (LTS preferred; CI targets current LTS)
-- pnpm 9+
-- Docker (PostgreSQL + Redis)
+- Node.js 24+ (matches CI)
+- pnpm 11+
+- Docker (PostgreSQL with pgvector)
 
 ```bash
 pnpm install
 cp .env.example .env
-docker compose up -d
-pnpm db:migrate
-pnpm dev
+# fill BETTER_AUTH_SECRET and GO_INTERNAL_AUTH_SECRET (openssl rand -hex 32)
+docker start chaste-pgvector    # or provision via docker compose
+pnpm --filter @chaste/db db:migrate
+pnpm dev                        # Vite on :3000; run pnpm dev:api in another terminal
 ```
 
 - Web: `http://localhost:3000` (Vite; talks to the Go API over HTTP only)

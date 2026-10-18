@@ -8,8 +8,9 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
 /**
- * Single entry point for schema migrations, used by `pnpm db:migrate` and by
- * the web app's boot hook (apps/web/src/instrumentation.ts).
+ * Single entry point for schema migrations, used by the `@chaste/db` migrate
+ * script (`pnpm --filter @chaste/db db:migrate`) and the Compose
+ * `migrate-schema` service.
  *
  * Safety model for user data:
  *  - Postgres advisory lock serializes concurrent boots (multi-instance
@@ -44,10 +45,9 @@ export interface MigrationResult {
 
 /**
  * Locates the @chaste/db package root whether this code runs from source
- * (tsx scripts, tests) or from a bundled server (Next instrumentation):
- * bundlers rewrite import.meta.url, and literal `new URL(rel, import.meta.url)`
- * forms get misread as asset imports, so resolution goes through Node's
- * require machinery, which follows the pnpm symlink to the real monorepo dir.
+ * (tsx scripts, tests) or from compiled output: resolution goes through
+ * Node's require machinery, which follows the pnpm symlink to the real
+ * monorepo dir.
  */
 function packageRoot(): string {
   const selfUrl = fileURLToPath(import.meta.url);

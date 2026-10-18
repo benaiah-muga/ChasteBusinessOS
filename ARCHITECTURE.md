@@ -164,15 +164,15 @@ Model routing (all via NVIDIA NIM unless overridden):
 |---|---|---|
 | Repo | Turborepo + pnpm workspaces | parallel builds, shared versioning, clean package boundaries |
 | Language | TypeScript strict in the browser; Go for the business runtime | generated API types keep the boundary checked; no TypeScript server remains after cutover (ADR 0070) |
-| Web | React 19 + Vite static client | faster client iteration and a separately compiled browser app; legacy server pages remain until each page passes parity |
-| API | Go HTTP service with validated, versioned contracts | one governed capability executor owns business writes; legacy handlers remain temporary route owners until parity passes |
+| Web | React 19 + Vite static client | faster client iteration and a separately compiled browser app; the Next.js server was retired on 2026-10-19 (ADR 0070) |
+| API | Go HTTP service with validated, versioned contracts | one governed capability executor owns business writes; 163 API methods are Go-owned and verified, and the two Better Auth catch-all methods stay auth-owned and pending by design |
 | DB | PostgreSQL 16 + Drizzle ORM | relational integrity is non-negotiable for accounting; SQL-native migrations |
 | Vectors | pgvector | no extra infra; joins with transactional data; HNSW indexes |
-| Auth | Existing Better Auth sessions with a temporary bridge | preserve passwords, sessions, verified identity binding, and active-org behavior while the Go auth port is proven |
+| Auth | Go-owned, Better Auth-compatible sessions | preserve passwords, sessions, verified identity binding, and active-org behavior; unsupported Better Auth endpoints return 404 or 405 |
 | UI | Existing token-driven theme and in-repo components, ported into Vite in slices | preserve the current brand and accessible controls; keep the component system in-repo |
 | Validation | Versioned API schemas with Go runtime validation and generated TypeScript types | reject contract drift at the HTTP boundary while retaining strict browser types |
-| Jobs | Go worker over the existing PostgreSQL durable queue | preserve `FOR UPDATE SKIP LOCKED` claims, leases, retries, occurrence receipts, and existing rows during the worker port |
-| Observability | console logging + event ledger in DB | structured pino logs and OpenTelemetry traces are planned, not wired |
+| Jobs | Go worker over the existing PostgreSQL durable queue | preserve `FOR UPDATE SKIP LOCKED` claims, leases, retries, occurrence receipts, and existing rows |
+| Observability | console logging + event ledger in DB | structured Go logs and OpenTelemetry traces are planned, not wired |
 | Testing | Vitest, Go tests and vet, database integration proofs, and browser checks | retain the existing demo proofs and drive them through the migrated API; property-test ledger invariants |
 
 Monorepo migration layout (current owner is recorded in
@@ -180,11 +180,10 @@ Monorepo migration layout (current owner is recorded in
 
 ```
 apps/
-  web-vite/       React + Vite browser client (target UI)
-  api/            Go HTTP API and worker (target business runtime)
-  web/            legacy application and auth bridge during parity-gated port
+  web-vite/       React + Vite browser client
+  api/            Go HTTP API, capability executor, and workers
 packages/
-  kernel/         legacy TypeScript reference until each Go path is verified
+  kernel/         TypeScript capability definitions and conformance reference (the runtime executor is Go)
   db/             drizzle schema + migrations (all modules)
   ai/             provider adapters (NIM, openai-compat), embeddings
   erp-core/       pure domain logic: posting rules, tax, inventory math (no IO)
@@ -209,7 +208,9 @@ Two of these are cross-cutting rather than domain modules:
   *proposed* governed action rather than executing one.
 
 Domain rule: `erp-core` is pure functions; `modules/*` may touch DB via `db`;
-only `kernel` executes capabilities; only humans approve `identity/destructive`.
+the Go capability executor executes capabilities at runtime, and `kernel` is
+the TypeScript definition and conformance reference; only humans approve
+`identity/destructive`.
 
 ---
 

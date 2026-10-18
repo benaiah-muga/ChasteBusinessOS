@@ -20,7 +20,7 @@ export const ROUTINE_PROMPT_MAX = 4000;
 export const ROUTINE_SCHEDULE_TEXT_MAX = 200;
 const ROUTINE_LIST_LIMIT = 100;
 
-/** Execution job type handled by the worker (apps/web/src/server/jobs.ts). */
+/** Execution job type handled by the Go jobs worker (apps/api/internal/jobs/routines.go). */
 export const ROUTINE_JOB_TYPE = "routines.executeRoutine";
 
 const validTimeSchema = z

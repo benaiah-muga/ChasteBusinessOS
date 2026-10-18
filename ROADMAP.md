@@ -113,7 +113,7 @@
       boot-time tool-schema serializability + name-collision conformance,
       registry cached per process instead of per request
 - [ ] Playwright e2e happy path (approvals inbox through posting)
-- [ ] pino/OTel export behind the structured logger seam; per-org ledger
+- [ ] OTel export behind the structured logger seam; per-org ledger
       chain heads + partitioning (ADR 0022); multi-currency phases 2-3
       (ADR 0021); sandboxed proposal runner (ADR 0023)
 - [ ] Pen-test pass; per-org data residency notes

@@ -3,9 +3,9 @@
 Agentic ERP. Every human action is also an AI-agent action through the same
 capability pipeline, governed, auditable, reversible.
 
-The target runtime is a React app built with Vite and Go business APIs and
-workers. During the migration, use the active commands documented in
-[README.md](README.md) and the [migration plan](docs/REACT_GO_MIGRATION_PLAN.md).
+The runtime is a React app built with Vite and Go business APIs and workers.
+Use the active commands documented in [README.md](README.md); migration
+history lives in the [migration plan](docs/REACT_GO_MIGRATION_PLAN.md).
 
 Read `ARCHITECTURE.md` first, then `ROADMAP.md`. Design decisions live in
 `docs/adr/`; user-facing changes are recorded in `CHANGELOG.md`.
@@ -40,8 +40,8 @@ pnpm typecheck && pnpm lint && pnpm test
 pnpm go:verify
 ```
 
-During the migration, run checks for each language and app that exists in the
-change. Keep the full gate above once the Go workspace is present.
+Run the full gate above for every change; the TypeScript and Go workspaces are
+both present.
 
 Live behavior proofs - one per milestone, each an executable specification:
 `demo:slice`, `demo:m2`, `demo:m3`, `demo:m4`, `demo:m4b`, `demo:m5`,

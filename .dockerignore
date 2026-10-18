@@ -3,7 +3,7 @@
 # never via files baked into layers.
 #
 # NOTE: unlike .gitignore, a bare name here matches only the context root,
-# so nested copies need the **/ prefix (apps/web/.next is 3GB+).
+# so nested copies need the **/ prefix.
 **/node_modules
 **/.next
 **/.turbo
@@ -16,7 +16,7 @@
 .env.*
 *.log
 .DS_Store
-apps/web/graft
+**/graft
 .codebuddy
 .kilo
 graft
