@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const capabilityTestUserID = "11111111-1111-4111-8111-111111111111"
@@ -326,5 +328,31 @@ func TestGoCapabilityHandlerRejectsInvalidAssertionAndUnavailableExecutor(t *tes
 	NewGoCapabilityHandler(assertionSecret, &fakeCapabilityExecutor{}, nil).ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("invalid assertion status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestGoCapabilityHandlerMapsExecutorErrorsToLegacyStatuses(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		status int
+		body   string
+	}{
+		{"domain refusal", errors.New("order is void"), http.StatusUnprocessableEntity, `{"error":"order is void","ok":false}`},
+		{"missing object", errors.New("customer not found"), http.StatusNotFound, `{"error":"customer not found","ok":false}`},
+		{"infrastructure failure", &pgconn.PgError{Code: "08006", Message: "connection failure"}, http.StatusInternalServerError, `{"error":"internal error"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := json.RawMessage(capabilityTestInput)
+			executor := &fakeCapabilityExecutor{err: tc.err}
+			request := httptest.NewRequest(http.MethodPost, "/__go/capability/execute", strings.NewReader(`{"capabilityId":"crm.createCustomer","input":`+string(input)+`}`))
+			request.Header.Set(sessionAssertionHeader, signedCapabilityAssertion(t, validCapabilityClaims(t, string(input))))
+			response := httptest.NewRecorder()
+			NewGoCapabilityHandler(assertionSecret, executor, nil).ServeHTTP(response, request)
+			if response.Code != tc.status || strings.TrimSpace(response.Body.String()) != tc.body {
+				t.Fatalf("status=%d body=%s, want %d %s", response.Code, response.Body.String(), tc.status, tc.body)
+			}
+		})
 	}
 }

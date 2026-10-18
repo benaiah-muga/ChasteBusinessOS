@@ -128,6 +128,8 @@ const pendingGoWave3Routes = new Set([
   "GET /api/scim/v2/Users/[id]",
   "DELETE /api/scim/v2/Users/[id]",
   "GET /api/routines/webhook/[token]",
+  "POST /api/chat",
+  "POST /api/chat/steer",
 ]);
 
 export function allowsPendingGoWave3Owner(kind, path, method, owner, parity) {

@@ -1272,6 +1272,20 @@
       "method": "GET",
       "owner": "go",
       "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/chat",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/chat/steer",
+      "method": "POST",
+      "owner": "go",
+      "parity": "pending"
     }
   ],
   "goRoutes": [

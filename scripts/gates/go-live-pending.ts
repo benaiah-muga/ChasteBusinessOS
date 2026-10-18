@@ -71,7 +71,9 @@ async function main(): Promise<void> {
       headers: { "content-type": "application/json", cookie, ...ROUTE_ORIGIN },
       body: JSON.stringify({
         intentId: crypto.randomUUID(),
-        orgName: "Live Pending Trading",
+        // The bootstrap slug retry caps at five attempts, so re-runs need a
+        // fresh org name or they exhaust live-pending-trading through -5.
+        orgName: `Live Pending Trading ${Date.now()}`,
         businessDescription:
           "A small distribution business buying stock from vendors and selling to local shops.",
       }),

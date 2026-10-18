@@ -96,6 +96,10 @@ func (h *GoCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 			return
 		}
+		if status, ok := capabilityErrorStatus(err); ok {
+			writeJSON(w, status, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
 		if h.logger != nil {
 			h.logger.Error("Go capability execution failed", "capabilityId", body.CapabilityID, "error", err)
 		}

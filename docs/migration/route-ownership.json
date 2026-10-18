@@ -198,7 +198,7 @@
       "path": "/api/chat",
       "method": "POST",
       "source": "apps/web/src/app/api/chat/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {
@@ -206,7 +206,7 @@
       "path": "/api/chat/steer",
       "method": "POST",
       "source": "apps/web/src/app/api/chat/steer/route.ts",
-      "owner": "legacy",
+      "owner": "go",
       "parity": "pending"
     },
     {

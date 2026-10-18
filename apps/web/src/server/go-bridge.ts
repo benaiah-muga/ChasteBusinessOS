@@ -9,6 +9,7 @@ const goCapabilityResponseSchemas = new Map<number, z.ZodType>([
   [400, z.object({ error: z.string() }).strict()],
   [401, z.object({ error: z.string() }).strict()],
   [403, z.object({ error: z.string() }).strict()],
+  [404, z.object({ ok: z.literal(false), error: z.string() }).strict()],
   [422, z.object({ ok: z.literal(false), error: z.string() }).strict()],
   [500, z.object({ error: z.string() }).strict()],
   [503, z.object({ error: z.string() }).strict()],
