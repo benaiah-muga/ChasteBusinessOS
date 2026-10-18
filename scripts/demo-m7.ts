@@ -8,8 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { approvals, getDb, items, stockLocations, stockMovements, stockTransferLines, users } from "@chaste/db";
 import { glAccountBalanceMinor, inventoryLedgerValueMinor } from "../modules/inventory/src/valuation";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 const runId = randomUUID().slice(0, 8);
 let passed = 0;
@@ -105,21 +104,18 @@ async function reconciliationScenario(): Promise<string> {
       ],
     });
   });
-  const cap = registry.get("inventory.postValuationSummary");
-  if (!cap) throw new Error("missing capability");
-  const corrected = (await cap.execute(ownerCtx, { memo: "drift correction" })) as {
-    posted: boolean;
-    varianceMinor: number;
-  };
-  if (!corrected.posted || corrected.varianceMinor !== -2_000_000) {
-    throw new Error(`drift not corrected: ${JSON.stringify(corrected)}`);
+  const correctedResult = await executor.execute("inventory.postValuationSummary", ownerCtx, { memo: "drift correction" });
+  const corrected = correctedResult.data as { posted: boolean; varianceMinor: number };
+  if (!correctedResult.ok || !corrected.posted || corrected.varianceMinor !== -2_000_000) {
+    throw new Error(`drift not corrected: ${JSON.stringify(correctedResult)}`);
   }
   ok("injected GL drift corrected back to the ledger value");
   const after = await glAccountBalanceMinor(db, orgId);
   if (after !== ledgerValue) throw new Error(`GL ${after} != ledger ${ledgerValue} after correction`);
 
-  const noop = (await cap.execute(ownerCtx, { memo: "repeat summary" })) as { posted: boolean };
-  if (noop.posted !== false) throw new Error("second summary was not an honest no-op");
+  const noopResult = await executor.execute("inventory.postValuationSummary", ownerCtx, { memo: "repeat summary" });
+  const noop = noopResult.data as { posted: boolean };
+  if (!noopResult.ok || noop.posted !== false) throw new Error("second summary was not an honest no-op");
   ok("second summary is an explicit no-op");
 
   return "M7 RECONCILED";
@@ -203,10 +199,10 @@ async function transfersScenario(): Promise<string> {
     { fromLocationCode: "SHOP", toLocationCode: "MAIN", lines: [{ sku: "BAG-50", quantityThousandths: 999_000 }] },
   );
   const refused = await executor.execute("inventory.confirmTransfer", ownerCtx, { transferId: oversell.data!.transferId });
-  if (refused.ok || !(refused.error ?? "").includes("insufficient stock at source")) {
-    throw new Error(`oversell at source was not refused: ${JSON.stringify(refused)}`);
+  if (refused.ok || !(refused.error ?? "").includes("insufficient stock at source location")) {
+    throw new Error(`oversell at source was not refused with the stock-shortfall error: ${JSON.stringify(refused)}`);
   }
-  ok("oversell at the source location correctly refused");
+  ok(`oversell at the source location correctly refused ("${refused.error!.slice(0, 60)}…")`);
   await executor.execute("inventory.cancelTransfer", ownerCtx, { transferId: oversell.data!.transferId });
 
   const valueAfterMoves = await inventoryLedgerValueMinor(db, orgId);

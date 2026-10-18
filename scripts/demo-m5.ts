@@ -8,8 +8,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb, posSessions, users } from "@chaste/db";
 import { formatMinor } from "@chaste/erp-core";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 async function main() {
   const db = getDb().db;
@@ -21,7 +20,7 @@ async function main() {
   const { orgId } = await runOnboarding(db, {
     userId: user.id,
     userEmail: user.email,
-    orgName: "M5 Corner Shop",
+    orgName: `M5 Corner Shop ${Date.now()}`,
     businessDescription: "Corner shop selling coffee and snacks over the counter.",
   });
 

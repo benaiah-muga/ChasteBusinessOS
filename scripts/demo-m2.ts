@@ -6,10 +6,9 @@
  */
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { approvals, conversations, getDb, messages, users } from "@chaste/db";
+import { approvals, conversations, conversationMembers, getDb, messages, users } from "@chaste/db";
 import { formatMinor } from "@chaste/erp-core";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 async function main() {
   const db = getDb().db;
@@ -49,6 +48,7 @@ async function main() {
     .insert(conversations)
     .values({ orgId, title: "general", createdByUserId: user.id })
     .returning();
+  await db.insert(conversationMembers).values({ conversationId: conv!.id, userId: user.id }).onConflictDoNothing();
   await executor.execute("messaging.sendMessage", agentCtx, {
     conversationId: conv!.id,
     body: "Invoice #1 issued to Bar & Co, follow up on payment next week.",
@@ -60,22 +60,25 @@ async function main() {
   const aging = await executor.execute("accounting.arAging", agentCtx, {});
   console.log("✓ aging:", JSON.stringify(aging.data?.buckets));
 
-  // Close last month. Destructive-class: the workmate proposing it waits for
-  // human approval; a permitted human in the UI acts under their own
-  // authority (ADR 0055), so the gate is proven with an agent actor.
-  const lastMonth = new Date(Date.now() - 45 * 86_400_000);
+  // Close the current month. Go posting capabilities always post at server
+  // "now" (no historic date inputs), so the closed-period guard is proven by
+  // closing the month that now falls into, then posting again. Destructive
+  // class: the workmate proposing it waits for human approval; a permitted
+  // human in the UI acts under their own authority (ADR 0055), so the gate is
+  // proven with an agent actor.
+  const period = new Date();
   for (const taskKey of ["review_journal", "review_receivables", "review_payables", "review_tax"] as const) {
     await executor.execute("accounting.updatePeriodCloseCheck", humanCtx, {
-      year: lastMonth.getUTCFullYear(),
-      month: lastMonth.getUTCMonth() + 1,
+      year: period.getUTCFullYear(),
+      month: period.getUTCMonth() + 1,
       taskKey,
       completed: true,
       note: "Reviewed in the M2 close workbench proof.",
     });
   }
   const close = await executor.execute("accounting.closePeriod", agentCtx, {
-    year: lastMonth.getUTCFullYear(),
-    month: lastMonth.getUTCMonth() + 1,
+    year: period.getUTCFullYear(),
+    month: period.getUTCMonth() + 1,
   });
   if (!close.pendingApproval) throw new Error("destructive close was not gated for the agent!");
   console.log('✓ close period gated:', close.pendingApproval.rationale);
@@ -94,23 +97,17 @@ async function main() {
   console.log("✓ approved:", approved.ok);
 
   // Posting into the closed period must fail
-  const oldDate = new Date(lastMonth);
-  const blocked = await executor.execute(
-    "crm.createCustomer",
-    { ...humanCtx, now: oldDate },
-    { name: "Should Fail" },
-  );
-  void blocked; // crm doesn't check periods, use invoice instead:
-
   const blockedInvoice = await executor.execute(
     "accounting.createInvoice",
-    { ...humanCtx, now: oldDate },
+    humanCtx,
     {
       customerId: cust.data!.customerId as string,
       lines: [{ description: "x", quantity: 1000, unitPriceMinor: 100, taxMinor: 0 }],
     },
   );
-  if (blockedInvoice.ok) throw new Error("posting into closed period was allowed!");
+  if (blockedInvoice.ok || !/period \d{4}-\d{2} is closed; post to the current period or reopen it/.test(blockedInvoice.error ?? "")) {
+    throw new Error(`closed-period guard must refuse with the period message: ${JSON.stringify(blockedInvoice)}`);
+  }
   console.log("✓ closed-period guard held:", blockedInvoice.error);
 }
 

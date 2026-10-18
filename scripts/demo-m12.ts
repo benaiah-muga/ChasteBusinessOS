@@ -3,8 +3,7 @@
  * Run: pnpm demo:m12 [decompose|ask|tickets|documents|all]
  */
 import { getDb, invoiceLines, invoices, users } from "@chaste/db";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 let passed = 0;
 function ok(label: string, condition?: boolean) {

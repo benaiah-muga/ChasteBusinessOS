@@ -15,8 +15,8 @@ import {
   stockMovements,
   users,
 } from "@chaste/db";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { randomUUID } from "node:crypto";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 let passed = 0;
 function ok(label: string, condition?: boolean) {
@@ -129,9 +129,10 @@ async function creditScenario(): Promise<string> {
     }),
   );
   const attempt = await executor.execute("sales.confirmOrder", ownerCtx, { orderId: order.orderId });
-  const refused = attempt.error ? String(attempt.error) : "";
-  if (!/credit limit exceeded/.test(refused)) throw new Error(`expected credit refusal, got: ${refused || "no error"}`);
-  ok(`refused with actionable message: ${refused.slice(0, 120)}…`);
+  if (attempt.ok || !(attempt.error ?? "").includes("credit limit exceeded")) {
+    throw new Error(`order must be refused for the credit limit: ${JSON.stringify(attempt)}`);
+  }
+  ok(`order refused before any stock was reserved or receivables moved ("${attempt.error!.slice(0, 70)}…")`);
 
   const resv = await db
     .select({ n: sql<number>`count(*)` })
@@ -158,9 +159,10 @@ async function expiryScenario(): Promise<string> {
   );
 
   const attempt = await executor.execute("accounting.acceptQuote", ownerCtx, { quoteId: quote.quoteId });
-  const refused = attempt.error ? String(attempt.error) : "";
-  if (!/quote expired on/.test(refused)) throw new Error(`expected expiry refusal, got: ${refused || "no error"}`);
-  ok(`accept refused honestly: ${refused}`);
+  if (attempt.ok || !(attempt.error ?? "").includes("quote expired on")) {
+    throw new Error(`accept must be refused for the expiry: ${JSON.stringify(attempt)}`);
+  }
+  ok(`accept refused honestly ("${attempt.error!.slice(0, 70)}…")`);
 
   const swept = data(await executor.execute("accounting.expireQuote", ownerCtx, {}));
   ok(`sweep archived ${swept.expiredCount} lapsed quote(s)`, swept.expiredCount >= 1);
@@ -197,7 +199,14 @@ async function timelineScenario(): Promise<string> {
   const { orgId, ownerCtx } = await seedOrg(db, "M9 Timeline Co");
 
   const deal = data(await executor.execute("crm.createDeal", ownerCtx, { title: "Walk-in - Harbor Cafe", valueMinor: 1_200_000, source: "walk-in" }));
-  const converted = data(await executor.execute("crm.convertLead", ownerCtx, { dealId: deal.dealId, createCustomer: true, customerName: "Harbor Cafe" }));
+  // Go requires a durable action intent for the reversible lead conversion.
+  const converted = data(
+    await executor.execute(
+      "crm.convertLead",
+      { ...ownerCtx, intentId: randomUUID() },
+      { dealId: deal.dealId, createCustomer: true, customerName: "Harbor Cafe" },
+    ),
+  );
   ok(`lead converted into customer ${converted.customerId} at stage ${converted.stage}`);
 
   const dupe = data(await executor.execute("crm.createCustomer", ownerCtx, { name: "harbor cafe" }));

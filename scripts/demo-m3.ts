@@ -3,9 +3,9 @@
  * coding suggestions → vendor bill from the suggested codes → gated payment
  * proves the whole governed chain.
  *
- * Works fully offline: the document is pasted text (no OCR call needed) and
- * line items are supplied explicitly. When NVIDIA_API_KEY is present, the
- * LLM line-extraction path is proven instead.
+ * Works fully offline: the document is pasted text (no OCR call needed). The
+ * Go documents coder refuses text-only line extraction by design (no model
+ * provider wired), so line items are supplied explicitly to suggestCoding.
  *
  * Run: pnpm demo:m3
  */
@@ -13,8 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { approvals, getDb, users } from "@chaste/db";
 import { formatMinor } from "@chaste/erp-core";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 const BILL_TEXT = `ACME OFFICE SUPPLIES LTD
 Invoice #42    Date: 2026-08-20
@@ -60,19 +59,16 @@ async function main() {
   if (!parsed.ok) throw new Error(parsed.error ?? "parse failed");
   console.log(`✓ document ingested & parsed (${parsed.data?.chars} chars indexed into org memory)`);
 
-  // 2. Coding suggestions, explicit lines offline; model extraction when a key exists.
-  const hasKey = Boolean(process.env.NVIDIA_API_KEY);
-  const suggestInput = hasKey
-    ? { documentId }
-    : {
-        documentId,
-        lines: [
-          { description: "Office chair", quantityThousandths: 20_000, unitPriceMinor: 8500 },
-          { description: "Annual internet subscription", quantityThousandths: 1000, unitPriceMinor: 96_000 },
-          { description: "Ream A4 paper", quantityThousandths: 60_000, unitPriceMinor: 450 },
-        ],
-      };
-  const suggested = await executor.execute("documents.suggestCoding", agentCtx, suggestInput);
+  // 2. Coding suggestions from explicit lines (the Go runtime has no model
+  // provider for text-only extraction and refuses that shape by design).
+  const suggested = await executor.execute("documents.suggestCoding", agentCtx, {
+    documentId,
+    lines: [
+      { description: "Office chair", quantityThousandths: 20_000, unitPriceMinor: 8500 },
+      { description: "Annual internet subscription", quantityThousandths: 1000, unitPriceMinor: 96_000 },
+      { description: "Ream A4 paper", quantityThousandths: 60_000, unitPriceMinor: 450 },
+    ],
+  });
   if (!suggested.ok || !suggested.data) throw new Error(suggested.error ?? "suggest failed");
   for (const s of suggested.data.suggestions as { description: string; suggestedAccountCode: string; matchScore: number }[]) {
     console.log(`✓ suggestion: "${s.description}" → account ${s.suggestedAccountCode} (signal ×${s.matchScore})`);

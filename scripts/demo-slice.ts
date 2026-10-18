@@ -10,8 +10,6 @@ import { and, eq } from "drizzle-orm";
 import {
   agentSessions,
   approvals,
-  authSession,
-  authUser,
   getDb,
   invoices,
   payments,
@@ -21,10 +19,10 @@ import { formatMinor } from "@chaste/erp-core";
 import {
   decideGoApproval,
   executeGoCapability,
+  runOnboarding,
   type GoApprovalDecisionAssertionInput,
   type GoCapabilityExecutionAssertionInput,
-} from "../apps/web/src/server/go-bridge";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+} from "./lib/go-driver";
 
 type GoActionContext = GoCapabilityExecutionAssertionInput["actionContext"];
 type GoSession = GoCapabilityExecutionAssertionInput["session"];
@@ -256,7 +254,7 @@ async function main() {
     .returning();
   if (!domainUser) throw new Error("user insert failed");
 
-  const { orgId } = await runOnboarding(db, {
+  const { orgId, authSessionId } = await runOnboarding(db, {
     userId: domainUser.id,
     userEmail: email,
     orgName: `Glow Works Demo ${runId.slice(0, 8)}`,
@@ -265,21 +263,8 @@ async function main() {
   });
   console.info("✓ org onboarded:", orgId);
 
-  // Go verifies Better Auth session state and a persisted, open agent session for every assertion.
-  const authUserId = `slice-auth-user-${runId}`;
-  const authSessionId = `slice-auth-session-${runId}`;
-  await db.insert(authUser).values({
-    id: authUserId,
-    name: "Demo Founder",
-    email,
-    emailVerified: true,
-  });
-  await db.insert(authSession).values({
-    id: authSessionId,
-    token: `slice-auth-token-${runId}`,
-    userId: authUserId,
-    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-  });
+  // Go verifies a persisted, open agent session for every agent assertion;
+  // runOnboarding already provisioned the Better Auth identity/session rows.
   const [agentSession] = await db
     .insert(agentSessions)
     .values({

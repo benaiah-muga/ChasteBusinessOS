@@ -14,8 +14,7 @@ import {
   users,
   vendorBills,
 } from "@chaste/db";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 let passed = 0;
 function ok(label: string, condition?: boolean) {
@@ -53,7 +52,7 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string) {
       services: {},
     },
     agentCtx: {
-      actor: { type: "agent" as const, id: null, orgId, permissions: new Set(["*"]) },
+      actor: { type: "agent" as const, id: owner.id, orgId, permissions: new Set(["*"]) },
       now: new Date(),
       services: {},
     },

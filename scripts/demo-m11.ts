@@ -7,8 +7,7 @@
 import { getDb, timeEntries, users } from "@chaste/db";
 import { randomUUID } from "node:crypto";
 import { CapabilityRegistry } from "@chaste/kernel";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 import { registerProjectsCapabilities } from "../modules/projects/src/index";
 
 let passed = 0;
@@ -48,7 +47,7 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string, enab
       services: {},
     },
     agentCtx: {
-      actor: { type: "agent" as const, id: null, orgId, permissions: new Set(["*"]) },
+      actor: { type: "agent" as const, id: owner.id, orgId, permissions: new Set(["*"]) },
       now: new Date(),
       services: {},
     },
