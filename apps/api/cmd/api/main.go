@@ -22,6 +22,7 @@ import (
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/orgswitch"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/policy"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/signals"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -194,6 +195,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	capabilityExecutor := capability.NewExecutor(pool, os.Getenv("NOTIFICATION_WEBHOOK_URL"), os.Getenv("SMTP_HOST"), os.Getenv("SMTP_TO"))
+	signals.Register(pool)
 	approvalDecider := capability.NewApprovalDecider(pool, capabilityExecutor)
 	approvalInboxReader := httpapi.NewPostgresApprovalInboxReader(pool)
 	var sessionResolver *session.Resolver
