@@ -11,6 +11,8 @@ import { CRMPage } from "./components/CRMPage";
 import { MarketplacePage } from "./components/MarketplacePage";
 import { SalesPage } from "./components/SalesPage";
 import { PageErrorBoundary } from "./components/PageErrorBoundary";
+import { ChatDock } from "./components/ChatDock";
+import { resetChat } from "./chat-store";
 import { DashboardPage } from "./components/DashboardPage";
 import { ActiveOrganization } from "./components/ActiveOrganization";
 import { LoginPage } from "./components/LoginPage";
@@ -45,6 +47,7 @@ const ProposalsPage = lazy(() => import("./components/ProposalsPage").then((modu
 const OnboardingPage = lazy(() => import("./components/OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
 const DocumentsEditorPage = lazy(() => import("./components/DocumentsEditorPage").then((module) => ({ default: module.DocumentsEditorPage })));
 const PosPage = lazy(() => import("./components/PosPage").then((module) => ({ default: module.PosPage })));
+const ChatPage = lazy(() => import("./components/ChatPage").then((module) => ({ default: module.ChatPage })));
 
 const SessionUserSchema = z.object({
   id: z.string().min(1),
@@ -59,6 +62,7 @@ type AuthState =
   | { status: "failed" };
 
 const navigationItems = [
+  { label: "Workmate", href: "/chat", icon: "✧" },
   { label: "Approvals", href: "/approvals", icon: "✓" },
   { label: "Accounting", href: "/accounting/invoices", icon: "▤" },
   { label: "Close readiness", href: "/accounting/close", icon: "◷" },
@@ -127,6 +131,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   const manufacturingPage = pathname === "/manufacturing";
   const marketingPage = pathname === "/marketing";
   const proposalsPage = pathname === "/proposals";
+  const chatPage = pathname === "/chat";
   // The editor is a dynamic segment, so it matches by prefix rather than equality.
   const documentsEditorPage = pathname.startsWith("/documents/editor/");
   const posPage = pathname === "/pos";
@@ -164,6 +169,12 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   useEffect(() => {
     void refreshSession();
   }, [refreshSession]);
+
+  useEffect(() => {
+    // An org switch must not leave the previous org's transcript or session
+    // id in the shared chat store.
+    if (organizationRevision > 0) resetChat();
+  }, [organizationRevision]);
 
   async function signOut() {
     setSigningOut(true);
@@ -305,7 +316,9 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                                             ? <MarketingPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                                             : proposalsPage
                                                               ? <ProposalsPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
-                                                              : documentsEditorPage
+                                                              : chatPage
+                                                                ? <ChatPage key={organizationRevision} />
+                                                                : documentsEditorPage
                                                                 ? <DocumentsEditorPage key={organizationRevision} documentId={pathname.split("/").pop()} actorId={currentUserId} organizationId={activeOrgId} />
                                                                 : posPage
                                                                 ? activeOrgId
@@ -315,6 +328,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
           </Suspense>
         </PageErrorBoundary>
       </div>
+      <ChatDock pathname={pathname} />
     </div>
   );
 }

@@ -1,0 +1,111 @@
+.chat-dock-bubble {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 50;
+  display: flex;
+  width: 52px;
+  height: 52px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: #223b32;
+  color: #e8dcc0;
+  box-shadow: 0 10px 24px rgb(32 41 34 / 28%);
+  cursor: pointer;
+  font-size: 20px;
+  transition: transform .15s ease, background .15s ease;
+}
+.chat-dock-bubble:hover { transform: scale(1.06); background: #1a2d26; }
+.chat-dock-bubble-pulse {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #fffefa;
+  border-radius: 50%;
+  background: #3f9d6b;
+  animation: chat-strip-pulse 1.4s ease infinite;
+}
+
+.chat-dock-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 50;
+  display: flex;
+  width: min(420px, calc(100vw - 2rem));
+  height: min(560px, calc(100vh - 5rem));
+  flex-direction: column;
+  border: 1px solid #e5e3da;
+  border-radius: 15px;
+  background: #fffefa;
+  box-shadow: 0 24px 60px rgb(32 41 34 / 22%);
+  overflow: hidden;
+}
+
+.chat-dock-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #efede7;
+  padding: 11px 12px 10px 14px;
+}
+
+.chat-dock-avatar {
+  position: relative;
+  display: flex;
+  width: 27px;
+  height: 27px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #2c3930;
+  color: #e8dcc0;
+  font-size: 12px;
+}
+.chat-dock-avatar-pulse {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid #fffefa;
+  border-radius: 50%;
+  background: #3f9d6b;
+  animation: chat-strip-pulse 1.4s ease infinite;
+}
+
+.chat-dock-title { min-width: 0; flex: 1; line-height: 1.25; }
+.chat-dock-title p { margin: 0; color: #223b32; font-size: 12.5px; font-weight: 700; }
+.chat-dock-status { display: inline-flex; align-items: center; color: #a3a196; font-size: 10.5px; }
+.chat-dock-status-busy { color: #5f655d; }
+
+.chat-dock-icon-button {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #82806f;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.chat-dock-icon-button:hover { background: #f2f0e8; color: #223b32; }
+
+.chat-dock-scroll { min-height: 0; flex: 1; overflow-y: auto; }
+
+.chat-dock-composer { border-top: 1px solid #efede7; padding: 10px 12px 12px; background: #fffefa; }
+
+@media (max-width: 480px) {
+  .chat-dock-panel { right: 0; bottom: 0; width: 100vw; height: calc(100vh - 3.5rem); border-radius: 15px 15px 0 0; }
+  .chat-dock-bubble { right: 14px; bottom: 14px; }
+}

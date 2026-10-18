@@ -177,8 +177,8 @@ describe("Vite home dashboard", () => {
       const promptLink = screen.getByRole("link", { name: label }) as HTMLAnchorElement;
       const destination = new URL(promptLink.href);
       expect(destination.origin).toBe(window.location.origin);
-      expect(destination.pathname).toBe("/messages");
-      expect(destination.searchParams.get("workmatePrompt")).toBe(prompt);
+      expect(destination.pathname).toBe("/chat");
+      expect(destination.searchParams.get("prompt")).toBe(prompt);
     }
     expect(screen.getByRole("link", { name: "Open books" }).getAttribute("href")).toBe("/accounting");
     expect(screen.getByRole("link", { name: "View all" }).getAttribute("href")).toBe("/ledger");
