@@ -332,10 +332,10 @@ other unported CRM writes and read modes retain their existing route owners.
 The Go metrics reader matches the newest-200-session aggregate,
 null-rate, rounding, and organization-scope behavior. Its short-lived signed
 HTTP adapter is opt-in through `GO_METRICS_READ=1`; the public route remains
-legacy-owned by default. The current route manifest has 163 API methods: 92 methods are
-Go-owned and verified, 69 are legacy-owned, and two Better Auth methods are
-assigned to Go auth with endpoint compatibility parity still open. Vite owns all 30 page entries as
-verified.
+legacy-owned by default. The current route manifest has 165 API methods: 163
+are Go-owned and verified and two Better Auth methods are assigned to Go auth
+with endpoint compatibility parity still open. Vite owns all 30 page entries
+as verified.
 
 The key seams are `apps/web/src/lib/api.ts` (HTTP and 202 approval semantics),
 `apps/web/src/server/auth.ts` and `session.ts` (identity and active org),
@@ -349,9 +349,9 @@ backup behavior. Phase 0 records exact manifests from these sources.
 Method-level owner and parity changes belong in
 `route-ownership-overrides.json`; the generator rejects duplicate or stale
 keys and prevents a route from moving to Go or Vite before parity is verified.
-The current manifest records 89 verified Go-owned business API methods, 71
-legacy-owned methods, and two auth methods assigned to Go with
-compatibility parity pending. All 30 page entries are Vite-owned and verified.
+The current manifest records 163 verified Go-owned business API methods and
+two auth methods assigned to Go with compatibility parity pending. All 30 page
+entries are Vite-owned and verified.
 Owner changes are recorded after their implementation and runtime evidence is
 reviewed.
 
@@ -4940,11 +4940,10 @@ new owners and the manifest shows zero legacy runtime paths.
      verified after the authenticated Vite proof in item 312 confirmed the
      state read, update, follow-up read, and absence of legacy requests. The
      other reviewed routes already have ownership entries and supporting
-     focused or runtime proof. Inventory POST remains legacy-owned because
-     active Vite uses capability endpoints for inventory writes and has no
-     caller for the legacy POST route. The generated census now records 94
-     route files, 162 API methods (89 Go, 71 legacy, 2 auth), and 30 Vite
-     pages; the earlier count in item 438 is historical.
+     focused or runtime proof. Inventory POST was later ported to Go in wave 3.
+     The generated census now records 94 route files, 165 API methods (163
+     Go-verified, 2 auth-pending), and 30 Vite pages; the earlier count in
+     item 438 is historical.
 
 461. (Runtime verified) Vite CRM Overview reads
      full organization-scoped deal-stage counts and totals through the existing

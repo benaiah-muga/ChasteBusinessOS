@@ -1,17 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import {
-  allowsPendingAuthOwner,
-  allowsPendingGoOrgPersonaOwner,
-  allowsPendingGoMemoryCollectionOwner,
-  allowsPendingGoModuleSettingsOwner,
-  allowsPendingGoPolicyOwner,
-  allowsPendingGoRoutineCollectionOwner,
-  allowsPendingGoAttachmentDownloadOwner,
-  allowsPendingGoMessagingAgentOwner,
-  allowsPendingGoWave3Owner,
-} from "./route-ownership-policy.mjs";
+import { allowsPendingAuthOwner } from "./route-ownership-policy.mjs";
 
 const manifest = JSON.parse(readFileSync("docs/migration/route-ownership.json", "utf8"));
 const overrides = JSON.parse(readFileSync("docs/migration/route-ownership-overrides.json", "utf8"));
@@ -50,137 +40,23 @@ test("pending auth ownership is limited to the Better Auth catch-all", () => {
   assert.equal(allowsPendingAuthOwner("page", "/api/auth/[...all]", "auth", "pending"), false);
 });
 
-test("pending Go persona ownership is limited to exact organization PUT and PATCH overrides", () => {
-  for (const method of ["PUT", "PATCH"]) {
-    assert.equal(allowsPendingGoOrgPersonaOwner("api", "/api/org", method, "go", "pending"), true);
-  }
+test("every API method except the Better Auth catch-all is verified Go", () => {
+  const nonVerified = manifest.entries.filter(
+    (entry) => entry.kind === "api" && entry.parity !== "verified",
+  );
 
-  for (const candidate of [
-    ["page", "/api/org", "PUT", "go", "pending"],
-    ["api", "/api/org/extra", "PUT", "go", "pending"],
-    ["api", "/api/org", "GET", "go", "pending"],
-    ["api", "/api/org", "DELETE", "go", "pending"],
-    ["api", "/api/org", "PATCH", "legacy", "pending"],
-    ["api", "/api/org", "PATCH", "go", "verified"],
-  ]) {
-    assert.equal(allowsPendingGoOrgPersonaOwner(...candidate), false, JSON.stringify(candidate));
-  }
+  assert.deepEqual(
+    nonVerified.map(({ path, method, owner, parity }) => ({ path, method, owner, parity })),
+    [
+      { path: "/api/auth/[...all]", method: "GET", owner: "auth", parity: "pending" },
+      { path: "/api/auth/[...all]", method: "POST", owner: "auth", parity: "pending" },
+    ],
+  );
 });
 
-test("pending Go routine ownership is limited to exact collection GET and POST overrides", () => {
-  for (const method of ["GET", "POST"]) {
-    assert.equal(allowsPendingGoRoutineCollectionOwner("api", "/api/routines", method, "go", "pending"), true);
-  }
-
-  for (const candidate of [
-    ["page", "/api/routines", "GET", "go", "pending"],
-    ["api", "/api/routines/extra", "GET", "go", "pending"],
-    ["api", "/api/routines", "PUT", "go", "pending"],
-    ["api", "/api/routines", "DELETE", "go", "pending"],
-    ["api", "/api/routines", "POST", "legacy", "pending"],
-    ["api", "/api/routines", "GET", "go", "verified"],
-  ]) {
-    assert.equal(allowsPendingGoRoutineCollectionOwner(...candidate), false, JSON.stringify(candidate));
-  }
-});
-
-test("pending Go memory ownership is limited to exact collection GET and POST overrides", () => {
-  for (const method of ["GET", "POST"]) {
-    assert.equal(allowsPendingGoMemoryCollectionOwner("api", "/api/memory", method, "go", "pending"), true);
-  }
-
-  for (const candidate of [
-    ["page", "/api/memory", "GET", "go", "pending"],
-    ["api", "/api/memory/extra", "GET", "go", "pending"],
-    ["api", "/api/memory", "PUT", "go", "pending"],
-    ["api", "/api/memory", "DELETE", "go", "pending"],
-    ["api", "/api/memory", "POST", "legacy", "pending"],
-    ["api", "/api/memory", "GET", "go", "verified"],
-  ]) {
-    assert.equal(allowsPendingGoMemoryCollectionOwner(...candidate), false, JSON.stringify(candidate));
-  }
-});
-
-test("pending Go module settings ownership is limited to exact collection GET and POST overrides", () => {
-  for (const method of ["GET", "POST"]) {
-    assert.equal(allowsPendingGoModuleSettingsOwner("api", "/api/module-settings", method, "go", "pending"), true);
-  }
-  for (const candidate of [
-    ["page", "/api/module-settings", "GET", "go", "pending"],
-    ["api", "/api/module-settings/extra", "GET", "go", "pending"],
-    ["api", "/api/module-settings", "PUT", "go", "pending"],
-    ["api", "/api/module-settings", "DELETE", "go", "pending"],
-    ["api", "/api/module-settings", "POST", "legacy", "pending"],
-    ["api", "/api/module-settings", "GET", "go", "verified"],
-  ]) {
-    assert.equal(allowsPendingGoModuleSettingsOwner(...candidate), false, JSON.stringify(candidate));
-  }
-});
-
-test("pending Go policy ownership is limited to exact collection GET and POST overrides", () => {
-  for (const method of ["GET", "POST"]) {
-    assert.equal(allowsPendingGoPolicyOwner("api", "/api/policy", method, "go", "pending"), true);
-  }
-  for (const candidate of [
-    ["page", "/api/policy", "GET", "go", "pending"],
-    ["api", "/api/policy/extra", "GET", "go", "pending"],
-    ["api", "/api/policy", "PUT", "go", "pending"],
-    ["api", "/api/policy", "DELETE", "go", "pending"],
-    ["api", "/api/policy", "POST", "legacy", "pending"],
-    ["api", "/api/policy", "GET", "go", "verified"],
-  ]) {
-    assert.equal(allowsPendingGoPolicyOwner(...candidate), false, JSON.stringify(candidate));
-  }
-});
-
-test("pending Go attachment ownership is limited to exact attachment GET", () => {
-  assert.equal(allowsPendingGoAttachmentDownloadOwner("api", "/api/message-attachments/[id]", "GET", "go", "pending"), true);
-  for (const candidate of [
-    ["page", "/api/message-attachments/[id]", "GET", "go", "pending"],
-    ["api", "/api/message-attachments/[id]", "POST", "go", "pending"],
-    ["api", "/api/message-attachments/[id]/extra", "GET", "go", "pending"],
-    ["api", "/api/message-attachments/[id]", "GET", "legacy", "pending"],
-    ["api", "/api/message-attachments/[id]", "GET", "go", "verified"],
-  ]) {
-    assert.equal(allowsPendingGoAttachmentDownloadOwner(...candidate), false, JSON.stringify(candidate));
-  }
-});
-
-test("pending Go messaging agent ownership is limited to exact POST", () => {
-  assert.equal(allowsPendingGoMessagingAgentOwner("api", "/api/conversations/[id]/agent-reply", "POST", "go", "pending"), true);
-  for (const candidate of [
-    ["page", "/api/conversations/[id]/agent-reply", "POST", "go", "pending"],
-    ["api", "/api/conversations/[id]/agent-reply", "GET", "go", "pending"],
-    ["api", "/api/conversations/[id]/agent-reply/extra", "POST", "go", "pending"],
-    ["api", "/api/conversations/[id]/agent-reply", "POST", "legacy", "pending"],
-    ["api", "/api/conversations/[id]/agent-reply", "POST", "go", "verified"],
-  ]) {
-    assert.equal(allowsPendingGoMessagingAgentOwner(...candidate), false, JSON.stringify(candidate));
-  }
-});
-
-test("pending Go wave 3 ownership is limited to exact collection routes", () => {
-  assert.equal(allowsPendingGoWave3Owner("api", "/api/conversations", "GET", "go", "pending"), true);
-  assert.equal(allowsPendingGoWave3Owner("api", "/api/purchasing/payment-runs", "POST", "go", "pending"), true);
-  assert.equal(allowsPendingGoWave3Owner("api", "/api/deals", "POST", "go", "pending"), true);
-  for (const candidate of [
-    ["page", "/api/conversations", "GET", "go", "pending"],
-    ["api", "/api/conversations", "DELETE", "go", "pending"],
-    ["api", "/api/conversations", "GET", "legacy", "pending"],
-    ["api", "/api/conversations", "GET", "go", "verified"],
-    ["api", "/api/conversations/extra", "GET", "go", "pending"],
-    ["api", "/api/deals", "PATCH", "go", "pending"],
-  ]) {
-    assert.equal(allowsPendingGoWave3Owner(...candidate), false, JSON.stringify(candidate));
-  }
-});
-
-test("generated Go route declarations require verified parity except the exact pending messaging proof", () => {
+test("generated Go route declarations require verified parity", () => {
   assert.ok(overrides.goRoutes.length > 0);
-  assert.ok(overrides.goRoutes.every((route) => route.kind === "api" && route.owner === "go" && (
-    route.parity === "verified"
-    || route.path === "/api/conversations/[id]/agent-reply" && route.method === "POST" && route.parity === "pending"
-  )));
+  assert.ok(overrides.goRoutes.every((route) => route.kind === "api" && route.owner === "go" && route.parity === "verified"));
 });
 
 test("attachment and routine webhook ownership is method-specific", () => {
@@ -192,7 +68,7 @@ test("attachment and routine webhook ownership is method-specific", () => {
       method: "GET",
       source: "apps/web/src/app/api/message-attachments/[id]/route.ts",
       owner: "go",
-      parity: "pending",
+      parity: "verified",
     }],
   );
   assert.deepEqual(
@@ -204,7 +80,7 @@ test("attachment and routine webhook ownership is method-specific", () => {
         method: "GET",
         source: "apps/web/src/app/api/routines/webhook/[token]/route.ts",
         owner: "go",
-        parity: "pending",
+        parity: "verified",
       },
       {
         kind: "api",
@@ -224,14 +100,14 @@ test("attachment and routine webhook ownership is method-specific", () => {
       method: "DELETE",
       source: "apps/web/src/app/api/scim/v2/Users/route.ts",
       owner: "go",
-      parity: "pending",
+      parity: "verified",
     }],
   );
   assert.deepEqual(
     manifest.entries.filter((entry) => entry.path === "/api/scim/v2/Users/[id]"),
     [
-      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "GET", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "go", parity: "pending" },
-      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "DELETE", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "go", parity: "pending" },
+      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "GET", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "go", parity: "verified" },
+      { kind: "api", path: "/api/scim/v2/Users/[id]", method: "DELETE", source: "apps/web/src/app/api/scim/v2/Users/[id]/route.ts", owner: "go", parity: "verified" },
     ],
   );
 });
@@ -246,7 +122,7 @@ test("Vite-only Go endpoints have generated ownership without Next source entrie
         method: "POST",
         source: "apps/api/internal/httpapi/messaging_agent_session.go",
         owner: "go",
-        parity: "pending",
+        parity: "verified",
       },
       {
         kind: "api",
@@ -412,7 +288,7 @@ test("approvals page has verified Vite ownership after the authenticated decisio
   );
 });
 
-test("CRM reads have verified Go ownership and collection writes are Go-pending", () => {
+test("CRM collection reads and writes have verified Go ownership", () => {
   assert.deepEqual(
     manifest.entries.filter((entry) => entry.kind === "api" && entry.path === "/api/crm"),
     [
@@ -430,7 +306,7 @@ test("CRM reads have verified Go ownership and collection writes are Go-pending"
         method: "POST",
         source: "apps/web/src/app/api/crm/route.ts",
         owner: "go",
-        parity: "pending",
+        parity: "verified",
       },
     ],
   );

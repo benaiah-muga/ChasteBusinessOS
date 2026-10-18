@@ -87,7 +87,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/ai-connections/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -95,7 +95,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/ai-connections/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -103,7 +103,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/ai-tools/mcp/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -191,7 +191,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/capability-gaps/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -199,7 +199,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/chat/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -207,7 +207,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/chat/steer/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -215,7 +215,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/conversations/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -223,7 +223,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/conversations/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -231,7 +231,7 @@
       "method": "PATCH",
       "source": "apps/web/src/app/api/conversations/[id]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -239,7 +239,7 @@
       "method": "POST",
       "source": "apps/api/internal/httpapi/messaging_agent_session.go",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -247,7 +247,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/conversations/[id]/attachments/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -255,7 +255,7 @@
       "method": "DELETE",
       "source": "apps/web/src/app/api/conversations/[id]/attachments/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -263,7 +263,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/conversations/[id]/messages/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -271,7 +271,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/conversations/[id]/messages/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -295,7 +295,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/conversations/[id]/read/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -303,7 +303,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/conversations/people/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -311,7 +311,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/creator/agent/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -319,7 +319,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/creator/evolution/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -335,7 +335,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/crm/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -343,7 +343,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/crm/views/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -351,7 +351,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/crm/views/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -367,7 +367,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/customers/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -383,7 +383,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/deals/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -391,7 +391,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/deals/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -399,7 +399,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/docs/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -407,7 +407,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/docs/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -415,7 +415,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/docs/[id]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -423,7 +423,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/docs/[id]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -455,7 +455,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/docs/folders/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -463,7 +463,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/docs/folders/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -471,7 +471,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/docs/next-number/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -479,7 +479,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/docs/records/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -487,7 +487,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/documents/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -495,7 +495,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/documents/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -503,7 +503,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/documents/[id]/content/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -575,7 +575,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/harness/compositions/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -607,7 +607,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/import/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -623,7 +623,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/inventory/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -631,7 +631,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/invite/[token]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -639,7 +639,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/invite/[token]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -655,7 +655,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/manufacturing/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -663,7 +663,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/manufacturing/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -687,7 +687,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/marketplace/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -695,7 +695,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/marketplace/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -719,7 +719,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/message-attachments/[id]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -727,7 +727,7 @@
       "method": "PATCH",
       "source": "apps/web/src/app/api/messages/[id]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -735,7 +735,7 @@
       "method": "DELETE",
       "source": "apps/web/src/app/api/messages/[id]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -743,7 +743,7 @@
       "method": "PATCH",
       "source": "apps/web/src/app/api/messages/[id]/pin/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -751,7 +751,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/messages/[id]/reactions/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -759,7 +759,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/messages/search/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -967,7 +967,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/proposals/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -975,7 +975,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/proposals/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -983,7 +983,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/purchasing/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -991,7 +991,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/purchasing/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -999,7 +999,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/purchasing/payment-runs/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1007,7 +1007,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/purchasing/payment-runs/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1015,7 +1015,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/quotes/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1023,7 +1023,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/quotes/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1031,7 +1031,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/recurring/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1039,7 +1039,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/recurring/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1047,7 +1047,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/reports/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1071,7 +1071,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/routines/webhook/[token]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1095,7 +1095,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/sales/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1159,7 +1159,7 @@
       "method": "DELETE",
       "source": "apps/web/src/app/api/scim/v2/Users/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1167,7 +1167,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/scim/v2/Users/[id]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1175,7 +1175,7 @@
       "method": "DELETE",
       "source": "apps/web/src/app/api/scim/v2/Users/[id]/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1223,7 +1223,7 @@
       "method": "GET",
       "source": "apps/web/src/app/api/support/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1231,7 +1231,7 @@
       "method": "POST",
       "source": "apps/web/src/app/api/support/route.ts",
       "owner": "go",
-      "parity": "pending"
+      "parity": "verified"
     },
     {
       "kind": "api",

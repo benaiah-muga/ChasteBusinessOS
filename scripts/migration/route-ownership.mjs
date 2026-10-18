@@ -2,17 +2,7 @@ import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 
 import { basename, dirname, join, relative, sep } from "node:path";
 import { createRequire } from "node:module";
 import process from "node:process";
-import {
-  allowsPendingAuthOwner,
-  allowsPendingGoOrgPersonaOwner,
-  allowsPendingGoMemoryCollectionOwner,
-  allowsPendingGoModuleSettingsOwner,
-  allowsPendingGoPolicyOwner,
-  allowsPendingGoRoutineCollectionOwner,
-  allowsPendingGoAttachmentDownloadOwner,
-  allowsPendingGoMessagingAgentOwner,
-  allowsPendingGoWave3Owner,
-} from "./route-ownership-policy.mjs";
+import { allowsPendingAuthOwner } from "./route-ownership-policy.mjs";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
@@ -114,15 +104,7 @@ if (existsSync(overridePath)) {
     // Auth owns the namespace while compatibility parity with the legacy
     // Better Auth catch-all remains pending. Go intentionally rejects
     // unsupported paths, so namespace ownership does not imply endpoint parity.
-    const pendingOwnerAllowed = allowsPendingAuthOwner(kind, path, owner, parity)
-      || allowsPendingGoOrgPersonaOwner(kind, path, method, owner, parity)
-      || allowsPendingGoMemoryCollectionOwner(kind, path, method, owner, parity)
-      || allowsPendingGoModuleSettingsOwner(kind, path, method, owner, parity)
-      || allowsPendingGoPolicyOwner(kind, path, method, owner, parity)
-      || allowsPendingGoRoutineCollectionOwner(kind, path, method, owner, parity)
-      || allowsPendingGoAttachmentDownloadOwner(kind, path, method, owner, parity)
-      || allowsPendingGoMessagingAgentOwner(kind, path, method, owner, parity)
-      || allowsPendingGoWave3Owner(kind, path, method, owner, parity);
+    const pendingOwnerAllowed = allowsPendingAuthOwner(kind, path, owner, parity);
     if (owner !== "legacy" && parity !== "verified" && !pendingOwnerAllowed) {
       throw new Error(`Route ${path} cannot move to ${owner} before parity is verified.`);
     }
@@ -142,8 +124,7 @@ if (existsSync(overridePath)) {
     const { kind, path, method, owner, parity, source } = route;
     if (kind !== "api" || !methods.has(method)) throw new Error(`Invalid Go route declaration: ${path ?? "(missing path)"}`);
     if (typeof path !== "string" || !path.startsWith("/api/")) throw new Error("Go route path must start with /api/.");
-    const pendingGoRouteAllowed = allowsPendingGoMessagingAgentOwner(kind, path, method, owner, parity);
-    if (owner !== "go" || parity !== "verified" && !pendingGoRouteAllowed) throw new Error(`Go route ${path} must have verified Go ownership.`);
+    if (owner !== "go" || parity !== "verified") throw new Error(`Go route ${path} must have verified Go ownership.`);
     if (typeof source !== "string" || !source.startsWith("apps/api/") || !existsSync(join(root, source))) {
       throw new Error(`Go route ${path} must name an existing apps/api source file.`);
     }
