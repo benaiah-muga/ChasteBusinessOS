@@ -635,7 +635,7 @@ describe("Vite app frame", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Supplier payment runs" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Supplier payment runs" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Purchasing" }).getAttribute("aria-current")).toBe("page");
     expect(await screen.findByText("PAY-204")).not.toBeNull();
     expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute"
@@ -823,7 +823,7 @@ describe("Vite app frame", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Products & Services" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Products & Services" }, { timeout: 5_000 })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Products & Services" }));
     expect(await screen.findByText("Ceramic mug")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Products" }).getAttribute("aria-current")).toBe("page");

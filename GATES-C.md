@@ -27,9 +27,10 @@ Scope: version purchase-order and quote-award money approvals, supersede older p
   EXPECT: /ok\s+github\.com\/benaiah-muga\/ChasteBusinessOS\/apps\/api\//
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=3fcdf4be9fcd/27 entries; EXPECT=matched; output-sha256=ae168e4dc36215aaebff4a976107d5ff8db5e4d65c9fdc8c9993574ffbda5292; output-bytes=2105
 
-- [ ] G6: The full TypeScript test suite passes.
+- [x] G6: The full TypeScript test suite passes.
   CHECK: pnpm test
   EXPECT: /Tasks:\s+3 successful, 3 total/
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=3fcdf4be9fcd/27 entries; EXPECT=matched; output-sha256=ab6f61bbcdf571ef741b239b72dd6e9f2618a692e259318661860344139eb893; output-bytes=2843
 
 - [x] G7: The TypeScript workspace typechecks and lints.
   CHECK: pnpm typecheck && pnpm lint >/tmp/chaste-gatec-lint.log 2>&1; code=$?; tail -2 /tmp/chaste-gatec-lint.log; test "$code" -eq 0 && echo TYPES_LINT_OK

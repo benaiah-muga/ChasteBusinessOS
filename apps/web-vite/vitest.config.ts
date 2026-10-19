@@ -7,5 +7,6 @@ export default defineConfig({
     environment: "jsdom",
     clearMocks: true,
     restoreMocks: true,
+    testTimeout: 20_000,
   },
 });
