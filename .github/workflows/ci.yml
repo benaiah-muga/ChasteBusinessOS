@@ -57,7 +57,7 @@ jobs:
       CHASTE_APP_DB_PASSWORD: chaste_app_dev_only
       GO_DATABASE_URL: postgresql://chaste_app:chaste_app_dev_only@localhost:5433/chaste_os_v2
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-      BETTER_AUTH_SECRET: ci-only-not-a-real-secret
+      BETTER_AUTH_SECRET: ci-only-not-a-real-secret-32-bytes-min
     steps:
       - uses: actions/checkout@v4
 
