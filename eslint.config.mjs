@@ -32,71 +32,19 @@ export default tseslint.config(
     },
   },
   // ── architectural boundaries ────────────────────────────────────────────
-  // Dependency direction: inner packages never depend on modules or apps.
+  // Dependency direction: inner packages never depend on the app layer.
   {
-    files: ["packages/kernel/**/*.ts", "packages/db/**/*.ts", "packages/erp-core/**/*.ts", "packages/ai/**/*.ts", "packages/plugin-kit/**/*.ts"],
+    files: ["packages/db/**/*.ts", "packages/erp-core/**/*.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
             {
-              group: ["@chaste/module-*", "@/server/*", "apps/*"],
-              message: "core packages must not depend on ERP modules or the app layer",
+              group: ["@/server/*", "apps/*"],
+              message: "core packages must not depend on the app layer",
             },
           ],
-        },
-      ],
-    },
-  },
-  // Modules are independent bounded contexts: no cross-module imports,
-  // except HR/POS/purchasing/inventory importing the shared posting service
-  // (ADR 0020; inventory added by ADR 0033 for valuation postings).
-  // Manufacturing and sales sit outside the restricted lists deliberately:
-  // they consume the sanctioned seams (inventory's stock writer and ATP
-  // helpers, accounting's invoice writer) as their designed integration
-  // surface (ADR 0036 for sales).
-  {
-    files: ["modules/{crm,messaging,iam,documents,creator}/src/**/*.ts"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["@chaste/module-*"],
-              message: "modules communicate through capabilities, not direct imports",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    files: ["modules/{hr,pos,purchasing,inventory}/src/**/*.ts"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          // Exact names so "@chaste/module-accounting/posting" stays allowed.
-          // "@chaste/module-inventory" stays allowed too: its stock command
-          // service is the sanctioned ledger seam for POS and purchasing
-          // (ADR 0050), same as sales/manufacturing consume it already.
-          paths: [
-            "@chaste/module-accounting",
-            "@chaste/module-crm",
-            "@chaste/module-messaging",
-            "@chaste/module-iam",
-            "@chaste/module-documents",
-            "@chaste/module-creator",
-            "@chaste/module-pos",
-            "@chaste/module-purchasing",
-            "@chaste/module-hr",
-          ].map((name) => ({
-            name,
-            message:
-              "the only allowed cross-module imports are @chaste/module-accounting/posting and @chaste/module-inventory (ADR 0050)",
-          })),
         },
       ],
     },

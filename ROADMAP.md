@@ -1,5 +1,10 @@
 # ChasteBusinessOS, Roadmap
 
+Milestone entries record what shipped when. The TypeScript kernel, module, and
+AI packages named in early entries were retired in the React + Go migration
+(see `docs/REACT_GO_MIGRATION_PLAN.md`); their behavior now lives in
+`apps/api` and is proven by the same demo proofs.
+
 ## M0, Foundation (current sprint)
 - [x] Monorepo scaffold: Turborepo, pnpm, TS strict, Next.js 15 web app
 - [x] Postgres 16 + pgvector dev database (Docker `chaste-pgvector`, :5433)

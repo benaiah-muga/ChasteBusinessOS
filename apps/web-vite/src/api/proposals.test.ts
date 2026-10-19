@@ -18,7 +18,7 @@ const evidence = JSON.stringify({
   kind: "isolated_creator_candidate",
   baselineCommit: "0123456789abcdef",
   candidateDigest: digest,
-  files: ["modules/creator/src/evolution.ts"],
+  files: ["apps/api/internal/capability/generated_creator_evolution.go"],
   verification: { passed: true, network: "isolated", productionCredentials: false },
 });
 
@@ -61,7 +61,7 @@ describe("candidate evidence verification", () => {
       kind: "isolated_creator_candidate",
       baselineCommit: "0123456789abcdef",
       candidateDigest: digest,
-      files: ["modules/creator/src/evolution.ts"],
+      files: ["apps/api/internal/capability/generated_creator_evolution.go"],
       verification: { passed: false, network: "open", productionCredentials: true },
     });
     const result = verifyCandidateEvidence(tampered);

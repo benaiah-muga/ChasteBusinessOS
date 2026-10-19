@@ -362,6 +362,39 @@ export async function ensureAppRole(
            END IF;
          END $$`,
       );
+      // Migration grants to the runtime role are skipped while the role does
+      // not exist (fresh database first run). Provisioning runs after
+      // migrations, so resolve SECURITY DEFINER functions and the worker
+      // schema here for the post-migration grants the guards skipped.
+      await tx.unsafe(
+        `DO $$
+           DECLARE
+             target text;
+           BEGIN
+             FOREACH target IN ARRAY ARRAY[
+               'public.chaste_resolve_better_auth_session(text, timestamptz)',
+               'public.chaste_resolve_support_embed_token(text)',
+               'public.chaste_resolve_invoice_share_token(text)',
+               'public.chaste_resolve_scim_token(text)',
+               'public.chaste_resolve_or_create_scim_user(uuid, uuid, text, text)',
+               'public.chaste_resolve_invitation_org(text)',
+               'public.chaste_bootstrap_organization(text, text, text, text, text, text[], text)',
+               'public.chaste_marketplace_lock_listing(uuid)',
+               'public.chaste_marketplace_install_listing(uuid)',
+               'public.chaste_marketplace_uninstall_listing(uuid)'
+             ] LOOP
+               IF to_regprocedure(target) IS NOT NULL THEN
+                 EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO ${APP_ROLE_NAME}', target);
+               END IF;
+             END LOOP;
+             IF to_regnamespace('jobs_worker') IS NOT NULL THEN
+               GRANT USAGE ON SCHEMA jobs_worker TO ${APP_ROLE_NAME};
+               IF to_regprocedure('jobs_worker.enqueue_routine_webhook(text)') IS NOT NULL THEN
+                 GRANT EXECUTE ON FUNCTION jobs_worker.enqueue_routine_webhook(text) TO ${APP_ROLE_NAME};
+               END IF;
+             END IF;
+           END $$`,
+      );
       await tx.unsafe(
         `ALTER DEFAULT PRIVILEGES FOR ROLE ${sqlIdent(owner)} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${APP_ROLE_NAME}`,
       );

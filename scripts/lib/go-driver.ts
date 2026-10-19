@@ -24,7 +24,39 @@ import {
   type Database,
 } from "@chaste/db";
 import { currencyMinorUnits, DEFAULT_CHART_OF_ACCOUNTS } from "@chaste/erp-core";
-import { canonicalInputHash, type ActionContext } from "@chaste/kernel";
+
+export type GoActor = {
+  type: "human" | "agent" | "system";
+  id: string | null;
+  orgId: string;
+  permissions: ReadonlySet<string>;
+};
+
+export type ActionContext = {
+  actor: GoActor;
+  sessionId?: string;
+  intentId?: string;
+  now: Date;
+  services: Record<string, unknown>;
+};
+
+/** Stable JSON digest for payload-conflict detection (canonical key order). */
+async function canonicalInputHash(input: unknown): Promise<string> {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([k, v]) => [k, canonical(v)]),
+      );
+    }
+    return value;
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(canonical(input)));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 export type GoSession = { userId: string; orgId: string; authSessionId: string };
 

@@ -33,19 +33,17 @@ pnpm dev                        # Vite on :3000; run pnpm dev:api in another ter
 
 | Path | Role |
 |---|---|
-| `apps/api` | Go API gateway, capability kernel, and workers |
-| `apps/web-vite` | React UI built by Vite -- **consumes REST APIs only** (no kernel/db imports) |
-| `packages/*` | Shared libraries (kernel, db, ai-core, schemas, api-client) |
-| `modules/*` | Installable business modules |
+| `apps/api` | Go API gateway, capability kernel and registry, and workers |
+| `apps/web-vite` | React UI built by Vite -- **consumes REST APIs only** |
+| `packages/db` | Drizzle schema, migrations, runtime role provisioning |
+| `packages/erp-core` | Pure domain logic (money, posting rules, tax, inventory math) |
 | `docs/` | Architecture, ADRs, module rules |
-| `skills/` | Agent skills for contributors |
 
 ## Coupling rules (enforced by review)
 
-- **`apps/web-vite` must not import** `@chaste/kernel`, `@chaste/db`, `@chaste/ai-core`, or module packages.
-- Web may import **`@chaste/api-client`** and **`@chaste/ui-schema`** (HTTP types + generative UI schemas only).
-- Business mutations live in **commands**; AI tools wrap commands -- never raw SQL.
-- Modules do not reach into other modules’ private tables.
+- **`apps/web-vite` must not import** `@chaste/db`; web may import `@chaste/erp-core` for pure formatting and domain constants.
+- Business mutations live in **capabilities** executed by the Go kernel; AI tools call capabilities -- never raw SQL.
+- Capability domains do not reach into other domains' private tables; use the declared seams.
 
 ## Pull requests
 

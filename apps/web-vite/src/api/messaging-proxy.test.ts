@@ -68,7 +68,6 @@ describe("Messaging capability proxy", () => {
     vi.stubEnv("CHASTE_GO_API_ORIGIN", goOrigin);
     vi.stubEnv("CHASTE_LEGACY_WEB_ORIGIN", legacyOrigin);
     vi.stubEnv("CHASTE_GO_SESSION_CAPABILITY_ROUTE", "1");
-    vi.stubEnv("CHASTE_GO_MESSAGING_PRESENCE", "1");
     const proxy = await startViteProxy();
     const conversationId = "72b99920-8c21-463a-9c5b-479216017501";
     const response = await fetch(`${proxy.origin}/api/conversations/${conversationId}/agent-reply`, {
@@ -151,7 +150,7 @@ describe("Messaging capability proxy", () => {
     expect(legacyRequests).toEqual([]);
   });
 
-  it("defaults messaging thread reads including older-page capability requests, edits, and deletions to Go with session routing and preserves independent selector opt-outs", async () => {
+  it("defaults messaging thread reads including older-page capability requests, edits, and deletions to Go", async () => {
     const go = routeRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolveClose, reject) => go.close((error) => error ? reject(error) : resolveClose())) });
@@ -168,13 +167,6 @@ describe("Messaging capability proxy", () => {
     vi.stubEnv("CHASTE_LEGACY_WEB_ORIGIN", legacyOrigin);
     vi.stubEnv("CHASTE_GO_SESSION_CAPABILITY_ROUTE", "1");
     const goProxy = await startViteProxy();
-    expect(goProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("true");
-    expect(goProxy.server.config.define?.__GO_MESSAGING_DELETE_SLICE__).toBe("true");
-    expect(goProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("true");
-    expect(goProxy.server.config.define?.__GO_MESSAGING_READ_CURSOR__).toBe("true");
-    expect(goProxy.server.config.define?.__GO_MESSAGING_REACTIONS__).toBe("true");
-    expect(goProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("true");
-    expect(goProxy.server.config.define?.__GO_MESSAGING_ATTACHMENT_UPLOAD__).toBe("true");
     const goResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await goResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     const olderPageResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, {
@@ -186,21 +178,7 @@ describe("Messaging capability proxy", () => {
     await goProxy.server.close();
     runningServers.splice(runningServers.indexOf(goProxy.tracked), 1);
 
-    vi.stubEnv("CHASTE_GO_MESSAGING_EDIT_SLICE", "0");
-    vi.stubEnv("CHASTE_GO_MESSAGING_DELETE_SLICE", "0");
-    vi.stubEnv("CHASTE_GO_MESSAGING_THREAD_READ", "0");
-    vi.stubEnv("CHASTE_GO_MESSAGING_READ_CURSOR", "0");
-    vi.stubEnv("CHASTE_GO_MESSAGING_REACTIONS", "0");
-    vi.stubEnv("CHASTE_GO_MESSAGING_PINS", "0");
-    vi.stubEnv("CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD", "0");
     const rollbackProxy = await startViteProxy();
-    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("false");
-    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_DELETE_SLICE__).toBe("false");
-    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("false");
-    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_READ_CURSOR__).toBe("false");
-    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_REACTIONS__).toBe("false");
-    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("false");
-    expect(rollbackProxy.server.config.define?.__GO_MESSAGING_ATTACHMENT_UPLOAD__).toBe("false");
     const rollbackResponse = await fetch(`${rollbackProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await rollbackResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     const conversationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -208,25 +186,17 @@ describe("Messaging capability proxy", () => {
     expect(await presenceResponse.json()).toEqual({ target: "go", path: `/api/conversations/${conversationId}/presence` });
     const agentReplyResponse = await fetch(`${rollbackProxy.origin}/api/conversations/${conversationId}/agent-reply`, { method: "POST" });
     expect(await agentReplyResponse.json()).toEqual({ target: "go", path: `/api/conversations/${conversationId}/agent-reply` });
-    const selectorOptOutEditResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1`, { method: "PATCH" });
-    expect(await selectorOptOutEditResponse.json()).toEqual({ target: "go", path: "/api/messages/m1" });
-    const selectorOptOutDeleteResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1?intentId=11111111-1111-4111-8111-111111111111`, { method: "DELETE" });
-    expect(await selectorOptOutDeleteResponse.json()).toEqual({ target: "go", path: "/api/messages/m1?intentId=11111111-1111-4111-8111-111111111111" });
+    const messageEditResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1`, { method: "PATCH" });
+    expect(await messageEditResponse.json()).toEqual({ target: "go", path: "/api/messages/m1" });
+    const messageDeleteResponse = await fetch(`${rollbackProxy.origin}/api/messages/m1?intentId=11111111-1111-4111-8111-111111111111`, { method: "DELETE" });
+    expect(await messageDeleteResponse.json()).toEqual({ target: "go", path: "/api/messages/m1?intentId=11111111-1111-4111-8111-111111111111" });
     expect(legacyCalls).toBe(0);
     expect(legacyOrigin).not.toBe(goOrigin);
     await rollbackProxy.server.close();
     runningServers.splice(runningServers.indexOf(rollbackProxy.tracked), 1);
 
-    vi.stubEnv("CHASTE_GO_MESSAGING_EDIT_SLICE", "1");
-    vi.stubEnv("CHASTE_GO_MESSAGING_DELETE_SLICE", "1");
     vi.stubEnv("CHASTE_GO_SESSION_CAPABILITY_ROUTE", "0");
     const legacyProxy = await startViteProxy();
-    expect(legacyProxy.server.config.define?.__GO_MESSAGING_EDIT_SLICE__).toBe("false");
-    expect(legacyProxy.server.config.define?.__GO_MESSAGING_DELETE_SLICE__).toBe("false");
-    expect(legacyProxy.server.config.define?.__GO_MESSAGING_THREAD_READ__).toBe("false");
-    expect(legacyProxy.server.config.define?.__GO_MESSAGING_REACTIONS__).toBe("false");
-    expect(legacyProxy.server.config.define?.__GO_MESSAGING_PINS__).toBe("false");
-    expect(legacyProxy.server.config.define?.__GO_MESSAGING_ATTACHMENT_UPLOAD__).toBe("false");
     const capabilityResponse = await fetch(`${legacyProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await capabilityResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
   });

@@ -10,11 +10,48 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 )
 
 const creatorTestManifest = `{"formatVersion":1,"slug":"acme-warehouse","name":"Acme Warehouse Tools","version":"1.2.3","summary":"Extra warehouse capabilities from Acme: cycle counting and bin transfers.","capabilities":["acme.cycleCount","acme.binTransfer"],"risks":{"acme.cycleCount":"write","acme.binTransfer":"write"},"license":"Apache-2.0"}`
+
+func creatorTestStructFields(t *testing.T, source, structName string) (map[string]string, map[string]string) {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "generated.go", source, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse generated source: %v", err)
+	}
+	types := map[string]string{}
+	tags := map[string]string{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		typeSpec, ok := node.(*ast.TypeSpec)
+		if !ok || typeSpec.Name.Name != structName {
+			return true
+		}
+		structType, ok := typeSpec.Type.(*ast.StructType)
+		if !ok {
+			return true
+		}
+		for _, field := range structType.Fields.List {
+			ident, ok := field.Type.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			for _, name := range field.Names {
+				types[name.Name] = ident.Name
+				if field.Tag != nil {
+					tags[name.Name] = field.Tag.Value
+				}
+			}
+		}
+		return false
+	})
+	return types, tags
+}
 
 func TestCreatorCanonicalJSONMatchesJavaScriptJSONStringifyEscaping(t *testing.T) {
 	tests := []struct {
@@ -412,28 +449,49 @@ func TestCreatorScaffoldRenderersMatchCreatorModuleContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "generated_stock_room_cycle_count.go", source, parser.ParseComments); err != nil {
+		t.Fatalf("renderCapabilitySource output does not parse as Go: %v\n%s", err, source)
+	}
 	for _, expected := range []string{
-		`id: "stock-room.cycleCount"`,
-		`registerStockRoomCapabilities(registry: CapabilityRegistry, deps: ModuleDeps)`,
-		`sku: z.string().describe("Customer's \"preferred\" warehouse"),`,
-		`countedThousandths: z.number(),`,
-		`force: z.boolean(),`,
-		`TODO(proposal): implement against deps.db within ctx.actor.orgId scope.`,
+		`const stockRoomCycleCountCapabilityID = "stock-room.cycleCount"`,
+		`func stockRoomCycleCountCapabilitySpec() capabilitySpec {`,
+		`// Customer's "preferred" warehouse`,
+		`func ParseStockRoomCycleCountInput(raw json.RawMessage) (StockRoomCycleCountInput, error) {`,
+		`requiredSafeInteger(fields, "countedThousandths")`,
+		`requiredBoolean(fields, "force")`,
+		`TODO(proposal): implement against tx within claims.OrganizationID scope and return the recorded result.`,
 	} {
 		if !strings.Contains(source, expected) {
 			t.Errorf("renderCapabilitySource output missing %q:\n%s", expected, source)
 		}
 	}
+	types, tags := creatorTestStructFields(t, source, "StockRoomCycleCountInput")
+	if types["Sku"] != "string" || types["CountedThousandths"] != "int64" || types["Force"] != "bool" {
+		t.Errorf("rendered input struct types = %v", types)
+	}
+	if tags["Sku"] != "`json:\"sku\"`" || tags["CountedThousandths"] != "`json:\"countedThousandths\"`" || tags["Force"] != "`json:\"force\"`" {
+		t.Errorf("rendered input struct tags = %v", tags)
+	}
 
 	testSkeleton := creatorRenderTestSkeleton(spec)
-	if !strings.Contains(testSkeleton, `describe("stock-room.cycleCount"`) || !strings.Contains(testSkeleton, `expect(true).toBe(true)`) {
-		t.Errorf("renderTestSkeleton() = %q, missing generated capability contract skeleton", testSkeleton)
+	if _, err := parser.ParseFile(token.NewFileSet(), "generated_stock_room_cycle_count_test.go", testSkeleton, parser.ParseComments); err != nil {
+		t.Fatalf("renderTestSkeleton output does not parse as Go: %v\n%s", err, testSkeleton)
+	}
+	for _, expected := range []string{
+		`func TestStockRoomCycleCount(t *testing.T) {`,
+		`if _, err := ParseStockRoomCycleCountInput(json.RawMessage("{}")); err == nil {`,
+		`t.Fatal("empty input must be rejected")`,
+	} {
+		if !strings.Contains(testSkeleton, expected) {
+			t.Errorf("renderTestSkeleton() missing %q:\n%s", expected, testSkeleton)
+		}
 	}
 	riskDoc := creatorRenderRiskDoc(spec)
 	for _, expected := range []string{
 		`# Risk assessment: stock-room.cycleCount`,
 		`- Risk class: write`,
 		`- Required permission: inventory.write`,
+		`- Blast radius: scoped to org rows via claims.OrganizationID.`,
 		`write-class: declare an inverse or justify the conformance warning in review.`,
 		`- [ ] Org scoping on every query`,
 	} {
@@ -441,12 +499,34 @@ func TestCreatorScaffoldRenderersMatchCreatorModuleContracts(t *testing.T) {
 			t.Errorf("renderRiskDoc() missing %q:\n%s", expected, riskDoc)
 		}
 	}
-	filePath := "modules/stock-room/src/cycleCount.ts"
+	filePath := "apps/api/internal/capability/generated_stock_room_cycle_count.go"
 	diff, err := creatorRenderProposalDiff(spec, filePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(diff, "--- /dev/null\n+++ b/"+filePath+"\n") || !strings.Contains(diff, "+  registry.register(cycleCount(deps));") {
+	if !strings.HasPrefix(diff, "--- /dev/null\n+++ b/"+filePath+"\n") || !strings.Contains(diff, `+const stockRoomCycleCountCapabilityID = "stock-room.cycleCount"`) {
 		t.Errorf("renderProposalDiff() = %q, missing expected generated file and additions", diff)
+	}
+}
+
+func TestCreatorScaffoldFilePathsUseGoArtifacts(t *testing.T) {
+	spec := CreatorScaffoldSpec{
+		Module: "stock-room", Action: "cycleCount", Title: "Cycle count adjustment",
+		Intent: "Record a cycle-count variance against stock with a reason and actor attribution",
+		Risk:   "write", Permission: "inventory.write",
+	}
+	source, err := creatorRenderCapabilitySource(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "generated.go", source, parser.ParseComments); err != nil {
+		t.Fatalf("empty-field spec does not render parseable Go: %v\n%s", err, source)
+	}
+	testSkeleton := creatorRenderTestSkeleton(spec)
+	if _, err := parser.ParseFile(token.NewFileSet(), "generated_test.go", testSkeleton, parser.ParseComments); err != nil {
+		t.Fatalf("empty-field test skeleton does not render parseable Go: %v\n%s", err, testSkeleton)
+	}
+	if creatorSnakeName("stock-room"+"_"+"cycleCount") != "stock_room_cycle_count" {
+		t.Errorf("snake name = %q", creatorSnakeName("stock-room_cycleCount"))
 	}
 }

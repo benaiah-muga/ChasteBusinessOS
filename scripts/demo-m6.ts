@@ -238,7 +238,7 @@ async function main() {
       title: "Add low-stock webhook to purchasing module",
       summary:
         "When a POS sale drives an item below its reorder point, POST a JSON event to NOTIFICATION_WEBHOOK_URL so suppliers can be pinged automatically. Uses the existing notification sink.",
-      diffText: "--- a/modules/pos/src/index.ts\n+++ b/modules/pos/src/index.ts\n@@ -1,3 +1,4 @@\n+// check reorder after sale",
+      diffText: "--- a/apps/api/internal/capability/generated_pos_reorder_webhook.go\n+++ b/apps/api/internal/capability/generated_pos_reorder_webhook.go\n@@ -1,3 +1,4 @@\n+// check reorder after sale",
       testEvidence: "demo:m5 still passes; added unit test for threshold boundary",
       riskAssessment: "Low: additive notification only, no postings change. Worst case a duplicate supplier ping.",
     },

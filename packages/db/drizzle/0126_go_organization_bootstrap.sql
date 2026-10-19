@@ -276,5 +276,11 @@ GRANT CREATE ON SCHEMA public TO chaste_bootstrap_owner;
 ALTER FUNCTION public.chaste_bootstrap_organization(text, text, text, text, text, text[], text) OWNER TO chaste_bootstrap_owner;
 REVOKE CREATE ON SCHEMA public FROM chaste_bootstrap_owner;
 --> statement-breakpoint
-REVOKE ALL ON FUNCTION public.chaste_bootstrap_organization(text, text, text, text, text, text[], text) FROM PUBLIC, chaste_app;
-GRANT EXECUTE ON FUNCTION public.chaste_bootstrap_organization(text, text, text, text, text, text[], text) TO chaste_app;
+REVOKE ALL ON FUNCTION public.chaste_bootstrap_organization(text, text, text, text, text, text[], text) FROM PUBLIC;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    REVOKE ALL ON FUNCTION public.chaste_bootstrap_organization(text, text, text, text, text, text[], text) FROM chaste_app;
+    GRANT EXECUTE ON FUNCTION public.chaste_bootstrap_organization(text, text, text, text, text, text[], text) TO chaste_app;
+  END IF;
+END $$;

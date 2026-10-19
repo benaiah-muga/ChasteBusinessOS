@@ -1,11 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true,
-    "paths": {
-      "@chaste/db": ["../../packages/db/src/index.ts"],
-      "@chaste/kernel": ["../../packages/kernel/src/index.ts"]
-    }
+    "noEmit": true
   },
   "include": ["./capability-manifest.ts"]
 }

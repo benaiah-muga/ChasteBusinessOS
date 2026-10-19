@@ -1,135 +1,22 @@
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goAccountingCreateInvoiceFromEnv, goAccountingCreditNoteFromEnv, goAccountingRecordPaymentFromEnv, goAccountingReverseEntryFromEnv, goBankReconciliationWritesFromEnv, goCrmCustomerCreateFromEnv, goCrmCustomerDeactivateFromEnv, goCrmCustomerImportFromEnv, goCrmCustomerMergeFromEnv, goCrmCustomerProfileUpdateFromEnv, goCrmDealCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmLeadConversionFromEnv, goHrEmployeeWritesFromEnv, goHrExpensesFromEnv, goHrHiringFromEnv, goHrPayrollFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goProjectsWritesFromEnv, goPurchasingAPAgingReadsFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingIntelReadsFromEnv, goPurchasingPaymentRunsFromEnv, goPurchasingSupplierStatementReadsFromEnv, goPurchasingWorkflowReadsFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goMessagingConversationListFromEnv, goMessagingConversationCreateFromEnv, goMessagingConversationUpdateFromEnv, goMessagingConversationArchiveFromEnv, goMessagingConversationLeaveFromEnv, goMessagingConversationAddMemberFromEnv, goMessagingConversationDeleteFromEnv, goMessagingThreadReadsFromEnv, goMessagingReadCursorFromEnv, goMessagingReactionsFromEnv, goMessagingPinsFromEnv, goMessagingAttachmentUploadFromEnv, goMessagingAttachmentDeleteFromEnv, goMarketingCampaignWritesFromEnv, goMarketingOverviewReadsFromEnv, goSupportInboxReadsFromEnv, goSupportLibraryReadsFromEnv, goSupportCannedResponseWriteFromEnv, goSupportKbArticleWriteFromEnv, goSupportConversationWritesFromEnv, goSupportTicketWritesFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goProjectsWritesFromEnv, goPurchasingPaymentRunsFromEnv, goRouteProxyFlagsFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL("../..", import.meta.url)), ["CHASTE_", "GO_"]);
   const goApiOrigin = env.CHASTE_GO_API_ORIGIN || "http://127.0.0.1:8080";
   const goRouteProxy = createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv(env), goApiOrigin);
   const goInventoryItemSlice = env.CHASTE_GO_INVENTORY_ITEM_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
-  const goInventoryImportSlice = env.CHASTE_GO_INVENTORY_IMPORT_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
-  const goInventoryCycleCountWrites = env.CHASTE_GO_INVENTORY_CYCLE_COUNT_WRITES === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
-  const goInventoryTransferWrites = goInventoryTransferWritesFromEnv(env);
-  const goInventoryLocationReservationWrites = goInventoryLocationReservationWritesFromEnv(env);
-  const goInventoryBarcodeLookup = goInventoryBarcodeLookupFromEnv(env);
-  const goCrmDealStageMove = goCrmDealStageMoveFromEnv(env);
-  const goCrmLeadConversion = goCrmLeadConversionFromEnv(env);
-  const goCrmDealCreate = goCrmDealCreateFromEnv(env);
-  const goCrmCustomerCreate = goCrmCustomerCreateFromEnv(env);
-  const goCrmCustomerDeactivate = goCrmCustomerDeactivateFromEnv(env);
-  const goCrmCustomerMerge = goCrmCustomerMergeFromEnv(env);
-  const goCrmCustomerImport = goCrmCustomerImportFromEnv(env);
-  const goCrmCustomerProfileUpdate = goCrmCustomerProfileUpdateFromEnv(env);
-  const goPurchasingCreateOrder = goPurchasingCreateOrderFromEnv(env);
-  const goPurchasingReceiveGoods = goPurchasingReceiveGoodsFromEnv(env);
-  const goPurchasingReturnClose = goPurchasingReturnCloseFromEnv(env);
-  const goPurchasingFinanceWrites = goPurchasingFinanceWritesFromEnv(env);
-  const goPurchasingPaymentRuns = goPurchasingPaymentRunsFromEnv(env);
-  const goPurchasingSupplierStatementReads = goPurchasingSupplierStatementReadsFromEnv(env);
-  const goPurchasingWorkflowReads = goPurchasingWorkflowReadsFromEnv(env);
-  const goPurchasingIntelReads = goPurchasingIntelReadsFromEnv(env);
-  const goPurchasingAPAgingReads = goPurchasingAPAgingReadsFromEnv(env);
-  const goPurchasingSourcingWrites = goPurchasingSourcingWritesFromEnv(env);
-  const goPurchasingVendorSlice = env.CHASTE_GO_PURCHASING_VENDOR_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
-  const goMarketingCampaignWrites = goMarketingCampaignWritesFromEnv(env);
-  const goMarketingOverviewReads = goMarketingOverviewReadsFromEnv(env);
-  const goHrExpenses = goHrExpensesFromEnv(env);
-  const goHrPayroll = goHrPayrollFromEnv(env);
   const goProjectsWrites = goProjectsWritesFromEnv(env);
-  const goHrHiring = goHrHiringFromEnv(env);
-  const goHrEmployeeWrites = goHrEmployeeWritesFromEnv(env);
-  const goAccountingRecordPayment = goAccountingRecordPaymentFromEnv(env);
-  const goAccountingCreateInvoice = goAccountingCreateInvoiceFromEnv(env);
-  const goAccountingCreditNote = goAccountingCreditNoteFromEnv(env);
-  const goAccountingReverseEntry = goAccountingReverseEntryFromEnv(env);
-  const goSupportInboxReads = goSupportInboxReadsFromEnv(env);
-  const goSupportLibraryReads = goSupportLibraryReadsFromEnv(env);
-  const goSupportCannedResponseWrite = goSupportCannedResponseWriteFromEnv(env);
-  const goSupportKbArticleWrite = goSupportKbArticleWriteFromEnv(env);
-  const goSupportConversationWrites = goSupportConversationWritesFromEnv(env);
-  const goSupportTicketWrites = goSupportTicketWritesFromEnv(env);
-  const goBankReconciliationWrites = goBankReconciliationWritesFromEnv(env);
-  const goMessagingSendSlice = env.CHASTE_GO_MESSAGING_SEND_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
-  const goMessagingEditSlice = env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_EDIT_SLICE !== "0";
-  const goMessagingDeleteSlice = env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_DELETE_SLICE !== "0";
-  const goMessagingConversationList = goMessagingConversationListFromEnv(env);
-  const goMessagingConversationCreate = goMessagingConversationCreateFromEnv(env);
-  const goMessagingConversationUpdate = goMessagingConversationUpdateFromEnv(env);
-  const goMessagingConversationArchive = goMessagingConversationArchiveFromEnv(env);
-  const goMessagingConversationLeave = goMessagingConversationLeaveFromEnv(env);
-  const goMessagingConversationAddMember = goMessagingConversationAddMemberFromEnv(env);
-  const goMessagingConversationDelete = goMessagingConversationDeleteFromEnv(env);
-  const goMessagingThreadReads = goMessagingThreadReadsFromEnv(env);
-  const goMessagingReadCursor = goMessagingReadCursorFromEnv(env);
-  const goMessagingReactions = goMessagingReactionsFromEnv(env);
-  const goMessagingPins = goMessagingPinsFromEnv(env);
-  const goMessagingAttachmentUpload = goMessagingAttachmentUploadFromEnv(env);
-  const goMessagingAttachmentDelete = goMessagingAttachmentDeleteFromEnv(env);
+  const goPurchasingPaymentRuns = goPurchasingPaymentRunsFromEnv(env);
 
   return {
     plugins: [react(), goRouteProxy],
     define: {
       __GO_INVENTORY_ITEM_SLICE__: JSON.stringify(goInventoryItemSlice),
-      __GO_INVENTORY_IMPORT_SLICE__: JSON.stringify(goInventoryImportSlice),
-      __GO_INVENTORY_CYCLE_COUNT_WRITES__: JSON.stringify(goInventoryCycleCountWrites),
-      __GO_INVENTORY_TRANSFER_WRITES__: JSON.stringify(goInventoryTransferWrites),
-      __GO_INVENTORY_LOCATION_RESERVATION_WRITES__: JSON.stringify(goInventoryLocationReservationWrites),
-      __GO_INVENTORY_BARCODE_LOOKUP__: JSON.stringify(goInventoryBarcodeLookup),
-      __GO_CRM_DEAL_STAGE_MOVE__: JSON.stringify(goCrmDealStageMove),
-      __GO_CRM_LEAD_CONVERSION__: JSON.stringify(goCrmLeadConversion),
-      __GO_CRM_READS__: JSON.stringify(env.CHASTE_GO_CRM_READS !== "0"),
-      __GO_CRM_DEAL_CREATE__: JSON.stringify(goCrmDealCreate),
-      __GO_CRM_CUSTOMER_CREATE__: JSON.stringify(goCrmCustomerCreate),
-      __GO_CRM_CUSTOMER_DEACTIVATE__: JSON.stringify(goCrmCustomerDeactivate),
-      __GO_CRM_CUSTOMER_MERGE__: JSON.stringify(goCrmCustomerMerge),
-      __GO_CRM_CUSTOMER_IMPORT__: JSON.stringify(goCrmCustomerImport),
-      __GO_CRM_CUSTOMER_PROFILE_UPDATE__: JSON.stringify(goCrmCustomerProfileUpdate),
-      __GO_PURCHASING_CREATE_ORDER__: JSON.stringify(goPurchasingCreateOrder),
-      __GO_PURCHASING_RECEIVE_GOODS__: JSON.stringify(goPurchasingReceiveGoods),
-      __GO_PURCHASING_RETURN_CLOSE__: JSON.stringify(goPurchasingReturnClose),
-      __GO_PURCHASING_FINANCE_WRITES__: JSON.stringify(goPurchasingFinanceWrites),
-      __GO_PURCHASING_PAYMENT_RUNS__: JSON.stringify(goPurchasingPaymentRuns),
-      __GO_PURCHASING_SUPPLIER_STATEMENT_READS__: JSON.stringify(goPurchasingSupplierStatementReads),
-      __GO_PURCHASING_WORKFLOW_READS__: JSON.stringify(goPurchasingWorkflowReads),
-      __GO_PURCHASING_INTEL_READS__: JSON.stringify(goPurchasingIntelReads),
-      __GO_PURCHASING_AP_AGING_READS__: JSON.stringify(goPurchasingAPAgingReads),
-      __GO_PURCHASING_SOURCING_WRITES__: JSON.stringify(goPurchasingSourcingWrites),
-      __GO_PURCHASING_VENDOR_SLICE__: JSON.stringify(goPurchasingVendorSlice),
-      __GO_MARKETING_CAMPAIGN_WRITES__: JSON.stringify(goMarketingCampaignWrites),
-      __GO_MARKETING_OVERVIEW_READS__: JSON.stringify(goMarketingOverviewReads),
-      __GO_HR_EXPENSES__: JSON.stringify(goHrExpenses),
-      __GO_HR_PAYROLL__: JSON.stringify(goHrPayroll),
       __GO_PROJECTS_WRITES__: JSON.stringify(goProjectsWrites),
-      __GO_HR_HIRING__: JSON.stringify(goHrHiring),
-      __GO_HR_EMPLOYEE_WRITES__: JSON.stringify(goHrEmployeeWrites),
-      __GO_ACCOUNTING_RECORD_PAYMENT__: JSON.stringify(goAccountingRecordPayment),
-      __GO_ACCOUNTING_CREATE_INVOICE__: JSON.stringify(goAccountingCreateInvoice),
-      __GO_ACCOUNTING_CREDIT_NOTE__: JSON.stringify(goAccountingCreditNote),
-      __GO_ACCOUNTING_REVERSE_ENTRY__: JSON.stringify(goAccountingReverseEntry),
-      __GO_SUPPORT_INBOX_READS__: JSON.stringify(goSupportInboxReads),
-      __GO_SUPPORT_LIBRARY_READS__: JSON.stringify(goSupportLibraryReads),
-      __GO_SUPPORT_CANNED_RESPONSE_WRITE__: JSON.stringify(goSupportCannedResponseWrite),
-      __GO_SUPPORT_KB_ARTICLE_WRITE__: JSON.stringify(goSupportKbArticleWrite),
-      __GO_SUPPORT_CONVERSATION_WRITES__: JSON.stringify(goSupportConversationWrites),
-      __GO_SUPPORT_TICKET_WRITES__: JSON.stringify(goSupportTicketWrites),
-      __GO_BANK_RECONCILIATION_WRITES__: JSON.stringify(goBankReconciliationWrites),
-      __GO_MESSAGING_SEND_SLICE__: JSON.stringify(goMessagingSendSlice),
-      __GO_MESSAGING_EDIT_SLICE__: JSON.stringify(goMessagingEditSlice),
-      __GO_MESSAGING_DELETE_SLICE__: JSON.stringify(goMessagingDeleteSlice),
-      __GO_MESSAGING_CONVERSATION_LIST__: JSON.stringify(goMessagingConversationList),
-      __GO_MESSAGING_CONVERSATION_CREATE__: JSON.stringify(goMessagingConversationCreate),
-      __GO_MESSAGING_CONVERSATION_UPDATE__: JSON.stringify(goMessagingConversationUpdate),
-      __GO_MESSAGING_CONVERSATION_ARCHIVE__: JSON.stringify(goMessagingConversationArchive),
-      __GO_MESSAGING_CONVERSATION_LEAVE__: JSON.stringify(goMessagingConversationLeave),
-      __GO_MESSAGING_CONVERSATION_ADD_MEMBER__: JSON.stringify(goMessagingConversationAddMember),
-      __GO_MESSAGING_CONVERSATION_DELETE__: JSON.stringify(goMessagingConversationDelete),
-      __GO_MESSAGING_THREAD_READ__: JSON.stringify(goMessagingThreadReads),
-      __GO_MESSAGING_READ_CURSOR__: JSON.stringify(goMessagingReadCursor),
-      __GO_MESSAGING_REACTIONS__: JSON.stringify(goMessagingReactions),
-      __GO_MESSAGING_PINS__: JSON.stringify(goMessagingPins),
-      __GO_MESSAGING_ATTACHMENT_UPLOAD__: JSON.stringify(goMessagingAttachmentUpload),
-      __GO_MESSAGING_ATTACHMENT_DELETE__: JSON.stringify(goMessagingAttachmentDelete),
+      __GO_PURCHASING_PAYMENT_RUNS__: JSON.stringify(goPurchasingPaymentRuns),
     },
     server: {
       host: "localhost",

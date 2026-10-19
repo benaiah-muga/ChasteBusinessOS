@@ -180,37 +180,34 @@ Monorepo migration layout (current owner is recorded in
 
 ```
 apps/
-  web-vite/       React + Vite browser client
-  api/            Go HTTP API, capability executor, and workers
+  web-vite/       React + Vite browser client (HTTP to the Go API only)
+  api/            Go HTTP API, capability executor, capability registry, and workers
 packages/
-  kernel/         TypeScript capability definitions and conformance reference (the runtime executor is Go)
-  db/             drizzle schema + migrations (all modules)
-  ai/             provider adapters (NIM, openai-compat), embeddings
+  db/             drizzle schema + migrations (every domain)
   erp-core/       pure domain logic: posting rules, tax, inventory math (no IO)
-  plugin-kit/     signed plugin manifest format for marketplace capabilities
-modules/          ERP modules (each exports capabilities over @chaste/db)
-  money & trade   accounting/ purchasing/ sales/ pos/ inventory/
-  operations      manufacturing/ projects/ hr/ documents/
-  growth          crm/ marketing/ support/
-  platform        iam/ messaging/ creator/ skills/ routines/
-  intelligence    signals/ analytics/
 ```
 
-Two of these are cross-cutting rather than domain modules:
+Capabilities live in `apps/api/internal/capability`, grouped by domain:
+money & trade (accounting, purchasing, sales, pos, inventory), operations
+(manufacturing, projects, hr, documents), growth (crm, marketing, support),
+platform (iam, messaging, creator, skills, routines), and intelligence
+(signals, analytics). Each domain contributes its own capability specs,
+parsers, and handlers; `apps/web-vite` consumes REST APIs only.
 
-- **`signals`** hosts the needs-attention registry (ADR 0034). Modules
-  contribute deterministic producers; `signals.list` aggregates them red-first
+Two capability groups are cross-cutting rather than domain modules:
+
+- **signals** hosts the needs-attention registry (ADR 0034). Domain producers
+  contribute deterministically; `signals.list` aggregates them red-first
   with evidence and a suggested governed action. A failing producer degrades to
   missing signals, never a broken dashboard.
-- **`analytics`** is the understanding layer (ADR 0039): `explainChange`
+- **analytics** is the understanding layer (ADR 0039): `explainChange`
   decomposes a revenue delta with exact, property-tested contributions, and
   `askYourBusiness` answers from cited extracts and signals, ending in a
   *proposed* governed action rather than executing one.
 
-Domain rule: `erp-core` is pure functions; `modules/*` may touch DB via `db`;
-the Go capability executor executes capabilities at runtime, and `kernel` is
-the TypeScript definition and conformance reference; only humans approve
-`identity/destructive`.
+Domain rule: `erp-core` is pure functions; capability handlers in Go query
+through org-scoped transactions (`internal/dbx.WithOrgTx`); only humans
+approve `identity/destructive`.
 
 ---
 

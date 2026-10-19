@@ -86,6 +86,10 @@ the next number; superseded ones get a Status update, never deletion.
 | 0079 | Go owns opt-in provider-neutral OIDC sign-in | accepted for migration; provider proofs and route cutover remain open |
 | 0080 | Go owns opt-in federated auth and SCIM provisioning | accepted for migration; provider proofs and route cutover remain open |
 | 0081 | Explicit coding-agent delegation for public support replies | accepted |
+| 0082 | Verified-session organization bootstrap in Go | accepted |
+| 0083 | Private message attachment staging bypasses approval payloads | accepted |
+| 0084 | Go-owned asynchronous document parsing jobs | accepted |
+| 0085 | Creator Mode scaffolds Go capability artifacts | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

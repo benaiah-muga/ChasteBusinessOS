@@ -11,4 +11,9 @@ CREATE POLICY tenant_isolation ON support_auto_reply_draft_limits
   USING (org_id = current_setting('app.org_id', true)::uuid)
   WITH CHECK (org_id = current_setting('app.org_id', true)::uuid);--> statement-breakpoint
 
-GRANT SELECT, INSERT, UPDATE ON support_auto_reply_draft_limits TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT SELECT, INSERT, UPDATE ON support_auto_reply_draft_limits TO chaste_app;
+  END IF;
+END $$;

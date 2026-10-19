@@ -16,4 +16,9 @@ CREATE TABLE auth_email_outbox (
 CREATE INDEX auth_email_outbox_ready_idx
   ON auth_email_outbox (available_at, lease_expires_at, expires_at);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON auth_email_outbox TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON auth_email_outbox TO chaste_app;
+  END IF;
+END $$;

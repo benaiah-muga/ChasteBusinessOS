@@ -6,9 +6,7 @@
  */
 import { getDb, timeEntries, users } from "@chaste/db";
 import { randomUUID } from "node:crypto";
-import { CapabilityRegistry } from "@chaste/kernel";
 import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
-import { registerProjectsCapabilities } from "../modules/projects/src/index";
 
 let passed = 0;
 function ok(label: string, condition?: boolean) {
@@ -99,12 +97,11 @@ async function hrScenario(): Promise<string> {
 
 async function projectsScenario(): Promise<string> {
   const db = getDb().db;
-  // Standalone: a registry containing ONLY the projects module, executor
-  // with only that module enabled. No CRM, no accounting, no HR.
-  const bare = new CapabilityRegistry();
+  // Standalone: the org is onboarded with ONLY the projects module enabled.
+  // No CRM, no accounting, no HR. The Go API refuses sibling modules the
+  // org has not enabled.
   const { orgId, ownerCtx } = await seedOrg(db, "M11 Projects Solo", ["projects"]);
-  registerProjectsCapabilities(bare, { db });
-  const ex = buildExecutor(db, bare, { enabledModules: ["projects"] });
+  const ex = buildExecutor(db, buildRegistry(db), { enabledModules: ["projects"] });
   void orgId;
 
   const project = data(await ex.execute("projects.createProject", ownerCtx, {

@@ -42,7 +42,7 @@ async function startViteProxy(): Promise<{ server: ViteDevServer; origin: string
 }
 
 describe("Products capability route proxy", () => {
-  it("always sends the governed endpoint to Go regardless of legacy slice selector flags", async () => {
+  it("always sends the governed endpoint to Go with and without the session capability route", async () => {
     const go = routeRecorder("go");
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
@@ -53,24 +53,15 @@ describe("Products capability route proxy", () => {
     vi.stubEnv("CHASTE_GO_API_ORIGIN", goOrigin);
     vi.stubEnv("CHASTE_LEGACY_WEB_ORIGIN", legacyOrigin);
     vi.stubEnv("CHASTE_GO_SESSION_CAPABILITY_ROUTE", "1");
-    vi.stubEnv("CHASTE_GO_INVENTORY_IMPORT_SLICE", "1");
-    vi.stubEnv("CHASTE_GO_INVENTORY_TRANSFER_WRITES", "1");
-    vi.stubEnv("CHASTE_GO_INVENTORY_LOCATION_RESERVATION_WRITES", "1");
     const goProxy = await startViteProxy();
-    expect(goProxy.server.config.define?.__GO_INVENTORY_IMPORT_SLICE__).toBe("true");
-    expect(goProxy.server.config.define?.__GO_INVENTORY_TRANSFER_WRITES__).toBe("true");
-    expect(goProxy.server.config.define?.__GO_INVENTORY_LOCATION_RESERVATION_WRITES__).toBe("true");
     const goResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await goResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     await goProxy.server.close();
     runningServers.splice(runningServers.indexOf(goProxy.tracked), 1);
 
     vi.stubEnv("CHASTE_GO_SESSION_CAPABILITY_ROUTE", "0");
-    const goProxyWithoutLegacySlices = await startViteProxy();
-    expect(goProxyWithoutLegacySlices.server.config.define?.__GO_INVENTORY_IMPORT_SLICE__).toBe("false");
-    expect(goProxyWithoutLegacySlices.server.config.define?.__GO_INVENTORY_TRANSFER_WRITES__).toBe("false");
-    expect(goProxyWithoutLegacySlices.server.config.define?.__GO_INVENTORY_LOCATION_RESERVATION_WRITES__).toBe("false");
-    const goResponseWithoutLegacySlices = await fetch(`${goProxyWithoutLegacySlices.origin}/api/capabilities/execute`, { method: "POST" });
-    expect(await goResponseWithoutLegacySlices.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
+    const goProxyWithoutSessionRoute = await startViteProxy();
+    const goResponseWithoutSessionRoute = await fetch(`${goProxyWithoutSessionRoute.origin}/api/capabilities/execute`, { method: "POST" });
+    expect(await goResponseWithoutSessionRoute.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
   });
 });

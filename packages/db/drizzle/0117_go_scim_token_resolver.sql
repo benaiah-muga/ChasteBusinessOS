@@ -26,4 +26,9 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.chaste_resolve_scim_token(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.chaste_resolve_scim_token(text) TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT EXECUTE ON FUNCTION public.chaste_resolve_scim_token(text) TO chaste_app;
+  END IF;
+END $$;

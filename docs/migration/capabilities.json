@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "source": [
-    "apps/web/src/server/kernel.ts#composeRegistry",
+    "docs/migration/retired-capability-census.json",
     "docs/migration/go-capability-overrides.json"
   ],
   "capabilities": [

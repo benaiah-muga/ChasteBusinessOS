@@ -43,7 +43,12 @@ END;
 $$;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION public.chaste_marketplace_lock_listing(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.chaste_marketplace_lock_listing(uuid) TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT EXECUTE ON FUNCTION public.chaste_marketplace_lock_listing(uuid) TO chaste_app;
+  END IF;
+END $$;
 --> statement-breakpoint
 DROP FUNCTION IF EXISTS public.chaste_marketplace_install_listing(uuid);
 --> statement-breakpoint
@@ -97,4 +102,9 @@ END;
 $$;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION public.chaste_marketplace_install_listing(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.chaste_marketplace_install_listing(uuid) TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT EXECUTE ON FUNCTION public.chaste_marketplace_install_listing(uuid) TO chaste_app;
+  END IF;
+END $$;

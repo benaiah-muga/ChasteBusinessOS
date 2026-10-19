@@ -432,3 +432,20 @@ func TestAIConnectionsTokenAndSecretRoundTrip(t *testing.T) {
 		t.Fatal("token without a connection verified")
 	}
 }
+
+func TestAIPublicAppURLPrefersGoPublicAppURL(t *testing.T) {
+	for _, key := range []string{"GO_PUBLIC_APP_URL", "CHASTE_PUBLIC_URL", "NEXT_PUBLIC_APP_URL", "PUBLIC_URL"} {
+		t.Setenv(key, "")
+	}
+	if got := aiPublicAppURL(); got != "http://localhost:3000" {
+		t.Fatalf("aiPublicAppURL() with no environment = %q, want localhost fallback", got)
+	}
+	t.Setenv("PUBLIC_URL", "https://legacy.example.test")
+	if got := aiPublicAppURL(); got != "https://legacy.example.test" {
+		t.Fatalf("aiPublicAppURL() = %q, want PUBLIC_URL fallback", got)
+	}
+	t.Setenv("GO_PUBLIC_APP_URL", "https://app.example.test")
+	if got := aiPublicAppURL(); got != "https://app.example.test" {
+		t.Fatalf("aiPublicAppURL() = %q, want GO_PUBLIC_APP_URL to win", got)
+	}
+}

@@ -23,7 +23,12 @@ END;
 $$;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION public.chaste_resolve_scim_token(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.chaste_resolve_scim_token(text) TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT EXECUTE ON FUNCTION public.chaste_resolve_scim_token(text) TO chaste_app;
+  END IF;
+END $$;
 --> statement-breakpoint
 CREATE OR REPLACE FUNCTION public.chaste_resolve_or_create_scim_user(
   p_token_id uuid,
@@ -78,4 +83,9 @@ END;
 $$;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION public.chaste_resolve_or_create_scim_user(uuid, uuid, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.chaste_resolve_or_create_scim_user(uuid, uuid, text, text) TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT EXECUTE ON FUNCTION public.chaste_resolve_or_create_scim_user(uuid, uuid, text, text) TO chaste_app;
+  END IF;
+END $$;

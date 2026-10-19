@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@chaste/db':
+        specifier: workspace:*
+        version: link:packages/db
+      '@chaste/erp-core':
+        specifier: workspace:*
+        version: link:packages/erp-core
       '@eslint/js':
         specifier: ^9.35.0
         version: 9.39.5
@@ -17,9 +23,15 @@ importers:
       '@typescript/native':
         specifier: npm:typescript@^7.0.2
         version: typescript@7.0.2
+      drizzle-orm:
+        specifier: ^0.44.5
+        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
       eslint:
         specifier: ^9.35.0
         version: 9.39.5(jiti@2.7.0)(supports-color@10.2.2)
+      openai:
+        specifier: ^5.16.0
+        version: 5.23.2
       openapi-typescript:
         specifier: 7.13.0
         version: 7.13.0(@typescript/typescript6@6.0.2)
@@ -82,450 +94,6 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@25.9.8)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
 
-  modules/accounting:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/analytics:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      arquero:
-        specifier: ^5.4.0
-        version: 5.4.1
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      echarts:
-        specifier: ^6.0.0
-        version: 6.1.0
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/creator:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      '@chaste/plugin-kit':
-        specifier: workspace:*
-        version: link:../../packages/plugin-kit
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/crm:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/documents:
-    dependencies:
-      '@chaste/ai':
-        specifier: workspace:*
-        version: link:../../packages/ai
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/hr:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      '@chaste/module-accounting':
-        specifier: workspace:*
-        version: link:../accounting
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/iam:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/inventory:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      '@chaste/module-accounting':
-        specifier: workspace:*
-        version: link:../accounting
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/manufacturing:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      '@chaste/module-inventory':
-        specifier: workspace:*
-        version: link:../inventory
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/marketing:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/messaging:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/pos:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      '@chaste/module-accounting':
-        specifier: workspace:*
-        version: link:../accounting
-      '@chaste/module-inventory':
-        specifier: workspace:*
-        version: link:../inventory
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/projects:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/purchasing:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      '@chaste/module-accounting':
-        specifier: workspace:*
-        version: link:../accounting
-      '@chaste/module-inventory':
-        specifier: workspace:*
-        version: link:../inventory
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/routines:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-
-  modules/sales:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      '@chaste/module-accounting':
-        specifier: workspace:*
-        version: link:../accounting
-      '@chaste/module-inventory':
-        specifier: workspace:*
-        version: link:../inventory
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/signals:
-    dependencies:
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  modules/skills:
-    dependencies:
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-
-  modules/support:
-    dependencies:
-      '@chaste/ai':
-        specifier: workspace:*
-        version: link:../../packages/ai
-      '@chaste/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@chaste/erp-core':
-        specifier: workspace:*
-        version: link:../../packages/erp-core
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      drizzle-orm:
-        specifier: ^0.44.5
-        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  packages/ai:
-    dependencies:
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../kernel
-      openai:
-        specifier: ^5.16.0
-        version: 5.23.2
-    devDependencies:
-      '@types/node':
-        specifier: ^24.3.0
-        version: 24.13.3
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
   packages/db:
     dependencies:
       drizzle-orm:
@@ -553,32 +121,6 @@ importers:
       fast-check:
         specifier: ^4.3.0
         version: 4.9.0
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  packages/kernel:
-    dependencies:
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.33.0)(tsx@4.23.12)
-
-  packages/plugin-kit:
-    dependencies:
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -1434,9 +976,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@swc/helpers@0.5.23':
-    resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
-
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
     engines: {node: '>=18'}
@@ -1492,12 +1031,6 @@ packages:
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
-  '@types/command-line-args@5.2.3':
-    resolution: {integrity: sha512-uv0aG6R0Y8WHZLTamZwtfsDLVRnOa+n+n5rEvFWL5Na5gZ8V2Teab/duDPFzIIIhs9qizDpcavCusCLJZu62Kw==}
-
-  '@types/command-line-usage@5.0.4':
-    resolution: {integrity: sha512-BwR5KP3Es/CSht0xqBcUXS3qCAUVXwpRKsV2+arxeb65atasuXG9LykC9Ab10Cw3s2raH92ZqOeILaQbsB2ACg==}
-
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
@@ -1506,9 +1039,6 @@ packages:
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
-
-  '@types/node@20.19.43':
-    resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
 
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
@@ -1785,26 +1315,11 @@ packages:
     resolution: {integrity: sha512-Cxwpt2SfTzTtXcfOlzGEee8O+c+MmUgGrNiBcXnuWxuFJHe6a5Hz7qwhwe5OgaSYI0IJvkLqWX1ASG+cJOkEiA==}
     engines: {node: '>=10'}
 
-  apache-arrow@15.0.2:
-    resolution: {integrity: sha512-RvwlFxLRpO405PLGffx4N2PYLiF7FD86Q1hHl6J2XCWiq+tTCzpb9ngFw0apFDcXZBMpCzMuwAvA7hjyL1/73A==}
-    hasBin: true
-
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
 
   aria-query@5.3.0:
     resolution: {integrity: sha512-b0P0sZPKtyu8HkeRAfCq0IfURZK+SuwMjY1UXGBU27wpAiTwQAIlq56IbIO+ytk/JjS1fMR14ee5WBBfKi5J6A==}
-
-  arquero@5.4.1:
-    resolution: {integrity: sha512-yZhBU0/bYaB3mfqWShl0Opb3WaIOOWpnQ/pNvpIwQ5AXm4vd6ryljjl1l5RtHR/ENK7BSmNJD6SPygLXhnan9A==}
-
-  array-back@3.1.0:
-    resolution: {integrity: sha512-TkuxA4UCOvxuDK6NZYXCalszEzj+TLszyASooky+i742l9TqsOdYCMJJupxRic61hwquNtppB3hgcuq9SVSH1Q==}
-    engines: {node: '>=6'}
-
-  array-back@6.2.3:
-    resolution: {integrity: sha512-SGDvmg6QTYiTxCBkYVmThcoa67uLl35pyzRHdpCGBOcqFy6BtwnphoFPk7LhJshD+Yk1Kt35WGWeZPTgwR4Fhw==}
-    engines: {node: '>=12.17'}
 
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
@@ -1845,10 +1360,6 @@ packages:
     resolution: {integrity: sha512-4zNhdJD/iOjSH0A05ea+Ke6MU5mmpQcbQsSOkgdaUMJ9zTlDTD/GYlwohmIE2u0gaxHYiVHEn1Fw9mZ/ktJWgw==}
     engines: {node: '>=18'}
 
-  chalk-template@0.4.0:
-    resolution: {integrity: sha512-/ghrgmhfY8RaSdeo43hNXxpoHAtxdbskUHjPpfqUWGttFgycUhYPGx3YZBCnUCvOa7Doivn1IZec3DEGFoMgLg==}
-    engines: {node: '>=12'}
-
   chalk@4.1.2:
     resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
     engines: {node: '>=10'}
@@ -1869,14 +1380,6 @@ packages:
 
   colorette@1.4.0:
     resolution: {integrity: sha512-Y2oEozpomLn7Q3HFP7dpww7AtMJplbM9lGZP6RDfHqmbeRjiwRg4n6VM6j4KLmRke85uWEI7JqF17f3pqdRA0g==}
-
-  command-line-args@5.2.1:
-    resolution: {integrity: sha512-H4UfQhZyakIjC74I9d34fGYDwk3XpSr17QhEd0Q3I9Xq1CETHo4Hcuo87WyWHpAF1aSLjLRf5lD9ZGX2qStUvg==}
-    engines: {node: '>=4.0.0'}
-
-  command-line-usage@7.0.4:
-    resolution: {integrity: sha512-85UdvzTNx/+s5CkSgBm/0hzP80RFHAa7PsfeADE5ezZF3uHz3/Tqj9gIKGT9PTtpycc3Ua64T0oVulGfKxzfqg==}
-    engines: {node: '>=12.20.0'}
 
   concat-map@0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
@@ -2022,9 +1525,6 @@ packages:
       sqlite3:
         optional: true
 
-  echarts@6.1.0:
-    resolution: {integrity: sha512-q0yaFPggC9FUdsWH4blavRWFmxdrIodbkoKNAjJudAI6CA9gNPxHtV2RcZNEepZVlk4yvBYkOkbk6HIVpIyHZA==}
-
   entities@8.1.0:
     resolution: {integrity: sha512-kxL7msIffSuh9aaFAMD7rxAIuTRMAHMeBtgHW2yUdWw732ZNh4MehkF2gdjvtdmikkaIP9bFDDJOPlsvm7avrA==}
     engines: {node: '>=20.19.0'}
@@ -2131,10 +1631,6 @@ packages:
     resolution: {integrity: sha512-XXTUwCvisa5oacNGRP9SfNtYBNAMi+RPwBFmblZEF7N7swHYQS6/Zfk7SRwx4D5j3CH211YNRco1DEMNVfZCnQ==}
     engines: {node: '>=16.0.0'}
 
-  find-replace@3.0.0:
-    resolution: {integrity: sha512-6Tb2myMioCAgv5kfvP5/PkZZ/ntTpVK39fHY7WkWBgvbeE+VHd/tZuZ4mrC+bxh4cfOZeYKVPaJIZtZXV7GNCQ==}
-    engines: {node: '>=4.0.0'}
-
   find-up@5.0.0:
     resolution: {integrity: sha512-78/PXT1wlLLDgTzDs7sjq9hzz0vXD+zn+7wypEe4fXQxCmdmqfGsEPQxmiCSQI3ajFV91bVSsvNtrJRiW6nGng==}
     engines: {node: '>=10'}
@@ -2142,9 +1638,6 @@ packages:
   flat-cache@4.0.1:
     resolution: {integrity: sha512-f7ccFPK3SXFHpx15UIGyRJ/FJQctuKZ0zVuN3frBo4HnK3cay9VEW0R6yPYFHC0AgqhukPzKjq22t5DmAyqGyw==}
     engines: {node: '>=16'}
-
-  flatbuffers@23.5.26:
-    resolution: {integrity: sha512-vE+SI9vrJDwi1oETtTIFldC/o9GsVKRM+s6EL0nQgxXlYV1Vc4Tk30hj4xGICftInKQKj1F3up2n8UbIVobISQ==}
 
   flatted@3.4.4:
     resolution: {integrity: sha512-5+ybhBZANEJxaH3X5evAFatUxLfEHSr7n6kYJ+1Qd0mUqr4eu9gIf6GDbWHf8RJijHrjjO8G+la14SlL2SeS1Q==}
@@ -2241,10 +1734,6 @@ packages:
     peerDependenciesMeta:
       canvas:
         optional: true
-
-  json-bignum@0.0.3:
-    resolution: {integrity: sha512-2WHyXj3OfHSgNyuzDbSxI1w2jgw5gkWSWhS7Qg4bWXx1nLk3jnbwfUeS0PSba3IzpTUWdHxBieELUzXRjQB2zg==}
-    engines: {node: '>=0.8'}
 
   json-buffer@3.0.1:
     resolution: {integrity: sha512-4bV5BfR2mqfQTJm+V5tPPdf+ZpuhiIvTuAB5g8kcrXOZpTT/QwwVRWBywX1ozr6lEuPdbHxwaJlm9G6mI2sfSQ==}
@@ -2347,9 +1836,6 @@ packages:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
     engines: {node: '>=10'}
 
-  lodash.camelcase@4.3.0:
-    resolution: {integrity: sha512-TwuEnCnxbc3rAvhf/LbG7tJUDzhqXyFnv3dtzLOPgCG/hODL7WFnsbwktkD7yUV0RrreP/l1PALq/YSg6VvjlA==}
-
   lodash.merge@4.6.2:
     resolution: {integrity: sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ==}
 
@@ -2391,15 +1877,6 @@ packages:
 
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
-
-  node-fetch@2.7.0:
-    resolution: {integrity: sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A==}
-    engines: {node: 4.x || >=6.0.0}
-    peerDependencies:
-      encoding: ^0.1.0
-    peerDependenciesMeta:
-      encoding:
-        optional: true
 
   openai@5.23.2:
     resolution: {integrity: sha512-MQBzmTulj+MM5O8SKEk/gL8a7s5mktS9zUtAkU257WjvobGc9nKcBuVwjyEEcb9SI8a8Y2G/mzn3vm9n1Jlleg==}
@@ -2595,10 +2072,6 @@ packages:
   symbol-tree@3.2.4:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
 
-  table-layout@4.1.1:
-    resolution: {integrity: sha512-iK5/YhZxq5GO5z8wb0bY1317uDF3Zjpha0QFFLA8/trAoiLbQD0HUbMesEaxyzUgDxi2QlcbM8IvqOlEjgoXBA==}
-    engines: {node: '>=12.17'}
-
   tinybench@2.9.0:
     resolution: {integrity: sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg==}
 
@@ -2632,9 +2105,6 @@ packages:
     resolution: {integrity: sha512-exgYmnmL/sJpR3upZfXG5PoatXQii55xAiXGXzY+sROLZ/Y+SLcp9PgJNI9Vz37HpQ74WvDcLT8eqm+kV3FzrA==}
     engines: {node: '>=16'}
 
-  tr46@0.0.3:
-    resolution: {integrity: sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==}
-
   tr46@6.0.0:
     resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}
     engines: {node: '>=20'}
@@ -2644,12 +2114,6 @@ packages:
     engines: {node: '>=18.12'}
     peerDependencies:
       typescript: '>=4.8.4'
-
-  tslib@2.3.0:
-    resolution: {integrity: sha512-N82ooyxVNm6h1riLCoyS9e3fuJ3AMG2zIZs2Gd1ATcSFjSA23Q0fzjjZeh0jbJvWVDZ0cJT8yaNNaaXHzueNjg==}
-
-  tslib@2.8.1:
-    resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
   tsx@4.23.12:
     resolution: {integrity: sha512-FDf4L4sYzKtzWYhU/Xm0AQFdTjdIxNo9ElTf2mxXM6k8YMHXzYUe4yODVaXP4V9uMFbVg8c0qyBccK2OOxb45Q==}
@@ -2684,17 +2148,6 @@ packages:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
     engines: {node: '>=16.20.0'}
     hasBin: true
-
-  typical@4.0.0:
-    resolution: {integrity: sha512-VAH4IvQ7BDFYglMd7BPRDfLgxZZX4O4TFcRDA6EN5X7erNJJq+McIEp8np9aVtxrCJ6qx4GTYVfOWNjcqwZgRw==}
-    engines: {node: '>=8'}
-
-  typical@7.3.0:
-    resolution: {integrity: sha512-ya4mg/30vm+DOWfBg4YK3j2WD6TWtRkCbasOJr40CseYENzCUby/7rIvXA99JGsQHeNxLbnXdyLLxKSv3tauFw==}
-    engines: {node: '>=12.17'}
-
-  undici-types@6.21.0:
-    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
@@ -2832,9 +2285,6 @@ packages:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
     engines: {node: '>=18'}
 
-  webidl-conversions@3.0.1:
-    resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
-
   webidl-conversions@8.0.1:
     resolution: {integrity: sha512-BMhLD/Sw+GbJC21C/UgyaZX41nPt8bUTg+jWyDeg7e7YN4xOM05YPSIXceACnXVtqyEw/LMClUQMtMZ+PGGpqQ==}
     engines: {node: '>=20'}
@@ -2851,9 +2301,6 @@ packages:
     resolution: {integrity: sha512-3GeworPmc2ZfEEHP7lEbUfBX/L75wdEsi0rLNhXcXxnoN5jyq0SL5gCy06SGW2cyTIZdTvWIDQNQoza++vKeaw==}
     engines: {node: ^22.14.0 || >=24.0.0}
 
-  whatwg-url@5.0.0:
-    resolution: {integrity: sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw==}
-
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
     engines: {node: '>= 8'}
@@ -2867,10 +2314,6 @@ packages:
   word-wrap@1.2.5:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
-
-  wordwrapjs@5.1.1:
-    resolution: {integrity: sha512-0yweIbkINJodk27gX9LBGMzyQdBDan3s/dEAiwBOj+Mf0PPyWL6/rikalkv8EeD0E8jm4o5RXEOrFTP3NXbhJg==}
-    engines: {node: '>=12.17'}
 
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
@@ -2892,9 +2335,6 @@ packages:
 
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
-
-  zrender@6.1.0:
-    resolution: {integrity: sha512-oEGMDB6pOP2S6OwRR4PdVv610zrjnA3Bh+JnSG12fYJlBKjtNAoEb5fSUoCOOINlH96I2fU38/A2UpRKs67xYQ==}
 
 snapshots:
 
@@ -3406,10 +2846,6 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.62.5':
     optional: true
 
-  '@swc/helpers@0.5.23':
-    dependencies:
-      tslib: 2.8.1
-
   '@testing-library/dom@10.4.1':
     dependencies:
       '@babel/code-frame': 7.29.7
@@ -3456,19 +2892,11 @@ snapshots:
       '@types/deep-eql': 4.0.2
       assertion-error: 2.0.1
 
-  '@types/command-line-args@5.2.3': {}
-
-  '@types/command-line-usage@5.0.4': {}
-
   '@types/deep-eql@4.0.2': {}
 
   '@types/estree@1.0.9': {}
 
   '@types/json-schema@7.0.15': {}
-
-  '@types/node@20.19.43':
-    dependencies:
-      undici-types: 6.21.0
 
   '@types/node@24.13.3':
     dependencies:
@@ -3722,35 +3150,11 @@ snapshots:
 
   ansi-styles@5.2.0: {}
 
-  apache-arrow@15.0.2:
-    dependencies:
-      '@swc/helpers': 0.5.23
-      '@types/command-line-args': 5.2.3
-      '@types/command-line-usage': 5.0.4
-      '@types/node': 20.19.43
-      command-line-args: 5.2.1
-      command-line-usage: 7.0.4
-      flatbuffers: 23.5.26
-      json-bignum: 0.0.3
-      tslib: 2.8.1
-
   argparse@2.0.1: {}
 
   aria-query@5.3.0:
     dependencies:
       dequal: 2.0.3
-
-  arquero@5.4.1:
-    dependencies:
-      acorn: 8.18.0
-      apache-arrow: 15.0.2
-      node-fetch: 2.7.0
-    transitivePeerDependencies:
-      - encoding
-
-  array-back@3.1.0: {}
-
-  array-back@6.2.3: {}
 
   assertion-error@2.0.1: {}
 
@@ -3789,10 +3193,6 @@ snapshots:
       loupe: 3.2.1
       pathval: 2.0.1
 
-  chalk-template@0.4.0:
-    dependencies:
-      chalk: 4.1.2
-
   chalk@4.1.2:
     dependencies:
       ansi-styles: 4.3.0
@@ -3809,20 +3209,6 @@ snapshots:
   color-name@1.1.4: {}
 
   colorette@1.4.0: {}
-
-  command-line-args@5.2.1:
-    dependencies:
-      array-back: 3.1.0
-      find-replace: 3.0.0
-      lodash.camelcase: 4.3.0
-      typical: 4.0.0
-
-  command-line-usage@7.0.4:
-    dependencies:
-      array-back: 6.2.3
-      chalk-template: 0.4.0
-      table-layout: 4.1.1
-      typical: 7.3.0
 
   concat-map@0.0.1: {}
 
@@ -3875,11 +3261,6 @@ snapshots:
     optionalDependencies:
       kysely: 0.29.5
       postgres: 3.4.9
-
-  echarts@6.1.0:
-    dependencies:
-      tslib: 2.3.0
-      zrender: 6.1.0
 
   entities@8.1.0: {}
 
@@ -4064,10 +3445,6 @@ snapshots:
     dependencies:
       flat-cache: 4.0.1
 
-  find-replace@3.0.0:
-    dependencies:
-      array-back: 3.1.0
-
   find-up@5.0.0:
     dependencies:
       locate-path: 6.0.0
@@ -4077,8 +3454,6 @@ snapshots:
     dependencies:
       flatted: 3.4.4
       keyv: 4.5.4
-
-  flatbuffers@23.5.26: {}
 
   flatted@3.4.4: {}
 
@@ -4176,8 +3551,6 @@ snapshots:
     transitivePeerDependencies:
       - '@noble/hashes'
 
-  json-bignum@0.0.3: {}
-
   json-buffer@3.0.1: {}
 
   json-schema-traverse@0.4.1: {}
@@ -4251,8 +3624,6 @@ snapshots:
     dependencies:
       p-locate: 5.0.0
 
-  lodash.camelcase@4.3.0: {}
-
   lodash.merge@4.6.2: {}
 
   loupe@3.2.1: {}
@@ -4284,10 +3655,6 @@ snapshots:
   nanoid@3.3.18: {}
 
   natural-compare@1.4.0: {}
-
-  node-fetch@2.7.0:
-    dependencies:
-      whatwg-url: 5.0.0
 
   openai@5.23.2: {}
 
@@ -4487,11 +3854,6 @@ snapshots:
 
   symbol-tree@3.2.4: {}
 
-  table-layout@4.1.1:
-    dependencies:
-      array-back: 6.2.3
-      wordwrapjs: 5.1.1
-
   tinybench@2.9.0: {}
 
   tinyexec@0.3.2: {}
@@ -4517,8 +3879,6 @@ snapshots:
     dependencies:
       tldts: 7.4.12
 
-  tr46@0.0.3: {}
-
   tr46@6.0.0:
     dependencies:
       punycode: 2.3.1
@@ -4526,10 +3886,6 @@ snapshots:
   ts-api-utils@2.5.0(@typescript/typescript6@6.0.2):
     dependencies:
       typescript: '@typescript/typescript6@6.0.2'
-
-  tslib@2.3.0: {}
-
-  tslib@2.8.1: {}
 
   tsx@4.23.12:
     dependencies:
@@ -4587,12 +3943,6 @@ snapshots:
       '@typescript/typescript-sunos-x64': 7.0.2
       '@typescript/typescript-win32-arm64': 7.0.2
       '@typescript/typescript-win32-x64': 7.0.2
-
-  typical@4.0.0: {}
-
-  typical@7.3.0: {}
-
-  undici-types@6.21.0: {}
 
   undici-types@7.18.2: {}
 
@@ -4844,8 +4194,6 @@ snapshots:
     dependencies:
       xml-name-validator: 5.0.0
 
-  webidl-conversions@3.0.1: {}
-
   webidl-conversions@8.0.1: {}
 
   whatwg-mimetype@5.0.0: {}
@@ -4866,11 +4214,6 @@ snapshots:
     transitivePeerDependencies:
       - '@noble/hashes'
 
-  whatwg-url@5.0.0:
-    dependencies:
-      tr46: 0.0.3
-      webidl-conversions: 3.0.1
-
   which@2.0.2:
     dependencies:
       isexe: 2.0.0
@@ -4881,8 +4224,6 @@ snapshots:
       stackback: 0.0.2
 
   word-wrap@1.2.5: {}
-
-  wordwrapjs@5.1.1: {}
 
   xml-name-validator@5.0.0: {}
 
@@ -4895,7 +4236,3 @@ snapshots:
   yocto-queue@0.1.0: {}
 
   zod@4.4.3: {}
-
-  zrender@6.1.0:
-    dependencies:
-      tslib: 2.3.0

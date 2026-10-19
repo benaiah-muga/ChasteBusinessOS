@@ -11,7 +11,7 @@ const verifiedEvidence = JSON.stringify({
   kind: "isolated_creator_candidate",
   baselineCommit: "0123456789abcdef",
   candidateDigest: digest,
-  files: ["modules/creator/src/evolution.ts", "modules/creator/src/index.ts"],
+  files: ["apps/api/internal/capability/generated_creator_evolution.go", "apps/api/internal/capability/generated_creator_release.go"],
   verification: { passed: true, network: "isolated", productionCredentials: false },
 });
 
@@ -158,7 +158,7 @@ describe("Vite proposals page", () => {
       kind: "isolated_creator_candidate",
       baselineCommit: "0123456789abcdef",
       candidateDigest: digest,
-      files: ["modules/creator/src/evolution.ts"],
+      files: ["apps/api/internal/capability/generated_creator_evolution.go"],
       verification: { passed: false, network: "open", productionCredentials: true },
     });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

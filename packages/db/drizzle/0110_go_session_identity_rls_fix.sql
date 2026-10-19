@@ -64,4 +64,9 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.chaste_resolve_better_auth_session(text, timestamptz) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.chaste_resolve_better_auth_session(text, timestamptz) TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT EXECUTE ON FUNCTION public.chaste_resolve_better_auth_session(text, timestamptz) TO chaste_app;
+  END IF;
+END $$;

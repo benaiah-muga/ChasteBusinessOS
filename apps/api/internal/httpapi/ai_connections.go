@@ -668,7 +668,7 @@ func aiProductionRuntime() bool {
 }
 
 func aiPublicAppURL() string {
-	for _, key := range []string{"CHASTE_PUBLIC_URL", "NEXT_PUBLIC_APP_URL", "PUBLIC_URL"} {
+	for _, key := range []string{"GO_PUBLIC_APP_URL", "CHASTE_PUBLIC_URL", "NEXT_PUBLIC_APP_URL", "PUBLIC_URL"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			return value
 		}

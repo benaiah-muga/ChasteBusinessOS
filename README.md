@@ -214,17 +214,14 @@ assertions used by scripts and is verified by the Go API.
 ### Vite selectors
 
 The `CHASTE_GO_*` selectors pick exact methods and paths in the Vite
-development proxy. Route, inbox, and read selectors default on. Capability
-write slices need an explicit `1` and most also need
-`CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` on Vite with
-`GO_SESSION_CAPABILITY_ROUTE=1` on the API, because they call Go capabilities
-directly with the browser session; examples include
-`CHASTE_GO_PROJECTS_WRITES`, `CHASTE_GO_ACCOUNTING_CREATE_INVOICE`,
-`CHASTE_GO_BANK_RECONCILIATION_WRITES`, and
-`CHASTE_GO_MARKETING_CAMPAIGN_WRITES`. Some slices default on once the session
-capability route is enabled. `.env.example` lists the current switches with
-comments, and `docs/migration/route-ownership.json` is the checked-in route
-census.
+development proxy. Route and read selectors default on. Three capability
+slices need an explicit `1` and also need `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`
+on Vite with `GO_SESSION_CAPABILITY_ROUTE=1` on the API, because they call Go
+capabilities directly with the browser session:
+`CHASTE_GO_INVENTORY_ITEM_SLICE`, `CHASTE_GO_PROJECTS_WRITES`, and
+`CHASTE_GO_PURCHASING_PAYMENT_RUNS`. `.env.example` lists the current switches
+with comments, and `docs/migration/route-ownership.json` is the checked-in
+route census.
 
 ### Authentication
 

@@ -57,4 +57,9 @@ $$;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION jobs_worker.list_public_support_embedding_orgs(integer, uuid) FROM PUBLIC;
 --> statement-breakpoint
-REVOKE ALL ON FUNCTION jobs_worker.list_public_support_embedding_orgs(integer, uuid) FROM chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    REVOKE ALL ON FUNCTION jobs_worker.list_public_support_embedding_orgs(integer, uuid) FROM chaste_app;
+  END IF;
+END $$;

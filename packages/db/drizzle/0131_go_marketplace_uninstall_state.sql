@@ -62,4 +62,9 @@ END;
 $$;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION public.chaste_marketplace_uninstall_listing(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.chaste_marketplace_uninstall_listing(uuid) TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT EXECUTE ON FUNCTION public.chaste_marketplace_uninstall_listing(uuid) TO chaste_app;
+  END IF;
+END $$;

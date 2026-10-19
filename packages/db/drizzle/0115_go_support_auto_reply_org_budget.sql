@@ -30,6 +30,11 @@ CREATE POLICY tenant_isolation ON support_auto_reply_reservations
   USING (org_id = current_setting('app.org_id', true)::uuid)
   WITH CHECK (org_id = current_setting('app.org_id', true)::uuid);--> statement-breakpoint
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON support_auto_reply_draft_limits TO chaste_app;--> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE, DELETE ON support_auto_reply_org_draft_limits TO chaste_app;--> statement-breakpoint
-GRANT SELECT, INSERT, DELETE ON support_auto_reply_reservations TO chaste_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaste_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON support_auto_reply_draft_limits TO chaste_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON support_auto_reply_org_draft_limits TO chaste_app;
+    GRANT SELECT, INSERT, DELETE ON support_auto_reply_reservations TO chaste_app;
+  END IF;
+END $$;

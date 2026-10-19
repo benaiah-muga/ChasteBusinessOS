@@ -2254,8 +2254,8 @@ export const scimTokens = pgTable(
 
 /**
  * A published capability package. The manifest is canonical JSON signed by
- * the publisher's ed25519 key (see @chaste/plugin-kit); verification happens
- * before a listing can be marked verified, and again on install.
+ * the publisher's ed25519 key; verification happens before a listing can be
+ * marked verified, and again on install.
  */
 export const marketplaceListings = pgTable(
   "marketplace_listings",

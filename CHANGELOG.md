@@ -85,6 +85,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Inventory can page through stock movement history beyond the latest 100 entries using the authenticated Go reader.
 - Vite CRM can record a deal's source and owner through Go, and the pipeline shows those attribution details after reload.
 - Vite Hiring can hire offer-stage applicants as employees through Go `hr.hireApplicant`.
+- Creator Mode proposals now scaffold Go capability artifacts: a `generated_<module>_<action>.go` file with the capability id constant, spec entry, typed input parser reusing the package validation helpers, and a refusal stub; a Go test skeleton; and the risk document restated in Go terms. Rendered Go is gofmt-formatted and validated with `go/parser` by the renderer tests (ADR 0085).
 
 ### Fixed
 
@@ -133,6 +134,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Support and Dashboard reject Go responses that contain malformed IDs, unsupported values, or undeclared fields, and preserve retry intents after malformed write receipts.
 - Vite Analytics rejects unsafe integer values in Go preview and report data and strictly validates module, dataset, preview, and report contracts.
 - Vite Auth, Organizations, Team, and Settings reject malformed Go session and workspace envelopes, including injected session tokens and invalid policy approval values.
+- Database migrations apply on a fresh database again: every `chaste_app` grant and revoke is guarded by a role-existence check, so `pnpm --filter @chaste/db db:migrate` no longer fails with `role "chaste_app" does not exist` before runtime provisioning has created the role. `ensureAppRole` now also grants the resolver functions and jobs-worker schema access that later migrations expect, closing the drift between the two paths.
+- Go AI provider URLs prefer `GO_PUBLIC_APP_URL` and fall back through `CHASTE_PUBLIC_URL`, `NEXT_PUBLIC_APP_URL`, and `PUBLIC_URL`, so images and links keep working now that the Next.js app no longer sets its public URL.
+- The root workspace manifest again declares `@chaste/db`, `@chaste/erp-core`, `drizzle-orm`, and `openai`, so `pnpm demo:*`, `pnpm test:groq`, and the migration scripts resolve their imports; the Next.js retirement had dropped these, breaking every demo at module load.
 
 ### Changed
 
@@ -2432,8 +2436,17 @@ The full v1 changelog is preserved at the bottom of this file.
 - Mobile app sections use visible, horizontally scrollable tabs again, and narrow app headers wrap action buttons instead of overflowing the page.
 - CRM customer filters and create/import actions fit 320px screens without horizontal scrolling, and saved-view creation stays closed until requested.
 - Empty Products & Services catalogs point to add and spreadsheet-import actions instead of reporting stock as healthy.
+- The Vite development proxy carries only the selectors it can act on: the dead per-module `CHASTE_GO_*` flag surface and its `__GO_*` defines are gone, leaving the three capability-slice switches, the live route flags, and the session capability route. `.env.example`, the README selector table, and the setup troubleshooting guide document only live switches, and the proxy tests keep only the retained selectors.
+- Creator Mode file proposals now target Go paths; proposal fixtures in the Vite tests and the demo proofs use Go artifact paths.
+- The capability manifest reads the checked-in retired-capability census plus the Go overrides directly; the legacy capture path, its `--freeze-census` mode, and the `migration:capabilities:census` command are gone, and the continuity inventory census now also records the retired module and package sources cited by the migration docs.
+- `pnpm test` runs the root node tests first and then the Turborepo suite with `--concurrency=1`, so database-backed suites no longer race each other.
+- `demo:m11:isolated` now starts a throwaway Go API on a loopback port against its fixture database, so the proof runs end to end against a clean database and the Go runtime role instead of the shared development API.
+- Documentation and repository hygiene now match the retired Next.js app: architecture, contributing, and roadmap describe only the Vite + Go layout; the PR template drops legacy-app and stale migration wording; the local `.env` documents the marketing and notification email worker roles; leftover failed jobs and orphan recurring invoices were cleared from the development database.
 
 ### Removed
+
+- The retired TypeScript runtime packages are deleted: `modules/*` (20 domain modules), `packages/kernel`, `packages/ai`, and `packages/plugin-kit`, together with the scripts that existed only to exercise them (`demo-agent.ts` and the `pnpm demo` entry, `registry-check.mts`, `gates/creator-isolation.ts`, `gates/zai-live.ts`, `gates/detector-positive-control.ts`, `env-probe.ts`, `test-inkling.ts`). `demo-m7` inlines the GL and stock checks it still needs, `demo-m11` drives the Go executor for its standalone proof, and `demo-support` and the remaining proofs were already Go-backed.
+- Tracked graft cache files, the Next.js MCP server entry, the Next.js agent skills with their lock file, and stale `.next/` ignore entries are removed from the repository.
 
 - The legacy Next.js app and its server-only TypeScript runtime are removed: `apps/web` (routes, server actions, kernel, instrumentation, tests) plus the scripts that drove it (`scripts/probe/*`, `scripts/agent-pilot-eval.ts`, `scripts/test-groq-agents.ts`, `scripts/tool-list-probe.ts`, `scripts/verify-documents-templates.mjs`) and the already-unwired `scripts/worker.ts` with its durable-run pilot gates (`scripts/gates/durable-po-run.ts`, `scripts/gates/supervised-pilot.ts`). Vite and the Go API are now the only runtime; no command path starts a Next server or reaches port 3001.
 - `packages/harness` and the `dev:legacy`, `bench:agents`, `migration:session-parity`, and `migration:permission-parity` package scripts are removed. Demo and node scripts now compile against the root `tsconfig.scripts.json`.
