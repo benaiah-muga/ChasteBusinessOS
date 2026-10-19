@@ -193,6 +193,37 @@ export const ledgerEvents = pgTable(
   ],
 );
 
+/** Durable evaluation runs. The payload is evidence, not business state. */
+export const evaluationRuns = pgTable(
+  "evaluation_runs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    scenarioId: text("scenario_id").notNull(),
+    status: text("status").notNull(), // passed | failed | error
+    model: text("model").notNull(),
+    finalAnswer: text("final_answer").notNull().default(""),
+    durationMs: integer("duration_ms").notNull().default(0),
+    inputTokens: bigint("input_tokens", { mode: "number" }).notNull().default(0),
+    outputTokens: bigint("output_tokens", { mode: "number" }).notNull().default(0),
+    cachedTokens: bigint("cached_tokens", { mode: "number" }).notNull().default(0),
+    toolCalls: jsonb("tool_calls").notNull().default([]),
+    checks: jsonb("checks").notNull().default([]),
+    error: text("error"),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("evaluation_run_org_created_idx").on(t.orgId, t.createdAt),
+    index("evaluation_run_org_scenario_idx").on(t.orgId, t.scenarioId, t.createdAt),
+    check("evaluation_run_status_valid", sql`${t.status} IN ('passed', 'failed', 'error')`),
+    check("evaluation_run_duration_nonnegative", sql`${t.durationMs} >= 0`),
+    check("evaluation_run_tokens_nonnegative", sql`${t.inputTokens} >= 0 AND ${t.outputTokens} >= 0 AND ${t.cachedTokens} >= 0`),
+  ],
+);
+
 /** Agent conversation sessions, replayable trajectories. */
 export const agentSessions = pgTable(
   "agent_sessions",

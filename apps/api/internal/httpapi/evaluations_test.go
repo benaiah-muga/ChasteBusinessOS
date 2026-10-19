@@ -126,7 +126,7 @@ func TestEvaluationProviderRejectsUnsafeEndpointAndEmptyModel(t *testing.T) {
 
 func TestEvaluationHandlerListsAndRunsAdminScenarios(t *testing.T) {
 	resolver := &fakeDirectSessionResolver{resolved: evaluationAdminIdentity()}
-	handler := NewEvaluationSessionHandler(resolver, nil)
+	handler := NewEvaluationSessionHandler(nil, resolver, nil)
 	handler.provider = func() (chatProvider, string, error) {
 		return &evaluationScriptedProvider{turns: []chatTurn{
 			{toolCalls: []chatToolCall{{ID: "call-1", Name: "inventory_replenishmentPlan", Arguments: json.RawMessage(`{}`)}}},
@@ -153,7 +153,7 @@ func TestEvaluationHandlerListsAndRunsAdminScenarios(t *testing.T) {
 
 func TestEvaluationHandlerRateLimitsRepeatedRuns(t *testing.T) {
 	resolver := &fakeDirectSessionResolver{resolved: evaluationAdminIdentity()}
-	handler := NewEvaluationSessionHandler(resolver, nil)
+	handler := NewEvaluationSessionHandler(nil, resolver, nil)
 	handler.rateLimit = 1
 	handler.provider = func() (chatProvider, string, error) {
 		return &evaluationScriptedProvider{turns: []chatTurn{{message: "Nothing to report."}}}, "deepseek-flash", nil
@@ -173,7 +173,7 @@ func TestEvaluationHandlerRateLimitsRepeatedRuns(t *testing.T) {
 
 func TestEvaluationHandlerRequiresAdmin(t *testing.T) {
 	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
-	handler := NewEvaluationSessionHandler(resolver, nil)
+	handler := NewEvaluationSessionHandler(nil, resolver, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/evaluations", nil)
 	request.AddCookie(&http.Cookie{Name: "chaste_session", Value: "session-cookie"})
 	recorder := httptest.NewRecorder()

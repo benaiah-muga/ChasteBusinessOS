@@ -41,6 +41,45 @@ function sanitizeEvaluationText(value: string): string {
   return value.replace(/\u2014/g, ", ").replace(/\u2013/g, "-");
 }
 
+const HISTORY_LIMIT = 30;
+const RUN_LIST_LIMIT = 8;
+const TREND_LIMIT = 5;
+
+function formatPassRate(passed: number, total: number): string {
+  if (total === 0) return "0%";
+  return `${Math.round((passed / total) * 100)}%`;
+}
+
+function historySummary(runs: readonly EvaluationRunResult[]): string {
+  const passed = runs.filter((run) => run.status === "passed").length;
+  const noun = runs.length === 1 ? "run" : "runs";
+  return `${runs.length} ${noun}, ${passed} passed, ${formatPassRate(passed, runs.length)} pass rate.`;
+}
+
+function formatRunTimestamp(createdAt: string): string {
+  if (!createdAt) return "Time not recorded";
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return "Time not recorded";
+  return sanitizeEvaluationText(date.toLocaleString());
+}
+
+function statusLabel(status: EvaluationRunResult["status"]): string {
+  if (status === "passed") return "Passed";
+  if (status === "failed") return "Failed";
+  return "Error";
+}
+
+function mergeRunHistory(
+  history: readonly EvaluationRunResult[],
+  run: EvaluationRunResult,
+): EvaluationRunResult[] {
+  const createdAt = run.createdAt.trim();
+  const kept = createdAt
+    ? history.filter((entry) => entry.createdAt !== createdAt || entry.scenarioId !== run.scenarioId)
+    : history;
+  return [run, ...kept].slice(0, HISTORY_LIMIT);
+}
+
 function compactJson(value: unknown): string {
   if (value === undefined) return "undefined";
   try {
@@ -63,6 +102,12 @@ function EvaluationResult({ result }: { result: EvaluationRunResult }) {
         <span className="evaluation-result__metric">{formatCount(result.usage.cachedInput)} cached</span>
         {result.model && <span className="evaluation-result__model">{result.model}</span>}
       </div>
+
+      {result.persisted === false && (
+        <p className="evaluation-result__unsaved" role="status">
+          Not saved to history
+        </p>
+      )}
 
       {result.status === "error" && result.error && (
         <p className="evaluation-result__error" role="status">
@@ -129,6 +174,85 @@ function EvaluationResult({ result }: { result: EvaluationRunResult }) {
   );
 }
 
+function EvaluationHistory({
+  runs,
+  scenarios,
+}: {
+  runs: readonly EvaluationRunResult[];
+  scenarios: readonly EvaluationScenario[];
+}) {
+  const titles = new Map(scenarios.map((scenario) => [scenario.id, scenario.title] as const));
+  const grouped = new Map<string, EvaluationRunResult[]>();
+  for (const run of runs) {
+    const existing = grouped.get(run.scenarioId);
+    if (existing) existing.push(run);
+    else grouped.set(run.scenarioId, [run]);
+  }
+
+  return (
+    <section className="evaluation-history" aria-labelledby="evaluation-history-title">
+      <header className="evaluation-history__header">
+        <h3 id="evaluation-history-title">Run history</h3>
+        <p className="evaluation-history__summary">{historySummary(runs)}</p>
+      </header>
+
+      <div className="evaluation-history__trends">
+        {[...grouped.entries()].map(([scenarioId, scenarioRuns]) => {
+          const title = titles.get(scenarioId) ?? scenarioId;
+          const recent = scenarioRuns.slice(0, TREND_LIMIT);
+          const passed = recent.filter((run) => run.status === "passed").length;
+          return (
+            <div className="evaluation-history__trend" key={scenarioId}>
+              <p className="evaluation-history__trend-title">
+                {sanitizeEvaluationText(title)} -{" "}
+                <span className="evaluation-history__trend-count">
+                  {passed}/{recent.length} passed
+                </span>
+              </p>
+              <ul className="evaluation-history__marks" aria-label={`Recent runs for ${title}`}>
+                {[...recent].reverse().map((run, index) => (
+                  <li key={`${run.createdAt}-${index}`} className="evaluation-history__mark-item">
+                    <span
+                      className={`evaluation-history__mark evaluation-history__mark--${run.status === "passed" ? "pass" : "fail"}`}
+                      role="img"
+                      aria-label={`Run ${index + 1} for ${title}: ${run.status}`}
+                      title={`${formatRunTimestamp(run.createdAt)}: ${run.status}`}
+                    >
+                      {run.status === "passed" ? "\u2713" : "\u2715"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+
+      <ol className="evaluation-history__runs" aria-label="Recent evaluation runs">
+        {runs.slice(0, RUN_LIST_LIMIT).map((run, index) => {
+          const title = titles.get(run.scenarioId) ?? run.scenarioId;
+          return (
+            <li
+              className="evaluation-history__run"
+              key={`${run.scenarioId}-${run.createdAt || "unsaved"}-${index}`}
+            >
+              <time className="evaluation-history__run-time" dateTime={run.createdAt || undefined}>
+                {formatRunTimestamp(run.createdAt)}
+              </time>
+              <span className="evaluation-history__run-title">
+                {sanitizeEvaluationText(title)} -{" "}
+                <span className="evaluation-history__run-model">{run.model || "unknown model"}</span>
+              </span>
+              <span className={`evaluation-status evaluation-status--${run.status}`}>{statusLabel(run.status)}</span>
+              <span className="evaluation-history__run-duration">took {formatDuration(run.durationMs)}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 function ScenarioCard({
   scenario,
   live,
@@ -181,6 +305,7 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
     organizationId ? { kind: "loading" } : { kind: "waiting" },
   );
   const [results, setResults] = useState<ReadonlyMap<string, EvaluationRunResult>>(() => new Map());
+  const [history, setHistory] = useState<EvaluationRunResult[]>([]);
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
   const [runningAll, setRunningAll] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -194,6 +319,7 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
     runGeneration.current += 1;
     busyRef.current = false;
     setResults(new Map());
+    setHistory([]);
     setActiveScenarioId(null);
     setRunningAll(false);
     setRunError(null);
@@ -208,7 +334,10 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
     setCatalog({ kind: "loading" });
     try {
       const next = await fetchEvaluations(organizationId, signal);
-      if (!signal?.aborted) setCatalog({ kind: "ready", catalog: next });
+      if (!signal?.aborted) {
+        setCatalog({ kind: "ready", catalog: next });
+        setHistory(next.recentRuns.slice(0, HISTORY_LIMIT));
+      }
     } catch (error) {
       if (signal?.aborted) return;
       setCatalog({ kind: "error", message: errorMessage(error), adminOnly: isForbidden(error) });
@@ -227,6 +356,7 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
       next.set(result.scenarioId, result);
       return next;
     });
+    setHistory((current) => mergeRunHistory(current, result));
   }
 
   function reportRunError(error: unknown) {
@@ -401,6 +531,10 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
                 />
               ))}
             </div>
+          )}
+
+          {history.length > 0 && (
+            <EvaluationHistory runs={history} scenarios={catalogData.scenarios} />
           )}
         </>
       )}

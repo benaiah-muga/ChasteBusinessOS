@@ -1,8 +1,47 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EvaluationPanel } from "./EvaluationPanel";
 
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
+
+const passedResult = {
+  scenarioId: "inventory-proposal-low-stock",
+  status: "passed",
+  model: "deepseek-flash",
+  finalAnswer: "CEM-1 is below its reorder point. I prepared the purchase order and it is awaiting approval.",
+  durationMs: 7730,
+  usage: { input: 100, output: 50, cachedInput: 0 },
+  toolCalls: [{ name: "inventory_replenishmentPlan", arguments: {}, result: { status: "reorder" } }],
+  checks: [
+    { id: "planned", label: "Reads the live replenishment plan", passed: true, detail: "inventory_replenishmentPlan was called" },
+    { id: "proposed", label: "Prepares the purchase order", passed: true, detail: "purchasing_createPurchaseOrder was called" },
+  ],
+  error: "",
+};
+
+const historicalPassed = {
+  ...passedResult,
+  durationMs: 6100,
+  model: "deepseek-chat",
+  finalAnswer: "Historical run that passed.",
+  toolCalls: [],
+  checks: [],
+  persisted: true,
+  createdAt: "2026-10-18T09:30:00Z",
+};
+
+const historicalFailed = {
+  ...passedResult,
+  scenarioId: "inventory-incoming-covers",
+  status: "failed",
+  durationMs: 8300,
+  model: "deepseek-chat",
+  finalAnswer: "Historical run that failed.",
+  toolCalls: [],
+  checks: [],
+  persisted: true,
+  createdAt: "2026-10-17T14:05:00Z",
+};
 
 const catalog = {
   live: true,
@@ -21,21 +60,7 @@ const catalog = {
       checks: ["Reads the live replenishment plan", "Does not prepare a duplicate order"],
     },
   ],
-};
-
-const passedResult = {
-  scenarioId: "inventory-proposal-low-stock",
-  status: "passed",
-  model: "deepseek-flash",
-  finalAnswer: "CEM-1 is below its reorder point. I prepared the purchase order and it is awaiting approval.",
-  durationMs: 7730,
-  usage: { input: 100, output: 50, cachedInput: 0 },
-  toolCalls: [{ name: "inventory_replenishmentPlan", arguments: {}, result: { status: "reorder" } }],
-  checks: [
-    { id: "planned", label: "Reads the live replenishment plan", passed: true, detail: "inventory_replenishmentPlan was called" },
-    { id: "proposed", label: "Prepares the purchase order", passed: true, detail: "purchasing_createPurchaseOrder was called" },
-  ],
-  error: "",
+  recentRuns: [historicalPassed, historicalFailed],
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -159,6 +184,75 @@ describe("EvaluationPanel", () => {
 
     rerender(<EvaluationPanel organizationId={"22222222-2222-4222-8222-222222222222"} />);
     await waitFor(() => expect(screen.queryByText("passed")).toBeNull());
+  }, 20_000);
+
+  it("renders seeded run history with summary, per-scenario trends, and recent runs", async () => {
+    stubEvaluationFetch();
+    render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+
+    expect(await screen.findByRole("heading", { name: "Run history" })).not.toBeNull();
+    expect(screen.getByText("2 runs, 1 passed, 50% pass rate.")).not.toBeNull();
+    expect(screen.getByText("1/1 passed")).not.toBeNull();
+    expect(screen.getByText("0/1 passed")).not.toBeNull();
+
+    const list = screen.getByRole("list", { name: "Recent evaluation runs" });
+    const runs = within(list).getAllByRole("listitem");
+    expect(runs).toHaveLength(2);
+    const [firstRun, secondRun] = runs;
+    if (!firstRun || !secondRun) throw new Error("Expected two seeded runs");
+    expect(firstRun.textContent).toContain("Prepare a low-stock purchase proposal");
+    expect(firstRun.textContent).toContain("deepseek-chat");
+    expect(firstRun.textContent).toContain("Passed");
+    expect(firstRun.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-18T09:30:00Z");
+    expect(secondRun.textContent).toContain("Avoid duplicate ordering when supply is incoming");
+    expect(secondRun.textContent).toContain("Failed");
+    expect(secondRun.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-17T14:05:00Z");
+
+    expect(
+      screen.getByRole("img", { name: "Run 1 for Prepare a low-stock purchase proposal: passed" }),
+    ).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Run 1 for Avoid duplicate ordering when supply is incoming: failed" })).not.toBeNull();
+  }, 20_000);
+
+  it("adds a completed run to history once", async () => {
+    stubEvaluationFetch({
+      run: (scenarioId) => ({
+        ...passedResult,
+        scenarioId,
+        persisted: true,
+        createdAt: "2026-10-19T18:00:00Z",
+      }),
+    });
+    render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run Prepare a low-stock purchase proposal" }));
+
+    expect(await screen.findByText("3 runs, 2 passed, 67% pass rate.")).not.toBeNull();
+    expect(screen.getByText("2/2 passed")).not.toBeNull();
+
+    const list = screen.getByRole("list", { name: "Recent evaluation runs" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+    expect(list.querySelectorAll('time[datetime="2026-10-19T18:00:00Z"]')).toHaveLength(1);
+    expect(screen.queryByText("Not saved to history")).toBeNull();
+  }, 20_000);
+
+  it("does not duplicate a completed run that is already in recentRuns", async () => {
+    stubEvaluationFetch({ run: () => historicalPassed });
+    render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run Prepare a low-stock purchase proposal" }));
+
+    await waitFor(() => expect(screen.getByText("2 runs, 1 passed, 50% pass rate.")).not.toBeNull());
+    const list = screen.getByRole("list", { name: "Recent evaluation runs" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(list.querySelectorAll('time[datetime="2026-10-18T09:30:00Z"]')).toHaveLength(1);
+  }, 20_000);
+
+  it("marks a completed run that was not persisted as not saved", async () => {
+    stubEvaluationFetch();
+    render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run Prepare a low-stock purchase proposal" }));
+
+    expect(await screen.findByText("Not saved to history")).not.toBeNull();
+    expect(screen.getByText("3 runs, 2 passed, 67% pass rate.")).not.toBeNull();
   }, 20_000);
 
 });

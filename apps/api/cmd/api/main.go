@@ -932,7 +932,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("Go routines webhook read route mounted", "path", "GET /api/routines/webhook/{token}")
 	chatRoute, chatSteerRoute := httpapi.NewGoChatHandlers(pool, emailResolver, capabilityExecutor, logger, trustedProxyCIDRs...)
 	logger.Info("Go chat routes mounted", "paths", []string{"POST /api/chat", "POST /api/chat/steer"})
-	evaluationsRoute := httpapi.NewEvaluationSessionHandler(emailResolver, logger, trustedProxyCIDRs...)
+	evaluationsRoute := httpapi.NewEvaluationSessionHandler(pool, emailResolver, logger, trustedProxyCIDRs...)
 	logger.Info("Go evaluation routes mounted", "paths", []string{"GET /api/evaluations", "POST /api/evaluations/run"})
 
 	apiHandler := httpapi.MountGoMessageAttachmentDownloadRoute(httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoCRMReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationsRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(

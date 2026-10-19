@@ -17,12 +17,6 @@ const EvaluationScenarioSchema = z.object({
   checks: z.array(z.string()),
 }).strict();
 
-const EvaluationCatalogSchema = z.object({
-  live: z.boolean(),
-  model: z.string(),
-  scenarios: z.array(EvaluationScenarioSchema),
-}).strict();
-
 const EvaluationToolCallSchema = z.object({
   name: z.string().min(1),
   arguments: z.unknown(),
@@ -52,6 +46,15 @@ const EvaluationRunResultSchema = z.object({
   toolCalls: z.array(EvaluationToolCallSchema),
   checks: z.array(EvaluationCheckResultSchema),
   error: z.string().default(""),
+  persisted: z.boolean().default(false),
+  createdAt: z.string().default(""),
+}).strict();
+
+const EvaluationCatalogSchema = z.object({
+  live: z.boolean(),
+  model: z.string(),
+  scenarios: z.array(EvaluationScenarioSchema),
+  recentRuns: z.array(EvaluationRunResultSchema).default([]),
 }).strict();
 
 export type EvaluationScenario = z.infer<typeof EvaluationScenarioSchema>;

@@ -28,12 +28,18 @@ depend on mutable business data.
 - Keep a scripted provider for deterministic tests and CI. Live runs are
   opt-in with `EVALUATION_LIVE=1` locally and never run in the normal suite.
 - First scenarios: low-stock proposal, incoming supply that covers the gap,
-  and missing sales history. The first two are already proven live.
+  and missing sales history. All three are proven live.
 - Expose the harness in the ERP interface as a Quality tab inside Settings.
   Runs require `iam.admin`, are same-origin, are limited to one at a time, and
   return the tool trace, checks, final answer, duration, and token usage.
-- Do not persist evaluation runs yet. The first surface is a deliberate
-  in-memory, admin-run check; history and scheduled evaluations come later.
+- Persist output-only run evidence in `evaluation_runs`, scoped by
+  organization with row level security: status, model, usage, tool trace,
+  checks, final answer, actor, and timestamp. The Quality tab reads the last
+  30 runs and renders pass-rate trends, so a model or prompt change can be
+  compared across sessions.
+- Keep evaluation payloads separate from business state. A run can record a
+  model's proposed purchase order, but it never creates an approval, order, or
+  receipt.
 
 ## Consequences
 
@@ -41,5 +47,6 @@ The first quality gate now tests tool choice and honesty without risking
 business state or spending authority. It measures model behavior, not the
 deterministic business outcome proofs, which remain separate. Scenarios are
 fixtures, so they can drift from production payloads; keeping a typed fixture
-per scenario and adding live workflow proofs covers that gap. Evaluation
-history, regression baselines, and scheduled runs remain open work.
+per scenario and adding live workflow proofs covers that gap. Run history is
+now durable and visible in Settings. Regression baselines, scheduled runs,
+retention, and comparisons across model versions remain open work.

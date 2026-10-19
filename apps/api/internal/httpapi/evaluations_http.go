@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -40,13 +41,15 @@ type EvaluationSessionHandler struct {
 	rateMu            sync.Mutex
 	rateWindows       map[string]evaluationRateWindow
 	rateLimit         int
+	store             *evaluationRunStore
 }
 
-func NewEvaluationSessionHandler(resolver evaluationSessionResolver, logger *slog.Logger, trustedProxyCIDRs ...*net.IPNet) *EvaluationSessionHandler {
+func NewEvaluationSessionHandler(pool *pgxpool.Pool, resolver evaluationSessionResolver, logger *slog.Logger, trustedProxyCIDRs ...*net.IPNet) *EvaluationSessionHandler {
 	return &EvaluationSessionHandler{
 		resolver: resolver, logger: logger, trustedProxyCIDRs: trustedProxyCIDRs,
 		runGuard: make(chan struct{}, 1), provider: evaluationProviderFromEnv,
 		rateWindows: make(map[string]evaluationRateWindow), rateLimit: evaluationRunLimit,
+		store: &evaluationRunStore{pool: pool},
 	}
 }
 
@@ -67,7 +70,7 @@ func (h *EvaluationSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 	switch r.Method {
 	case http.MethodGet:
-		h.list(w)
+		h.list(w, r, resolved)
 	case http.MethodPost:
 		h.run(w, r, resolved)
 	default:
@@ -76,14 +79,24 @@ func (h *EvaluationSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func (h *EvaluationSessionHandler) list(w http.ResponseWriter) {
+func (h *EvaluationSessionHandler) list(w http.ResponseWriter, r *http.Request, resolved *session.ResolvedUser) {
 	_, model, err := h.provider()
 	live := err == nil
 	if !live {
 		model = ""
 	}
+	runs := []EvaluationRunResult{}
+	if resolved.OrgID != nil {
+		if recent, historyErr := h.store.recent(r.Context(), *resolved.OrgID, evaluationHistoryLimit); historyErr != nil {
+			if h.logger != nil {
+				h.logger.Error("Go evaluation history read failed", "error", historyErr)
+			}
+		} else {
+			runs = recent
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"live": live, "model": model, "scenarios": evaluationScenarioSummaries(),
+		"live": live, "model": model, "scenarios": evaluationScenarioSummaries(), "recentRuns": runs,
 	})
 }
 
@@ -130,6 +143,11 @@ func (h *EvaluationSessionHandler) run(w http.ResponseWriter, r *http.Request, r
 	ctx, cancel := context.WithTimeout(r.Context(), evaluationRunTimeout)
 	defer cancel()
 	result := runEvaluationScenario(ctx, provider, scenario, model)
+	if err := h.store.save(ctx, *resolved.OrgID, resolved.UserID, &result); err != nil {
+		if h.logger != nil {
+			h.logger.Error("Go evaluation run persistence failed", "error", err)
+		}
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 

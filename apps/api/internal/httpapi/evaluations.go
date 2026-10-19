@@ -58,6 +58,8 @@ type EvaluationRunResult struct {
 	ToolCalls   []EvaluationToolCall    `json:"toolCalls"`
 	Checks      []EvaluationCheckResult `json:"checks"`
 	Error       string                  `json:"error,omitempty"`
+	Persisted   bool                    `json:"persisted"`
+	CreatedAt   time.Time               `json:"createdAt"`
 }
 
 type EvaluationScenarioSummary struct {
