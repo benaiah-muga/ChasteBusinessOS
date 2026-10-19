@@ -95,6 +95,24 @@ func TestGoAppendVerifiesWholeMigratedLedgerChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if preSeq == 0 {
+		// A fresh database has no migrated chain to continue, so seed one row
+		// whose hash covers a JSON.stringify key order jsonb does not keep.
+		legacyAt := time.Now().UTC().Truncate(time.Millisecond)
+		legacyPayload := json.RawMessage(`{"bbb":1,"a":true}`)
+		legacyEvent := AppendEvent{OrgID: orgID, ActorType: "system", Kind: "ledger.migrationFixture", OccurredAt: legacyAt}
+		legacyHash := hashEvent(legacyEvent, legacyPayload, preHead, legacyAt)
+		if _, err := ownerPool.Exec(ctx, `
+			INSERT INTO ledger_events (org_id, actor_type, kind, payload, prev_hash, hash, occurred_at)
+			VALUES ($1::uuid, 'system', 'ledger.migrationFixture', $2::jsonb, $3, $4, $5)`,
+			orgID, string(legacyPayload), preHead, legacyHash, legacyAt); err != nil {
+			t.Fatal(err)
+		}
+		if err := ownerPool.QueryRow(ctx, `SELECT seq, hash FROM ledger_events ORDER BY seq DESC LIMIT 1`).Scan(&preSeq, &preHead); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	probePayload := json.RawMessage(fmt.Sprintf(`{"continuityProbe":%q}`, randomUUID(t)))
 	type appendResult struct {
 		Seq  int64
