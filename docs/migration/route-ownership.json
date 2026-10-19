@@ -547,6 +547,22 @@
     },
     {
       "kind": "api",
+      "path": "/api/evaluations",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/evaluations_http.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/evaluations/run",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/evaluations_http.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
       "path": "/api/expenses",
       "method": "GET",
       "source": "apps/web/src/app/api/expenses/route.ts",

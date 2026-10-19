@@ -381,7 +381,7 @@ func (h *messagingAgentHandler) loadMessagingAIConfig(ctx context.Context, orgID
 		return out, nil
 	}
 	dto := publicAIConfig(nil)
-	keyName := map[string]string{"nvidia": "NVIDIA_API_KEY", "openrouter": "OPENROUTER_API_KEY", "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY", "zai": "ZAI_API_KEY", "openai": "OPENAI_API_KEY"}[dto.Provider]
+	keyName := map[string]string{"nvidia": "NVIDIA_API_KEY", "openrouter": "OPENROUTER_API_KEY", "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY", "zai": "ZAI_API_KEY", "openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}[dto.Provider]
 	return messagingAIConfig{Provider: dto.Provider, BaseURL: dto.BaseURL, Models: dto.Models, APIKey: strings.TrimSpace(os.Getenv(keyName))}, nil
 }
 

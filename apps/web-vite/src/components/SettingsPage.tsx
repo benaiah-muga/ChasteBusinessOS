@@ -38,6 +38,7 @@ import {
 } from "../api/settings";
 import { fetchOrganizations } from "../api/organizations";
 import { parseScheduleText } from "@chaste/erp-core";
+import { EvaluationPanel } from "./EvaluationPanel";
 import "./SettingsPage.css";
 
 /* ------------------------------------------------------------- styling ---- */
@@ -179,6 +180,7 @@ const TABS = [
   { id: "workspace", label: "Workspace" },
   { id: "modules", label: "Modules" },
   { id: "governance", label: "Governance" },
+  { id: "quality", label: "Quality" },
   { id: "ai", label: "AI & automation" },
   { id: "branding", label: "Branding" },
   { id: "routines", label: "Routines" },
@@ -239,6 +241,7 @@ export function SettingsPage({
         {tab === "workspace" && <WorkspaceTab accountingOn={accountingOn} />}
         {tab === "modules" && <ModulesTab />}
         {tab === "governance" && <GovernanceTab baseCurrency={baseCurrency} />}
+        {tab === "quality" && <EvaluationPanel organizationId={organizationId ?? null} />}
         {tab === "ai" && <AiTab />}
         {tab === "branding" && <BrandingTab />}
         {tab === "routines" && <RoutinesTab retryScope={retryScope ?? undefined} />}

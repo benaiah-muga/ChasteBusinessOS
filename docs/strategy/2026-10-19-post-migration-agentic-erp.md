@@ -220,6 +220,12 @@ Still open, and not claimed as done:
 
 ### Gate F: evaluation and metrics (continuous, first cases at Gate B)
 
+Delivered on 19 October: a Settings Quality tab that runs live DeepSeek flash
+scenarios against fixture tool results, with scripted tests and three first
+cases: low-stock proposal, incoming supply that covers the gap, and missing
+history. It measures tool choice and honesty without creating business records.
+History, scheduled runs, and release metrics remain open.
+
 - Scripted-model scenarios for: low stock with no supply, low stock with
   sufficient incoming, supplier delay, conflicting records, authority
   exceeded, and incomplete data.

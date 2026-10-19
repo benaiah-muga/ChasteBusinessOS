@@ -98,7 +98,7 @@ func newOpenAIChatProvider(config myWorkSummaryConfig) *openAIChatProvider {
 		apiKey:  strings.TrimSpace(config.apiKey),
 		model:   strings.TrimSpace(config.primaryModel),
 	}
-	if !strings.EqualFold(strings.TrimSpace(config.provider), "nvidia") {
+	if !strings.EqualFold(strings.TrimSpace(config.provider), "nvidia") && !strings.EqualFold(strings.TrimSpace(config.provider), "deepseek") {
 		if key := strings.TrimSpace(os.Getenv("NVIDIA_API_KEY")); key != "" {
 			provider.fallbackBaseURL = strings.TrimRight(envOr("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"), "/")
 			provider.fallbackAPIKey = key

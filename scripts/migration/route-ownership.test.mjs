@@ -13,7 +13,7 @@ test("frozen route census reproduces the live manifest byte-for-byte", () => {
   const output = execFileSync(process.execPath, ["scripts/migration/route-ownership.mjs", "--check", "--frozen"], {
     encoding: "utf8",
   });
-  assert.match(output, /Routes: 94 files, 165 methods, 30 pages\./);
+  assert.match(output, /Routes: 94 files, 167 methods, 30 pages\./);
 });
 
 test("retired route census keeps every source entry the manifest cites", () => {
