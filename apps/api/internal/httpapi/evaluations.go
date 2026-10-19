@@ -116,6 +116,14 @@ func evaluationScenarios() []EvaluationScenario {
 		}],
 		"warnings":["1 item(s) have no sales history; their quantities rely on configured reorder points"],"truncated":false
 	}`)
+	partialReceipt := json.RawMessage(`{
+		"poNumber":1042,"vendorId":"33333333-3333-4333-8333-333333333333","vendorName":"Acme Supplies",
+		"status":"partially_received","memo":"Cement replenishment","orderedAt":"2026-10-10T09:00:00Z","promisedAt":"2026-10-24T09:00:00Z",
+		"totalMinor":5000000,
+		"lines":[{"lineNumber":1,"description":"Cement bag (CEM-1)","quantity":10000,"unitPriceMinor":500000,"lineTotalMinor":5000000,"acceptedThousandths":6000,"rejectedThousandths":0,"returnedThousandths":0,"remainingThousandths":4000}],
+		"receipts":[{"number":1,"receivedAt":"2026-10-18T15:30:00Z","note":"First delivery","lines":[{"position":1,"description":"Cement bag (CEM-1)","acceptedThousandths":6000,"rejectedThousandths":0,"returnedThousandths":0,"rejectionNote":null}]}],
+		"fullyReceived":false,"backordered":true
+	}`)
 	vendors := json.RawMessage(`{"vendors":[{"id":"33333333-3333-4333-8333-333333333333","name":"Acme Supplies","email":"orders@acme.test","paymentTermDays":14,"active":true}]}`)
 	performance := json.RawMessage(`{"vendors":[{"vendorId":"33333333-3333-4333-8333-333333333333","vendorName":"Acme Supplies","orders":12,"backorderedOrders":0,"avgLeadTimeDays":12.5,"onTimeRate":92,"fillRate":96}]}`)
 	pendingApproval := json.RawMessage(`{"error":"pending human approval","pendingApproval":true,"approvalId":"11111111-1111-4111-8111-111111111111","approvalRationale":"amount 5000000 exceeds autonomous threshold 0"}`)
@@ -175,6 +183,22 @@ func evaluationScenarios() []EvaluationScenario {
 				{ID: "no-order", Label: "Does not prepare an order without demand evidence", Kind: "not_called", Tool: "purchasing_createPurchaseOrder"},
 				{ID: "limitation", Label: "States the missing-history limitation", Kind: "final_contains", Text: "history"},
 				{ID: "not-placed", Label: "Does not claim an order was placed", Kind: "final_excludes", Text: "has been placed"},
+			},
+			MaxSteps: 5,
+		},
+		{
+			ID: "purchase-order-partial-receipt", Title: "Report a partial receipt without ordering again",
+			Description: "A purchase order has one partial receipt. The agent should read it, report what is still open, and avoid a duplicate order.",
+			Prompt:      "Check purchase order 1042. Part of it has arrived. Tell me what is still open, and do not place a new order.",
+			Fixtures: map[string]json.RawMessage{
+				"purchasing_getPurchaseOrder":    partialReceipt,
+				"purchasing_createPurchaseOrder": unexpectedOrder,
+			},
+			Checks: []EvaluationCheckSpec{
+				{ID: "read", Label: "Reads the purchase order", Kind: "called", Tool: "purchasing_getPurchaseOrder"},
+				{ID: "number", Label: "Reads the requested order number", Kind: "argument_equals", Tool: "purchasing_getPurchaseOrder", Field: "poNumber", Text: "1042"},
+				{ID: "remaining", Label: "Reports what is still open", Kind: "final_contains", Text: "remain"},
+				{ID: "no-order", Label: "Does not place a duplicate order", Kind: "not_called", Tool: "purchasing_createPurchaseOrder"},
 			},
 			MaxSteps: 5,
 		},

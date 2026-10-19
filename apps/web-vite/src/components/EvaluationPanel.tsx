@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   EvaluationApiError,
   fetchEvaluations,
@@ -44,6 +44,15 @@ function sanitizeEvaluationText(value: string): string {
 const HISTORY_LIMIT = 30;
 const RUN_LIST_LIMIT = 8;
 const TREND_LIMIT = 5;
+const PASS_RATE_BASELINE = 80;
+
+type BaselineVerdict = "met" | "below";
+type TrendDirection = "improving" | "slipping" | "steady";
+
+type ScenarioTrend = {
+  direction: TrendDirection;
+  explanation: string;
+};
 
 function formatPassRate(passed: number, total: number): string {
   if (total === 0) return "0%";
@@ -54,6 +63,32 @@ function historySummary(runs: readonly EvaluationRunResult[]): string {
   const passed = runs.filter((run) => run.status === "passed").length;
   const noun = runs.length === 1 ? "run" : "runs";
   return `${runs.length} ${noun}, ${passed} passed, ${formatPassRate(passed, runs.length)} pass rate.`;
+}
+
+function baselineVerdict(runs: readonly EvaluationRunResult[]): BaselineVerdict {
+  if (runs.length === 0) return "below";
+  const passed = runs.filter((run) => run.status === "passed").length;
+  return passed * 100 >= runs.length * PASS_RATE_BASELINE ? "met" : "below";
+}
+
+function scenarioTrend(runs: readonly EvaluationRunResult[]): ScenarioTrend {
+  const latest = runs.slice(0, TREND_LIMIT);
+  const previous = runs.slice(TREND_LIMIT, TREND_LIMIT * 2);
+  if (latest.length === 0 || previous.length === 0) {
+    return { direction: "steady", explanation: "Not enough runs to compare." };
+  }
+
+  const latestPassed = latest.filter((run) => run.status === "passed").length;
+  const previousPassed = previous.filter((run) => run.status === "passed").length;
+  const latestRate = latestPassed / latest.length;
+  const previousRate = previousPassed / previous.length;
+  const direction: TrendDirection =
+    latestRate > previousRate ? "improving" : latestRate < previousRate ? "slipping" : "steady";
+
+  return {
+    direction,
+    explanation: `Latest ${latest.length}: ${latestPassed}/${latest.length} passed. Previous ${previous.length}: ${previousPassed}/${previous.length} passed.`,
+  };
 }
 
 function formatRunTimestamp(createdAt: string): string {
@@ -177,10 +212,15 @@ function EvaluationResult({ result }: { result: EvaluationRunResult }) {
 function EvaluationHistory({
   runs,
   scenarios,
+  selectedRun,
+  onSelectRun,
 }: {
   runs: readonly EvaluationRunResult[];
   scenarios: readonly EvaluationScenario[];
+  selectedRun: EvaluationRunResult | null;
+  onSelectRun: (run: EvaluationRunResult | null) => void;
 }) {
+  const detailId = useId();
   const titles = new Map(scenarios.map((scenario) => [scenario.id, scenario.title] as const));
   const grouped = new Map<string, EvaluationRunResult[]>();
   for (const run of runs) {
@@ -188,12 +228,20 @@ function EvaluationHistory({
     if (existing) existing.push(run);
     else grouped.set(run.scenarioId, [run]);
   }
+  const baseline = baselineVerdict(runs);
+  const activeRun = selectedRun && runs.includes(selectedRun) ? selectedRun : null;
+  const activeTitle = activeRun ? (titles.get(activeRun.scenarioId) ?? activeRun.scenarioId) : "";
 
   return (
     <section className="evaluation-history" aria-labelledby="evaluation-history-title">
       <header className="evaluation-history__header">
         <h3 id="evaluation-history-title">Run history</h3>
-        <p className="evaluation-history__summary">{historySummary(runs)}</p>
+        <div className="evaluation-history__summary-group">
+          <p className="evaluation-history__summary">{historySummary(runs)}</p>
+          <p className={`evaluation-history__baseline evaluation-history__baseline--${baseline}`}>
+            Baseline {PASS_RATE_BASELINE}%: {baseline}
+          </p>
+        </div>
       </header>
 
       <div className="evaluation-history__trends">
@@ -201,14 +249,25 @@ function EvaluationHistory({
           const title = titles.get(scenarioId) ?? scenarioId;
           const recent = scenarioRuns.slice(0, TREND_LIMIT);
           const passed = recent.filter((run) => run.status === "passed").length;
+          const trend = scenarioTrend(scenarioRuns);
           return (
             <div className="evaluation-history__trend" key={scenarioId}>
-              <p className="evaluation-history__trend-title">
-                {sanitizeEvaluationText(title)} -{" "}
-                <span className="evaluation-history__trend-count">
-                  {passed}/{recent.length} passed
-                </span>
-              </p>
+              <div className="evaluation-history__trend-main">
+                <p className="evaluation-history__trend-title">
+                  {sanitizeEvaluationText(title)} -{" "}
+                  <span className="evaluation-history__trend-count">
+                    {passed}/{recent.length} passed
+                  </span>
+                </p>
+                <p className="evaluation-history__trend-meta">
+                  <span
+                    className={`evaluation-history__trend-label evaluation-history__trend-label--${trend.direction}`}
+                  >
+                    {trend.direction}
+                  </span>
+                  <span className="evaluation-history__trend-note">{trend.explanation}</span>
+                </p>
+              </div>
               <ul className="evaluation-history__marks" aria-label={`Recent runs for ${title}`}>
                 {[...recent].reverse().map((run, index) => (
                   <li key={`${run.createdAt}-${index}`} className="evaluation-history__mark-item">
@@ -231,24 +290,66 @@ function EvaluationHistory({
       <ol className="evaluation-history__runs" aria-label="Recent evaluation runs">
         {runs.slice(0, RUN_LIST_LIMIT).map((run, index) => {
           const title = titles.get(run.scenarioId) ?? run.scenarioId;
+          const isSelected = activeRun === run;
           return (
             <li
               className="evaluation-history__run"
               key={`${run.scenarioId}-${run.createdAt || "unsaved"}-${index}`}
             >
-              <time className="evaluation-history__run-time" dateTime={run.createdAt || undefined}>
-                {formatRunTimestamp(run.createdAt)}
-              </time>
-              <span className="evaluation-history__run-title">
-                {sanitizeEvaluationText(title)} -{" "}
-                <span className="evaluation-history__run-model">{run.model || "unknown model"}</span>
-              </span>
-              <span className={`evaluation-status evaluation-status--${run.status}`}>{statusLabel(run.status)}</span>
-              <span className="evaluation-history__run-duration">took {formatDuration(run.durationMs)}</span>
+              <button
+                type="button"
+                className="evaluation-history__run-button"
+                aria-expanded={isSelected}
+                aria-controls={isSelected ? detailId : undefined}
+                aria-label={`${sanitizeEvaluationText(title)}, ${statusLabel(run.status)}, ${formatRunTimestamp(run.createdAt)}`}
+                onClick={() => onSelectRun(isSelected ? null : run)}
+              >
+                <time className="evaluation-history__run-time" dateTime={run.createdAt || undefined}>
+                  {formatRunTimestamp(run.createdAt)}
+                </time>
+                <span className="evaluation-history__run-title">
+                  {sanitizeEvaluationText(title)} -{" "}
+                  <span className="evaluation-history__run-model">{run.model || "unknown model"}</span>
+                </span>
+                <span className={`evaluation-status evaluation-status--${run.status}`}>
+                  {statusLabel(run.status)}
+                </span>
+                <span className="evaluation-history__run-duration">took {formatDuration(run.durationMs)}</span>
+                <span className="evaluation-history__run-toggle" aria-hidden="true">
+                  {isSelected ? "Hide details" : "Details"}
+                </span>
+              </button>
             </li>
           );
         })}
       </ol>
+
+      {activeRun && (
+        <section
+          id={detailId}
+          className="evaluation-history__detail"
+          aria-label={`Run detail for ${sanitizeEvaluationText(activeTitle)}`}
+        >
+          <header className="evaluation-history__detail-head">
+            <div>
+              <h4>Run detail</h4>
+              <p className="evaluation-history__detail-meta">
+                {sanitizeEvaluationText(activeTitle)} - {statusLabel(activeRun.status)} -{" "}
+                {formatRunTimestamp(activeRun.createdAt)}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="evaluation-panel__button evaluation-panel__button--secondary"
+              aria-label={`Close run detail for ${sanitizeEvaluationText(activeTitle)}`}
+              onClick={() => onSelectRun(null)}
+            >
+              Close
+            </button>
+          </header>
+          <EvaluationResult result={activeRun} />
+        </section>
+      )}
     </section>
   );
 }
@@ -306,6 +407,7 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
   );
   const [results, setResults] = useState<ReadonlyMap<string, EvaluationRunResult>>(() => new Map());
   const [history, setHistory] = useState<EvaluationRunResult[]>([]);
+  const [selectedRun, setSelectedRun] = useState<EvaluationRunResult | null>(null);
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
   const [runningAll, setRunningAll] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -320,6 +422,7 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
     busyRef.current = false;
     setResults(new Map());
     setHistory([]);
+    setSelectedRun(null);
     setActiveScenarioId(null);
     setRunningAll(false);
     setRunError(null);
@@ -534,7 +637,12 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
           )}
 
           {history.length > 0 && (
-            <EvaluationHistory runs={history} scenarios={catalogData.scenarios} />
+            <EvaluationHistory
+              runs={history}
+              scenarios={catalogData.scenarios}
+              selectedRun={selectedRun}
+              onSelectRun={setSelectedRun}
+            />
           )}
         </>
       )}

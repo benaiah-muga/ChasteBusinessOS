@@ -63,6 +63,68 @@ const catalog = {
   recentRuns: [historicalPassed, historicalFailed],
 };
 
+const LOW_STOCK_SCENARIO = "inventory-proposal-low-stock";
+const INCOMING_SCENARIO = "inventory-incoming-covers";
+
+function seededRun(
+  scenarioId: string,
+  status: "passed" | "failed",
+  createdAt: string,
+  withDetail = false,
+) {
+  return {
+    ...passedResult,
+    scenarioId,
+    status,
+    model: "deepseek-chat",
+    durationMs: 6100,
+    finalAnswer: withDetail
+      ? "Incoming stock already covers the shortfall, so I did not place another order."
+      : `Historical ${status} run recorded at ${createdAt}.`,
+    toolCalls: withDetail
+      ? [{ name: "inventory_replenishmentPlan", arguments: { sku: "CEM-1" }, result: { status: "covered" } }]
+      : [],
+    checks: withDetail
+      ? [
+          {
+            id: "covers",
+            label: "Confirms incoming stock covers the gap",
+            passed: true,
+            detail: "The fixture plan shows incoming units.",
+          },
+        ]
+      : [],
+    persisted: true,
+    createdAt,
+  };
+}
+
+const metHistoryCatalog = {
+  ...catalog,
+  recentRuns: [
+    seededRun(INCOMING_SCENARIO, "passed", "2026-10-19T11:00:00Z", true),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T10:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T09:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T08:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T07:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T06:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T05:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T04:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T03:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "failed", "2026-10-19T02:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "failed", "2026-10-19T01:00:00Z"),
+  ],
+};
+
+const failedHistoryCatalog = {
+  ...catalog,
+  recentRuns: [
+    seededRun(LOW_STOCK_SCENARIO, "failed", "2026-10-19T11:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T10:00:00Z"),
+    seededRun(INCOMING_SCENARIO, "failed", "2026-10-19T09:00:00Z", true),
+  ],
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return Response.json(body, { status });
 }
@@ -212,6 +274,73 @@ describe("EvaluationPanel", () => {
       screen.getByRole("img", { name: "Run 1 for Prepare a low-stock purchase proposal: passed" }),
     ).not.toBeNull();
     expect(screen.getByRole("img", { name: "Run 1 for Avoid duplicate ordering when supply is incoming: failed" })).not.toBeNull();
+  }, 20_000);
+
+  it("shows a met baseline and per-scenario trends from a longer history", async () => {
+    stubEvaluationFetch({ catalog: metHistoryCatalog });
+    render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+
+    expect(await screen.findByText("Baseline 80%: met")).not.toBeNull();
+    expect(screen.getByText("11 runs, 9 passed, 82% pass rate.")).not.toBeNull();
+    expect(screen.getByText("improving")).not.toBeNull();
+    expect(screen.getByText("Latest 5: 5/5 passed. Previous 5: 3/5 passed.")).not.toBeNull();
+    expect(screen.getByText("5/5 passed")).not.toBeNull();
+    expect(screen.getByText("1/1 passed")).not.toBeNull();
+    expect(screen.getByText("steady")).not.toBeNull();
+  }, 20_000);
+
+  it("shows a below baseline and a failed history case", async () => {
+    stubEvaluationFetch({ catalog: failedHistoryCatalog });
+    render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+
+    expect(await screen.findByText("Baseline 80%: below")).not.toBeNull();
+    expect(screen.getByText("3 runs, 1 passed, 33% pass rate.")).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: /Prepare a low-stock purchase proposal, Failed/ }),
+    ).not.toBeNull();
+  }, 20_000);
+
+  it("opens a historical run detail from the last eight and collapses it", async () => {
+    stubEvaluationFetch({ catalog: metHistoryCatalog });
+    render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+
+    const runButton = await screen.findByRole("button", {
+      name: /Avoid duplicate ordering when supply is incoming, Passed/,
+    });
+    expect(runButton.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(runButton);
+    expect(
+      await screen.findByText("Incoming stock already covers the shortfall, so I did not place another order."),
+    ).not.toBeNull();
+    expect(screen.getByText("inventory_replenishmentPlan")).not.toBeNull();
+    expect(screen.getByText("Confirms incoming stock covers the gap")).not.toBeNull();
+    expect(runButton.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Close run detail for Avoid duplicate ordering when supply is incoming",
+      }),
+    );
+    expect(
+      screen.queryByText("Incoming stock already covers the shortfall, so I did not place another order."),
+    ).toBeNull();
+    expect(runButton.getAttribute("aria-expanded")).toBe("false");
+  }, 20_000);
+
+  it("clears a selected historical run when the organization changes", async () => {
+    stubEvaluationFetch({ catalog: metHistoryCatalog });
+    const { rerender } = render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+
+    const runButton = await screen.findByRole("button", {
+      name: /Avoid duplicate ordering when supply is incoming, Passed/,
+    });
+    fireEvent.click(runButton);
+    expect(await screen.findByText(/Incoming stock already covers the shortfall/)).not.toBeNull();
+
+    rerender(<EvaluationPanel organizationId={"22222222-2222-4222-8222-222222222222"} />);
+    await waitFor(() => expect(screen.queryByText(/Incoming stock already covers the shortfall/)).toBeNull());
+    expect(screen.queryByRole("button", { name: /Close run detail/ })).toBeNull();
   }, 20_000);
 
   it("adds a completed run to history once", async () => {

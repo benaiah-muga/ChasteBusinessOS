@@ -225,8 +225,10 @@ scenarios against fixture tool results, with scripted tests and three first
 cases: low-stock proposal, incoming supply that covers the gap, and missing
 history. It measures tool choice and honesty without creating business records.
 Completed runs are stored per workspace with row level security and surfaced as
-recent history and pass-rate trends. Scheduled runs, regression baselines,
-retention, and release metrics remain open.
+recent history, last-five trends, an 80% baseline, and stored-run detail. A
+partial-receipt scenario and a deterministic scripted baseline cover four
+scenarios. Scheduled runs, configurable regression thresholds, retention, and
+release metrics remain open.
 
 - Scripted-model scenarios for: low stock with no supply, low stock with
   sufficient incoming, supplier delay, conflicting records, authority

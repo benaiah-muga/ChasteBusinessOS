@@ -20,7 +20,7 @@ The sequence is evidence-gated, not date-gated.
 - [x] Workmate purchase proposal card: supplier context, exact approval payload, approve and reject in the conversation.
 - [x] Post-approval order status: remaining quantities and receipt history, with a backend plan-to-receipt acceptance proof.
 - [ ] Workmate cards for exception, progress, waiting, and verified result.
-- [x] Live agent evaluation harness with a Settings Quality surface, durable run history, pass-rate trends, scripted tests, and DeepSeek flash scenarios.
+- [x] Live agent evaluation harness with a Settings Quality surface, durable run history, pass-rate trends, an 80% baseline, stored-run detail, a four-scenario scripted baseline, and DeepSeek flash scenarios.
 - [ ] Scheduled evaluation runs, regression baselines, retention, and release reliability metrics.
 
 ## M0, Foundation (current sprint)

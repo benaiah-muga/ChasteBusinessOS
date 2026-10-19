@@ -25,18 +25,21 @@ depend on mutable business data.
 - Use DeepSeek `deepseek-flash` as the first live evaluator, configured from
   `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DEEPSEEK_MODEL`. The provider
   does not fall back to NVIDIA, so a result always names the model that ran.
-- Keep a scripted provider for deterministic tests and CI. Live runs are
-  opt-in with `EVALUATION_LIVE=1` locally and never run in the normal suite.
+- Keep a scripted provider for deterministic tests and CI. A scripted baseline
+  covers every scenario and fails the normal Go suite if a fixture or check
+  drifts. Live runs are opt-in with `EVALUATION_LIVE=1` locally.
 - First scenarios: low-stock proposal, incoming supply that covers the gap,
-  and missing sales history. All three are proven live.
+  missing sales history, and partial receipt follow-through. All four are
+  proven live.
 - Expose the harness in the ERP interface as a Quality tab inside Settings.
   Runs require `iam.admin`, are same-origin, are limited to one at a time, and
   return the tool trace, checks, final answer, duration, and token usage.
 - Persist output-only run evidence in `evaluation_runs`, scoped by
   organization with row level security: status, model, usage, tool trace,
   checks, final answer, actor, and timestamp. The Quality tab reads the last
-  30 runs and renders pass-rate trends, so a model or prompt change can be
-  compared across sessions.
+  30 runs, compares the latest five with the previous five, flags the 80% pass
+  rate baseline, and opens a stored run's full trace, so a model or prompt
+  change can be inspected across sessions.
 - Keep evaluation payloads separate from business state. A run can record a
   model's proposed purchase order, but it never creates an approval, order, or
   receipt.
