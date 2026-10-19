@@ -1,0 +1,38 @@
+name: Nightly agent evaluation
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scripted-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+      - name: Run the deterministic evaluation baseline
+        run: go -C apps/api test ./internal/httpapi -run '^TestScriptedEvaluationBaseline$' -count=1 -v
+
+  live-evaluation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+      - name: Run the live DeepSeek evaluation when configured
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          EVALUATION_LIVE: "1"
+        run: |
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "DEEPSEEK_API_KEY is not configured; live evaluation skipped." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          go -C apps/api test ./internal/httpapi -run '^TestLiveEvaluationAgainstDeepSeek$' -count=1 -v 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

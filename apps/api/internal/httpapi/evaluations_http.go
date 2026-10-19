@@ -68,6 +68,15 @@ func (h *EvaluationSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "evaluation runs require an organization admin"})
 		return
 	}
+	if r.URL.Path == "/api/evaluations/baseline" {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		h.setBaseline(w, r, resolved)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		h.list(w, r, resolved)
@@ -85,6 +94,16 @@ func (h *EvaluationSessionHandler) list(w http.ResponseWriter, r *http.Request, 
 	if !live {
 		model = ""
 	}
+	baseline := evaluationDefaultBaseline
+	if resolved.OrgID != nil {
+		if configured, baselineErr := h.store.baseline(r.Context(), *resolved.OrgID); baselineErr != nil {
+			if h.logger != nil {
+				h.logger.Error("Go evaluation baseline read failed", "error", baselineErr)
+			}
+		} else {
+			baseline = configured
+		}
+	}
 	runs := []EvaluationRunResult{}
 	if resolved.OrgID != nil {
 		if recent, historyErr := h.store.recent(r.Context(), *resolved.OrgID, evaluationHistoryLimit); historyErr != nil {
@@ -96,8 +115,38 @@ func (h *EvaluationSessionHandler) list(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"live": live, "model": model, "scenarios": evaluationScenarioSummaries(), "recentRuns": runs,
+		"live": live, "model": model, "baselinePassRate": baseline,
+		"scenarios": evaluationScenarioSummaries(), "recentRuns": runs,
 	})
+}
+
+func (h *EvaluationSessionHandler) setBaseline(w http.ResponseWriter, r *http.Request, resolved *session.ResolvedUser) {
+	if strings.TrimSpace(r.Header.Get("Authorization")) == "" && !sameOriginCapabilityRequest(r, h.trustedProxyCIDRs) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "same-origin request required"})
+		return
+	}
+	var request struct {
+		PassRate *int `json:"passRate"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 4<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || request.PassRate == nil || *request.PassRate < 0 || *request.PassRate > 100 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "passRate must be between 0 and 100"})
+		return
+	}
+	var trailing any
+	if decoder.Decode(&trailing) != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if err := h.store.setBaseline(r.Context(), *resolved.OrgID, resolved.UserID, *request.PassRate); err != nil {
+		if h.logger != nil {
+			h.logger.Error("Go evaluation baseline write failed", "error", err)
+		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "baseline could not be saved"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"baselinePassRate": *request.PassRate})
 }
 
 func (h *EvaluationSessionHandler) run(w http.ResponseWriter, r *http.Request, resolved *session.ResolvedUser) {

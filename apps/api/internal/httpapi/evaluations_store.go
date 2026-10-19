@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	evaluationHistoryLimit = 30
-	evaluationSaveTimeout  = 5 * time.Second
+	evaluationHistoryLimit    = 30
+	evaluationRetentionLimit  = 50
+	evaluationDefaultBaseline = 80
+	evaluationSaveTimeout     = 5 * time.Second
 )
 
 type evaluationRunStore struct {
@@ -62,6 +64,56 @@ func (s *evaluationRunStore) save(ctx context.Context, orgID, actorID string, re
 		}
 		result.CreatedAt = createdAt.UTC()
 		result.Persisted = true
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM evaluation_runs
+			WHERE org_id = $1::uuid
+			  AND id NOT IN (
+				SELECT id FROM evaluation_runs WHERE org_id = $1::uuid
+				ORDER BY created_at DESC LIMIT $2
+			  )`, orgID, evaluationRetentionLimit); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, nil
+	})
+	return err
+}
+
+func (s *evaluationRunStore) baseline(ctx context.Context, orgID string) (int, error) {
+	if s == nil || s.pool == nil {
+		return evaluationDefaultBaseline, nil
+	}
+	baseline := evaluationDefaultBaseline
+	_, err := dbx.WithOrgTx(ctx, s.pool, orgID, func(tx pgx.Tx) (struct{}, error) {
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE((settings->'evaluation'->>'baselinePassRate')::int, $2)
+			FROM organizations WHERE id = $1::uuid`, orgID, evaluationDefaultBaseline).Scan(&baseline); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, nil
+	})
+	return baseline, err
+}
+
+func (s *evaluationRunStore) setBaseline(ctx context.Context, orgID, actorID string, passRate int) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("evaluation store is unavailable")
+	}
+	_, err := dbx.WithOrgTx(ctx, s.pool, orgID, func(tx pgx.Tx) (struct{}, error) {
+		command, err := tx.Exec(ctx, `
+			UPDATE organizations
+			SET settings = jsonb_set(
+				COALESCE(settings, '{}'::jsonb),
+				'{evaluation}',
+				COALESCE(settings->'evaluation', '{}'::jsonb) || jsonb_build_object('baselinePassRate', $2::int),
+				true
+			)
+			WHERE id = $1::uuid`, orgID, passRate)
+		if err != nil {
+			return struct{}{}, err
+		}
+		if command.RowsAffected() != 1 {
+			return struct{}{}, fmt.Errorf("organization not found")
+		}
 		return struct{}{}, nil
 	})
 	return err

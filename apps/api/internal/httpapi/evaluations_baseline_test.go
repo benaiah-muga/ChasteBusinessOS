@@ -25,6 +25,21 @@ func scriptedTurnsForScenario(t *testing.T, scenarioID string) []chatTurn {
 			{toolCalls: []chatToolCall{{ID: "call-1", Name: "inventory_replenishmentPlan", Arguments: json.RawMessage(`{"sku":"CEM-1"}`)}}},
 			{message: "There is no sales history, so I did not prepare an order."},
 		}
+	case "quote-award-approval":
+		return []chatTurn{
+			{toolCalls: []chatToolCall{{ID: "call-1", Name: "purchasing_selectWinningQuote", Arguments: json.RawMessage(`{"rfqId":"44444444-4444-4444-8444-444444444444"}`)}}},
+			{message: "The quote award is waiting for approval; no purchase order exists yet."},
+		}
+	case "receivables-aging":
+		return []chatTurn{
+			{toolCalls: []chatToolCall{{ID: "call-1", Name: "accounting_arAging", Arguments: json.RawMessage(`{}`)}}},
+			{message: "The 90-plus bucket is 75,000 minor and total outstanding is 250,000 minor. No tasks were created."},
+		}
+	case "supplier-delay-risk":
+		return []chatTurn{
+			{toolCalls: []chatToolCall{{ID: "call-1", Name: "inventory_replenishmentPlan", Arguments: json.RawMessage(`{"sku":"CEM-1"}`)}}},
+			{message: "The 30 day lead time exceeds 9 days of cover, so delivery risk is high. I did not place an order."},
+		}
 	case "purchase-order-partial-receipt":
 		return []chatTurn{
 			{toolCalls: []chatToolCall{{ID: "call-1", Name: "purchasing_getPurchaseOrder", Arguments: json.RawMessage(`{"poNumber":1042}`)}}},

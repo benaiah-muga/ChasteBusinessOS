@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,6 +90,20 @@ func TestEvaluationRunPersistenceIntegration(t *testing.T) {
 	}
 	if len(catalog.RecentRuns) != 1 || catalog.RecentRuns[0].ScenarioID != "inventory-proposal-low-stock" || !catalog.RecentRuns[0].Persisted {
 		t.Fatalf("recent runs=%+v", catalog.RecentRuns)
+	}
+	baselineRequest := directCapabilityRequest(http.MethodPost, `{"passRate":90}`)
+	baselineRequest.URL.Path = "/api/evaluations/baseline"
+	baselineRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(baselineRecorder, baselineRequest)
+	if baselineRecorder.Code != http.StatusOK || !strings.Contains(baselineRecorder.Body.String(), `"baselinePassRate":90`) {
+		t.Fatalf("baseline status=%d body=%s", baselineRecorder.Code, baselineRecorder.Body.String())
+	}
+	afterBaseline := httptest.NewRequest(http.MethodGet, "/api/evaluations", nil)
+	afterBaseline.AddCookie(&http.Cookie{Name: "chaste_session", Value: "session-cookie"})
+	afterBaselineRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(afterBaselineRecorder, afterBaseline)
+	if afterBaselineRecorder.Code != http.StatusOK || !strings.Contains(afterBaselineRecorder.Body.String(), `"baselinePassRate":90`) {
+		t.Fatalf("baseline catalogue status=%d body=%s", afterBaselineRecorder.Code, afterBaselineRecorder.Body.String())
 	}
 	var count int
 	if err := owner.QueryRow(ctx, `SELECT count(*) FROM evaluation_runs WHERE org_id = $1::uuid`, orgID).Scan(&count); err != nil {

@@ -9,6 +9,7 @@ const READ_TIMEOUT_MS = 15_000;
 const RUN_TIMEOUT_MS = 100_000;
 
 const SafeCountSchema = z.number().int().nonnegative().safe();
+const PassRateSchema = z.number().int().min(0).max(100).safe();
 
 const EvaluationScenarioSchema = z.object({
   id: z.string().min(1),
@@ -53,8 +54,13 @@ const EvaluationRunResultSchema = z.object({
 const EvaluationCatalogSchema = z.object({
   live: z.boolean(),
   model: z.string(),
+  baselinePassRate: PassRateSchema.default(80),
   scenarios: z.array(EvaluationScenarioSchema),
   recentRuns: z.array(EvaluationRunResultSchema).default([]),
+}).strict();
+
+const EvaluationBaselineSchema = z.object({
+  baselinePassRate: PassRateSchema,
 }).strict();
 
 export type EvaluationScenario = z.infer<typeof EvaluationScenarioSchema>;
@@ -85,15 +91,38 @@ function usableServerMessage(raw: unknown): string | undefined {
   return message;
 }
 
-function errorMessage(status: number, raw: unknown): string {
-  if (status === 401) return "Your session has ended. Sign in again to run evaluations.";
-  if (status === 403) return "Quality runs are limited to organization admins. Ask an admin to run these checks.";
-  if (status === 404) return "That evaluation scenario is no longer available. Refresh and try again.";
-  if (status === 429) return "An evaluation is already running. Wait for it to finish and try again.";
+type EvaluationRequestKind = "catalog" | "run" | "baseline";
+
+function errorMessage(status: number, raw: unknown, kind: EvaluationRequestKind = "catalog"): string {
+  if (status === 401) {
+    return kind === "baseline"
+      ? "Your session has ended. Sign in again to save the baseline."
+      : "Your session has ended. Sign in again to run evaluations.";
+  }
+  if (status === 403) {
+    return kind === "baseline"
+      ? "Only organization admins can change the quality baseline."
+      : "Quality runs are limited to organization admins. Ask an admin to run these checks.";
+  }
+  if (status === 404) {
+    return kind === "baseline"
+      ? "Baseline changes are unavailable. Refresh and try again."
+      : "That evaluation scenario is no longer available. Refresh and try again.";
+  }
+  if (status === 429) {
+    return kind === "baseline"
+      ? "Too many baseline changes. Wait a moment and try again."
+      : "An evaluation is already running. Wait for it to finish and try again.";
+  }
   if (status === 503) {
-    return "The live evaluation model is not configured. Set DEEPSEEK_API_KEY on the server and try again.";
+    return kind === "baseline"
+      ? "The baseline could not be saved right now. Try again in a moment."
+      : "The live evaluation model is not configured. Set DEEPSEEK_API_KEY on the server and try again.";
   }
   if (status >= 500) return "The evaluations service is unavailable. Try again in a moment.";
+  if (kind === "baseline") {
+    return usableServerMessage(raw) ?? "The baseline could not be saved. Refresh and try again.";
+  }
   return usableServerMessage(raw) ?? "The evaluation request could not be completed. Refresh and try again.";
 }
 
@@ -116,6 +145,7 @@ async function request<T>(
   init: RequestInit,
   signal: AbortSignal | undefined,
   timeoutMs: number,
+  kind: EvaluationRequestKind = "catalog",
 ): Promise<T> {
   let response: Response;
   try {
@@ -131,7 +161,12 @@ async function request<T>(
   } catch (error) {
     if (signal?.aborted) throw error;
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new EvaluationApiError(0, "The evaluation run took too long. Try again with a shorter scenario.");
+      throw new EvaluationApiError(
+        0,
+        kind === "baseline"
+          ? "Saving the baseline took too long. Check your connection and try again."
+          : "The evaluation run took too long. Try again with a shorter scenario.",
+      );
     }
     throw new EvaluationApiError(0, "Could not reach the evaluations service. Check your connection and try again.");
   }
@@ -144,11 +179,11 @@ async function request<T>(
       response.status,
       response.ok
         ? "The evaluations service returned an unreadable response. Try again."
-        : errorMessage(response.status, null),
+        : errorMessage(response.status, null, kind),
     );
   }
 
-  if (!response.ok) throw new EvaluationApiError(response.status, errorMessage(response.status, body));
+  if (!response.ok) throw new EvaluationApiError(response.status, errorMessage(response.status, body, kind));
 
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
@@ -164,6 +199,7 @@ export async function fetchEvaluations(organizationId: string, signal?: AbortSig
     { method: "GET", headers: organizationHeader(organizationId) },
     signal,
     READ_TIMEOUT_MS,
+    "catalog",
   );
 }
 
@@ -187,5 +223,32 @@ export async function runEvaluation(
     },
     signal,
     RUN_TIMEOUT_MS,
+    "run",
   );
+}
+
+export async function saveEvaluationBaseline(
+  passRate: number,
+  organizationId: string,
+  signal?: AbortSignal,
+): Promise<number> {
+  if (!Number.isInteger(passRate) || passRate < 0 || passRate > 100) {
+    throw new EvaluationApiError(0, "Enter a whole-number pass rate between 0 and 100.");
+  }
+  const saved = await request(
+    "/api/evaluations/baseline",
+    EvaluationBaselineSchema,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...organizationHeader(organizationId),
+      },
+      body: JSON.stringify({ passRate }),
+    },
+    signal,
+    READ_TIMEOUT_MS,
+    "baseline",
+  );
+  return saved.baselinePassRate;
 }

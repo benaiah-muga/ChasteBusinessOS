@@ -46,6 +46,7 @@ const historicalFailed = {
 const catalog = {
   live: true,
   model: "deepseek-flash",
+  baselinePassRate: 90,
   scenarios: [
     {
       id: "inventory-proposal-low-stock",
@@ -111,7 +112,7 @@ const metHistoryCatalog = {
     seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T05:00:00Z"),
     seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T04:00:00Z"),
     seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T03:00:00Z"),
-    seededRun(LOW_STOCK_SCENARIO, "failed", "2026-10-19T02:00:00Z"),
+    seededRun(LOW_STOCK_SCENARIO, "passed", "2026-10-19T02:00:00Z"),
     seededRun(LOW_STOCK_SCENARIO, "failed", "2026-10-19T01:00:00Z"),
   ],
 };
@@ -125,11 +126,51 @@ const failedHistoryCatalog = {
   ],
 };
 
+function releaseRun(
+  scenarioId: string,
+  status: "passed" | "failed",
+  model: string,
+  durationMs: number,
+  input: number,
+  output: number,
+  createdAt: string,
+) {
+  return {
+    ...passedResult,
+    scenarioId,
+    status,
+    model,
+    durationMs,
+    usage: { input, output, cachedInput: 0 },
+    finalAnswer: `Release metric run at ${createdAt}.`,
+    toolCalls: [],
+    checks: [],
+    persisted: true,
+    createdAt,
+  };
+}
+
+const releaseMetricsCatalog = {
+  ...catalog,
+  recentRuns: [
+    releaseRun(LOW_STOCK_SCENARIO, "passed", "deepseek-flash", 2000, 100, 50, "2026-10-19T12:00:00Z"),
+    releaseRun(LOW_STOCK_SCENARIO, "failed", "deepseek-flash", 4000, 200, 100, "2026-10-19T11:00:00Z"),
+    releaseRun(INCOMING_SCENARIO, "passed", "deepseek-flash", 6000, 300, 150, "2026-10-19T10:00:00Z"),
+    releaseRun(INCOMING_SCENARIO, "passed", "deepseek-chat", 8000, 400, 200, "2026-10-19T09:00:00Z"),
+  ],
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return Response.json(body, { status });
 }
 
-function stubEvaluationFetch(overrides: { catalog?: unknown; run?: (scenarioId: string) => unknown } = {}) {
+function stubEvaluationFetch(
+  overrides: {
+    catalog?: unknown;
+    run?: (scenarioId: string) => unknown;
+    baseline?: (passRate: number) => unknown;
+  } = {},
+) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/evaluations" && (init?.method ?? "GET") === "GET") {
@@ -143,6 +184,10 @@ function stubEvaluationFetch(overrides: { catalog?: unknown; run?: (scenarioId: 
       };
       return jsonResponse(result);
     }
+    if (path === "/api/evaluations/baseline" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as { passRate: number };
+      return jsonResponse(overrides.baseline?.(body.passRate) ?? { baselinePassRate: body.passRate });
+    }
     return jsonResponse({ error: "not stubbed" }, 404);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -153,6 +198,12 @@ function runBodies(fetchMock: { mock: { calls: Array<[RequestInfo | URL, Request
   return fetchMock.mock.calls
     .filter(([path, init]) => String(path) === "/api/evaluations/run" && init?.method === "POST")
     .map(([, init]) => JSON.parse(String(init?.body)) as { scenarioId: string });
+}
+
+function baselineCalls(fetchMock: { mock: { calls: Array<[RequestInfo | URL, RequestInit?]> } }) {
+  return fetchMock.mock.calls.filter(
+    ([path, init]) => String(path) === "/api/evaluations/baseline" && init?.method === "POST",
+  );
 }
 
 afterEach(() => {
@@ -178,7 +229,7 @@ describe("EvaluationPanel", () => {
     expect(screen.getByText("purchasing_createPurchaseOrder was called")).not.toBeNull();
     expect(screen.getByText(/awaiting approval/)).not.toBeNull();
     expect(screen.getByText("100 input tokens")).not.toBeNull();
-    expect(screen.getByText("7.7s")).not.toBeNull();
+    expect(screen.getAllByText("7.7s").length).toBeGreaterThan(0);
 
     await waitFor(() => expect(runBodies(fetchMock)).toHaveLength(1));
     expect(runBodies(fetchMock)[0]).toEqual({ scenarioId: "inventory-proposal-low-stock" });
@@ -253,6 +304,7 @@ describe("EvaluationPanel", () => {
     render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
 
     expect(await screen.findByRole("heading", { name: "Run history" })).not.toBeNull();
+    expect(screen.getByText("Baseline 90%: below")).not.toBeNull();
     expect(screen.getByText("2 runs, 1 passed, 50% pass rate.")).not.toBeNull();
     expect(screen.getByText("1/1 passed")).not.toBeNull();
     expect(screen.getByText("0/1 passed")).not.toBeNull();
@@ -280,10 +332,10 @@ describe("EvaluationPanel", () => {
     stubEvaluationFetch({ catalog: metHistoryCatalog });
     render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
 
-    expect(await screen.findByText("Baseline 80%: met")).not.toBeNull();
-    expect(screen.getByText("11 runs, 9 passed, 82% pass rate.")).not.toBeNull();
+    expect(await screen.findByText("Baseline 90%: met")).not.toBeNull();
+    expect(screen.getByText("11 runs, 10 passed, 91% pass rate.")).not.toBeNull();
     expect(screen.getByText("improving")).not.toBeNull();
-    expect(screen.getByText("Latest 5: 5/5 passed. Previous 5: 3/5 passed.")).not.toBeNull();
+    expect(screen.getByText("Latest 5: 5/5 passed. Previous 5: 4/5 passed.")).not.toBeNull();
     expect(screen.getByText("5/5 passed")).not.toBeNull();
     expect(screen.getByText("1/1 passed")).not.toBeNull();
     expect(screen.getByText("steady")).not.toBeNull();
@@ -293,11 +345,63 @@ describe("EvaluationPanel", () => {
     stubEvaluationFetch({ catalog: failedHistoryCatalog });
     render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
 
-    expect(await screen.findByText("Baseline 80%: below")).not.toBeNull();
+    expect(await screen.findByText("Baseline 90%: below")).not.toBeNull();
     expect(screen.getByText("3 runs, 1 passed, 33% pass rate.")).not.toBeNull();
     expect(
       screen.getByRole("button", { name: /Prepare a low-stock purchase proposal, Failed/ }),
     ).not.toBeNull();
+  }, 20_000);
+
+  it("saves a new baseline and recomputes the verdict without refetching", async () => {
+    const fetchMock = stubEvaluationFetch({ catalog: metHistoryCatalog });
+    render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+
+    expect(await screen.findByText("Baseline 90%: met")).not.toBeNull();
+    const input = screen.getByRole("spinbutton", { name: "Baseline" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "95" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save baseline" }));
+
+    expect(await screen.findByText("Baseline 95%: below", {}, { timeout: 5000 })).not.toBeNull();
+
+    const calls = baselineCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    const init = calls[0]?.[1];
+    expect(JSON.parse(String(init?.body))).toEqual({ passRate: 95 });
+    expect(init?.headers).toMatchObject({
+      "X-Organization-ID": ORGANIZATION_ID,
+      "content-type": "application/json",
+    });
+    expect(init?.credentials).toBe("same-origin");
+
+    const catalogReads = fetchMock.mock.calls.filter(
+      ([path, readInit]) => String(path) === "/api/evaluations" && (readInit?.method ?? "GET") === "GET",
+    );
+    expect(catalogReads).toHaveLength(1);
+  }, 20_000);
+
+  it("reports recent release metrics and compares two models", async () => {
+    stubEvaluationFetch({ catalog: releaseMetricsCatalog });
+    render(<EvaluationPanel organizationId={ORGANIZATION_ID} />);
+
+    const region = await screen.findByRole("region", { name: "Release metrics" });
+    expect(within(region).getByText("Recent history only, not lifetime totals.")).not.toBeNull();
+    expect(within(region).getByText("4")).not.toBeNull();
+    expect(within(region).getByText("75%")).not.toBeNull();
+    expect(within(region).getByText("5.0s")).not.toBeNull();
+    expect(within(region).getByText("1,500")).not.toBeNull();
+    expect(within(region).getByText("2")).not.toBeNull();
+
+    const table = within(region).getByRole("table", { name: "Model comparison" });
+    const rows = within(table).getAllByRole("row");
+    expect(rows).toHaveLength(3);
+    expect(rows[1]?.textContent).toContain("deepseek-flash");
+    expect(rows[1]?.textContent).toContain("3");
+    expect(rows[1]?.textContent).toContain("67%");
+    expect(rows[1]?.textContent).toContain("4.0s");
+    expect(rows[2]?.textContent).toContain("deepseek-chat");
+    expect(rows[2]?.textContent).toContain("1");
+    expect(rows[2]?.textContent).toContain("100%");
+    expect(rows[2]?.textContent).toContain("8.0s");
   }, 20_000);
 
   it("opens a historical run detail from the last eight and collapses it", async () => {

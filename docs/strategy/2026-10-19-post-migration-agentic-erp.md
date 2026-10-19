@@ -225,10 +225,13 @@ scenarios against fixture tool results, with scripted tests and three first
 cases: low-stock proposal, incoming supply that covers the gap, and missing
 history. It measures tool choice and honesty without creating business records.
 Completed runs are stored per workspace with row level security and surfaced as
-recent history, last-five trends, an 80% baseline, and stored-run detail. A
-partial-receipt scenario and a deterministic scripted baseline cover four
-scenarios. Scheduled runs, configurable regression thresholds, retention, and
-release metrics remain open.
+recent history, last-five trends, a configurable baseline, release metrics,
+model comparison, and stored-run detail. Seven scenarios now cover low stock,
+incoming supply, missing history, partial receipt, quote award, receivables
+aging, and supplier delay; a deterministic scripted baseline covers all of
+them. A nightly GitHub workflow runs the baseline and the live DeepSeek case
+when the secret is configured, and retention keeps 50 runs per workspace.
+In-app scheduling, regression alerts, and cross-model baselines remain open.
 
 - Scripted-model scenarios for: low stock with no supply, low stock with
   sufficient incoming, supplier delay, conflicting records, authority

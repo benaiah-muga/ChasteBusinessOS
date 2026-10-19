@@ -26,6 +26,10 @@ var agentToolDefinitions = map[string]agentToolDefinition{
 		description: "Read one purchase order and its receipts by order number, including status, ordered lines, accepted, rejected, returned and remaining quantities, promised date, and total. Use it to verify what actually happened after an approval.",
 		schema:      `{"type":"object","properties":{"poNumber":{"type":"integer","minimum":1,"description":"Purchase order number returned by the approval or purchasing list."}},"required":["poNumber"],"additionalProperties":false}`,
 	},
+	selectWinningQuoteCapabilityID: {
+		description: "Award the winning quote on a purchase RFQ. This is a money commitment: an agent call returns a pending human approval with the exact award and does not create a purchase order. Explain the award and the approval before calling it.",
+		schema:      `{"type":"object","properties":{"rfqId":{"type":"string","format":"uuid","description":"Purchase RFQ UUID from the purchasing workflow."}},"required":["rfqId"],"additionalProperties":false}`,
+	},
 	purchasingSupplierPerformanceCapabilityID: {
 		description: "Read supplier delivery performance, including average lead time in days, on-time rate, fill rate, order count, and backordered orders. Use it to compare approved suppliers before proposing a purchase.",
 		schema:      `{"type":"object","properties":{},"additionalProperties":false}`,

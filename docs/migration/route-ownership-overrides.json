@@ -1429,5 +1429,14 @@
       "owner": "go",
       "parity": "verified"
     }
+,
+    {
+      "kind": "api",
+      "path": "/api/evaluations/baseline",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/evaluations_http.go",
+      "owner": "go",
+      "parity": "verified"
+    }
   ]
 }

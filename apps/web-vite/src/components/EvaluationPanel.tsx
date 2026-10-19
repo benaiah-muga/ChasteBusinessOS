@@ -3,6 +3,7 @@ import {
   EvaluationApiError,
   fetchEvaluations,
   runEvaluation,
+  saveEvaluationBaseline,
   type EvaluationCatalog,
   type EvaluationRunResult,
   type EvaluationScenario,
@@ -44,7 +45,6 @@ function sanitizeEvaluationText(value: string): string {
 const HISTORY_LIMIT = 30;
 const RUN_LIST_LIMIT = 8;
 const TREND_LIMIT = 5;
-const PASS_RATE_BASELINE = 80;
 
 type BaselineVerdict = "met" | "below";
 type TrendDirection = "improving" | "slipping" | "steady";
@@ -65,10 +65,10 @@ function historySummary(runs: readonly EvaluationRunResult[]): string {
   return `${runs.length} ${noun}, ${passed} passed, ${formatPassRate(passed, runs.length)} pass rate.`;
 }
 
-function baselineVerdict(runs: readonly EvaluationRunResult[]): BaselineVerdict {
+function baselineVerdict(runs: readonly EvaluationRunResult[], baselinePassRate: number): BaselineVerdict {
   if (runs.length === 0) return "below";
   const passed = runs.filter((run) => run.status === "passed").length;
-  return passed * 100 >= runs.length * PASS_RATE_BASELINE ? "met" : "below";
+  return passed * 100 >= runs.length * baselinePassRate ? "met" : "below";
 }
 
 function scenarioTrend(runs: readonly EvaluationRunResult[]): ScenarioTrend {
@@ -88,6 +88,60 @@ function scenarioTrend(runs: readonly EvaluationRunResult[]): ScenarioTrend {
   return {
     direction,
     explanation: `Latest ${latest.length}: ${latestPassed}/${latest.length} passed. Previous ${previous.length}: ${previousPassed}/${previous.length} passed.`,
+  };
+}
+
+type ModelComparison = {
+  name: string;
+  runs: number;
+  passed: number;
+  totalDurationMs: number;
+};
+
+type ReleaseMetrics = {
+  runs: number;
+  passed: number;
+  passRate: string;
+  averageDuration: string;
+  totalTokens: number;
+  distinctModels: number;
+  models: readonly ModelComparison[];
+};
+
+function summarizeReleaseMetrics(runs: readonly EvaluationRunResult[]): ReleaseMetrics {
+  let passed = 0;
+  let totalDurationMs = 0;
+  let totalTokens = 0;
+  const byModel = new Map<string, { name: string; runs: number; passed: number; totalDurationMs: number }>();
+
+  for (const run of runs) {
+    const didPass = run.status === "passed";
+    if (didPass) passed += 1;
+    totalDurationMs += run.durationMs;
+    totalTokens += run.usage.input + run.usage.output;
+    const name = run.model.trim() || "unknown model";
+    const model = byModel.get(name);
+    if (model) {
+      model.runs += 1;
+      model.passed += didPass ? 1 : 0;
+      model.totalDurationMs += run.durationMs;
+    } else {
+      byModel.set(name, { name, runs: 1, passed: didPass ? 1 : 0, totalDurationMs: run.durationMs });
+    }
+  }
+
+  const models = [...byModel.values()].sort(
+    (left, right) => right.runs - left.runs || left.name.localeCompare(right.name),
+  );
+
+  return {
+    runs: runs.length,
+    passed,
+    passRate: formatPassRate(passed, runs.length),
+    averageDuration: formatDuration(runs.length === 0 ? 0 : Math.round(totalDurationMs / runs.length)),
+    totalTokens,
+    distinctModels: byModel.size,
+    models,
   };
 }
 
@@ -209,13 +263,151 @@ function EvaluationResult({ result }: { result: EvaluationRunResult }) {
   );
 }
 
+function BaselineControl({
+  baselinePassRate,
+  disabled,
+  onSave,
+}: {
+  baselinePassRate: number;
+  disabled: boolean;
+  onSave: (passRate: number) => Promise<void>;
+}) {
+  const inputId = useId();
+  const errorId = useId();
+  const [draft, setDraft] = useState(String(baselinePassRate));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(String(baselinePassRate));
+  }, [baselinePassRate]);
+
+  const parsed = Number(draft);
+  const valid = draft.trim() !== "" && Number.isInteger(parsed) && parsed >= 0 && parsed <= 100;
+  const guarded = disabled || saving;
+
+  async function save() {
+    if (!valid || guarded) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(parsed);
+    } catch (saveError) {
+      setError(errorMessage(saveError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="evaluation-baseline">
+      <label className="evaluation-baseline__label" htmlFor={inputId}>
+        Baseline
+      </label>
+      <input
+        id={inputId}
+        className="evaluation-baseline__input"
+        type="number"
+        min={0}
+        max={100}
+        step={1}
+        inputMode="numeric"
+        value={draft}
+        disabled={guarded}
+        aria-describedby={error ? errorId : undefined}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <span className="evaluation-baseline__suffix" aria-hidden="true">
+        %
+      </span>
+      <button
+        type="button"
+        className="evaluation-panel__button evaluation-panel__button--secondary"
+        aria-label="Save baseline"
+        disabled={guarded || !valid}
+        onClick={() => void save()}
+      >
+        {saving ? "Saving..." : "Save"}
+      </button>
+      {error && (
+        <p id={errorId} className="evaluation-baseline__error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ReleaseMetricsSection({ runs }: { runs: readonly EvaluationRunResult[] }) {
+  const titleId = useId();
+  const metrics = summarizeReleaseMetrics(runs);
+
+  return (
+    <section className="evaluation-release" aria-labelledby={titleId}>
+      <header className="evaluation-release__header">
+        <h4 id={titleId}>Release metrics</h4>
+        <p className="evaluation-release__note">Recent history only, not lifetime totals.</p>
+      </header>
+
+      <dl className="evaluation-release__stats">
+        <div className="evaluation-release__stat">
+          <dt>Runs</dt>
+          <dd>{formatCount(metrics.runs)}</dd>
+        </div>
+        <div className="evaluation-release__stat">
+          <dt>Pass rate</dt>
+          <dd>{metrics.passRate}</dd>
+        </div>
+        <div className="evaluation-release__stat">
+          <dt>Average duration</dt>
+          <dd>{metrics.averageDuration}</dd>
+        </div>
+        <div className="evaluation-release__stat">
+          <dt>Total tokens</dt>
+          <dd>{formatCount(metrics.totalTokens)}</dd>
+        </div>
+        <div className="evaluation-release__stat">
+          <dt>Distinct models</dt>
+          <dd>{formatCount(metrics.distinctModels)}</dd>
+        </div>
+      </dl>
+
+      <div className="evaluation-release__models">
+        <h5>Model comparison</h5>
+        <table className="evaluation-release__table" aria-label="Model comparison">
+          <thead>
+            <tr>
+              <th scope="col">Model</th>
+              <th scope="col">Runs</th>
+              <th scope="col">Pass rate</th>
+              <th scope="col">Avg duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            {metrics.models.map((model) => (
+              <tr key={model.name}>
+                <th scope="row">{sanitizeEvaluationText(model.name)}</th>
+                <td>{formatCount(model.runs)}</td>
+                <td>{formatPassRate(model.passed, model.runs)}</td>
+                <td>{formatDuration(Math.round(model.totalDurationMs / model.runs))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function EvaluationHistory({
   runs,
+  baselinePassRate,
   scenarios,
   selectedRun,
   onSelectRun,
 }: {
   runs: readonly EvaluationRunResult[];
+  baselinePassRate: number;
   scenarios: readonly EvaluationScenario[];
   selectedRun: EvaluationRunResult | null;
   onSelectRun: (run: EvaluationRunResult | null) => void;
@@ -228,7 +420,7 @@ function EvaluationHistory({
     if (existing) existing.push(run);
     else grouped.set(run.scenarioId, [run]);
   }
-  const baseline = baselineVerdict(runs);
+  const baseline = baselineVerdict(runs, baselinePassRate);
   const activeRun = selectedRun && runs.includes(selectedRun) ? selectedRun : null;
   const activeTitle = activeRun ? (titles.get(activeRun.scenarioId) ?? activeRun.scenarioId) : "";
 
@@ -239,10 +431,12 @@ function EvaluationHistory({
         <div className="evaluation-history__summary-group">
           <p className="evaluation-history__summary">{historySummary(runs)}</p>
           <p className={`evaluation-history__baseline evaluation-history__baseline--${baseline}`}>
-            Baseline {PASS_RATE_BASELINE}%: {baseline}
+            Baseline {baselinePassRate}%: {baseline}
           </p>
         </div>
       </header>
+
+      <ReleaseMetricsSection runs={runs} />
 
       <div className="evaluation-history__trends">
         {[...grouped.entries()].map(([scenarioId, scenarioRuns]) => {
@@ -525,6 +719,20 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
     }
   }
 
+  async function saveBaseline(passRate: number) {
+    if (!organizationId) {
+      throw new EvaluationApiError(0, "Wait for the active organization to finish loading before saving the baseline.");
+    }
+    const organization = organizationId;
+    const saved = await saveEvaluationBaseline(passRate, organization);
+    if (organizationRef.current !== organization) return;
+    setCatalog((current) =>
+      current.kind === "ready"
+        ? { kind: "ready", catalog: { ...current.catalog, baselinePassRate: saved } }
+        : current,
+    );
+  }
+
   const catalogData = catalog.kind === "ready" ? catalog.catalog : null;
   const busy = activeScenarioId !== null || runningAll;
   const activeScenario = catalogData?.scenarios.find((scenario) => scenario.id === activeScenarioId);
@@ -581,14 +789,21 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
                 Model <code>{catalogData.live ? catalogData.model || "unknown" : "not connected"}</code>
               </span>
             </div>
-            <button
-              type="button"
-              className="evaluation-panel__button evaluation-panel__button--primary"
-              disabled={!catalogData.live || busy || adminOnly || catalogData.scenarios.length === 0}
-              onClick={() => void runAll()}
-            >
-              {runningAll ? "Running all..." : "Run all"}
-            </button>
+            <div className="evaluation-panel__toolbar-actions">
+              <BaselineControl
+                baselinePassRate={catalogData.baselinePassRate}
+                disabled={busy}
+                onSave={saveBaseline}
+              />
+              <button
+                type="button"
+                className="evaluation-panel__button evaluation-panel__button--primary"
+                disabled={!catalogData.live || busy || adminOnly || catalogData.scenarios.length === 0}
+                onClick={() => void runAll()}
+              >
+                {runningAll ? "Running all..." : "Run all"}
+              </button>
+            </div>
           </div>
 
           {!catalogData.live && (
@@ -639,6 +854,7 @@ export function EvaluationPanel({ organizationId }: { organizationId: string | n
           {history.length > 0 && (
             <EvaluationHistory
               runs={history}
+              baselinePassRate={catalogData.baselinePassRate}
               scenarios={catalogData.scenarios}
               selectedRun={selectedRun}
               onSelectRun={setSelectedRun}

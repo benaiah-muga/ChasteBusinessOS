@@ -11,6 +11,7 @@ func MountGoEvaluationsRoute(base, evaluations http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/evaluations", evaluations)
 	mux.Handle("POST /api/evaluations/run", evaluations)
+	mux.Handle("POST /api/evaluations/baseline", evaluations)
 	if base != nil {
 		mux.Handle("/", base)
 	}

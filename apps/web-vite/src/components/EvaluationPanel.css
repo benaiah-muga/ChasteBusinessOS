@@ -80,6 +80,64 @@
   font-size: 10px;
 }
 
+.evaluation-panel__toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.evaluation-baseline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.evaluation-baseline__label {
+  color: var(--evaluation-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.evaluation-baseline__input {
+  width: 58px;
+  min-height: 30px;
+  border: 1px solid #d9d7cd;
+  border-radius: 6px;
+  padding: 0 7px;
+  background: var(--evaluation-surface);
+  color: var(--evaluation-ink);
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.evaluation-baseline__input:focus-visible {
+  outline: 2px solid #927b4d;
+  outline-offset: 2px;
+}
+
+.evaluation-baseline__input:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.evaluation-baseline__suffix {
+  color: var(--evaluation-muted);
+  font-size: 10px;
+}
+
+.evaluation-baseline .evaluation-panel__button {
+  min-height: 30px;
+}
+
+.evaluation-baseline__error {
+  flex-basis: 100%;
+  margin: 0;
+  color: #8e4134;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .evaluation-panel__live {
   display: inline-flex;
   align-items: center;
@@ -492,6 +550,126 @@
   font-weight: 650;
 }
 
+.evaluation-release {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #eeece5;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fbfaf5;
+}
+
+.evaluation-release__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.evaluation-release__header h4 {
+  margin: 0;
+  color: var(--evaluation-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -.01em;
+}
+
+.evaluation-release__note {
+  margin: 0;
+  color: var(--evaluation-muted);
+  font-size: 10px;
+}
+
+.evaluation-release__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.evaluation-release__stat {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid #efede7;
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: var(--evaluation-surface);
+}
+
+.evaluation-release__stat dt {
+  color: #9a9c93;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.evaluation-release__stat dd {
+  margin: 0;
+  color: var(--evaluation-ink);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.evaluation-release__models {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.evaluation-release__models h5 {
+  margin: 0;
+  color: var(--evaluation-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.evaluation-release__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.evaluation-release__table th,
+.evaluation-release__table td {
+  border-bottom: 1px solid #efede7;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.evaluation-release__table thead th {
+  color: #9a9c93;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.evaluation-release__table tbody th {
+  color: var(--evaluation-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-release__table tbody td {
+  color: var(--evaluation-muted);
+  white-space: nowrap;
+}
+
+.evaluation-release__table tbody tr:last-child th,
+.evaluation-release__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 .evaluation-history {
   display: grid;
   gap: 12px;
@@ -794,6 +972,19 @@
 
   .evaluation-panel__toolbar .evaluation-panel__button {
     width: 100%;
+  }
+
+  .evaluation-panel__toolbar-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .evaluation-baseline {
+    justify-content: flex-start;
+  }
+
+  .evaluation-release__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .evaluation-scenario__head {
