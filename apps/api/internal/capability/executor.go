@@ -4161,18 +4161,55 @@ func (e *Executor) requestApproval(ctx context.Context, tx pgx.Tx, claims authbr
 		intentID = claims.IntentID
 		inputDigest = inputHash
 	}
+	version := 1
+	var supersedesApprovalID any
+	if requestedByUserID != nil && risk == "money" && (capabilityID == createPurchaseOrderCapabilityID || capabilityID == selectWinningQuoteCapabilityID) {
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(MAX(version), 0) + 1
+			FROM approvals
+			WHERE org_id = $1::uuid AND capability_id = $2 AND requested_by_user_id = $3::uuid`,
+			claims.OrganizationID, capabilityID, requestedByUserID).Scan(&version); err != nil {
+			return "", err
+		}
+		rows, err := tx.Query(ctx, `
+			UPDATE approvals
+			SET status = 'superseded', decided_at = $4, decision_comment = 'Superseded by a newer proposal version'
+			WHERE org_id = $1::uuid AND capability_id = $2 AND requested_by_user_id = $3::uuid AND status = 'pending'
+			RETURNING id::text`,
+			claims.OrganizationID, capabilityID, requestedByUserID, now)
+		if err != nil {
+			return "", err
+		}
+		for rows.Next() {
+			var supersededID string
+			if err := rows.Scan(&supersededID); err != nil {
+				rows.Close()
+				return "", err
+			}
+			if supersedesApprovalID == nil {
+				supersedesApprovalID = supersededID
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return "", err
+		}
+		rows.Close()
+	}
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO approvals (org_id, session_id, requested_by_user_id, capability_id, risk_class, payload, rationale, status, expires_at, intent_id, input_hash)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7, 'pending', $8, $9, $10)
-		RETURNING id::text`, claims.OrganizationID, agentSessionID, requestedByUserID, capabilityID, risk, payload, rationale, now.Add(approvalTTL), intentID, inputDigest).Scan(&approvalID); err != nil {
+		INSERT INTO approvals (org_id, session_id, requested_by_user_id, capability_id, risk_class, payload, rationale, status, expires_at, intent_id, input_hash, version, supersedes_approval_id)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7, 'pending', $8, $9, $10, $11, $12)
+		RETURNING id::text`, claims.OrganizationID, agentSessionID, requestedByUserID, capabilityID, risk, payload, rationale, now.Add(approvalTTL), intentID, inputDigest, version, supersedesApprovalID).Scan(&approvalID); err != nil {
 		return "", err
 	}
 	request := struct {
-		CapabilityID string `json:"capabilityId"`
-		RiskClass    string `json:"riskClass"`
-		Payload      any    `json:"payload"`
-		Rationale    string `json:"rationale"`
-	}{CapabilityID: capabilityID, RiskClass: risk, Payload: input, Rationale: rationale}
+		CapabilityID         string `json:"capabilityId"`
+		RiskClass            string `json:"riskClass"`
+		Payload              any    `json:"payload"`
+		Rationale            string `json:"rationale"`
+		Version              int    `json:"version"`
+		SupersedesApprovalID any    `json:"supersedesApprovalId,omitempty"`
+	}{CapabilityID: capabilityID, RiskClass: risk, Payload: input, Rationale: rationale, Version: version, SupersedesApprovalID: supersedesApprovalID}
 	requestJSON, err := marshalJS(request)
 	if err != nil {
 		return "", err

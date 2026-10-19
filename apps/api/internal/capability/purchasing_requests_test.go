@@ -865,3 +865,49 @@ func TestPurchasingRequestsListReturnsWorkflow(t *testing.T) {
 		t.Fatalf("list JSON = %s, want ISO timestamps and an empty rfqs array", encoded)
 	}
 }
+
+func TestPurchasingRequestsAwardUsesQuoteLines(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupPurchasingRequestsFixture(t, fx)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	vendor := seedPurchasingVendor(t, fx, fx.orgID, nil)
+	requestID := seedPurchasingRequest(t, fx, fx.orgID, fx.userID, "Line-level award", "Approved for quoting", "approved", nil, now.Add(-time.Hour))
+	rfqID := seedPurchasingRFQ(t, fx, fx.orgID, requestID, vendor, "sent", nil, nil, nil)
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (RecordQuoteOutput, error) {
+		return recordQuote(fx.ctx, tx, fx.orgID, RecordQuoteInput{
+			RFQID: rfqID, AmountMinor: 4400,
+			Lines: []RecordQuoteLineInput{
+				{Description: "Cement bag", QuantityThousandths: 2000, UnitPriceMinor: 1000},
+				{Description: "Sand bag", QuantityThousandths: 3000, UnitPriceMinor: 800},
+			},
+		}, now)
+	}); err != nil {
+		t.Fatalf("recordQuote(lines): %v", err)
+	}
+	if got := fx.count(`SELECT count(*) FROM rfq_quote_lines WHERE rfq_id = $1::uuid`, rfqID); got != 2 {
+		t.Fatalf("stored quote lines = %d, want 2", got)
+	}
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (SelectWinningQuoteOutput, error) {
+		return selectWinningQuote(fx.ctx, tx, fx.orgID, SelectWinningQuoteInput{RFQID: rfqID}, now)
+	}); err != nil {
+		t.Fatalf("selectWinningQuote(lines): %v", err)
+	}
+	var lineCount int
+	var total int64
+	if err := fx.owner.QueryRow(fx.ctx, `
+		SELECT count(*), COALESCE(sum(quantity * unit_price_minor / 1000), 0)
+		FROM po_lines pl JOIN purchase_orders po ON po.id = pl.po_id
+		WHERE po.org_id = $1::uuid`, fx.orgID).Scan(&lineCount, &total); err != nil {
+		t.Fatal(err)
+	}
+	if lineCount != 2 || total != 4400 {
+		t.Fatalf("PO lines=%d total=%d, want 2 lines totaling 4400", lineCount, total)
+	}
+}
+
+func TestParseRecordQuoteLinesMustMatchAmount(t *testing.T) {
+	_, err := ParseRecordQuoteInput(json.RawMessage(`{"rfqId":"11111111-1111-4111-8111-111111111111","amountMinor":100,"lines":[{"description":"Cement","quantityThousandths":2000,"unitPriceMinor":100}]}`))
+	if err == nil || err.Error() != "lines must add up to amountMinor" {
+		t.Fatalf("error=%v, want a line-total mismatch", err)
+	}
+}

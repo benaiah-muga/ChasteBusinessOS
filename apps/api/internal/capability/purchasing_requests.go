@@ -51,11 +51,19 @@ type CreateRfqOutput struct {
 	RFQIDs []string `json:"rfqIds"`
 }
 
+type RecordQuoteLineInput struct {
+	Description         string  `json:"description"`
+	QuantityThousandths int64   `json:"quantityThousandths"`
+	UnitPriceMinor      int64   `json:"unitPriceMinor"`
+	SKU                 *string `json:"sku,omitempty"`
+}
+
 type RecordQuoteInput struct {
-	RFQID        string  `json:"rfqId"`
-	AmountMinor  int64   `json:"amountMinor"`
-	LeadTimeDays *int64  `json:"leadTimeDays,omitempty"`
-	Notes        *string `json:"notes,omitempty"`
+	RFQID        string                 `json:"rfqId"`
+	AmountMinor  int64                  `json:"amountMinor"`
+	LeadTimeDays *int64                 `json:"leadTimeDays,omitempty"`
+	Notes        *string                `json:"notes,omitempty"`
+	Lines        []RecordQuoteLineInput `json:"lines,omitempty"`
 }
 
 type RecordQuoteOutput struct {
@@ -204,7 +212,60 @@ func ParseRecordQuoteInput(raw json.RawMessage) (RecordQuoteInput, error) {
 	if input.Notes, err = optionalCRMDealString(fields, "notes", 2000, false); err != nil {
 		return RecordQuoteInput{}, err
 	}
+	if rawLines, ok := fields["lines"]; ok {
+		var lines []RecordQuoteLineInput
+		if err := json.Unmarshal(rawLines, &lines); err != nil {
+			return RecordQuoteInput{}, errors.New("lines must be an array")
+		}
+		if len(lines) > 100 {
+			return RecordQuoteInput{}, errors.New("a quote may carry at most 100 lines")
+		}
+		var total int64
+		for index := range lines {
+			line := &lines[index]
+			line.Description = strings.TrimSpace(line.Description)
+			if line.Description == "" || len(line.Description) > 200 {
+				return RecordQuoteInput{}, fmt.Errorf("line %d description must be 1-200 characters", index+1)
+			}
+			if line.QuantityThousandths <= 0 || line.QuantityThousandths > maxDatabaseInteger {
+				return RecordQuoteInput{}, fmt.Errorf("line %d quantityThousandths must be positive and fit the database integer range", index+1)
+			}
+			if line.UnitPriceMinor < 0 || line.UnitPriceMinor > maxSafeInteger {
+				return RecordQuoteInput{}, fmt.Errorf("line %d unitPriceMinor must be non-negative", index+1)
+			}
+			if line.SKU != nil {
+				trimmed := strings.TrimSpace(*line.SKU)
+				if len(trimmed) > 120 {
+					return RecordQuoteInput{}, fmt.Errorf("line %d sku is too long", index+1)
+				}
+				line.SKU = &trimmed
+			}
+			lineTotal, ok := safeLineTotal(line.QuantityThousandths, line.UnitPriceMinor)
+			if !ok {
+				return RecordQuoteInput{}, fmt.Errorf("line %d total exceeds the safe integer range", index+1)
+			}
+			total += lineTotal
+		}
+		if len(lines) > 0 && total != input.AmountMinor {
+			return RecordQuoteInput{}, errors.New("lines must add up to amountMinor")
+		}
+		input.Lines = lines
+	}
 	return input, nil
+}
+
+func safeLineTotal(quantityThousandths, unitPriceMinor int64) (int64, bool) {
+	if quantityThousandths <= 0 || unitPriceMinor < 0 {
+		return 0, false
+	}
+	if quantityThousandths > maxSafeInteger/unitPriceMinor && unitPriceMinor > 0 {
+		return 0, false
+	}
+	product := quantityThousandths * unitPriceMinor
+	if product%1000 != 0 {
+		return 0, false
+	}
+	return product / 1000, true
 }
 
 func ParseSelectWinningQuoteInput(raw json.RawMessage) (SelectWinningQuoteInput, error) {
@@ -388,6 +449,17 @@ func recordQuote(ctx context.Context, tx pgx.Tx, orgID string, input RecordQuote
 		WHERE id = $1::uuid`, rfqID, input.AmountMinor, input.LeadTimeDays, input.Notes, now); err != nil {
 		return RecordQuoteOutput{}, err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM rfq_quote_lines WHERE rfq_id = $1::uuid AND org_id = $2::uuid`, rfqID, orgID); err != nil {
+		return RecordQuoteOutput{}, err
+	}
+	for index, line := range input.Lines {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO rfq_quote_lines (org_id, rfq_id, position, description, quantity_thousandths, unit_price_minor, sku)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)`,
+			orgID, rfqID, index+1, line.Description, line.QuantityThousandths, line.UnitPriceMinor, line.SKU); err != nil {
+			return RecordQuoteOutput{}, err
+		}
+	}
 	return RecordQuoteOutput{Status: "quoted"}, nil
 }
 
@@ -465,6 +537,39 @@ func selectWinningQuote(ctx context.Context, tx pgx.Tx, orgID string, input Sele
 	if quoteAmountMinor != nil {
 		quoteAmount = *quoteAmountMinor
 	}
+	type quoteLine struct {
+		description string
+		quantity    int64
+		unitPrice   int64
+		sku         *string
+	}
+	quoteLines := make([]quoteLine, 0, 4)
+	lineRows, err := tx.Query(ctx, `
+		SELECT description, quantity_thousandths, unit_price_minor, sku
+		FROM rfq_quote_lines
+		WHERE rfq_id = $1::uuid AND org_id = $2::uuid
+		ORDER BY position`, rfqID, orgID)
+	if err != nil {
+		return SelectWinningQuoteOutput{}, err
+	}
+	var lineTotal int64
+	for lineRows.Next() {
+		var line quoteLine
+		if err := lineRows.Scan(&line.description, &line.quantity, &line.unitPrice, &line.sku); err != nil {
+			lineRows.Close()
+			return SelectWinningQuoteOutput{}, err
+		}
+		lineTotal += (line.quantity * line.unitPrice) / 1000
+		quoteLines = append(quoteLines, line)
+	}
+	if err := lineRows.Err(); err != nil {
+		lineRows.Close()
+		return SelectWinningQuoteOutput{}, err
+	}
+	lineRows.Close()
+	if len(quoteLines) > 0 && lineTotal != quoteAmount {
+		return SelectWinningQuoteOutput{}, errors.New("quote lines no longer match the quoted amount")
+	}
 	var poID string
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO purchase_orders (org_id, vendor_id, number, status, memo, ordered_at)
@@ -472,10 +577,28 @@ func selectWinningQuote(ctx context.Context, tx pgx.Tx, orgID string, input Sele
 		RETURNING id::text`, orgID, vendorID, poNumber, fmt.Sprintf("From RFQ award \u00b7 %s", requestTitle), now).Scan(&poID); err != nil {
 		return SelectWinningQuoteOutput{}, err
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO po_lines (po_id, description, quantity, unit_price_minor, position)
-		VALUES ($1::uuid, $2, 1000, $3, 1)`, poID, requestTitle, quoteAmount); err != nil {
-		return SelectWinningQuoteOutput{}, err
+	if len(quoteLines) == 0 {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO po_lines (po_id, description, quantity, unit_price_minor, position)
+			VALUES ($1::uuid, $2, 1000, $3, 1)`, poID, requestTitle, quoteAmount); err != nil {
+			return SelectWinningQuoteOutput{}, err
+		}
+	} else {
+		for index, line := range quoteLines {
+			description := line.description
+			if line.sku != nil && *line.sku != "" {
+				description = description + " (" + *line.sku + ")"
+			}
+			if line.quantity > maxDatabaseInteger {
+				return SelectWinningQuoteOutput{}, errors.New("quote line quantity exceeds the database integer range")
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO po_lines (po_id, description, quantity, unit_price_minor, position)
+				VALUES ($1::uuid, $2, $3, $4, $5)`,
+				poID, description, line.quantity, line.unitPrice, index+1); err != nil {
+				return SelectWinningQuoteOutput{}, err
+			}
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE purchase_requests SET status = 'converted', decided_at = $2

@@ -176,16 +176,20 @@ Delivered on 19 October:
 - The public execute route requires an intent for money, destructive, and
   identity capabilities.
 
-Still open, and not claimed as done:
+Delivered after the first boundary slice:
 
-- `selectWinningQuote` still creates a synthetic single-line order after its
-  approval. Replacing that with a line-level commitment is the remaining part
-  of the quote-to-order boundary.
-- Approval versioning and cumulative mandate limits need a proposal or mandate
-  record. They are the next gate, not a property of this slice. Because agent
-  and system purchase commitments now always require approval, there is no
-  autonomous cumulative spend to bound yet; cumulative limits become relevant
-  when a mandate later permits autonomous commitments below a limit.
+- Purchase-order and quote-award approvals are versioned per requester and
+  capability. A revised money proposal supersedes the pending earlier version,
+  increments the version, and links the superseded row. The approval payload
+  hash remains the exact authority binding.
+- RFQ quotes can carry line-level quantities and prices. The award copies those
+  lines into the purchase order, so receipts and remaining quantities are
+  reconciled per line. Legacy quotes without lines keep the single synthetic
+  line.
+
+Still open: the human quote-line editor, cumulative mandate limits, and
+autonomous spend below a mandate threshold. With agent and system commitments
+still approval-gated, there is no autonomous cumulative spend to bound yet.
 
 ### Gate D: durable objective, exceptions, and records (two weeks)
 

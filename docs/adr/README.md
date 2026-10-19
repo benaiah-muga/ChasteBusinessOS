@@ -93,6 +93,7 @@ the next number; superseded ones get a Status update, never deletion.
 | 0086 | Replenishment planning is a read-only governed capability | accepted |
 | 0087 | Workmate proposal cards render the stored approval payload | accepted |
 | 0088 | Agent evaluations run live models against fixture tool results | accepted |
+| 0089 | Money approvals are versioned proposals and quote awards carry lines | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

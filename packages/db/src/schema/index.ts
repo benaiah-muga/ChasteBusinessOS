@@ -276,6 +276,8 @@ export const approvals = pgTable(
     payload: jsonb("payload").notNull(),
     intentId: text("intent_id"),
     inputHash: text("input_hash"),
+    version: integer("version").notNull().default(1),
+    supersedesApprovalId: uuid("supersedes_approval_id"),
     rationale: text("rationale"),
     status: text("status").notNull().default("pending"), // pending | approved | rejected | expired | executed
     decidedByUserId: uuid("decided_by_user_id").references(() => users.id),
@@ -286,6 +288,7 @@ export const approvals = pgTable(
   },
   (t) => [
     index("approval_org_status_idx").on(t.orgId, t.status),
+    index("approval_org_capability_requester_idx").on(t.orgId, t.capabilityId, t.requestedByUserId, t.createdAt),
     uniqueIndex("approval_org_intent_idx").on(t.orgId, t.intentId).where(sql`${t.intentId} IS NOT NULL`),
     check("approval_intent_digest_pair_check", sql`(${t.intentId} IS NULL) = (${t.inputHash} IS NULL)`),
   ],
@@ -2458,6 +2461,27 @@ export const fxSettlements = pgTable(
   (t) => [index("fx_settlement_org_idx").on(t.orgId, t.currency)],
 );
 
+
+/** Line-level RFQ quote, so an award can carry real lines into the PO. */
+export const rfqQuoteLines = pgTable(
+  "rfq_quote_lines",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    rfqId: uuid("rfq_id").notNull().references(() => rfqs.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    description: text("description").notNull(),
+    quantityThousandths: bigint("quantity_thousandths", { mode: "number" }).notNull(),
+    unitPriceMinor: bigint("unit_price_minor", { mode: "number" }).notNull(),
+    sku: text("sku"),
+  },
+  (t) => [
+    uniqueIndex("rfq_quote_line_position_idx").on(t.rfqId, t.position),
+    index("rfq_quote_line_org_idx").on(t.orgId, t.rfqId),
+    check("rfq_quote_line_quantity_positive", sql`${t.quantityThousandths} > 0`),
+    check("rfq_quote_line_price_nonnegative", sql`${t.unitPriceMinor} >= 0`),
+  ],
+);
 
 // ── Functional gap batch: quotes, recurring billing, timesheets,
 //    expense claims, customer portal shares, in-app notifications ──

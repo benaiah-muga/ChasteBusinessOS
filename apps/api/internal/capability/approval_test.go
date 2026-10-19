@@ -484,3 +484,55 @@ func TestApprovalDecisionInputRejectsInvalidDecisionAndLongComment(t *testing.T)
 		})
 	}
 }
+
+func TestNewMoneyApprovalVersionSupersedesPriorPendingProposal(t *testing.T) {
+	fx := newExecutorFixture(t)
+	fx.addAgentSession()
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO role_permissions (role_id, permission_key, org_id)
+		VALUES ($1::uuid, 'purchasing.write', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	var vendorID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Versioned proposal supplier')
+		RETURNING id::text`, fx.orgID).Scan(&vendorID); err != nil {
+		t.Fatal(err)
+	}
+	execute := func(quantity int) string {
+		input := json.RawMessage(`{"vendorId":"` + vendorID + `","lines":[{"description":"Proposed stock","quantity":` + fmt.Sprint(quantity) + `,"unitPriceMinor":5000}]}`)
+		claims := fx.claims(input, "agent", fx.agentSession, executorUUID(t))
+		claims.CapabilityID = createPurchaseOrderCapabilityID
+		claims.Permissions = []string{"purchasing.write"}
+		result, err := fx.executor.Execute(fx.ctx, claims, createPurchaseOrderCapabilityID, input)
+		if err != nil || !result.PendingApproval || result.ApprovalID == "" {
+			t.Fatalf("purchase approval result=%+v err=%v", result, err)
+		}
+		return result.ApprovalID
+	}
+	firstID := execute(1000)
+	secondID := execute(2000)
+	if firstID == secondID {
+		t.Fatal("revision reused the superseded approval")
+	}
+	var firstStatus string
+	var firstVersion int
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT status, version FROM approvals WHERE id = $1::uuid`, firstID).Scan(&firstStatus, &firstVersion); err != nil {
+		t.Fatal(err)
+	}
+	var secondStatus string
+	var secondVersion int
+	var supersedes *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT status, version, supersedes_approval_id::text FROM approvals WHERE id = $1::uuid`, secondID).Scan(&secondStatus, &secondVersion, &supersedes); err != nil {
+		t.Fatal(err)
+	}
+	if firstStatus != "superseded" || firstVersion != 1 {
+		t.Fatalf("first approval status=%s version=%d, want superseded version 1", firstStatus, firstVersion)
+	}
+	if secondStatus != "pending" || secondVersion != 2 || supersedes == nil || *supersedes != firstID {
+		t.Fatalf("second approval status=%s version=%d supersedes=%v, want pending version 2 superseding %s", secondStatus, secondVersion, supersedes, firstID)
+	}
+	if got := fx.count(`SELECT count(*) FROM approvals WHERE org_id = $1::uuid AND capability_id = $2 AND status = 'pending'`, fx.orgID, createPurchaseOrderCapabilityID); got != 1 {
+		t.Fatalf("pending approvals = %d, want only the revised proposal", got)
+	}
+}

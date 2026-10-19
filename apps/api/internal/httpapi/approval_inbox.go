@@ -28,23 +28,25 @@ type ApprovalInboxResponse struct {
 }
 
 type ApprovalInboxRow struct {
-	ID                string            `json:"id"`
-	OrgID             string            `json:"orgId"`
-	SessionID         *string           `json:"sessionId"`
-	RequestedByUserID *string           `json:"requestedByUserId"`
-	CapabilityID      string            `json:"capabilityId"`
-	RiskClass         string            `json:"riskClass"`
-	Payload           json.RawMessage   `json:"payload"`
-	Rationale         *string           `json:"rationale"`
-	Status            string            `json:"status"`
-	DecidedByUserID   *string           `json:"decidedByUserId"`
-	DecisionComment   *string           `json:"decisionComment"`
-	ExpiresAt         *string           `json:"expiresAt"`
-	DecidedAt         *string           `json:"decidedAt"`
-	CreatedAt         string            `json:"createdAt"`
-	RaisedBy          RaisedBy          `json:"raisedBy"`
-	DecidedBy         *string           `json:"decidedBy"`
-	RelatedDocuments  []RelatedDocument `json:"relatedDocuments"`
+	ID                   string            `json:"id"`
+	OrgID                string            `json:"orgId"`
+	SessionID            *string           `json:"sessionId"`
+	RequestedByUserID    *string           `json:"requestedByUserId"`
+	CapabilityID         string            `json:"capabilityId"`
+	RiskClass            string            `json:"riskClass"`
+	Payload              json.RawMessage   `json:"payload"`
+	Rationale            *string           `json:"rationale"`
+	Status               string            `json:"status"`
+	Version              int               `json:"version"`
+	SupersedesApprovalID *string           `json:"supersedesApprovalId,omitempty"`
+	DecidedByUserID      *string           `json:"decidedByUserId"`
+	DecisionComment      *string           `json:"decisionComment"`
+	ExpiresAt            *string           `json:"expiresAt"`
+	DecidedAt            *string           `json:"decidedAt"`
+	CreatedAt            string            `json:"createdAt"`
+	RaisedBy             RaisedBy          `json:"raisedBy"`
+	DecidedBy            *string           `json:"decidedBy"`
+	RelatedDocuments     []RelatedDocument `json:"relatedDocuments"`
 }
 
 type RaisedBy struct {
@@ -311,14 +313,16 @@ func approvalInboxPermissions(ctx context.Context, tx pgx.Tx, claims authbridge.
 type scannedApproval struct {
 	ID, OrgID, CapabilityID, RiskClass, Status                                string
 	SessionID, RequestedByUserID, Rationale, DecidedByUserID, DecisionComment *string
+	SupersedesApprovalID                                                      *string
+	Version                                                                   int
 	Payload                                                                   []byte
 	ExpiresAt, DecidedAt, CreatedAt                                           *time.Time
 }
 
 func readApprovalRows(ctx context.Context, tx pgx.Tx, orgID string, history bool) ([]ApprovalInboxRow, error) {
-	query := `SELECT id::text, org_id::text, session_id::text, requested_by_user_id::text, capability_id, risk_class, payload, rationale, status, decided_by_user_id::text, decision_comment, expires_at, decided_at, created_at FROM approvals WHERE org_id = $1::uuid AND status = 'pending' ORDER BY created_at DESC LIMIT 100`
+	query := `SELECT id::text, org_id::text, session_id::text, requested_by_user_id::text, capability_id, risk_class, payload, rationale, status, version, supersedes_approval_id::text, decided_by_user_id::text, decision_comment, expires_at, decided_at, created_at FROM approvals WHERE org_id = $1::uuid AND status = 'pending' ORDER BY created_at DESC LIMIT 100`
 	if history {
-		query = `SELECT id::text, org_id::text, session_id::text, requested_by_user_id::text, capability_id, risk_class, payload, rationale, status, decided_by_user_id::text, decision_comment, expires_at, decided_at, created_at FROM approvals WHERE org_id = $1::uuid AND status = ANY(ARRAY['approved','executed','rejected','expired']) ORDER BY decided_at DESC LIMIT 25`
+		query = `SELECT id::text, org_id::text, session_id::text, requested_by_user_id::text, capability_id, risk_class, payload, rationale, status, version, supersedes_approval_id::text, decided_by_user_id::text, decision_comment, expires_at, decided_at, created_at FROM approvals WHERE org_id = $1::uuid AND status = ANY(ARRAY['approved','executed','rejected','expired','superseded']) ORDER BY decided_at DESC LIMIT 25`
 	}
 	rows, err := tx.Query(ctx, query, orgID)
 	if err != nil {
@@ -328,14 +332,14 @@ func readApprovalRows(ctx context.Context, tx pgx.Tx, orgID string, history bool
 	out := []ApprovalInboxRow{}
 	for rows.Next() {
 		var item scannedApproval
-		if err := rows.Scan(&item.ID, &item.OrgID, &item.SessionID, &item.RequestedByUserID, &item.CapabilityID, &item.RiskClass, &item.Payload, &item.Rationale, &item.Status, &item.DecidedByUserID, &item.DecisionComment, &item.ExpiresAt, &item.DecidedAt, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.OrgID, &item.SessionID, &item.RequestedByUserID, &item.CapabilityID, &item.RiskClass, &item.Payload, &item.Rationale, &item.Status, &item.Version, &item.SupersedesApprovalID, &item.DecidedByUserID, &item.DecisionComment, &item.ExpiresAt, &item.DecidedAt, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		createdAt := formatApprovalTime(item.CreatedAt)
 		if createdAt == nil {
 			return nil, errors.New("approval has no created timestamp")
 		}
-		out = append(out, ApprovalInboxRow{ID: item.ID, OrgID: item.OrgID, SessionID: item.SessionID, RequestedByUserID: item.RequestedByUserID, CapabilityID: item.CapabilityID, RiskClass: item.RiskClass, Payload: item.Payload, Rationale: item.Rationale, Status: item.Status, DecidedByUserID: item.DecidedByUserID, DecisionComment: item.DecisionComment, ExpiresAt: formatApprovalTime(item.ExpiresAt), DecidedAt: formatApprovalTime(item.DecidedAt), CreatedAt: *createdAt, RelatedDocuments: []RelatedDocument{}})
+		out = append(out, ApprovalInboxRow{ID: item.ID, OrgID: item.OrgID, SessionID: item.SessionID, RequestedByUserID: item.RequestedByUserID, CapabilityID: item.CapabilityID, RiskClass: item.RiskClass, Payload: item.Payload, Rationale: item.Rationale, Status: item.Status, Version: item.Version, SupersedesApprovalID: item.SupersedesApprovalID, DecidedByUserID: item.DecidedByUserID, DecisionComment: item.DecisionComment, ExpiresAt: formatApprovalTime(item.ExpiresAt), DecidedAt: formatApprovalTime(item.DecidedAt), CreatedAt: *createdAt, RelatedDocuments: []RelatedDocument{}})
 	}
 	return out, rows.Err()
 }
