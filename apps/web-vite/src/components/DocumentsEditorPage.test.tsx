@@ -264,7 +264,8 @@ describe("authored document editor", () => {
     render(<DocumentsEditorPage documentId={DOCUMENT_ID} />);
     await screen.findByDisplayValue("Service quote", undefined, BOOT);
 
-    expect(screen.getByRole("status").textContent).toContain("Grace is editing right now");
+    const lockNotice = await screen.findByText(/Grace is editing right now/);
+    expect(lockNotice.getAttribute("role")).toBe("status");
     expect(screen.getByText("Grace")).not.toBeNull();
     expect(surface().getAttribute("contenteditable")).toBe("false");
     expect((screen.getByLabelText("Bold") as HTMLButtonElement).disabled).toBe(true);
