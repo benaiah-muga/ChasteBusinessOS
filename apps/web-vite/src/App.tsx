@@ -317,7 +317,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                                             : proposalsPage
                                                               ? <ProposalsPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                                                               : chatPage
-                                                                ? <ChatPage key={organizationRevision} />
+                                                                ? <ChatPage key={organizationRevision} organizationId={activeOrgId} />
                                                                 : documentsEditorPage
                                                                 ? <DocumentsEditorPage key={organizationRevision} documentId={pathname.split("/").pop()} actorId={currentUserId} organizationId={activeOrgId} />
                                                                 : posPage
@@ -328,7 +328,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
           </Suspense>
         </PageErrorBoundary>
       </div>
-      <ChatDock pathname={pathname} />
+      <ChatDock pathname={pathname} organizationId={activeOrgId} />
     </div>
   );
 }

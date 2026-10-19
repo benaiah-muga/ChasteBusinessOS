@@ -123,7 +123,7 @@ func TestGoChatSessionIntegration(t *testing.T) {
 			t.Fatalf("X-Session-Id=%q", sessionID)
 		}
 		events := decodeChatNDJSON(t, recorder)
-		if types := strings.Join(chatEventTypes(events), ","); types != "step,tool,step,delta,done" {
+		if types := strings.Join(chatEventTypes(events), ","); types != "step,tool,tool_result,step,delta,done" {
 			t.Fatalf("NDJSON types=%s", types)
 		}
 		done := events[len(events)-1]
@@ -229,7 +229,7 @@ func TestGoChatSessionIntegration(t *testing.T) {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
 			events := decodeChatNDJSON(t, response)
-			if types := strings.Join(chatEventTypes(events), ","); types != "step,tool,step,delta,done" {
+			if types := strings.Join(chatEventTypes(events), ","); types != "step,tool,tool_result,step,delta,done" {
 				t.Fatalf("NDJSON types=%s", types)
 			}
 			if strings.Contains(response.Body.String(), "intent conflict") {

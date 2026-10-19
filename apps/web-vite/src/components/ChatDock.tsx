@@ -9,7 +9,7 @@ import "./ChatDock.css";
  * sharing the chat page's store. History and an in-flight stream survive
  * shrinking or expanding because both surfaces render the same conversation.
  */
-export function ChatDock({ pathname }: { pathname: string }) {
+export function ChatDock({ pathname, organizationId = null }: { pathname: string; organizationId?: string | null }) {
   const { messages, busy, creator, queue, step, lastTool, sessionUsage } = useChat();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
@@ -93,7 +93,7 @@ export function ChatDock({ pathname }: { pathname: string }) {
           </header>
 
           <div ref={scrollRef} className="chat-dock-scroll">
-            <MessageList messages={messages} busy={busy} compact />
+            <MessageList messages={messages} busy={busy} compact organizationId={organizationId} />
           </div>
 
           {busy && (

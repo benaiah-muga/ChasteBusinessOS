@@ -18,6 +18,15 @@ const StepFrameSchema = z.object({
   maxSteps: z.number().int().nonnegative(),
 });
 const ToolFrameSchema = z.object({ type: z.literal("tool"), name: z.string() });
+const ToolResultFrameSchema = z.object({
+  type: z.literal("tool_result"),
+  name: z.string(),
+  ok: z.boolean(),
+  pendingApproval: z.boolean().optional(),
+  approvalId: z.string().optional(),
+  approvalRationale: z.string().optional(),
+  error: z.string().optional(),
+});
 const CompactionFrameSchema = z.object({
   type: z.literal("compaction"),
   compactedToMessages: z.number().int().nonnegative(),
@@ -48,6 +57,7 @@ const FrameSchema = z.discriminatedUnion("type", [
   DeltaFrameSchema,
   StepFrameSchema,
   ToolFrameSchema,
+  ToolResultFrameSchema,
   CompactionFrameSchema,
   AskFrameSchema,
   DoneFrameSchema,
@@ -59,6 +69,7 @@ export type ChatEvent =
   | { type: "delta"; text: string }
   | { type: "step"; step: number; maxSteps: number }
   | { type: "tool"; name: string }
+  | { type: "tool_result"; name: string; ok: boolean; pendingApproval: boolean; approvalId: string | null; approvalRationale: string | null; error: string | null }
   | { type: "compaction"; compactedToMessages: number }
   | { type: "ask"; id: string; question: string; options: string[]; allowOther: boolean }
   | { type: "done"; sessionId: string | null; reply: string; turnUsage: ChatUsage | null; sessionUsage: ChatUsage | null }
@@ -73,6 +84,16 @@ function toChatEvent(frame: z.infer<typeof FrameSchema>): ChatEvent | null {
       return { type: "step", step: frame.step, maxSteps: frame.maxSteps };
     case "tool":
       return { type: "tool", name: frame.name };
+    case "tool_result":
+      return {
+        type: "tool_result",
+        name: frame.name,
+        ok: frame.ok,
+        pendingApproval: frame.pendingApproval ?? false,
+        approvalId: frame.approvalId ?? null,
+        approvalRationale: frame.approvalRationale ?? null,
+        error: frame.error ?? null,
+      };
     case "compaction":
       return { type: "compaction", compactedToMessages: frame.compactedToMessages };
     case "ask":

@@ -15751,6 +15751,99 @@
       }
     },
     {
+      "id": "inventory.replenishmentPlan",
+      "title": "Plan inventory replenishment",
+      "intent": "Calculate a deterministic replenishment plan from live stock, open reservations, recent sales, incoming purchase orders, and configured lead times without creating an order.",
+      "module": "inventory",
+      "risk": "read",
+      "permission": "inventory.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sku": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "lookbackDays": {
+            "type": "integer",
+            "minimum": 7,
+            "maximum": 365
+          },
+          "reviewDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "serviceLevel": {
+            "type": "string",
+            "enum": [
+              "90",
+              "95",
+              "98",
+              "99"
+            ]
+          },
+          "includeSufficient": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "asOf": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "assumptions": {
+            "type": "object"
+          },
+          "summary": {
+            "type": "object"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asOf",
+          "currency",
+          "assumptions",
+          "summary",
+          "items",
+          "warnings",
+          "truncated"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "inventory.reserveStock",
       "title": "Reserve stock",
       "intent": "Place an open claim against available stock for a sales order, work order, or other commitment; reservations never move the ledger but reduce what is promiseable",
@@ -22048,64 +22141,55 @@
     {
       "id": "purchasing.createPurchaseOrder",
       "title": "Create purchase order",
-      "intent": "Order goods from a vendor with line items and expected prices; receiving and billing are matched against this order later",
+      "intent": "Commit an authorized purchase order with its vendor, lines, quantities, prices, and promised delivery date.",
       "module": "purchasing",
-      "risk": "write",
+      "risk": "money",
       "permission": "purchasing.write",
       "executionScope": "organization",
-      "moneyThresholdMinor": null,
+      "moneyThresholdMinor": 0,
       "inverseCapabilityId": null,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
           "vendorId": {
-            "type": "string"
+            "type": "string",
+            "format": "uuid"
           },
           "memo": {
             "type": "string"
           },
           "promisedAt": {
             "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            "format": "date-time"
           },
           "lines": {
-            "minItems": 1,
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "object",
               "properties": {
                 "description": {
-                  "type": "string",
-                  "minLength": 1
+                  "type": "string"
                 },
                 "quantity": {
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "description": "thousandths of a unit"
+                  "type": "integer"
                 },
                 "unitPriceMinor": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
+                  "type": "integer"
                 },
                 "expenseAccountCode": {
-                  "default": "6000",
                   "type": "string",
-                  "pattern": "^\\d{4}$"
+                  "pattern": "^[0-9]{4}$"
                 },
                 "sku": {
-                  "description": "links the line to a stocked item for receipts",
                   "type": "string"
                 }
               },
               "required": [
                 "description",
                 "quantity",
-                "unitPriceMinor",
-                "expenseAccountCode"
+                "unitPriceMinor"
               ],
               "additionalProperties": false
             }
@@ -22122,7 +22206,7 @@
         "type": "object",
         "properties": {
           "poNumber": {
-            "type": "number"
+            "type": "integer"
           }
         },
         "required": [
@@ -22323,6 +22407,104 @@
         },
         "required": [
           "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.getPurchaseOrder",
+      "title": "Read purchase order",
+      "intent": "Read one purchase order with its status, ordered lines, received quantities, and receipt history for verification.",
+      "module": "purchasing",
+      "risk": "read",
+      "permission": "purchasing.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "poNumber": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "poNumber"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "poNumber": {
+            "type": "integer"
+          },
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vendorName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "memo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "orderedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "promisedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalMinor": {
+            "type": "integer"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "fullyReceived": {
+            "type": "boolean"
+          },
+          "backordered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "poNumber",
+          "vendorId",
+          "vendorName",
+          "status",
+          "memo",
+          "orderedAt",
+          "promisedAt",
+          "totalMinor",
+          "lines",
+          "receipts",
+          "fullyReceived",
+          "backordered"
         ],
         "additionalProperties": false
       }
@@ -22811,6 +22993,75 @@
         "required": [
           "receipts",
           "orderLines"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.listVendors",
+      "title": "List purchasing vendors",
+      "intent": "List this organization's suppliers with contact details, payment terms, and active state for purchasing decisions.",
+      "module": "purchasing",
+      "risk": "read",
+      "permission": "purchasing.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "includeInactive": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "paymentTermDays": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "active": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "email",
+                "paymentTermDays",
+                "active"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "vendors"
         ],
         "additionalProperties": false
       }
@@ -23920,20 +24171,21 @@
     },
     {
       "id": "purchasing.selectWinningQuote",
-      "title": "Select winning quote and raise PO",
-      "intent": "Award an approved request to a vendor's quoted price: marks that RFQ won, its siblings lost, and raises the purchase order so receiving and billing can proceed",
+      "title": "Award purchase quote",
+      "intent": "Select a quoted supplier as the winner and commit the resulting purchase order under purchase authority.",
       "module": "purchasing",
-      "risk": "write",
+      "risk": "money",
       "permission": "purchasing.write",
       "executionScope": "organization",
-      "moneyThresholdMinor": null,
+      "moneyThresholdMinor": 0,
       "inverseCapabilityId": null,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
           "rfqId": {
-            "type": "string"
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -23946,13 +24198,14 @@
         "type": "object",
         "properties": {
           "poNumber": {
-            "type": "number"
+            "type": "integer"
           },
           "vendorId": {
-            "type": "string"
+            "type": "string",
+            "format": "uuid"
           },
           "quoteAmountMinor": {
-            "type": "number"
+            "type": "integer"
           }
         },
         "required": [

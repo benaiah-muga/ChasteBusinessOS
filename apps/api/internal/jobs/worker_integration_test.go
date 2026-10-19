@@ -1679,26 +1679,28 @@ func TestPurchasingReturnGoodsWorkerClaimAndExecution(t *testing.T) {
 	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Commerce jobs vendor') RETURNING id::text`, orgID).Scan(&vendorID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := owner.Exec(ctx, `INSERT INTO items (org_id,sku,name,sale_price_minor) VALUES ($1::uuid,'PILOT-CEM','Pilot cement',1500)`, orgID); err != nil {
+	var itemID string
+	if err := owner.QueryRow(ctx, `INSERT INTO items (org_id,sku,name,sale_price_minor) VALUES ($1::uuid,'PILOT-CEM','Pilot cement',1500) RETURNING id::text`, orgID).Scan(&itemID); err != nil {
 		t.Fatal(err)
 	}
-	poPayload := json.RawMessage(fmt.Sprintf(`{"vendorId":%q,"lines":[{"description":"Stock item","quantity":2000,"unitPriceMinor":1500,"sku":"PILOT-CEM"}]}`, vendorID))
-	poJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.createPurchaseOrder", poPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
-	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
-		t.Fatalf("createPurchaseOrder job worked=%v err=%v", worked, err)
+	// A system purchase commitment now requires a verified human approval, so
+	// this worker proof seeds the order the way an approved run would leave it
+	// and exercises the ungated receipt step as the system actor.
+	var poID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO purchase_orders (org_id, vendor_id, number, status, ordered_at)
+		VALUES ($1::uuid, $2::uuid, 1, 'ordered', now())
+		RETURNING id::text`, orgID, vendorID).Scan(&poID); err != nil {
+		t.Fatal(err)
 	}
-	assertJobsTestState(t, ctx, owner, poJobID, "done", 1)
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO po_lines (po_id, description, quantity, unit_price_minor, item_id, position)
+		VALUES ($1::uuid, 'Stock item', 2000, 1500, $2::uuid, 1)`, poID, itemID); err != nil {
+		t.Fatal(err)
+	}
 	if got := countJobsTestRows(t, ctx, owner, `
 		SELECT count(*) FROM purchase_orders WHERE org_id=$1::uuid AND vendor_id=$2::uuid AND status='ordered'`, orgID, vendorID); got != 1 {
-		t.Fatalf("system purchase orders=%d, want one", got)
-	}
-	if got := countJobsTestRows(t, ctx, owner, `
-		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
-		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.createPurchaseOrder'`, orgID); got != 1 {
-		t.Fatalf("system purchase order audit events=%d, want one", got)
-	}
-	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+poJobID, "purchasing.createPurchaseOrder"); got != 1 {
-		t.Fatalf("purchase order job action receipts=%d, want one", got)
+		t.Fatalf("seeded purchase orders=%d, want one", got)
 	}
 	receiptPayload := json.RawMessage(`{"poNumber":1,"lines":[{"lineNumber":1,"quantity":2000}]}`)
 	receiptJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.receiveGoods", receiptPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))

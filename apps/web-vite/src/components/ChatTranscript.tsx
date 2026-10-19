@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { answerChatAsk, chatStore, useChat, type AskPayload, type ChatMsg } from "../chat-store";
 import { CHAT_MESSAGE_MAX_UNITS, type ChatUsage } from "../api/chat";
+import { ProposalCard } from "./ProposalCard";
 import "./ChatTranscript.css";
 
 /** Compact token counts for chips: 1234 -> "1.2k". */
@@ -172,7 +173,17 @@ export function useAutoScroll(dependency: unknown) {
 }
 
 /** Message transcript shared by the chat page and the dock. */
-export function MessageList({ messages, busy, compact = false }: { messages: ChatMsg[]; busy: boolean; compact?: boolean }) {
+export function MessageList({
+  messages,
+  busy,
+  compact = false,
+  organizationId = null,
+}: {
+  messages: ChatMsg[];
+  busy: boolean;
+  compact?: boolean;
+  organizationId?: string | null;
+}) {
   return (
     <div className={`chat-transcript${compact ? " chat-transcript-compact" : ""}`}>
       {messages.map((message, index) => {
@@ -226,6 +237,7 @@ export function MessageList({ messages, busy, compact = false }: { messages: Cha
                 )
               )}
               {message.ask && <AskCard ask={message.ask} answered={message.answered} />}
+              {message.proposal && <ProposalCard proposal={message.proposal} organizationId={organizationId} />}
               {message.usage && <UsageChip usage={message.usage} />}
             </div>
           </div>

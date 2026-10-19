@@ -320,6 +320,7 @@ var GoCapabilityPermissions = map[string]string{
 	"inventory.postValuationSummary":           "inventory.write",
 	"inventory.reverseValuationSummary":        "inventory.write",
 	"inventory.stockReport":                    "inventory.read",
+	"inventory.replenishmentPlan":              "inventory.read",
 	"inventory.itemHistory":                    "inventory.read",
 	"inventory.listLots":                       "inventory.read",
 	"inventory.listCycleCounts":                "inventory.read",

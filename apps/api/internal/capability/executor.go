@@ -154,7 +154,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	listExpensePoliciesCapabilityID:                     {module: "accounting", permission: "expenses.decide", risk: "read"},
 	setExpensePolicyCapabilityID:                        {module: "accounting", permission: "expenses.decide", risk: "write"},
 	createVendorCapabilityID:                            {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	createPurchaseOrderCapabilityID:                     {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	createPurchaseOrderCapabilityID:                     {module: "purchasing", permission: "purchasing.write", risk: "money", moneyThresholdMinor: 0},
 	receiveGoodsCapabilityID:                            {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	returnGoodsCapabilityID:                             {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	createBillCapabilityID:                              {module: "purchasing", permission: "purchasing.write", risk: "write", inverseCapabilityID: "accounting.reverseEntry"},
@@ -194,7 +194,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	decidePurchaseRequestCapabilityID:                   {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	createRfqCapabilityID:                               {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	recordQuoteCapabilityID:                             {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	selectWinningQuoteCapabilityID:                      {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	selectWinningQuoteCapabilityID:                      {module: "purchasing", permission: "purchasing.write", risk: "money", moneyThresholdMinor: 0},
 	listPurchaseWorkflowCapabilityID:                    {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	inventoryCreateItemCapabilityID:                     {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryUpdateItemCapabilityID:                     {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.restoreItem"},
@@ -268,6 +268,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	inventoryPostValuationSummaryCapabilityID:           {module: "inventory", permission: "inventory.write", risk: "money", inverseCapabilityID: "inventory.reverseValuationSummary"},
 	inventoryReverseValuationSummaryCapabilityID:        {module: "inventory", permission: "inventory.write", risk: "money"},
 	inventoryStockReportCapabilityID:                    {module: "inventory", permission: "inventory.read", risk: "read"},
+	inventoryReplenishmentPlanCapabilityID:              {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryItemHistoryCapabilityID:                    {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryListLotsCapabilityID:                       {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryRebuildStockProjectionsCapabilityID:        {module: "inventory", permission: "inventory.admin", risk: "write"},
@@ -323,6 +324,8 @@ var capabilitySpecs = map[string]capabilitySpec{
 	iamSetOrgBrandingCapabilityID:             {module: "iam", permission: "iam.admin", risk: "write"},
 	purchasingSupplierPerformanceCapabilityID: {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	purchasingListWorkspaceCapabilityID:       {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	purchasingListVendorsCapabilityID:         {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	purchasingGetPurchaseOrderCapabilityID:    {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	purchasingPriceHistoryCapabilityID:        {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	purchasingSupplierStatementCapabilityID:   {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	signalsListCapabilityID:                   {module: "signals", permission: "signals.read", risk: "read"},
@@ -443,6 +446,22 @@ func init() {
 	RegisterHarnessCapabilities()
 }
 
+// RequiresActionIntent reports whether a public caller must supply an
+// idempotency intent before a high-impact state change. Reads and ordinary
+// reversible writes keep their existing route contracts.
+func RequiresActionIntent(capabilityID string) bool {
+	spec, ok := capabilitySpecs[capabilityID]
+	if !ok {
+		return false
+	}
+	switch spec.risk {
+	case "money", "destructive", "identity":
+		return true
+	default:
+		return false
+	}
+}
+
 func supportedCapability(capabilityID string) bool {
 	for _, id := range DocumentsCapabilityIDs() {
 		if id == capabilityID {
@@ -513,7 +532,7 @@ func supportedCapability(capabilityID string) bool {
 		hrHireApplicantCapabilityID, hrListApplicantsCapabilityID,
 		billCreditNoteCapabilityID, closePurchaseOrderCapabilityID, listReceiptsCapabilityID,
 		inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID,
-		inventoryStockReportCapabilityID, inventoryItemHistoryCapabilityID, inventoryListLotsCapabilityID,
+		inventoryStockReportCapabilityID, inventoryReplenishmentPlanCapabilityID, inventoryItemHistoryCapabilityID, inventoryListLotsCapabilityID,
 		inventoryRebuildStockProjectionsCapabilityID,
 		reportCurrencyMetadataCapabilityID, incomeStatementCapabilityID, balanceSheetCapabilityID, listInvoicesCapabilityID, arAgingCapabilityID, accountingOverviewCapabilityID,
 		cashBasisReportCapabilityID, customerStatementCapabilityID, salesTaxReportCapabilityID,
@@ -533,7 +552,7 @@ func supportedCapability(capabilityID string) bool {
 		hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID,
 		iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
 		iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID,
-		purchasingListWorkspaceCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
+		purchasingListWorkspaceCapabilityID, purchasingListVendorsCapabilityID, purchasingGetPurchaseOrderCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
 		purchasingSupplierStatementCapabilityID,
 		signalsListCapabilityID, skillsFindCapabilityID, skillsLoadCapabilityID,
 		routinesCreateCapabilityID, routinesListCapabilityID, routinesUpdateCapabilityID,
@@ -1265,6 +1284,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case inventoryReplenishmentPlanCapabilityID:
+			parsed, err := ParseInventoryReplenishmentPlanInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
 		case inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID,
 			inventoryStockReportCapabilityID, inventoryItemHistoryCapabilityID, inventoryListLotsCapabilityID,
 			inventoryRebuildStockProjectionsCapabilityID:
@@ -1336,7 +1361,7 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case purchasingListWorkspaceCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
+		case purchasingListWorkspaceCapabilityID, purchasingListVendorsCapabilityID, purchasingGetPurchaseOrderCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
 			purchasingSupplierStatementCapabilityID:
 			parsed, err := parsePurchasingReadsInput(capabilityID, rawInput)
 			if err != nil {
@@ -3080,6 +3105,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case InventoryReplenishmentPlanInput:
+			output, err := inventoryReplenishmentPlan(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case InventoryItemHistoryInput:
 			output, err := inventoryItemHistory(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -3358,6 +3389,18 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case PurchasingListWorkspaceInput:
 			output, err := purchasingListWorkspace(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PurchasingListVendorsInput:
+			output, err := purchasingListVendors(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PurchasingGetPurchaseOrderInput:
+			output, err := purchasingGetPurchaseOrder(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3729,7 +3772,7 @@ func canonicalInputHash(input any) (string, error) {
 		HRAddApplicantInput, HRMoveApplicantInput, HRHireApplicantInput, HRListApplicantsInput,
 		BillCreditNoteInput, ClosePurchaseOrderInput, ListReceiptsInput,
 		InventoryPostValuationSummaryInput, InventoryReverseValuationSummaryInput, InventoryStockReportInput,
-		InventoryItemHistoryInput, InventoryListLotsInput, InventoryRebuildStockProjectionsInput,
+		InventoryReplenishmentPlanInput, InventoryItemHistoryInput, InventoryListLotsInput, InventoryRebuildStockProjectionsInput,
 		ReportCurrencyMetadataInput, IncomeStatementInput, BalanceSheetInput, ListInvoicesInput, ArAgingInput, AccountingOverviewInput, CashBasisReportInput,
 		CustomerStatementInput, SalesTaxReportInput, CashFlowInput, CashForecastInput,
 		UnrealizedFxExposureInput, ReversePeriodFxRevaluationInput,
@@ -3746,7 +3789,7 @@ func canonicalInputHash(input any) (string, error) {
 		AssignProjectTaskInput, RestoreProjectTaskAssigneeInput,
 		HRCreateOpeningInput, HRCloseOpeningInput,
 		IAMModulesInput, IAMSetModuleConfigInput, IAMSetOrgPolicyInput, IAMSetOrgBrandingInput,
-		PurchasingListWorkspaceInput, PurchasingSupplierPerformanceInput, PurchasingPriceHistoryInput, PurchasingSupplierStatementInput,
+		PurchasingListWorkspaceInput, PurchasingListVendorsInput, PurchasingGetPurchaseOrderInput, PurchasingSupplierPerformanceInput, PurchasingPriceHistoryInput, PurchasingSupplierStatementInput,
 		SignalsListInput, SkillsFindInput, SkillsLoadInput,
 		RoutinesCreateInput, RoutinesListInput, RoutinesUpdateInput, RoutinesDeleteInput, RoutinesRunNowInput,
 		AnalyticsRenderReportInput, AnalyticsPipelineByStageInput, AnalyticsRevenueByMonthInput,
@@ -4063,6 +4106,8 @@ func moneyAmount(input any) (*int64, bool) {
 		return &totals.totalMinor, true
 	case HRExecutePayrollRunInput:
 		return &parsed.ExpectedTotalNetMinor, true
+	case CreatePurchaseOrderInput:
+		return purchaseOrderCommitmentMinor(parsed)
 	default:
 		return nil, false
 	}

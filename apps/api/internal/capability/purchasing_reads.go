@@ -106,6 +106,10 @@ func parsePurchasingReadsInput(capabilityID string, raw json.RawMessage) (any, e
 	switch capabilityID {
 	case purchasingListWorkspaceCapabilityID:
 		return ParsePurchasingListWorkspaceInput(raw)
+	case purchasingListVendorsCapabilityID:
+		return ParsePurchasingListVendorsInput(raw)
+	case purchasingGetPurchaseOrderCapabilityID:
+		return ParsePurchasingGetPurchaseOrderInput(raw)
 	case purchasingSupplierPerformanceCapabilityID:
 		return ParsePurchasingSupplierPerformanceInput(raw)
 	case purchasingPriceHistoryCapabilityID:

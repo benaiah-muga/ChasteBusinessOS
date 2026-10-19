@@ -170,9 +170,19 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 			// The kernel emits tool_result only for executor calls; the ticket
 			// and ask paths are covered by their own persisted events.
 			if emitResult && deps.onEvent != nil {
-				content := map[string]any{"name": capabilityID, "ok": ok}
+				content := map[string]any{"name": capabilityID, "capabilityId": capabilityID, "ok": ok}
 				if !ok && errorMessage != "" {
 					content["error"] = errorMessage
+				}
+				var refusal chatToolRefusal
+				if json.Unmarshal([]byte(toolResult), &refusal) == nil {
+					content["pendingApproval"] = refusal.PendingApproval
+					if refusal.ApprovalID != "" {
+						content["approvalId"] = refusal.ApprovalID
+					}
+					if refusal.ApprovalRationale != "" {
+						content["approvalRationale"] = refusal.ApprovalRationale
+					}
 				}
 				deps.onEvent("tool_result", content)
 			}
@@ -193,8 +203,10 @@ type chatTicketResult struct {
 }
 
 type chatToolRefusal struct {
-	Error           string `json:"error"`
-	PendingApproval bool   `json:"pendingApproval"`
+	Error             string `json:"error"`
+	PendingApproval   bool   `json:"pendingApproval"`
+	ApprovalID        string `json:"approvalId,omitempty"`
+	ApprovalRationale string `json:"approvalRationale,omitempty"`
 }
 
 type chatAskResult struct {
@@ -306,7 +318,12 @@ func (deps chatLoopDeps) executeChatTool(ctx context.Context, user *session.Reso
 	if message == "" {
 		message = "capability execution failed"
 	}
-	return chatMustEncode(chatToolRefusal{Error: message, PendingApproval: result.PendingApproval}), false, message
+	return chatMustEncode(chatToolRefusal{
+		Error:             message,
+		PendingApproval:   result.PendingApproval,
+		ApprovalID:        result.ApprovalID,
+		ApprovalRationale: result.ApprovalRationale,
+	}), false, message
 }
 
 func (deps chatLoopDeps) executeCapability(ctx context.Context, capabilityID string, input json.RawMessage, step, index int) capability.Result {

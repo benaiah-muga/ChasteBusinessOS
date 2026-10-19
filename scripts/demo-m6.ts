@@ -119,9 +119,10 @@ async function main() {
   const itemId = item.data!.itemId as string;
   ok(`item created ${itemId.slice(0, 8)}`);
 
-  // Receive goods against a purchase order.
+  // Receive goods against a purchase order. A purchase order is a money
+  // commitment, so the owner commits it; the agent still performs the receipt.
   const vendor = await executor.execute("purchasing.createVendor", agentCtx, { name: "Lamp Parts Ltd" });
-  const po = await executor.execute("purchasing.createPurchaseOrder", agentCtx, {
+  const po = await executor.execute("purchasing.createPurchaseOrder", ownerCtx, {
     vendorId: vendor.data!.vendorId as string,
     lines: [{ description: "Desk lamp", quantity: 20_000, unitPriceMinor: 3_000, sku: "LAMP-01" }],
   });

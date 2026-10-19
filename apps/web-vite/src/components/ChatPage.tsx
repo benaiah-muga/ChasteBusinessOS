@@ -28,7 +28,7 @@ function clearChatPromptFromUrl() {
   }
 }
 
-export function ChatPage() {
+export function ChatPage({ organizationId = null }: { organizationId?: string | null }) {
   const { messages, busy, creator, creatorAvailable, queue, step, lastTool, sessionUsage } = useChat();
   const [input, setInput] = useState("");
   const promptAppliedRef = useRef(false);
@@ -101,7 +101,7 @@ export function ChatPage() {
         </header>
 
         <div ref={scrollRef} className="chat-page-scroll">
-          <MessageList messages={messages} busy={busy} />
+          <MessageList messages={messages} busy={busy} organizationId={organizationId} />
         </div>
 
         {busy && (

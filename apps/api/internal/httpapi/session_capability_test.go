@@ -545,7 +545,7 @@ func TestSessionCapabilityHandlerRejectsInvalidAuthOriginAndCallerClaims(t *test
 		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
 		executor := &fakeDirectCapabilityExecutor{err: capability.AccountingDomainError("credit note requires invoice workflow")}
 		response := httptest.NewRecorder()
-		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"accounting.reverseEntry","input":{}}`))
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"accounting.reverseEntry","input":{},"intentId":"domain-refusal-1"}`))
 		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "credit note requires invoice workflow") {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
@@ -555,7 +555,7 @@ func TestSessionCapabilityHandlerRejectsInvalidAuthOriginAndCallerClaims(t *test
 		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
 		executor := &fakeDirectCapabilityExecutor{err: capability.CreatorDomainError("proposal lacks valid isolated candidate evidence")}
 		response := httptest.NewRecorder()
-		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"creator.stageCandidate","input":{}}`))
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"creator.stageCandidate","input":{},"intentId":"domain-refusal-2"}`))
 		var refusal struct {
 			OK    bool   `json:"ok"`
 			Error string `json:"error"`
@@ -784,4 +784,28 @@ func TestSessionCapabilityHandlerCanGateMessagingPeopleRead(t *testing.T) {
 			t.Fatalf("status=%d capability=%q executor=%d body=%s", response.Code, executor.capID, executor.calls, response.Body.String())
 		}
 	})
+}
+
+func TestSessionCapabilityHandlerRequiresCommitmentIntent(t *testing.T) {
+	resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+	handler := NewSessionCapabilityHandler(resolver, executor, nil)
+
+	missing := httptest.NewRecorder()
+	handler.ServeHTTP(missing, directCapabilityRequest(http.MethodPost, `{"capabilityId":"purchasing.createPurchaseOrder","input":{}}`))
+	if missing.Code != http.StatusBadRequest || executor.calls != 0 {
+		t.Fatalf("money capability without intent status=%d calls=%d body=%s", missing.Code, executor.calls, missing.Body.String())
+	}
+
+	read := httptest.NewRecorder()
+	handler.ServeHTTP(read, directCapabilityRequest(http.MethodPost, `{"capabilityId":"crm.listCustomers","input":{}}`))
+	if read.Code != http.StatusOK || executor.calls != 1 {
+		t.Fatalf("read capability without intent status=%d calls=%d body=%s", read.Code, executor.calls, read.Body.String())
+	}
+
+	withIntent := httptest.NewRecorder()
+	handler.ServeHTTP(withIntent, directCapabilityRequest(http.MethodPost, `{"capabilityId":"purchasing.createPurchaseOrder","input":{},"intentId":"commit-po-1"}`))
+	if withIntent.Code != http.StatusOK || executor.calls != 2 {
+		t.Fatalf("money capability with intent status=%d calls=%d body=%s", withIntent.Code, executor.calls, withIntent.Body.String())
+	}
 }

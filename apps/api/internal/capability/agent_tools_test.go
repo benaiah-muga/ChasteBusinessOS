@@ -115,3 +115,18 @@ func assertUsefulAgentToolContract(t *testing.T, tool AgentToolSpec) {
 		}
 	}
 }
+
+func TestAgentToolsExposeGatedPurchaseProposal(t *testing.T) {
+	tools := AgentTools(map[string]bool{"purchasing.write": true, "purchasing.read": true})
+	purchase := findAgentTool(t, tools, createPurchaseOrderCapabilityID)
+	if purchase.Permission != "purchasing.write" || purchase.Risk != "money" {
+		t.Fatalf("purchase order tool=%+v, want purchasing.write money risk", purchase)
+	}
+	assertUsefulAgentToolContract(t, purchase)
+	findAgentTool(t, tools, purchasingListVendorsCapabilityID)
+	findAgentTool(t, tools, purchasingSupplierPerformanceCapabilityID)
+	findAgentTool(t, tools, purchasingGetPurchaseOrderCapabilityID)
+	if findAgentToolOrNil(AgentTools(map[string]bool{"purchasing.read": true}), createPurchaseOrderCapabilityID) != nil {
+		t.Fatal("purchase order was advertised without purchasing.write")
+	}
+}

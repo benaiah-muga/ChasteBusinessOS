@@ -90,6 +90,8 @@ the next number; superseded ones get a Status update, never deletion.
 | 0083 | Private message attachment staging bypasses approval payloads | accepted |
 | 0084 | Go-owned asynchronous document parsing jobs | accepted |
 | 0085 | Creator Mode scaffolds Go capability artifacts | accepted |
+| 0086 | Replenishment planning is a read-only governed capability | accepted |
+| 0087 | Workmate proposal cards render the stored approval payload | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

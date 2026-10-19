@@ -5,6 +5,23 @@ AI packages named in early entries were retired in the React + Go migration
 (see `docs/REACT_GO_MIGRATION_PLAN.md`); their behavior now lives in
 `apps/api` and is proven by the same demo proofs.
 
+## Post-migration, agentic operations (current)
+
+The strategy note is [docs/strategy/2026-10-19-post-migration-agentic-erp.md](docs/strategy/2026-10-19-post-migration-agentic-erp.md).
+The sequence is evidence-gated, not date-gated.
+
+- [x] Retire the Next.js runtime and prove Vite plus Go on fresh and upgraded databases.
+- [x] Register the Go business signal producers in the live API process.
+- [x] Create and dispatch durable runs with approval gates, receipts, and worker recovery.
+- [x] Deterministic live-data replenishment planning (`inventory.replenishmentPlan`, read-only).
+- [x] Purchase commitments and quote awards require human authority for agent and system actors; deactivated suppliers are rejected, and high-impact public writes require an intent.
+- [ ] Versioned purchase proposal and a line-level quote commitment.
+- [ ] Persistent exceptions, business objectives, and Decision Records.
+- [x] Workmate purchase proposal card: supplier context, exact approval payload, approve and reject in the conversation.
+- [x] Post-approval order status: remaining quantities and receipt history, with a backend plan-to-receipt acceptance proof.
+- [ ] Workmate cards for exception, progress, waiting, and verified result.
+- [ ] Scripted-model evaluation harness and release reliability metrics.
+
 ## M0, Foundation (current sprint)
 - [x] Monorepo scaffold: Turborepo, pnpm, TS strict, Next.js 15 web app
 - [x] Postgres 16 + pgvector dev database (Docker `chaste-pgvector`, :5433)

@@ -36,7 +36,7 @@ function creatorModulesResponse(enabled: boolean): Response {
   });
 }
 
-function harness(options: { modules?: () => Response; steer?: () => Response } = {}) {
+function harness(options: { modules?: () => Response; steer?: () => Response; approvals?: () => Response } = {}) {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const streams: ControlledStream[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -46,6 +46,12 @@ function harness(options: { modules?: () => Response; steer?: () => Response } =
     }
     if (url === "/api/chat/steer") {
       return options.steer ? options.steer() : Response.json({ queued: true });
+    }
+    if (url === "/api/approvals") {
+      return options.approvals ? options.approvals() : Response.json({ error: "approvals unavailable" }, { status: 500 });
+    }
+    if (url === "/api/capabilities/execute") {
+      return Response.json({ error: "purchasing read unavailable" }, { status: 500 });
     }
     requests.push({ url, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
     const stream = controlledStream();
@@ -232,4 +238,45 @@ describe("ChatPage", () => {
     await waitFor(() => expect(chatStore.getState().busy).toBe(false));
     expect(chatStore.getState().messages.at(-1)?.text).toBe("Continues after unmount.");
   });
+  it("renders the exact stored proposal when a pending approval tool result arrives", async () => {
+    const organizationId = "22222222-2222-4222-8222-222222222222";
+    const approvalId = "11111111-1111-4111-8111-111111111111";
+    const { streams } = harness({
+      approvals: () => Response.json({
+        approvals: [{
+          id: approvalId,
+          orgId: organizationId,
+          sessionId: null,
+          requestedByUserId: null,
+          capabilityId: "purchasing.createPurchaseOrder",
+          riskClass: "money",
+          payload: {
+            vendorId: "33333333-3333-4333-8333-333333333333",
+            memo: "Restock cement",
+            lines: [{ description: "Cement bag", quantity: 2000, unitPriceMinor: 5000 }],
+          },
+          rationale: "amount 10000 exceeds autonomous threshold 0",
+          status: "pending",
+          decidedByUserId: null,
+          decisionComment: null,
+          expiresAt: null,
+          decidedAt: null,
+          createdAt: "2026-10-19T12:00:00.000Z",
+          raisedBy: { name: "Workmate", kind: "agent" },
+          decidedBy: null,
+          relatedDocuments: [],
+        }],
+        history: [],
+      }),
+    });
+    render(<ChatPage organizationId={organizationId} />);
+    sendMessage("Order two cement bags from the approved supplier.");
+    await waitFor(() => expect(streams).toHaveLength(1));
+    streams[0]!.push(`{"type":"tool_result","name":"purchasing.createPurchaseOrder","ok":false,"pendingApproval":true,"approvalId":"${approvalId}","approvalRationale":"amount 10000 exceeds autonomous threshold 0"}\n`);
+    expect(await screen.findByText("Purchase proposal")).not.toBeNull();
+    expect(await screen.findByText("Cement bag")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Approve order" })).not.toBeNull();
+    await completeTurn(streams[0]!, "I prepared the order and it is waiting for your approval.");
+  });
+
 });

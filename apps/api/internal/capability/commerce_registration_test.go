@@ -17,7 +17,8 @@ func TestCommerceCapabilitiesHaveConsistentGovernance(t *testing.T) {
 		{listExpensePoliciesCapabilityID, "expenses.decide", "accounting", "read", 0},
 		{setExpensePolicyCapabilityID, "expenses.decide", "accounting", "write", 0},
 		{createVendorCapabilityID, "purchasing.write", "purchasing", "write", 0},
-		{createPurchaseOrderCapabilityID, "purchasing.write", "purchasing", "write", 0},
+		{createPurchaseOrderCapabilityID, "purchasing.write", "purchasing", "money", 0},
+		{selectWinningQuoteCapabilityID, "purchasing.write", "purchasing", "money", 0},
 		{receiveGoodsCapabilityID, "purchasing.write", "purchasing", "write", 0},
 		{createBillCapabilityID, "purchasing.write", "purchasing", "write", 0},
 		{payBillCapabilityID, "purchasing.post", "purchasing", "money", 50_000},
@@ -80,6 +81,13 @@ func TestCommerceMoneyAmountUsesExactOrFailClosedValues(t *testing.T) {
 	amount, known = moneyAmount(PosCompleteSaleInput{Lines: []PosSaleLineInput{{Description: "Item", Quantity: 2_000, UnitPriceMinor: 2_500}}})
 	if !known || amount == nil || *amount != 5_000 {
 		t.Fatalf("POS sale amount = %v, known=%t, want 5000", amount, known)
+	}
+	amount, known = moneyAmount(CreatePurchaseOrderInput{Lines: []CreatePurchaseOrderLineInput{
+		{Description: "Cement", Quantity: 2_000, UnitPriceMinor: 1_500},
+		{Description: "Delivery", Quantity: 1_000, UnitPriceMinor: 250},
+	}})
+	if !known || amount == nil || *amount != 3_250 {
+		t.Fatalf("purchase order amount = %v, known=%t, want 3250", amount, known)
 	}
 }
 

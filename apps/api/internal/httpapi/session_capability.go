@@ -178,6 +178,10 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "capability is disabled on this Go route"})
 		return
 	}
+	if intentID == "" && capability.RequiresActionIntent(body.CapabilityId) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "intentId is required for money, destructive, or identity capabilities"})
+		return
+	}
 	if isInventoryImportCapability(body.CapabilityId) {
 		if !resolved.HasPermission("inventory.write") && !resolved.HasPermission("*") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})

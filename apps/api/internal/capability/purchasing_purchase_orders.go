@@ -38,6 +38,25 @@ type CreatePurchaseOrderOutput struct {
 	PONumber int64 `json:"poNumber"`
 }
 
+// purchaseOrderCommitmentMinor computes the commitment a purchase order would
+// create, in integer minor units. The policy engine uses it to decide whether
+// an agent or system actor may commit without a human decision. An unknown
+// amount fails closed and requires approval.
+func purchaseOrderCommitmentMinor(input CreatePurchaseOrderInput) (*int64, bool) {
+	var total int64
+	for _, line := range input.Lines {
+		amount, err := inventoryJsRoundProductDiv(line.Quantity, line.UnitPriceMinor, 1000)
+		if err != nil {
+			return nil, false
+		}
+		total, err = inventoryAddSafeIntegers(total, amount)
+		if err != nil {
+			return nil, false
+		}
+	}
+	return &total, true
+}
+
 func ParseCreatePurchaseOrderInput(raw json.RawMessage) (CreatePurchaseOrderInput, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
@@ -113,12 +132,16 @@ func ParseCreatePurchaseOrderInput(raw json.RawMessage) (CreatePurchaseOrderInpu
 func createPurchaseOrder(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CreatePurchaseOrderInput, now time.Time) (CreatePurchaseOrderOutput, error) {
 	orgID := claims.OrganizationID
 	var vendorID string
+	var deactivatedAt *time.Time
 	if err := tx.QueryRow(ctx, `
-		SELECT id::text FROM vendors WHERE id = $1::uuid AND org_id = $2::uuid`, input.VendorID, orgID).Scan(&vendorID); err != nil {
+		SELECT id::text, deactivated_at FROM vendors WHERE id = $1::uuid AND org_id = $2::uuid`, input.VendorID, orgID).Scan(&vendorID, &deactivatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return CreatePurchaseOrderOutput{}, errors.New("vendor not found")
 		}
 		return CreatePurchaseOrderOutput{}, err
+	}
+	if deactivatedAt != nil {
+		return CreatePurchaseOrderOutput{}, errors.New("vendor is deactivated")
 	}
 	number, err := nextPurchaseOrderNumber(ctx, tx, orgID)
 	if err != nil {

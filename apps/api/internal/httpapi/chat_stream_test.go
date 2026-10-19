@@ -73,3 +73,24 @@ func TestChatNDJSONWriterMarshalsRawArguments(t *testing.T) {
 		t.Fatalf("body=%q, want raw JSON args embedded", recorder.Body.String())
 	}
 }
+
+func TestHandleChatLoopEventStreamsPendingApprovalMetadata(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writer := newChatNDJSONWriter(recorder, "session")
+	handler := &chatSessionHandler{}
+	handler.handleChatLoopEvent(writer, "org", "session", "tool_result", map[string]any{
+		"name":              "purchasing.createPurchaseOrder",
+		"capabilityId":      "purchasing.createPurchaseOrder",
+		"ok":                false,
+		"pendingApproval":   true,
+		"approvalId":        "11111111-1111-4111-8111-111111111111",
+		"approvalRationale": "amount 5000 exceeds autonomous threshold 0",
+	})
+	var event map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &event); err != nil {
+		t.Fatalf("decode event: %v body=%s", err, recorder.Body.String())
+	}
+	if event["type"] != "tool_result" || event["name"] != "purchasing.createPurchaseOrder" || event["pendingApproval"] != true || event["approvalId"] != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("tool result event=%v", event)
+	}
+}

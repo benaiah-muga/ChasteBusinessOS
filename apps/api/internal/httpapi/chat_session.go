@@ -550,6 +550,13 @@ func (h *chatSessionHandler) handleChatLoopEvent(writer *chatNDJSONWriter, orgID
 		writer.write(map[string]any{"type": "tool", "name": content["name"]})
 		h.persistChatEventDetached(orgID, sessionID, role, content)
 	case "tool_result":
+		frame := map[string]any{"type": "tool_result", "name": content["name"], "ok": content["ok"]}
+		for _, key := range []string{"capabilityId", "pendingApproval", "approvalId", "approvalRationale", "error"} {
+			if value, exists := content[key]; exists {
+				frame[key] = value
+			}
+		}
+		writer.write(frame)
 		h.persistChatEventDetached(orgID, sessionID, role, content)
 	case "ask":
 		event := map[string]any{"type": "ask"}

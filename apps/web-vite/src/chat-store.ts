@@ -21,6 +21,12 @@ export interface AskPayload {
   allowOther: boolean;
 }
 
+export interface ChatProposal {
+  approvalId: string;
+  capabilityId: string;
+  rationale: string;
+}
+
 export interface ChatMsg {
   role: "user" | "assistant";
   text: string;
@@ -30,6 +36,8 @@ export interface ChatMsg {
   steered?: boolean;
   /** Set when the model asked a clarification question in this message. */
   ask?: AskPayload;
+  /** A pending human approval produced by this turn, rendered as a proposal card. */
+  proposal?: ChatProposal;
   /** The option (or free text) the user answered with, once answered. */
   answered?: string;
   /** Token usage for this assistant turn, from the provider's own report. */
@@ -132,6 +140,17 @@ async function runTurn(text: string) {
             updateActive((message) => {
               message.activity = [...(message.activity ?? []), event.name];
             });
+            break;
+          case "tool_result":
+            if (event.pendingApproval && event.approvalId) {
+              updateActive((message) => {
+                message.proposal = {
+                  approvalId: event.approvalId!,
+                  capabilityId: event.name,
+                  rationale: event.approvalRationale || "This action needs your approval before it can run.",
+                };
+              });
+            }
             break;
           case "step":
             patch({ step: { step: event.step, maxSteps: event.maxSteps } });

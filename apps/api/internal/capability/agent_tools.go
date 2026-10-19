@@ -18,6 +18,26 @@ var agentToolDefinitions = map[string]agentToolDefinition{
 		description: "Summarize outstanding customer invoices by age, including current, 30, 60, and 90-plus day totals and invoice-level balances. This tool takes no input.",
 		schema:      `{"type":"object","properties":{},"additionalProperties":false}`,
 	},
+	purchasingListVendorsCapabilityID: {
+		description: "List this organization's suppliers with their IDs, names, contact email, payment terms, and active state. Use the returned IDs when preparing a purchase order.",
+		schema:      `{"type":"object","properties":{"includeInactive":{"type":"boolean","description":"When true, include deactivated suppliers. Defaults to false."}},"additionalProperties":false}`,
+	},
+	purchasingGetPurchaseOrderCapabilityID: {
+		description: "Read one purchase order and its receipts by order number, including status, ordered lines, accepted, rejected, returned and remaining quantities, promised date, and total. Use it to verify what actually happened after an approval.",
+		schema:      `{"type":"object","properties":{"poNumber":{"type":"integer","minimum":1,"description":"Purchase order number returned by the approval or purchasing list."}},"required":["poNumber"],"additionalProperties":false}`,
+	},
+	purchasingSupplierPerformanceCapabilityID: {
+		description: "Read supplier delivery performance, including average lead time in days, on-time rate, fill rate, order count, and backordered orders. Use it to compare approved suppliers before proposing a purchase.",
+		schema:      `{"type":"object","properties":{},"additionalProperties":false}`,
+	},
+	createPurchaseOrderCapabilityID: {
+		description: "Prepare a purchase order commitment for one supplier. This tool does not create the order directly: agent commitments return a pending human approval with the exact lines and total. Use purchasing.listVendors for the supplier ID and explain the proposal before calling it.",
+		schema:      `{"type":"object","properties":{"vendorId":{"type":"string","format":"uuid","description":"Supplier UUID from purchasing.listVendors."},"memo":{"type":"string","maxLength":500,"description":"Optional business reason for the order."},"promisedAt":{"type":"string","format":"date-time","description":"Optional RFC 3339 delivery promise."},"lines":{"type":"array","minItems":1,"items":{"type":"object","properties":{"description":{"type":"string","minLength":1,"maxLength":200},"quantity":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Quantity in thousandths; 1000 is one unit."},"unitPriceMinor":{"type":"integer","minimum":0,"maximum":9007199254740991,"description":"Unit price in integer minor currency units."},"expenseAccountCode":{"type":"string","pattern":"^[0-9]{4}$"},"sku":{"type":"string","maxLength":120}},"required":["description","quantity","unitPriceMinor"],"additionalProperties":false}}},"required":["vendorId","lines"],"additionalProperties":false}`,
+	},
+	inventoryReplenishmentPlanCapabilityID: {
+		description: "Plan inventory replenishment from live stock, open reservations, recent sales demand, open purchase orders, and recorded costs. Returns suggested quantities, cost estimates, assumptions, and warnings. It does not create or reserve anything.",
+		schema:      `{"type":"object","properties":{"sku":{"type":"string","minLength":1,"maxLength":120,"description":"Optional exact SKU to plan; omit to plan every active goods item."},"lookbackDays":{"type":"integer","minimum":7,"maximum":365,"description":"Days of sales history used for the demand rate. Defaults to 90."},"reviewDays":{"type":"integer","minimum":0,"maximum":90,"description":"Days of demand the target stock should cover beyond lead time. Defaults to 7."},"leadTimeDays":{"type":"integer","minimum":1,"maximum":365,"description":"Configured supplier lead time in days. Defaults to 14."},"serviceLevel":{"type":"string","enum":["90","95","98","99"],"description":"Service level used for safety stock. Defaults to 95."},"includeSufficient":{"type":"boolean","description":"When true, include items that need no action. Defaults to false."}},"additionalProperties":false}`,
+	},
 	listCustomersCapabilityID: {
 		description: "Search organization customers by name, email, or phone. Returns customer IDs, names, and email addresses. Leave query out to list the first matching customers.",
 		schema:      `{"type":"object","properties":{"query":{"type":"string","description":"Optional text to match against customer name, email, or phone."}},"additionalProperties":false}`,

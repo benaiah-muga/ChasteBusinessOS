@@ -810,6 +810,38 @@ func TestRoutineProviderUsesOpenAICompatibleChatCompletions(t *testing.T) {
 
 func stringPointer(value string) *string { return &value }
 
+func TestRoutineToolsIncludeReplenishmentPlan(t *testing.T) {
+	tools, byName, err := routineToolSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byName["inventory_replenishmentPlan"] != "inventory.replenishmentPlan" {
+		t.Fatalf("routine name mapping=%q, want inventory.replenishmentPlan", byName["inventory_replenishmentPlan"])
+	}
+	for _, tool := range tools {
+		if tool.Capability != "inventory.replenishmentPlan" {
+			continue
+		}
+		if tool.Name != "inventory_replenishmentPlan" || tool.Permission != "inventory.read" {
+			t.Fatalf("unexpected replenishment tool: %+v", tool)
+		}
+		properties, ok := tool.Schema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("replenishment schema has no properties: %#v", tool.Schema)
+		}
+		for _, field := range []string{"sku", "lookbackDays", "reviewDays", "leadTimeDays", "serviceLevel", "includeSufficient"} {
+			if _, exists := properties[field]; !exists {
+				t.Fatalf("replenishment schema is missing %s: %#v", field, properties)
+			}
+		}
+		if _, required := tool.Schema["required"]; required {
+			t.Fatalf("replenishment filters should stay optional: %#v", tool.Schema)
+		}
+		return
+	}
+	t.Fatal("routine tool set does not expose inventory.replenishmentPlan")
+}
+
 func TestRoutineProviderErrorDoesNotExposeBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

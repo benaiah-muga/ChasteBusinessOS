@@ -435,6 +435,17 @@ func selectWinningQuote(ctx context.Context, tx pgx.Tx, orgID string, input Sele
 	if requestStatus != "approved" {
 		return SelectWinningQuoteOutput{}, errors.New("request is no longer approvable into an order")
 	}
+	var vendorDeactivatedAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT deactivated_at FROM vendors WHERE id = $1::uuid AND org_id = $2::uuid`, vendorID, orgID).Scan(&vendorDeactivatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return SelectWinningQuoteOutput{}, errors.New("vendor not found")
+		}
+		return SelectWinningQuoteOutput{}, err
+	}
+	if vendorDeactivatedAt != nil {
+		return SelectWinningQuoteOutput{}, errors.New("vendor is deactivated")
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE rfqs SET status = 'lost'
 		WHERE request_id = $1::uuid AND org_id = $2::uuid`, requestID, orgID); err != nil {

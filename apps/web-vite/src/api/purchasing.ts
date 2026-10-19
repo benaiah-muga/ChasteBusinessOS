@@ -520,6 +520,68 @@ export async function fetchPurchasingEnabled(organizationId: string | null | und
   return switchboard.enabledModules.includes("purchasing");
 }
 
+const GoPurchaseOrderLineSchema = z.object({
+  lineNumber: z.number().int().safe().positive(),
+  description: z.string(),
+  quantity: SafeIntegerSchema,
+  unitPriceMinor: SafeIntegerSchema,
+  lineTotalMinor: SafeIntegerSchema,
+  acceptedThousandths: SafeIntegerSchema,
+  rejectedThousandths: SafeIntegerSchema,
+  returnedThousandths: SafeIntegerSchema,
+  remainingThousandths: SafeIntegerSchema,
+}).strict();
+
+const GoPurchaseOrderReceiptLineSchema = z.object({
+  position: z.number().int().safe().positive(),
+  description: z.string(),
+  acceptedThousandths: SafeIntegerSchema,
+  rejectedThousandths: SafeIntegerSchema,
+  returnedThousandths: SafeIntegerSchema,
+  rejectionNote: z.string().nullable(),
+}).strict();
+
+const GoPurchaseOrderReceiptSchema = z.object({
+  number: z.number().int().safe().positive(),
+  receivedAt: TimestampSchema,
+  note: z.string().nullable(),
+  lines: z.array(GoPurchaseOrderReceiptLineSchema),
+}).strict();
+
+export const GoPurchaseOrderSchema = z.object({
+  poNumber: z.number().int().safe().positive(),
+  vendorId: z.string().uuid(),
+  vendorName: z.string(),
+  status: z.string(),
+  memo: z.string().nullable(),
+  orderedAt: TimestampSchema.nullable(),
+  promisedAt: TimestampSchema.nullable(),
+  totalMinor: SafeIntegerSchema,
+  lines: z.array(GoPurchaseOrderLineSchema),
+  receipts: z.array(GoPurchaseOrderReceiptSchema),
+  fullyReceived: z.boolean(),
+  backordered: z.boolean(),
+}).strict();
+
+export type GoPurchaseOrder = z.infer<typeof GoPurchaseOrderSchema>;
+
+export async function fetchPurchaseOrder(poNumber: number, organizationId: string | null | undefined, signal?: AbortSignal): Promise<GoPurchaseOrder> {
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json", ...organizationHeader(organizationId) },
+    body: JSON.stringify({ capabilityId: "purchasing.getPurchaseOrder", input: { poNumber }, intentId: crypto.randomUUID() }),
+  }, "load the purchase order", signal);
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  if (response.status !== 200 || !envelope.success) {
+    throw new PurchasingApiError(response.status, "The Go Purchasing service returned an unexpected order response.");
+  }
+  const parsed = GoPurchaseOrderSchema.safeParse(envelope.data.data);
+  if (!parsed.success) {
+    throw new PurchasingApiError(response.status, "The Go Purchasing service returned the purchase order in an unexpected format.");
+  }
+  return parsed.data;
+}
+
 export async function fetchPurchasingWorkspace(organizationId: string | null | undefined, signal?: AbortSignal): Promise<PurchasingWorkspace> {
   const { response, body } = await request("/api/capabilities/execute", {
     method: "POST",
