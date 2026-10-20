@@ -195,6 +195,9 @@ var capabilitySpecs = map[string]capabilitySpec{
 	createRfqCapabilityID:                               {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	recordQuoteCapabilityID:                             {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	selectWinningQuoteCapabilityID:                      {module: "purchasing", permission: "purchasing.write", risk: "money", moneyThresholdMinor: 0},
+	upsertOperationalRecordCapabilityID:                 {module: "operations", permission: "operations.write", risk: "write"},
+	getOperationalRecordCapabilityID:                    {module: "operations", permission: "operations.read", risk: "read"},
+	listOperationalRecordsCapabilityID:                  {module: "operations", permission: "operations.read", risk: "read"},
 	listPurchaseWorkflowCapabilityID:                    {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	inventoryCreateItemCapabilityID:                     {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryUpdateItemCapabilityID:                     {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.restoreItem"},
@@ -506,6 +509,7 @@ func supportedCapability(capabilityID string) bool {
 		unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID, listBankingWorkspaceCapabilityID,
 		createPurchaseRequestCapabilityID, decidePurchaseRequestCapabilityID, createRfqCapabilityID, recordQuoteCapabilityID,
 		selectWinningQuoteCapabilityID, listPurchaseWorkflowCapabilityID,
+		upsertOperationalRecordCapabilityID, getOperationalRecordCapabilityID, listOperationalRecordsCapabilityID,
 		inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
 		inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
 		inventoryListLocationRecordsCapabilityID,
@@ -1193,6 +1197,24 @@ func (e *Executor) executeWithFinalizer(
 			unmatchBankTransactionCapabilityID, bankReconciliationCapabilityID, excludeBankTransactionCapabilityID,
 			unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID, listBankingWorkspaceCapabilityID:
 			parsed, err := parseBankingInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case upsertOperationalRecordCapabilityID:
+			parsed, err := ParseUpsertOperationalRecordInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case getOperationalRecordCapabilityID:
+			parsed, err := ParseGetOperationalRecordInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case listOperationalRecordsCapabilityID:
+			parsed, err := ParseListOperationalRecordsInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -2672,6 +2694,24 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case UpsertOperationalRecordInput:
+			output, err := upsertOperationalRecord(ctx, tx, claims.OrganizationID, claims.ActorID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case GetOperationalRecordInput:
+			output, err := getOperationalRecord(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListOperationalRecordsInput:
+			output, err := listOperationalRecords(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case SelectWinningQuoteInput:
 			output, err := selectWinningQuote(ctx, tx, claims.OrganizationID, parsed, now)
 			if err != nil {
@@ -3813,6 +3853,8 @@ func canonicalInputHash(input any) (string, error) {
 		MessagingUpdateConversationPresenceInput, MessagingRestoreConversationPresenceInput,
 		MessagingUploadMessageAttachmentInput, MessagingDeletePendingAttachmentInput:
 		return canonicalHash(parsed)
+	case UpsertOperationalRecordInput, GetOperationalRecordInput, ListOperationalRecordsInput:
+		return canonicalHash(parsed)
 	default:
 		return "", errors.New("unsupported capability input")
 	}
@@ -3956,10 +3998,11 @@ func effectivePermissions(ctx context.Context, tx pgx.Tx, claims authbridge.Capa
 // apps/web/src/server/kernel.ts: without these a saved enabled_modules list
 // silently disabled IAM governance in Go while TypeScript still allowed it.
 var alwaysEnabledModuleIDs = map[string]bool{
-	"settings": true,
-	"iam":      true,
-	"signals":  true,
-	"routines": true,
+	"settings":   true,
+	"iam":        true,
+	"signals":    true,
+	"routines":   true,
+	"operations": true,
 }
 
 func isModuleEnabled(ctx context.Context, tx pgx.Tx, orgID, moduleID string) (bool, error) {

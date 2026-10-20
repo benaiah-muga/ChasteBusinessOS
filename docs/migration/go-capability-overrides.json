@@ -16,20 +16,42 @@
           {
             "type": "object",
             "properties": {
-              "dealId": { "type": "string", "format": "uuid" },
-              "customerId": { "type": "string", "format": "uuid" }
+              "dealId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "customerId": {
+                "type": "string",
+                "format": "uuid"
+              }
             },
-            "required": ["dealId", "customerId"],
+            "required": [
+              "dealId",
+              "customerId"
+            ],
             "additionalProperties": false
           },
           {
             "type": "object",
             "properties": {
-              "dealId": { "type": "string", "format": "uuid" },
-              "createCustomer": { "type": "boolean", "const": true },
-              "customerName": { "type": "string", "minLength": 1 }
+              "dealId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "createCustomer": {
+                "type": "boolean",
+                "const": true
+              },
+              "customerName": {
+                "type": "string",
+                "minLength": 1
+              }
             },
-            "required": ["dealId", "createCustomer", "customerName"],
+            "required": [
+              "dealId",
+              "createCustomer",
+              "customerName"
+            ],
             "additionalProperties": false
           }
         ]
@@ -38,12 +60,30 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "dealId": { "type": "string", "format": "uuid" },
-          "customerId": { "type": "string", "format": "uuid" },
-          "conversionIntentId": { "type": "string", "minLength": 1, "maxLength": 160 },
-          "stage": { "type": "string", "const": "qualified" }
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversionIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "stage": {
+            "type": "string",
+            "const": "qualified"
+          }
         },
-        "required": ["dealId", "customerId", "conversionIntentId", "stage"],
+        "required": [
+          "dealId",
+          "customerId",
+          "conversionIntentId",
+          "stage"
+        ],
         "additionalProperties": false
       }
     },
@@ -61,22 +101,50 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "conversionIntentId": { "type": "string", "minLength": 1, "maxLength": 160 }
+          "conversionIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
         },
-        "required": ["conversionIntentId"],
+        "required": [
+          "conversionIntentId"
+        ],
         "additionalProperties": false
       },
       "outputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "undone": { "type": "boolean", "const": true },
-          "dealId": { "type": "string", "format": "uuid" },
-          "customerDeleted": { "type": "boolean" },
-          "conversionIntentId": { "type": "string", "minLength": 1, "maxLength": 160 },
-          "undoIntentId": { "type": "string", "minLength": 1, "maxLength": 160 }
+          "undone": {
+            "type": "boolean",
+            "const": true
+          },
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerDeleted": {
+            "type": "boolean"
+          },
+          "conversionIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "undoIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
         },
-        "required": ["undone", "dealId", "customerDeleted", "conversionIntentId", "undoIntentId"],
+        "required": [
+          "undone",
+          "dealId",
+          "customerDeleted",
+          "conversionIntentId",
+          "undoIntentId"
+        ],
         "additionalProperties": false
       }
     },
@@ -105,34 +173,74 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "string", "format": "uuid" },
-                "createdAt": { "type": "string", "format": "date-time" },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
                 "inspection": {
                   "type": "object",
                   "properties": {
                     "profile": {
                       "type": "object",
                       "properties": {
-                        "id": { "type": "string" },
-                        "version": { "type": "string" },
-                        "environment": { "type": "string" }
+                        "id": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "string"
+                        },
+                        "environment": {
+                          "type": "string"
+                        }
                       },
-                      "required": ["id", "version", "environment"],
+                      "required": [
+                        "id",
+                        "version",
+                        "environment"
+                      ],
                       "additionalProperties": false
                     },
-                    "profileDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-                    "compositionDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                    "profileDigest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "compositionDigest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
                     "bundles": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "id": { "type": "string" },
-                          "version": { "type": "string" },
-                          "serviceIds": { "type": "array", "items": { "type": "string" } },
-                          "requiredBundleIds": { "type": "array", "items": { "type": "string" } }
+                          "id": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "serviceIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "requiredBundleIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
                         },
-                        "required": ["id", "version", "serviceIds"],
+                        "required": [
+                          "id",
+                          "version",
+                          "serviceIds"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -141,25 +249,50 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "id": { "type": "string" },
-                          "version": { "type": "string" },
-                          "configKeys": { "type": "array", "items": { "type": "string" } }
+                          "id": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "configKeys": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
                         },
-                        "required": ["id", "version", "configKeys"],
+                        "required": [
+                          "id",
+                          "version",
+                          "configKeys"
+                        ],
                         "additionalProperties": false
                       }
                     }
                   },
-                  "required": ["profile", "profileDigest", "compositionDigest", "bundles", "patches"],
+                  "required": [
+                    "profile",
+                    "profileDigest",
+                    "compositionDigest",
+                    "bundles",
+                    "patches"
+                  ],
                   "additionalProperties": false
                 }
               },
-              "required": ["id", "createdAt", "inspection"],
+              "required": [
+                "id",
+                "createdAt",
+                "inspection"
+              ],
               "additionalProperties": false
             }
           }
         },
-        "required": ["compositions"],
+        "required": [
+          "compositions"
+        ],
         "additionalProperties": false
       }
     },
@@ -177,21 +310,45 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "undoIntentId": { "type": "string", "minLength": 1, "maxLength": 160 }
+          "undoIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
         },
-        "required": ["undoIntentId"],
+        "required": [
+          "undoIntentId"
+        ],
         "additionalProperties": false
       },
       "outputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "reapplied": { "type": "boolean", "const": true },
-          "dealId": { "type": "string", "format": "uuid" },
-          "customerId": { "type": "string", "format": "uuid" },
-          "conversionIntentId": { "type": "string", "minLength": 1, "maxLength": 160 }
+          "reapplied": {
+            "type": "boolean",
+            "const": true
+          },
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversionIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
         },
-        "required": ["reapplied", "dealId", "customerId", "conversionIntentId"],
+        "required": [
+          "reapplied",
+          "dealId",
+          "customerId",
+          "conversionIntentId"
+        ],
         "additionalProperties": false
       }
     },
@@ -209,18 +366,37 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "kind": { "type": "string", "enum": ["invoice", "quote", "receipt", "delivery_note", "purchase_order", "voucher", "employment_contract", "employment_agreement"] }
+          "kind": {
+            "type": "string",
+            "enum": [
+              "invoice",
+              "quote",
+              "receipt",
+              "delivery_note",
+              "purchase_order",
+              "voucher",
+              "employment_contract",
+              "employment_agreement"
+            ]
+          }
         },
-        "required": ["kind"],
+        "required": [
+          "kind"
+        ],
         "additionalProperties": false
       },
       "outputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "number": { "type": "string", "minLength": 1 }
+          "number": {
+            "type": "string",
+            "minLength": 1
+          }
         },
-        "required": ["number"],
+        "required": [
+          "number"
+        ],
         "additionalProperties": false
       }
     },
@@ -238,12 +414,38 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "sku": { "type": "string", "minLength": 1, "maxLength": 120 },
-          "lookbackDays": { "type": "integer", "minimum": 7, "maximum": 365 },
-          "reviewDays": { "type": "integer", "minimum": 0, "maximum": 90 },
-          "leadTimeDays": { "type": "integer", "minimum": 1, "maximum": 365 },
-          "serviceLevel": { "type": "string", "enum": ["90", "95", "98", "99"] },
-          "includeSufficient": { "type": "boolean" }
+          "sku": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "lookbackDays": {
+            "type": "integer",
+            "minimum": 7,
+            "maximum": 365
+          },
+          "reviewDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "serviceLevel": {
+            "type": "string",
+            "enum": [
+              "90",
+              "95",
+              "98",
+              "99"
+            ]
+          },
+          "includeSufficient": {
+            "type": "boolean"
+          }
         },
         "additionalProperties": false
       },
@@ -251,15 +453,43 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "asOf": { "type": "string" },
-          "currency": { "type": "string" },
-          "assumptions": { "type": "object" },
-          "summary": { "type": "object" },
-          "items": { "type": "array", "items": { "type": "object" } },
-          "warnings": { "type": "array", "items": { "type": "string" } },
-          "truncated": { "type": "boolean" }
+          "asOf": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "assumptions": {
+            "type": "object"
+          },
+          "summary": {
+            "type": "object"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
         },
-        "required": ["asOf", "currency", "assumptions", "summary", "items", "warnings", "truncated"],
+        "required": [
+          "asOf",
+          "currency",
+          "assumptions",
+          "summary",
+          "items",
+          "warnings",
+          "truncated"
+        ],
         "additionalProperties": false
       }
     },
@@ -277,36 +507,66 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "vendorId": { "type": "string", "format": "uuid" },
-          "memo": { "type": "string" },
-          "promisedAt": { "type": "string", "format": "date-time" },
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "memo": {
+            "type": "string"
+          },
+          "promisedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
           "lines": {
             "type": "array",
             "minItems": 1,
             "items": {
               "type": "object",
               "properties": {
-                "description": { "type": "string" },
-                "quantity": { "type": "integer" },
-                "unitPriceMinor": { "type": "integer" },
-                "expenseAccountCode": { "type": "string", "pattern": "^[0-9]{4}$" },
-                "sku": { "type": "string" }
+                "description": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer"
+                },
+                "unitPriceMinor": {
+                  "type": "integer"
+                },
+                "expenseAccountCode": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}$"
+                },
+                "sku": {
+                  "type": "string"
+                }
               },
-              "required": ["description", "quantity", "unitPriceMinor"],
+              "required": [
+                "description",
+                "quantity",
+                "unitPriceMinor"
+              ],
               "additionalProperties": false
             }
           }
         },
-        "required": ["vendorId", "lines"],
+        "required": [
+          "vendorId",
+          "lines"
+        ],
         "additionalProperties": false
       },
       "outputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "poNumber": { "type": "integer" }
+          "poNumber": {
+            "type": "integer"
+          }
         },
-        "required": ["poNumber"],
+        "required": [
+          "poNumber"
+        ],
         "additionalProperties": false
       }
     },
@@ -324,20 +584,36 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "rfqId": { "type": "string", "format": "uuid" }
+          "rfqId": {
+            "type": "string",
+            "format": "uuid"
+          }
         },
-        "required": ["rfqId"],
+        "required": [
+          "rfqId"
+        ],
         "additionalProperties": false
       },
       "outputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "poNumber": { "type": "integer" },
-          "vendorId": { "type": "string", "format": "uuid" },
-          "quoteAmountMinor": { "type": "integer" }
+          "poNumber": {
+            "type": "integer"
+          },
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quoteAmountMinor": {
+            "type": "integer"
+          }
         },
-        "required": ["poNumber", "vendorId", "quoteAmountMinor"],
+        "required": [
+          "poNumber",
+          "vendorId",
+          "quoteAmountMinor"
+        ],
         "additionalProperties": false
       }
     },
@@ -355,7 +631,9 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "includeInactive": { "type": "boolean" }
+          "includeInactive": {
+            "type": "boolean"
+          }
         },
         "additionalProperties": false
       },
@@ -368,18 +646,43 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "string", "format": "uuid" },
-                "name": { "type": "string" },
-                "email": { "type": ["string", "null"] },
-                "paymentTermDays": { "type": ["integer", "null"] },
-                "active": { "type": "boolean" }
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "paymentTermDays": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "active": {
+                  "type": "boolean"
+                }
               },
-              "required": ["id", "name", "email", "paymentTermDays", "active"],
+              "required": [
+                "id",
+                "name",
+                "email",
+                "paymentTermDays",
+                "active"
+              ],
               "additionalProperties": false
             }
           }
         },
-        "required": ["vendors"],
+        "required": [
+          "vendors"
+        ],
         "additionalProperties": false
       }
     },
@@ -397,30 +700,229 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "poNumber": { "type": "integer", "minimum": 1 }
+          "poNumber": {
+            "type": "integer",
+            "minimum": 1
+          }
         },
-        "required": ["poNumber"],
+        "required": [
+          "poNumber"
+        ],
         "additionalProperties": false
       },
       "outputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "poNumber": { "type": "integer" },
-          "vendorId": { "type": "string", "format": "uuid" },
-          "vendorName": { "type": "string" },
-          "status": { "type": "string" },
-          "memo": { "type": ["string", "null"] },
-          "orderedAt": { "type": ["string", "null"] },
-          "promisedAt": { "type": ["string", "null"] },
-          "totalMinor": { "type": "integer" },
-          "lines": { "type": "array", "items": { "type": "object" } },
-          "receipts": { "type": "array", "items": { "type": "object" } },
-          "fullyReceived": { "type": "boolean" },
-          "backordered": { "type": "boolean" }
+          "poNumber": {
+            "type": "integer"
+          },
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vendorName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "memo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "orderedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "promisedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalMinor": {
+            "type": "integer"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "fullyReceived": {
+            "type": "boolean"
+          },
+          "backordered": {
+            "type": "boolean"
+          }
         },
-        "required": ["poNumber", "vendorId", "vendorName", "status", "memo", "orderedAt", "promisedAt", "totalMinor", "lines", "receipts", "fullyReceived", "backordered"],
+        "required": [
+          "poNumber",
+          "vendorId",
+          "vendorName",
+          "status",
+          "memo",
+          "orderedAt",
+          "promisedAt",
+          "totalMinor",
+          "lines",
+          "receipts",
+          "fullyReceived",
+          "backordered"
+        ],
         "additionalProperties": false
+      }
+    },
+    {
+      "id": "operations.upsertRecord",
+      "title": "Upsert operational record",
+      "intent": "Create or update a persistent business objective, deduplicated exception, or Decision Record under a stable key.",
+      "module": "operations",
+      "risk": "write",
+      "permission": "operations.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "stableKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "details": {
+            "type": "object"
+          },
+          "authorityRef": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "approvalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "stableKey",
+          "status",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "operations.getRecord",
+      "title": "Read operational record",
+      "intent": "Read one persistent objective, exception, or Decision Record and its conversation card.",
+      "module": "operations",
+      "risk": "read",
+      "permission": "operations.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "stableKey": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "operations.listRecords",
+      "title": "List operational records",
+      "intent": "List persistent objectives, exceptions, and Decision Records filtered by kind and status.",
+      "module": "operations",
+      "risk": "read",
+      "permission": "operations.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
       }
     }
   ]

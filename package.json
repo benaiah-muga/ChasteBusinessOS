@@ -27,7 +27,7 @@
     "nl:test": "tsx --tsconfig tsconfig.scripts.json --env-file-if-exists=.env scripts/nl-tasks.ts",
     "test:groq": "tsx --tsconfig tsconfig.scripts.json --env-file-if-exists=.env scripts/test-groq.ts",
     "worker": "node --env-file-if-exists=.env scripts/worker-go.mjs",
-    "go:test": "go -C apps/api test ./...",
+    "go:test": "go -C apps/api test -timeout 30m ./...",
     "go:vet": "go -C apps/api vet ./...",
     "go:verify": "pnpm go:test && pnpm go:vet",
     "verify:vite-go": "pnpm --filter @chaste/web-vite build && pnpm go:verify",

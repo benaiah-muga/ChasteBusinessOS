@@ -114,7 +114,7 @@ func TestAlwaysEnabledSetIsKnownToTheTypeScriptCatalog(t *testing.T) {
 		"pos": true, "inventory": true, "manufacturing": true, "purchasing": true,
 		"crm": true, "sales": true, "documents": true, "hr": true, "messaging": true,
 		"support": true, "skills": true, "creator": true, "iam": true,
-		"routines": true, "signals": true, "settings": true,
+		"routines": true, "signals": true, "settings": true, "operations": true,
 	}
 	for module := range alwaysEnabledModuleIDs {
 		if !known[module] {

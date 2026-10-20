@@ -16,10 +16,10 @@ The sequence is evidence-gated, not date-gated.
 - [x] Deterministic live-data replenishment planning (`inventory.replenishmentPlan`, read-only).
 - [x] Purchase commitments and quote awards require human authority for agent and system actors; deactivated suppliers are rejected, and high-impact public writes require an intent.
 - [x] Versioned purchase proposal and a line-level quote commitment.
-- [ ] Persistent exceptions, business objectives, and Decision Records.
+- [x] Persistent exceptions, business objectives, and Decision Records.
 - [x] Workmate purchase proposal card: supplier context, exact approval payload, approve and reject in the conversation.
 - [x] Post-approval order status: remaining quantities and receipt history, with a backend plan-to-receipt acceptance proof.
-- [ ] Workmate cards for exception, progress, waiting, and verified result.
+- [x] Workmate cards for exception, progress, waiting, and verified result.
 - [x] Live agent evaluation harness with a Settings Quality surface, durable run history, pass-rate trends, an 80% baseline, stored-run detail, a four-scenario scripted baseline, and DeepSeek flash scenarios.
 - [x] Scheduled nightly evaluation, configurable regression baseline, bounded retention, release metrics, model comparison, and seven scenarios.
 

@@ -1,0 +1,110 @@
+.workmate-record-card {
+  --record-ink: #26352c;
+  --record-muted: #73766d;
+  --record-line: #e5e3da;
+  --record-surface: #fffefa;
+  --record-accent: #8a6f38;
+  --record-tone: var(--record-muted);
+  --record-wash: var(--record-surface);
+
+  margin-top: 10px;
+  border: 1px solid var(--record-line);
+  border-left: 3px solid var(--record-tone);
+  border-radius: 10px;
+  padding: 11px 13px;
+  background: var(--record-wash);
+  color: var(--record-ink);
+}
+
+.workmate-record-card-exception { --record-tone: #8c4c40; --record-wash: #fbf5f2; }
+.workmate-record-card-progress { --record-tone: #26352c; --record-wash: #fffefa; }
+.workmate-record-card-waiting { --record-tone: #8a6f38; --record-wash: #fbf8ee; }
+.workmate-record-card-result { --record-tone: #73766d; --record-wash: #f6f5ef; }
+
+.workmate-record-card-kind {
+  margin: 0 0 3px;
+  color: var(--record-tone);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.workmate-record-card-title {
+  margin: 0;
+  color: var(--record-ink);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.workmate-record-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 8px 0 0;
+}
+
+.workmate-record-card-meta div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.workmate-record-card-meta dt {
+  color: var(--record-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.workmate-record-card-meta dd {
+  margin: 0;
+  color: var(--record-ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.workmate-record-card-summary {
+  margin: 8px 0 0;
+  color: #4b5348;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.workmate-record-card-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 7px;
+  margin: 8px 0 0;
+  color: var(--record-ink);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.workmate-record-card-next-label {
+  border-radius: 99px;
+  padding: 1px 7px;
+  background: #f2ecda;
+  color: var(--record-accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.workmate-record-card-evidence {
+  max-height: 220px;
+  margin: 9px 0 0;
+  overflow: auto;
+  border-top: 1px solid var(--record-line);
+  padding-top: 8px;
+  color: var(--record-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

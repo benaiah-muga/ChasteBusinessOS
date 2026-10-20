@@ -193,6 +193,14 @@ still approval-gated, there is no autonomous cumulative spend to bound yet.
 
 ### Gate D: durable objective, exceptions, and records (two weeks)
 
+Delivered on 20 October: `operational_records` persists objectives,
+deduplicated exceptions, and Decision Records under stable keys, with
+revisioned updates, authority references, approval links, and JSON evidence.
+`operations.upsertRecord`, `operations.getRecord`, and
+`operations.listRecords` are governed capabilities and the operations module is
+always enabled. Rich type-specific validation and a dedicated records page
+remain open.
+
 - A business objective persists its completion criteria, authority reference,
   current state, evidence versions, approvals, waiting conditions, and
   verified result.
@@ -207,6 +215,12 @@ still approval-gated, there is no autonomous cumulative spend to bound yet.
   recommendation, authority, approval, actions, and verified result.
 
 ### Gate E: Workmate as the operating surface (one week, overlapping C and D)
+
+Delivered on 20 October: Workmate renders read-only exception, progress,
+waiting, and verified-result cards from structured tool results. The card is a
+record view, never an approval; the purchase proposal card remains the
+authority surface. Multiple cards per turn and a dedicated record detail view
+remain open.
 
 - Reusable cards for exception, proposal, approval, progress, waiting, and
   result.

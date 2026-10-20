@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { answerChatAsk, chatStore, useChat, type AskPayload, type ChatMsg } from "../chat-store";
 import { CHAT_MESSAGE_MAX_UNITS, type ChatUsage } from "../api/chat";
 import { ProposalCard } from "./ProposalCard";
+import { WorkmateRecordCard } from "./WorkmateRecordCard";
 import "./ChatTranscript.css";
 
 /** Compact token counts for chips: 1234 -> "1.2k". */
@@ -237,6 +238,7 @@ export function MessageList({
                 )
               )}
               {message.ask && <AskCard ask={message.ask} answered={message.answered} />}
+              {message.card && <WorkmateRecordCard card={message.card} />}
               {message.proposal && <ProposalCard proposal={message.proposal} organizationId={organizationId} />}
               {message.usage && <UsageChip usage={message.usage} />}
             </div>

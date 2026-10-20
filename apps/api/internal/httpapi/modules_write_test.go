@@ -54,7 +54,7 @@ func TestModulesWriteHandlerExecutesGovernedSwitchboardCapability(t *testing.T) 
 	if err := json.Unmarshal(executor.input, &input); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(input.Modules, ",") != "projects,iam,routines,signals" {
+	if strings.Join(input.Modules, ",") != "projects,iam,routines,signals,operations" {
 		t.Fatalf("capability input=%s, legacy input order or protected modules changed", executor.input)
 	}
 }

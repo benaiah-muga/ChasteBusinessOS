@@ -858,6 +858,10 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "accounting.write", true
 	case bankReconciliationCapabilityID, bankSummaryCapabilityID, listBankingWorkspaceCapabilityID:
 		return "accounting.read", true
+	case upsertOperationalRecordCapabilityID:
+		return "operations.write", true
+	case getOperationalRecordCapabilityID, listOperationalRecordsCapabilityID:
+		return "operations.read", true
 	case createPurchaseRequestCapabilityID, decidePurchaseRequestCapabilityID, createRfqCapabilityID, recordQuoteCapabilityID,
 		selectWinningQuoteCapabilityID:
 		return "purchasing.write", true

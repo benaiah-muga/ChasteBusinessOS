@@ -18,6 +18,26 @@ const StepFrameSchema = z.object({
   maxSteps: z.number().int().nonnegative(),
 });
 const ToolFrameSchema = z.object({ type: z.literal("tool"), name: z.string() });
+
+const ChatCardKindSchema = z.enum(["exception", "progress", "waiting", "result"]);
+
+/**
+ * A structured record the backend attaches to a tool result. Evidence is
+ * arbitrary JSON and stays a record: this card never drives approval.
+ */
+const ChatCardSchema = z.object({
+  kind: ChatCardKindSchema,
+  title: z.string().min(1),
+  status: z.string().min(1),
+  severity: z.string().min(1).optional(),
+  summary: z.string().default(""),
+  next: z.string().default(""),
+  evidence: z.unknown().optional(),
+});
+
+export type ChatCardKind = z.infer<typeof ChatCardKindSchema>;
+export type ChatCard = z.infer<typeof ChatCardSchema>;
+
 const ToolResultFrameSchema = z.object({
   type: z.literal("tool_result"),
   name: z.string(),
@@ -26,6 +46,9 @@ const ToolResultFrameSchema = z.object({
   approvalId: z.string().optional(),
   approvalRationale: z.string().optional(),
   error: z.string().optional(),
+  // A malformed card must not discard the frame: the approval and error
+  // fields are load-bearing even when the display card is not parseable.
+  card: ChatCardSchema.optional().catch(undefined),
 });
 const CompactionFrameSchema = z.object({
   type: z.literal("compaction"),
@@ -69,7 +92,7 @@ export type ChatEvent =
   | { type: "delta"; text: string }
   | { type: "step"; step: number; maxSteps: number }
   | { type: "tool"; name: string }
-  | { type: "tool_result"; name: string; ok: boolean; pendingApproval: boolean; approvalId: string | null; approvalRationale: string | null; error: string | null }
+  | { type: "tool_result"; name: string; ok: boolean; pendingApproval: boolean; approvalId: string | null; approvalRationale: string | null; error: string | null; card: ChatCard | null }
   | { type: "compaction"; compactedToMessages: number }
   | { type: "ask"; id: string; question: string; options: string[]; allowOther: boolean }
   | { type: "done"; sessionId: string | null; reply: string; turnUsage: ChatUsage | null; sessionUsage: ChatUsage | null }
@@ -93,6 +116,7 @@ function toChatEvent(frame: z.infer<typeof FrameSchema>): ChatEvent | null {
         approvalId: frame.approvalId ?? null,
         approvalRationale: frame.approvalRationale ?? null,
         error: frame.error ?? null,
+        card: frame.card ?? null,
       };
     case "compaction":
       return { type: "compaction", compactedToMessages: frame.compactedToMessages };

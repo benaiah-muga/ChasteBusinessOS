@@ -94,3 +94,16 @@ func TestHandleChatLoopEventStreamsPendingApprovalMetadata(t *testing.T) {
 		t.Fatalf("tool result event=%v", event)
 	}
 }
+
+func TestChatToolResultCardExtractsTopLevelCardOnly(t *testing.T) {
+	card := chatToolResultCard(`{"record":{"id":"1"},"card":{"kind":"exception","title":"CEM-1 low","status":"open"}}`)
+	if len(card) == 0 || !bytes.Contains(card, []byte(`"kind":"exception"`)) {
+		t.Fatalf("card=%q, want the nested card object", card)
+	}
+	if got := chatToolResultCard(`{"ok":true,"data":{"card":{"kind":"result"}}}`); got != nil {
+		t.Fatalf("nested card was promoted: %q", got)
+	}
+	if got := chatToolResultCard(`{"ok":true}`); got != nil {
+		t.Fatalf("plain result produced a card: %q", got)
+	}
+}

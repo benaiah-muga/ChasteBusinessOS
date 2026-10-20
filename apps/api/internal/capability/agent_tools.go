@@ -26,6 +26,18 @@ var agentToolDefinitions = map[string]agentToolDefinition{
 		description: "Read one purchase order and its receipts by order number, including status, ordered lines, accepted, rejected, returned and remaining quantities, promised date, and total. Use it to verify what actually happened after an approval.",
 		schema:      `{"type":"object","properties":{"poNumber":{"type":"integer","minimum":1,"description":"Purchase order number returned by the approval or purchasing list."}},"required":["poNumber"],"additionalProperties":false}`,
 	},
+	upsertOperationalRecordCapabilityID: {
+		description: "Create or update a persistent operating record: a business objective, a deduplicated exception, or a Decision Record. Use a stable key so repeated detections update the same record instead of duplicating it. Put completion criteria, evidence, alternatives, recommendation, approval, actions, or verified result in details.",
+		schema:      `{"type":"object","properties":{"kind":{"type":"string","enum":["objective","exception","decision"]},"stableKey":{"type":"string","minLength":1,"maxLength":200},"status":{"type":"string","minLength":1,"maxLength":40},"title":{"type":"string","minLength":1,"maxLength":200},"summary":{"type":"string","maxLength":2000},"details":{"type":"object","additionalProperties":true},"authorityRef":{"type":"string","maxLength":200},"approvalId":{"type":"string","format":"uuid"},"ownerUserId":{"type":"string","format":"uuid"}},"required":["kind","stableKey","status","title"],"additionalProperties":false}`,
+	},
+	getOperationalRecordCapabilityID: {
+		description: "Read one persistent operating record by UUID, or by kind and stable key, including its card view for the conversation.",
+		schema:      `{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"kind":{"type":"string","enum":["objective","exception","decision"]},"stableKey":{"type":"string","maxLength":200}},"additionalProperties":false}`,
+	},
+	listOperationalRecordsCapabilityID: {
+		description: "List persistent operating records, optionally filtered by objective, exception, or decision kind and by status.",
+		schema:      `{"type":"object","properties":{"kind":{"type":"string","enum":["objective","exception","decision"]},"status":{"type":"string","maxLength":40},"limit":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}`,
+	},
 	selectWinningQuoteCapabilityID: {
 		description: "Award the winning quote on a purchase RFQ. This is a money commitment: an agent call returns a pending human approval with the exact award and does not create a purchase order. Explain the award and the approval before calling it.",
 		schema:      `{"type":"object","properties":{"rfqId":{"type":"string","format":"uuid","description":"Purchase RFQ UUID from the purchasing workflow."}},"required":["rfqId"],"additionalProperties":false}`,

@@ -53,15 +53,14 @@ func TestGoSCIMReadRouteUsesTokenScopeAndExpiry(t *testing.T) {
 	digest := sha256.Sum256([]byte(rawToken))
 	tokenHash := hex.EncodeToString(digest[:])
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
 		if _, err := owner.Exec(cleanupCtx, `DELETE FROM organizations WHERE id IN ($1::uuid, $2::uuid)`, orgID, otherOrgID); err != nil {
 			t.Errorf("delete SCIM fixture organizations: %v", err)
 		}
-		for _, id := range append([]string{userID, otherUserID}, pageUserIDs...) {
-			if _, err := owner.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1::uuid`, id); err != nil {
-				t.Errorf("delete SCIM fixture user %s: %v", id, err)
-			}
+		ids := append([]string{userID, otherUserID}, pageUserIDs...)
+		if _, err := owner.Exec(cleanupCtx, `DELETE FROM users WHERE id = ANY($1::uuid[])`, ids); err != nil {
+			t.Errorf("delete SCIM fixture users: %v", err)
 		}
 	})
 	_, err = owner.Exec(ctx, `INSERT INTO organizations (id, name, slug) VALUES

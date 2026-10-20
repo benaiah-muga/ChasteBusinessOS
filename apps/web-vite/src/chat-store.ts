@@ -6,6 +6,7 @@ import {
   isChatAbortError,
   steerChat,
   streamChat,
+  type ChatCard,
   type ChatUsage,
 } from "./api/chat";
 
@@ -38,6 +39,8 @@ export interface ChatMsg {
   ask?: AskPayload;
   /** A pending human approval produced by this turn, rendered as a proposal card. */
   proposal?: ChatProposal;
+  /** A structured record attached to a tool result, rendered as a record card. */
+  card?: ChatCard;
   /** The option (or free text) the user answered with, once answered. */
   answered?: string;
   /** Token usage for this assistant turn, from the provider's own report. */
@@ -142,6 +145,12 @@ async function runTurn(text: string) {
             });
             break;
           case "tool_result":
+            if (event.card) {
+              const card = event.card;
+              updateActive((message) => {
+                message.card = card;
+              });
+            }
             if (event.pendingApproval && event.approvalId) {
               updateActive((message) => {
                 message.proposal = {

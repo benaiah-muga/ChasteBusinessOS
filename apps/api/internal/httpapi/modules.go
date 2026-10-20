@@ -32,12 +32,13 @@ var moduleCatalog = []businesscontract.ModuleInfo{
 	{Id: "support", Label: "Customer care", Description: "Support desk with AI-drafted replies", Href: modulePath("/support")},
 	{Id: "skills", Label: "Skills", Description: "Advisory playbooks the workmate can consult", Href: nil},
 	{Id: "creator", Label: "Creator & marketplace", Description: "Capability proposals and signed plugins", Href: modulePath("/proposals")},
+	{Id: "operations", Label: "Operations", Description: "Objectives, exceptions, and Decision Records", Href: nil, Protected: moduleProtected(true)},
 	{Id: "iam", Label: "Identity & access", Description: "Roles, permissions, module switchboard", Href: modulePath("/team"), Protected: moduleProtected(true)},
 	{Id: "routines", Label: "Routines", Description: "Scheduled agent runs on a fixed least-privilege bundle", Href: nil, Protected: moduleProtected(true)},
 	{Id: "signals", Label: "Signals", Description: "Needs-attention registry feeding home and the workmate", Href: nil, Protected: moduleProtected(true)},
 }
 
-var protectedModuleIDs = []string{"iam", "routines", "signals"}
+var protectedModuleIDs = []string{"iam", "routines", "signals", "operations"}
 
 type modulesHandler struct {
 	resolver modulesSessionResolver

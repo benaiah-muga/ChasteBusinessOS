@@ -20016,6 +20016,147 @@
       }
     },
     {
+      "id": "operations.getRecord",
+      "title": "Read operational record",
+      "intent": "Read one persistent objective, exception, or Decision Record and its conversation card.",
+      "module": "operations",
+      "risk": "read",
+      "permission": "operations.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "stableKey": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "operations.listRecords",
+      "title": "List operational records",
+      "intent": "List persistent objectives, exceptions, and Decision Records filtered by kind and status.",
+      "module": "operations",
+      "risk": "read",
+      "permission": "operations.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "operations.upsertRecord",
+      "title": "Upsert operational record",
+      "intent": "Create or update a persistent business objective, deduplicated exception, or Decision Record under a stable key.",
+      "module": "operations",
+      "risk": "write",
+      "permission": "operations.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "stableKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "details": {
+            "type": "object"
+          },
+          "authorityRef": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "approvalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "stableKey",
+          "status",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
       "id": "pos.closeSession",
       "title": "Close register session",
       "intent": "Count the cash drawer and close the session; reports any variance between counted and expected cash",

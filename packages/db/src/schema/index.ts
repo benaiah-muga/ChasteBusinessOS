@@ -224,6 +224,35 @@ export const evaluationRuns = pgTable(
   ],
 );
 
+/** Persistent operating records: objective, exception, or Decision Record. */
+export const operationalRecords = pgTable(
+  "operational_records",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // objective | exception | decision
+    stableKey: text("stable_key").notNull(),
+    status: text("status").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary"),
+    details: jsonb("details").notNull().default({}),
+    revision: integer("revision").notNull().default(1),
+    authorityRef: text("authority_ref"),
+    approvalId: uuid("approval_id").references(() => approvals.id, { onDelete: "set null" }),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("operational_record_key_idx").on(t.orgId, t.kind, t.stableKey),
+    index("operational_record_org_status_idx").on(t.orgId, t.kind, t.status, t.updatedAt),
+    check("operational_record_kind_valid", sql`${t.kind} IN ('objective', 'exception', 'decision')`),
+    check("operational_record_revision_positive", sql`${t.revision} > 0`),
+  ],
+);
+
 /** Agent conversation sessions, replayable trajectories. */
 export const agentSessions = pgTable(
   "agent_sessions",

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPage } from "./ChatPage";
 import { chatStore, resetChat } from "../chat-store";
@@ -238,6 +238,25 @@ describe("ChatPage", () => {
     await waitFor(() => expect(chatStore.getState().busy).toBe(false));
     expect(chatStore.getState().messages.at(-1)?.text).toBe("Continues after unmount.");
   });
+  it("renders a structured tool result card in the transcript", async () => {
+    const { streams } = harness();
+    render(<ChatPage />);
+    sendMessage("Check CEM-1 stock.");
+    await waitFor(() => expect(streams).toHaveLength(1));
+    streams[0]!.push(
+      '{"type":"tool_result","name":"inventory.checkStock","ok":true,"card":{"kind":"exception","title":"CEM-1 below reorder point","status":"open","severity":"high","summary":"Available stock is below the reorder point.","next":"Prepare a purchase proposal","evidence":{"sku":"CEM-1","available":5000}}}\n',
+    );
+
+    const region = await screen.findByRole("region", { name: "Exception record: CEM-1 below reorder point" });
+    expect(within(region).getByText("open")).not.toBeNull();
+    expect(within(region).getByText("high")).not.toBeNull();
+    expect(within(region).getByText("Prepare a purchase proposal")).not.toBeNull();
+    expect(within(region).getByText(/sku: CEM-1/)).not.toBeNull();
+    // A record reaches the transcript without turning into an approval.
+    expect(within(region).queryByRole("button")).toBeNull();
+    await completeTurn(streams[0]!, "CEM-1 is below its reorder point.");
+  });
+
   it("renders the exact stored proposal when a pending approval tool result arrives", async () => {
     const organizationId = "22222222-2222-4222-8222-222222222222";
     const approvalId = "11111111-1111-4111-8111-111111111111";

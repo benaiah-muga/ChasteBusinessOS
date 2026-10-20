@@ -174,6 +174,9 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 				if !ok && errorMessage != "" {
 					content["error"] = errorMessage
 				}
+				if card := chatToolResultCard(toolResult); card != nil {
+					content["card"] = card
+				}
 				var refusal chatToolRefusal
 				if json.Unmarshal([]byte(toolResult), &refusal) == nil {
 					content["pendingApproval"] = refusal.PendingApproval
@@ -193,6 +196,16 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 		}
 	}
 	return result, nil
+}
+
+func chatToolResultCard(toolResult string) json.RawMessage {
+	var withCard struct {
+		Card json.RawMessage `json:"card"`
+	}
+	if json.Unmarshal([]byte(toolResult), &withCard) != nil || len(withCard.Card) == 0 || string(withCard.Card) == "null" {
+		return nil
+	}
+	return withCard.Card
 }
 
 type chatTicketResult struct {

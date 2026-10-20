@@ -44,7 +44,7 @@ func TestModulesHandlerReturnsCatalogAndDefaultModules(t *testing.T) {
 		`"id":"iam"`,
 		`"label":"Identity & access"`,
 		`"protected":true`,
-		`"enabledModules":["accounting","analytics","marketing","projects","pos","inventory","manufacturing","purchasing","crm","sales","documents","hr","messaging","support","skills","creator","iam","routines","signals"]`,
+		`"enabledModules":["accounting","analytics","marketing","projects","pos","inventory","manufacturing","purchasing","crm","sales","documents","hr","messaging","support","skills","creator","operations","iam","routines","signals"]`,
 		`"usingDefaults":true`,
 	} {
 		if !strings.Contains(body, fragment) {
@@ -65,7 +65,7 @@ func TestModulesHandlerUsesRestrictedModulesAndPreservesProtectedModules(t *test
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, `"enabledModules":["iam","routines","signals","crm","support"]`) {
+	if !strings.Contains(body, `"enabledModules":["iam","routines","signals","operations","crm","support"]`) {
 		t.Fatalf("enabled modules did not preserve protected modules and deduplicate saved modules: %s", body)
 	}
 	if !strings.Contains(body, `"usingDefaults":false`) {
@@ -79,7 +79,7 @@ func TestModulesHandlerPreservesUnknownSavedModuleIDsLikeLegacy(t *testing.T) {
 	identity.EnabledModules = []string{"projects", "future-module", "projects"}
 	response := httptest.NewRecorder()
 	NewModulesHandler(&fakeDirectSessionResolver{resolved: identity}).ServeHTTP(response, modulesRequest(http.MethodGet))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"enabledModules":["iam","routines","signals","projects","future-module"]`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"enabledModules":["iam","routines","signals","operations","projects","future-module"]`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
