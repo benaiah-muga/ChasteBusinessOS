@@ -22,6 +22,7 @@ const (
 	posCloseSessionCapabilityID = "pos.closeSession"
 	posReturnSaleCapabilityID   = "pos.returnSale"
 	posShiftSummaryCapabilityID = "pos.shiftSummary"
+	posListSessionsCapabilityID = "pos.listSessions"
 )
 
 const posWalkInCustomerName = "Walk-in Customer"
@@ -107,6 +108,27 @@ type PosShiftSummaryInput struct {
 	SessionID string `json:"sessionId"`
 }
 
+type PosListSessionsInput struct{}
+
+type PosSessionSummary struct {
+	ID                string  `json:"id"`
+	Register          string  `json:"register"`
+	Status            string  `json:"status"`
+	OpeningFloatMinor int64   `json:"openingFloatMinor"`
+	ExpectedCashMinor int64   `json:"expectedCashMinor"`
+	CountedCashMinor  *int64  `json:"countedCashMinor"`
+	VarianceMinor     *int64  `json:"varianceMinor"`
+	VarianceReason    *string `json:"varianceReason"`
+	OpenedByUserID    *string `json:"openedByUserId"`
+	ClosedByUserID    *string `json:"closedByUserId"`
+	OpenedAt          string  `json:"openedAt"`
+	ClosedAt          *string `json:"closedAt"`
+}
+
+type PosListSessionsOutput struct {
+	Sessions []PosSessionSummary `json:"sessions"`
+}
+
 type PosMethodTotal struct {
 	Method      string `json:"method"`
 	AmountMinor int64  `json:"amountMinor"`
@@ -136,6 +158,8 @@ func parsePosSaleInput(capabilityID string, raw json.RawMessage) (any, error) {
 		return ParsePosReturnSaleInput(raw)
 	case posShiftSummaryCapabilityID:
 		return ParsePosShiftSummaryInput(raw)
+	case posListSessionsCapabilityID:
+		return ParsePosListSessionsInput(raw)
 	default:
 		return nil, errors.New("unsupported POS capability")
 	}
@@ -150,6 +174,47 @@ func posRequiredUUID(fields map[string]json.RawMessage, key string) (string, err
 		return "", fmt.Errorf("%s must be a UUID", key)
 	}
 	return value, nil
+}
+
+func ParsePosListSessionsInput(raw json.RawMessage) (PosListSessionsInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return PosListSessionsInput{}, err
+	}
+	return PosListSessionsInput{}, nil
+}
+
+func posListSessions(ctx context.Context, tx pgx.Tx, orgID string) (PosListSessionsOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, register, status, opening_float_minor, expected_cash_minor,
+		       counted_cash_minor, variance_minor, variance_reason,
+		       opened_by_user_id::text, closed_by_user_id::text, opened_at, closed_at
+		FROM pos_sessions WHERE org_id = $1::uuid
+		ORDER BY opened_at DESC LIMIT 20`, orgID)
+	if err != nil {
+		return PosListSessionsOutput{}, err
+	}
+	defer rows.Close()
+	out := PosListSessionsOutput{Sessions: make([]PosSessionSummary, 0)}
+	for rows.Next() {
+		var session PosSessionSummary
+		var openedAt time.Time
+		var closedAt *time.Time
+		if err := rows.Scan(&session.ID, &session.Register, &session.Status, &session.OpeningFloatMinor,
+			&session.ExpectedCashMinor, &session.CountedCashMinor, &session.VarianceMinor, &session.VarianceReason,
+			&session.OpenedByUserID, &session.ClosedByUserID, &openedAt, &closedAt); err != nil {
+			return PosListSessionsOutput{}, err
+		}
+		session.OpenedAt = openedAt.UTC().Format(time.RFC3339Nano)
+		if closedAt != nil {
+			formatted := closedAt.UTC().Format(time.RFC3339Nano)
+			session.ClosedAt = &formatted
+		}
+		out.Sessions = append(out.Sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return PosListSessionsOutput{}, err
+	}
+	return out, nil
 }
 
 func ParsePosOpenSessionInput(raw json.RawMessage) (PosOpenSessionInput, error) {

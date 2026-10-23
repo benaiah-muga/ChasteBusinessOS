@@ -7,6 +7,7 @@ const createdAt = "2026-09-27T10:15:00.000Z";
 const sessions = [
   { id: "session-1", title: "Quarter close", mode: "assist", status: "completed", modelRef: "provider/model", createdAt },
   { id: "session-2", title: null, mode: "creator", status: "active", modelRef: null, createdAt },
+  { id: "session-3", title: "Set up the new workspace", mode: "assist", status: "completed", modelRef: "provider/model", createdAt },
 ];
 
 const run = {
@@ -27,11 +28,31 @@ const run = {
 };
 
 function eventResponses(sessionId: string) {
+  if (sessionId === "session-3") {
+    const events = [
+      { seq: 41, role: "user", content: { text: "Set up Acme and a launch project", turnId: "turn-multi" }, at: createdAt },
+      { seq: 42, role: "tool_call", content: { name: "crm_createCustomer", args: { name: "Acme" }, callId: "call-turn-1", turnId: "turn-multi" }, at: createdAt },
+      { seq: 43, role: "tool_result", content: { name: "crm.createCustomer", capabilityId: "crm.createCustomer", callId: "call-turn-1", ok: true, result: "{\"customerId\":\"88888888-8888-4888-8888-888888888888\"}", turnId: "turn-multi" }, at: createdAt },
+      { seq: 44, role: "tool_call", content: { name: "projects_createProject", args: { name: "Launch" }, callId: "call-turn-2", turnId: "turn-multi" }, at: createdAt },
+      { seq: 45, role: "tool_result", content: { name: "projects.createProject", capabilityId: "projects.createProject", callId: "call-turn-2", ok: true, result: "{\"projectId\":\"99999999-9999-4999-8999-999999999999\"}", turnId: "turn-multi" }, at: createdAt },
+      { seq: 46, role: "assistant", content: { text: "Created Acme and the Launch project.", turnId: "turn-multi" }, at: createdAt },
+    ];
+    return { events, trace: { eventCount: events.length, finalMessage: "Created Acme and the Launch project.", observations: [] } };
+  }
+  if (sessionId === "session-2") {
+    const events = [
+      { seq: 31, role: "user", content: { text: "Create Acme" }, at: createdAt },
+      { seq: 32, role: "tool_call", content: { name: "crm_createCustomer", args: { name: "Acme" }, callId: "call-revert-1" }, at: createdAt },
+      { seq: 33, role: "tool_result", content: { name: "crm.createCustomer", capabilityId: "crm.createCustomer", callId: "call-revert-1", ok: true, result: "{\"customerId\":\"77777777-7777-4777-8777-777777777777\"}" }, at: createdAt },
+      { seq: 34, role: "assistant", content: { text: "Created Acme." }, at: createdAt },
+    ];
+    return { events, trace: { eventCount: events.length, finalMessage: "Created Acme.", observations: [] } };
+  }
   const seq = sessionId === "session-1" ? 11 : 21;
   const events = [
     { seq, role: "user", content: { text: "Check the books" }, at: createdAt },
     { seq: seq + 1, role: "tool_call", content: { name: "accounting.trialBalance", args: { period: "2026-Q3" } }, at: createdAt },
-    { seq: seq + 2, role: "tool_result", content: { name: "accounting.trialBalance", ok: true }, at: createdAt },
+    { seq: seq + 2, role: "tool_result", content: { name: "accounting.trialBalance", ok: true, result: "balanced" }, at: createdAt },
     { seq: seq + 3, role: "assistant", content: { text: "The books are balanced." }, at: createdAt },
   ];
   const trace = {
@@ -81,6 +102,20 @@ beforeEach(() => {
       note: "Provider cache usage.",
     });
     if (path === "/api/durable-runs/run-1") return Response.json(runDetail());
+    if (path === "/api/sessions/session-2/revert") {
+      return Response.json({ ok: true, inverseCapabilityId: "crm.deactivateCustomer", data: { deactivated: true } });
+    }
+    if (path === "/api/sessions/session-3/revert") {
+      return Response.json({
+        turnId: "turn-multi",
+        ok: true,
+        planCount: 2,
+        reverted: [
+          { callId: "call-turn-2", inverseCapabilityId: "projects.archiveProject", ok: true },
+          { callId: "call-turn-1", inverseCapabilityId: "crm.deactivateCustomer", ok: true },
+        ],
+      });
+    }
     if (path.startsWith("/api/sessions/") && path.endsWith("/replay")) {
       const sessionId = path.split("/").at(-2) ?? "session-1";
       return Response.json({ trace: eventResponses(sessionId).trace });
@@ -100,6 +135,13 @@ afterEach(() => {
 });
 
 describe("SessionsPage", () => {
+  it("links a selected session back into the Workmate", async () => {
+    render(<SessionsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Quarter close/ }));
+    const link = await screen.findByRole("link", { name: "Continue in Workmate" });
+    expect(link.getAttribute("href")).toBe("/chat?session=session-1");
+  });
+
   it("keeps session selection, event sequence, canonical replay, durable checkpoints, and context metrics", async () => {
     const { container } = render(<SessionsPage />);
 
@@ -125,6 +167,8 @@ describe("SessionsPage", () => {
     expect(observationDisclosure!.open).toBe(true);
     expect(observationDisclosure!.textContent).toContain("balanced");
     expect(container.querySelector(".session-tool-result")?.textContent).toContain("ok · accounting.trialBalance");
+    const resultDisclosures = Array.from(container.querySelectorAll(".session-event-details"));
+    expect(resultDisclosures.some((element) => element.textContent?.includes("balanced"))).toBe(true);
     const eventMetas = Array.from(container.querySelectorAll(".session-event-meta"), (element) => element.textContent?.split(" · ")[0]);
     expect(eventMetas).toEqual(["#11", "#12", "#13", "#14"]);
 
@@ -186,4 +230,43 @@ describe("SessionsPage", () => {
     expect(await screen.findByRole("alert")).not.toBeNull();
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/sessions/session-1")).toBe(true));
   });
+});
+
+it("filters sessions by title and mode without losing the active replay", async () => {
+  render(<SessionsPage />);
+  expect(await screen.findByRole("button", { name: /Quarter close/ })).not.toBeNull();
+  const search = screen.getByRole("searchbox", { name: "Search sessions" });
+  fireEvent.change(search, { target: { value: "creator" } });
+  expect(screen.queryByRole("button", { name: /Quarter close/ })).toBeNull();
+  expect(screen.getByRole("button", { name: /Untitled session/ })).not.toBeNull();
+  fireEvent.change(search, { target: { value: "" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Filter sessions" }), { target: { value: "assist" } });
+  expect(screen.getByRole("button", { name: /Quarter close/ })).not.toBeNull();
+  expect(screen.queryByRole("button", { name: /Untitled session/ })).toBeNull();
+  fireEvent.change(search, { target: { value: "does-not-exist" } });
+  expect(screen.getByRole("status", { name: "" }).textContent).toContain("No sessions match.");
+});
+
+
+it("reverts a declared action from the session replay", async () => {
+  render(<SessionsPage />);
+  fireEvent.click(await screen.findByRole("button", { name: /Untitled session/ }));
+  const revert = await screen.findByRole("button", { name: "Revert action" });
+  fireEvent.click(revert);
+  expect(screen.getByRole("button", { name: "Confirm revert" })).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm revert" }));
+  expect(await screen.findByText(/Reverted through crm.deactivateCustomer/)).not.toBeNull();
+  expect(requests).toContain("/api/sessions/session-2/revert");
+});
+
+
+it("reverts all declared actions in a turn in reverse order", async () => {
+  render(<SessionsPage />);
+  fireEvent.click(await screen.findByRole("button", { name: /Set up the new workspace/ }));
+  const revert = await screen.findByRole("button", { name: "Revert turn" });
+  fireEvent.click(revert);
+  expect(screen.getByRole("button", { name: "Confirm turn revert" })).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm turn revert" }));
+  expect(await screen.findByText(/Reverted 2 actions in turn turn-multi/)).not.toBeNull();
+  expect(requests).toContain("/api/sessions/session-3/revert");
 });

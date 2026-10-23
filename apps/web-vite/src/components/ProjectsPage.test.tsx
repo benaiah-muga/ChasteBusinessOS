@@ -561,7 +561,7 @@ describe("Vite projects page", () => {
     render(<ProjectsPage />);
 
     expect(await screen.findByRole("heading", { name: "No projects yet" })).not.toBeNull();
-    expect(screen.getByRole("heading", { name: "Select a project" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Name your first project" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Create project" }).hasAttribute("disabled")).toBe(true);
   });
 

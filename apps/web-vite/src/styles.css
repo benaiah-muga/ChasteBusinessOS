@@ -1,12 +1,51 @@
 :root {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #24241f;
-  background: #f4f3ef;
+  --font-sans: Inter, "SF Pro Text", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ink-950: #111110;
+  --ink-900: #171613;
+  --ink-800: #211f1a;
+  --ink-700: #2e2b24;
+  --ink-600: #454037;
+  --ink-500: #615a4d;
+  --ink-400: #6b6559;
+  --ink-300: #716b5f;
+  --paper-50: #fffdf8;
+  --paper-100: #fbf7ef;
+  --paper-200: #f4efe5;
+  --paper-300: #ece4d5;
+  --paper-400: #e0d6c3;
+  --line: #e5dccb;
+  --line-strong: #d3c5ae;
+  --gold-100: #faf1dc;
+  --gold-200: #f0dfb6;
+  --gold-300: #e2c98f;
+  --gold-400: #d4b26a;
+  --gold-500: #c19a32;
+  --gold-600: #9e7a24;
+  --gold-700: #7d5e1a;
+  --success: #4f6b52;
+  --success-soft: #edf3eb;
+  --danger: #9d4438;
+  --danger-soft: #fbf0ed;
+  --warning: #9e7a24;
+  --warning-soft: #faf3e3;
+  --info: #5c6f7d;
+  --info-soft: #eef3f6;
+  --shadow-soft: 0 1px 2px rgb(35 30 20 / 4%), 0 10px 30px -18px rgb(35 30 20 / 22%);
+  --shadow-lift: 0 2px 4px rgb(35 30 20 / 5%), 0 18px 48px -22px rgb(35 30 20 / 32%);
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  font-family: var(--font-sans);
+  color: var(--ink-800);
+  background: var(--paper-200);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-optical-sizing: auto;
+  accent-color: var(--gold-500);
 }
 
 * { box-sizing: border-box; }
@@ -16,11 +55,23 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    radial-gradient(ellipse at 77% 18%, rgb(219 203 165 / 20%), transparent 30rem),
-    #f4f3ef;
+    radial-gradient(ellipse at 78% 4%, rgb(193 154 50 / 10%), transparent 34rem),
+    radial-gradient(ellipse at 10% 100%, rgb(193 154 50 / 5%), transparent 32rem),
+    var(--paper-200);
 }
 
-button, a { font: inherit; }
+button, a, input, select, textarea { font: inherit; }
+button { color: inherit; }
+::selection { background: var(--gold-200); color: var(--ink-900); }
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--gold-600);
+  outline-offset: 3px;
+}
+
+* { scrollbar-width: thin; scrollbar-color: var(--paper-400) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background-clip: padding-box; background-color: var(--paper-400); }
+::-webkit-scrollbar-thumb:hover { background-color: var(--line-strong); }
 
 .page-shell { min-height: 100vh; }
 
@@ -30,7 +81,7 @@ button, a { font: inherit; }
   justify-content: space-between;
   height: 76px;
   padding: 0 clamp(24px, 5vw, 76px);
-  border-bottom: 1px solid #e5e3dc;
+  border-bottom: 1px solid #e5dccb;
 }
 
 .brand {
@@ -51,17 +102,17 @@ button, a { font: inherit; }
   height: 31px;
   place-items: center;
   border-radius: 9px;
-  background: #26372e;
+  background: #171613;
   color: #fff;
   font-family: inherit;
   font-weight: 800;
 }
 
 .environment-tag {
-  border: 1px solid #dedbd2;
+  border: 1px solid #e4dbc9;
   border-radius: 99px;
   padding: 7px 11px;
-  color: #68675f;
+  color: #625d53;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -76,7 +127,7 @@ button, a { font: inherit; }
 
 .eyebrow {
   margin-bottom: 21px;
-  color: #84744e;
+  color: #8b6a22;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.16em;
@@ -122,12 +173,12 @@ h1 {
   height: 9px;
   margin-top: 7px;
   border-radius: 50%;
-  background: #c7a650;
+  background: #c19a32;
   box-shadow: 0 0 0 5px rgb(199 166 80 / 13%);
 }
 
-.status-ready { background: #43805b; box-shadow: 0 0 0 5px rgb(67 128 91 / 12%); }
-.status-failed { background: #b94e3b; box-shadow: 0 0 0 5px rgb(185 78 59 / 12%); }
+.status-ready { background: #4f6b52; box-shadow: 0 0 0 5px rgb(67 128 91 / 12%); }
+.status-failed { background: #9d4438; box-shadow: 0 0 0 5px rgb(185 78 59 / 12%); }
 
 .status-card h2 {
   margin-bottom: 4px;
@@ -151,8 +202,8 @@ h1 {
   transition: border-color 120ms ease, background 120ms ease;
 }
 
-.refresh-button:hover { border-color: #a99a74; background: #faf9f5; }
-.refresh-button:focus-visible { outline: 2px solid #84744e; outline-offset: 3px; }
+.refresh-button:hover { border-color: #c19a32; background: #faf6ee; }
+.refresh-button:focus-visible { outline: 2px solid #8b6a22; outline-offset: 3px; }
 
 .health-details {
   display: flex;
@@ -166,7 +217,7 @@ h1 {
 .health-details div { display: grid; gap: 5px; }
 .health-details dt { color: #8a8980; font-size: 11px; }
 .health-details dd { margin: 0; color: #40443d; font-size: 12px; font-weight: 600; }
-.error-message { grid-column: 1 / -1; color: #a5382e !important; }
+.error-message { grid-column: 1 / -1; color: #9d4438 !important; }
 
 .organization-card {
   display: grid;
@@ -205,12 +256,12 @@ h1 {
   font-weight: 600;
 }
 
-.organization-select-label select:focus-visible { outline: 2px solid #84744e; outline-offset: 3px; }
+.organization-select-label select:focus-visible { outline: 2px solid #8b6a22; outline-offset: 3px; }
 .organization-select-label select:disabled { cursor: wait; opacity: 0.6; }
 .organization-chevron { position: absolute; top: 8px; right: 13px; color: #77766e; font-size: 19px; pointer-events: none; }
-.organization-pending { color: #84744e; font-size: 12px; font-weight: 600; }
+.organization-pending { color: #8b6a22; font-size: 12px; font-weight: 600; }
 .organization-footnote { font-size: 11px !important; }
-.organization-error, .organization-error-state [role="alert"] { color: #a5382e !important; }
+.organization-error, .organization-error-state [role="alert"] { color: #9d4438 !important; }
 .organization-error-state { display: grid; justify-items: start; gap: 12px; }
 
 .sr-only {
@@ -234,7 +285,7 @@ h1 {
   line-height: 1.6;
 }
 
-.proof-note span { color: #9b895c; font-size: 11px; font-weight: 700; }
+.proof-note span { color: #8b6a22; font-size: 11px; font-weight: 700; }
 .proof-note p { max-width: 530px; margin: -3px 0 0; }
 
 @media (max-width: 560px) {

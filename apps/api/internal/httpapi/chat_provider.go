@@ -50,6 +50,7 @@ type chatToolSpec struct {
 
 type chatTurn struct {
 	message   string
+	reasoning string
 	toolCalls []chatToolCall
 	usage     chatUsage
 }
@@ -68,10 +69,25 @@ type chatProviderError struct {
 }
 
 func (e chatProviderError) Error() string {
-	if e.status != 0 {
-		return fmt.Sprintf("model request failed (HTTP %d)", e.status)
+	switch e.status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "The AI provider rejected its credentials. Check Settings > AI & automation."
+	case http.StatusNotFound:
+		return "The configured AI model is unavailable. Try again, or check the model in Settings > AI & automation."
+	case http.StatusRequestEntityTooLarge:
+		return "The request was too large for the configured AI model. Try a shorter request."
+	case http.StatusTooManyRequests:
+		return "The AI model is rate limited right now. Try again in a moment."
+	case http.StatusPaymentRequired:
+		return "The AI provider needs credit before it can answer. Check the workspace billing."
 	}
-	return "model request failed"
+	if e.status >= 500 {
+		return "The AI provider is unavailable right now. Try again in a moment."
+	}
+	if e.status != 0 {
+		return fmt.Sprintf("The AI provider could not answer (HTTP %d). Try again in a moment.", e.status)
+	}
+	return "The AI provider could not answer. Try again in a moment."
 }
 
 func (e chatProviderError) StatusCode() int { return e.status }
@@ -99,10 +115,11 @@ func newOpenAIChatProvider(config myWorkSummaryConfig) *openAIChatProvider {
 		model:   strings.TrimSpace(config.primaryModel),
 	}
 	if !strings.EqualFold(strings.TrimSpace(config.provider), "nvidia") && !strings.EqualFold(strings.TrimSpace(config.provider), "deepseek") {
-		if key := strings.TrimSpace(os.Getenv("NVIDIA_API_KEY")); key != "" {
+		fallbackModel := strings.TrimSpace(os.Getenv("MODEL_PRIMARY_NIM"))
+		if key := strings.TrimSpace(os.Getenv("NVIDIA_API_KEY")); key != "" && fallbackModel != "" {
 			provider.fallbackBaseURL = strings.TrimRight(envOr("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"), "/")
 			provider.fallbackAPIKey = key
-			provider.fallbackModel = envOr("MODEL_PRIMARY_NIM", "moonshotai/kimi-k2.6")
+			provider.fallbackModel = fallbackModel
 		}
 	}
 	return provider
@@ -116,7 +133,13 @@ func (p *openAIChatProvider) Stream(ctx context.Context, messages []chatMessage,
 		// balance, not that the turn is doomed; a fallback may accept it. The
 		// body is never surfaced, so message-pattern matching is unavailable.
 		case http.StatusTooManyRequests, http.StatusNotFound, http.StatusPaymentRequired:
-			return p.stream(ctx, p.fallbackBaseURL, p.fallbackAPIKey, p.fallbackModel, messages, tools, onDelta)
+			fallbackTurn, fallbackErr := p.stream(ctx, p.fallbackBaseURL, p.fallbackAPIKey, p.fallbackModel, messages, tools, onDelta)
+			if fallbackErr != nil {
+				// Keep the primary provider's error: it is the actionable one
+				// (rate limit versus missing model) and the fallback is optional.
+				return chatTurn{}, err
+			}
+			return fallbackTurn, nil
 		}
 	}
 	return turn, err
@@ -372,9 +395,7 @@ func readChatCompletionStream(body io.Reader, onDelta func(string)) (chatTurn, e
 		turn.toolCalls = append(turn.toolCalls, chatToolCall{ID: id, Name: slot.name, Arguments: chatSafeArguments(slot.arguments)})
 	}
 	turn.message = content.String()
-	if turn.message == "" {
-		turn.message = reasoning.String()
-	}
+	turn.reasoning = reasoning.String()
 	return turn, nil
 }
 

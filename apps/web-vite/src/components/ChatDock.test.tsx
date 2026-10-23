@@ -86,7 +86,7 @@ describe("ChatDock", () => {
 
     streams[0]!.push('{"type":"step","step":1,"maxSteps":8}\n');
     streams[0]!.push('{"type":"tool","name":"accounting.aging"}\n');
-    expect(await screen.findByText("Step 1/8 · aging")).not.toBeNull();
+    expect(await screen.findByText("Step 1/8 · Accounting · Aging")).not.toBeNull();
 
     await finish(streams[0]!, "Two invoices are overdue.");
     expect(screen.getByText("Two invoices are overdue.")).not.toBeNull();

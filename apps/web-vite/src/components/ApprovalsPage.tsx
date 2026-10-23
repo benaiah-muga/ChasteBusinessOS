@@ -95,6 +95,87 @@ function friendlyValue(key: string, value: unknown, currency: CurrencyStyle): st
   return String(value);
 }
 
+function moneyHint(payload: unknown): number | null {
+  if (!isRecord(payload)) return null;
+  for (const key of ["totalMinor", "amountMinor", "total", "amount"]) {
+    if (typeof payload[key] === "number" && Number.isSafeInteger(payload[key])) return payload[key];
+  }
+  if (Array.isArray(payload.lines)) {
+    let total = 0;
+    for (const line of payload.lines) {
+      if (!isRecord(line)) continue;
+      const quantity = typeof line.quantity === "number" ? line.quantity : 0;
+      const unitPrice = typeof line.unitPriceMinor === "number" ? line.unitPriceMinor : 0;
+      if (quantity > 0 && unitPrice > 0) total += Math.round((quantity * unitPrice) / 1000);
+    }
+    if (total > 0) return total;
+  }
+  return null;
+}
+
+const APPROVAL_REVERSALS: Record<string, string> = {
+  "accounting.createInvoice": "credit note or reversing entry",
+  "accounting.recordPayment": "reverse payment",
+  "accounting.createQuote": "void quote",
+  "purchasing.createBill": "reversing entry",
+  "purchasing.payBill": "reverse vendor payment",
+  "inventory.adjustStock": "reverse stock adjustment",
+  "inventory.createTransfer": "reverse transfer",
+  "iam.createRole": "human identity review",
+  "crm.mergeCustomers": "restore prior customer record",
+};
+
+function approvalPlan(capabilityId: string, payload: unknown, currency: CurrencyStyle): string[] {
+  const amount = moneyHint(payload);
+  const money = amount === null ? null : formatMoney(amount, currency);
+  switch (capabilityId) {
+    case "accounting.createInvoice":
+      return [
+        `Issue an invoice${money ? ` for ${money}` : ""} to the named customer.`,
+        "Projected ledger direction: debit accounts receivable, credit revenue and any tax.",
+        "The invoice posts only after this approval.",
+      ];
+    case "accounting.recordPayment":
+      return [
+        `Record a payment${money ? ` of ${money}` : ""} against the invoice.`,
+        "Projected ledger direction: debit cash, credit accounts receivable.",
+        "The payment posts only after this approval.",
+      ];
+    case "purchasing.createBill":
+      return [
+        `Enter a supplier bill${money ? ` for ${money}` : ""}.`,
+        "Projected ledger direction: debit the expense or inventory account, credit accounts payable.",
+        "The bill posts only after this approval.",
+      ];
+    case "purchasing.payBill":
+      return [
+        `Pay a supplier bill${money ? ` for ${money}` : ""}.`,
+        "Projected ledger direction: debit accounts payable, credit cash.",
+        "The payment posts only after this approval.",
+      ];
+    case "inventory.adjustStock":
+      return [
+        "Write a stock movement for the named SKU and quantity.",
+        "Stock value and any linked valuation summary update only after this approval.",
+      ];
+    case "inventory.createTransfer":
+      return [
+        "Move stock between the named locations.",
+        "Both location balances update only after this approval.",
+      ];
+    case "iam.createRole":
+      return [
+        "Create an organization role with the supplied permission keys.",
+        "Identity changes always require human authority and are audited.",
+      ];
+    default:
+      return [
+        `${actionTitle(capabilityId)} will run with the payload shown below.`,
+        "The executor records a receipt and the inverse action when it commits.",
+      ];
+  }
+}
+
 function targetName(payload: unknown): string | null {
   const entry = previewFields(payload).find(([key]) => /name|title|description/i.test(key))?.[1];
   return typeof entry === "string" ? entry : null;
@@ -168,6 +249,12 @@ function ApprovalCard({
         <section className="approval-rationale" aria-label="What this does">
           <h3>What this does</h3>
           <p>{approval.rationale || `${actionTitle(approval.capabilityId)} will run after approval.`}{name && <> It relates to <strong>{name}</strong>.</>}</p>
+        </section>
+
+        <section className="approval-plan" aria-label="Execution plan">
+          <h3>Execution plan</h3>
+          <ol>{approvalPlan(approval.capabilityId, approval.payload, currency).map((step) => <li key={step}>{step}</li>)}</ol>
+          <p><strong>Reversible by:</strong> {APPROVAL_REVERSALS[approval.capabilityId] ?? "no automatic inverse is declared; a person must correct it"}. <strong>Policy:</strong> risk class {approval.riskClass}; the decision and receipt are recorded in the audit ledger.</p>
         </section>
 
         {fields.length > 0 && (

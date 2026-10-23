@@ -18,7 +18,7 @@
 
 .print-hint {
   margin: 0 0 1rem;
-  color: #78716c;
+  color: #696357;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 0.8rem;
 }
@@ -67,7 +67,7 @@
 .print-meta td:first-child {
   padding-left: 0;
   padding-right: 12px;
-  color: #78716c;
+  color: #696357;
 }
 
 .print-billed-to {
@@ -76,7 +76,7 @@
 
 .print-label {
   margin: 0;
-  color: #78716c;
+  color: #696357;
   font-size: 0.75rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -143,7 +143,7 @@
   margin-top: 2rem;
   padding-top: 0.8rem;
   border-top: 1px solid #e7e5e4;
-  color: #78716c;
+  color: #696357;
   font-size: 0.75rem;
 }
 

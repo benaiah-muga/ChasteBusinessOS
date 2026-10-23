@@ -13660,6 +13660,47 @@
       }
     },
     {
+      "id": "iam.getOrgPolicy",
+      "title": "Read org approval policy",
+      "intent": "Read the organization's approval policy: the highest risk class that can run autonomously, the money threshold in minor units, and the risk classes that always need human approval. Use it to explain why an action needs approval or to propose a policy change.",
+      "module": "iam",
+      "risk": "read",
+      "permission": "iam.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "maxRiskAutonomous": {
+            "type": "string"
+          },
+          "moneyThresholdMinor": {
+            "type": "number"
+          },
+          "requiresApprovalFor": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "maxRiskAutonomous",
+          "moneyThresholdMinor",
+          "requiresApprovalFor"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "iam.inviteMember",
       "title": "Invite member",
       "intent": "Invite someone by email to join the organization with a specific role; they accept via a token link. Humans only: agents are refused and must ask their principal to invite",
@@ -13817,6 +13858,49 @@
       }
     },
     {
+      "id": "iam.restoreAgentSoul",
+      "title": "Restore agent persona",
+      "intent": "Restore a previously captured organization agent persona after an authorized change. The previous persona is returned so the restore can be reversed again.",
+      "module": "iam",
+      "risk": "write",
+      "permission": "iam.admin",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "iam.setAgentSoul",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Standing instructions, voice, and hard rules for every agent turn. An empty string clears the persona."
+          }
+        },
+        "required": [
+          "agentSoul"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string"
+          },
+          "previousAgentSoul": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentSoul",
+          "previousAgentSoul"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "iam.restoreModules",
       "title": "Restore enabled modules",
       "intent": "Put back the exact module selection that was enabled before a recent change, undoing it when a switchboard edit turns out wrong",
@@ -13858,6 +13942,49 @@
         },
         "required": [
           "enabledModules"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "iam.setAgentSoul",
+      "title": "Set agent persona",
+      "intent": "Replace the organization's standing agent persona, the instructions every agent turn follows. The previous persona is returned so the change can be restored.",
+      "module": "iam",
+      "risk": "write",
+      "permission": "iam.admin",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "iam.restoreAgentSoul",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Standing instructions, voice, and hard rules for every agent turn. An empty string clears the persona."
+          }
+        },
+        "required": [
+          "agentSoul"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string"
+          },
+          "previousAgentSoul": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentSoul",
+          "previousAgentSoul"
         ],
         "additionalProperties": false
       }
@@ -20375,6 +20502,110 @@
       }
     },
     {
+      "id": "pos.listSessions",
+      "title": "List POS sessions",
+      "intent": "List the organization's POS register sessions, newest first, with register, status, opening float, expected and counted cash, variance, and open or close times. Use the session id with pos.shiftSummary for details.",
+      "module": "pos",
+      "risk": "read",
+      "permission": "pos.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "register": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "openingFloatMinor": {
+                  "type": "number"
+                },
+                "expectedCashMinor": {
+                  "type": "number"
+                },
+                "countedCashMinor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "varianceMinor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "varianceReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "openedByUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "closedByUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "openedAt": {
+                  "type": "string"
+                },
+                "closedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "register",
+                "status",
+                "openingFloatMinor",
+                "expectedCashMinor",
+                "countedCashMinor",
+                "varianceMinor",
+                "varianceReason",
+                "openedByUserId",
+                "closedByUserId",
+                "openedAt",
+                "closedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "pos.openSession",
       "title": "Open register session",
       "intent": "Open a point-of-sale cash drawer session with an opening float before taking sales",
@@ -21175,6 +21406,76 @@
           "position",
           "note",
           "createdAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "projects.list",
+      "title": "List projects",
+      "intent": "List the organization's projects with their id, name, active or archived status, due date, and creation time, newest first, so work can be found before opening a board. Optionally filter to active or archived projects.",
+      "module": "projects",
+      "risk": "read",
+      "permission": "projects.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ],
+            "description": "Optional status filter; omit for every project."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "dueAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "status",
+                "dueAt",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "projects"
         ],
         "additionalProperties": false
       }

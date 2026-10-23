@@ -228,7 +228,7 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		orgRoute = httpapi.NewOrgHandler(httpapi.NewPgOrgRepository(pool), resolver, os.Getenv("BETTER_AUTH_SECRET"), logger, trustedProxyCIDRs)
+		orgRoute = httpapi.NewOrgHandler(httpapi.NewPgOrgRepository(pool), resolver, capabilityExecutor, os.Getenv("BETTER_AUTH_SECRET"), logger, trustedProxyCIDRs)
 		logger.Info("Go organization route mounted", "path", "/api/org")
 	}
 	var aiConfigRoute http.Handler
@@ -385,7 +385,7 @@ func run(logger *slog.Logger) error {
 		if resolverErr != nil {
 			return resolverErr
 		}
-		projectsRoute = httpapi.NewProjectsSessionHandler(resolver, capabilityExecutor, capabilityExecutor, logger, trustedProxyCIDRs)
+		projectsRoute = httpapi.NewProjectsSessionHandler(resolver, capabilityExecutor, logger, trustedProxyCIDRs)
 		logger.Info("Go projects route mounted", "path", "/api/projects")
 	}
 	var routinesRoute http.Handler
@@ -615,6 +615,15 @@ func run(logger *slog.Logger) error {
 		sessionsDetailRoute = httpapi.NewSessionsDetailHandler(resolver, pool, logger)
 		logger.Info("Go sessions routes mounted", "paths", []string{"GET /api/sessions", "GET /api/sessions/{id}", "GET /api/sessions/{id}/replay"})
 	}
+	var sessionRevertRoute http.Handler
+	if os.Getenv("GO_SESSION_REVERT_ROUTE") != "0" {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		sessionRevertRoute = httpapi.NewSessionRevertHandler(pool, resolver, capabilityExecutor, logger, trustedProxyCIDRs...)
+		logger.Info("Go session revert route mounted", "path", "POST /api/sessions/{id}/revert")
+	}
 	var durableRunsRoute http.Handler
 	if goDurableRunsRouteEnabledFromEnv(os.Getenv("GO_DURABLE_RUNS_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
@@ -632,6 +641,24 @@ func run(logger *slog.Logger) error {
 		}
 		notificationsRoute = httpapi.NewNotificationsSessionHandler(pool, resolver, logger)
 		logger.Info("Go notifications route mounted", "path", "GET /api/notifications")
+	}
+	var recordSearchRoute http.Handler
+	if os.Getenv("GO_SEARCH_ROUTE") != "0" {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		recordSearchRoute = httpapi.NewRecordSearchHandler(pool, resolver, logger)
+		logger.Info("Go record search route mounted", "path", "GET /api/search")
+	}
+	var notificationPreferencesRoute http.Handler
+	if os.Getenv("GO_NOTIFICATIONS_WRITE_ROUTE") != "0" {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		notificationPreferencesRoute = httpapi.NewNotificationPreferencesHandler(pool, resolver, logger, trustedProxyCIDRs...)
+		logger.Info("Go notification preferences route mounted", "path", "/api/notification-preferences")
 	}
 	var notificationReadRoute http.Handler
 	if os.Getenv("GO_NOTIFICATIONS_WRITE_ROUTE") != "0" {
@@ -949,6 +976,9 @@ func run(logger *slog.Logger) error {
 		authRoute,
 		approvalDecider,
 	), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute, analyticsReportRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute), notificationsRoute, notificationReadRoute), routinesRoute, routinesWebhookRoute), inventoryReadRoute), crmReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute), messageAttachmentDownloadRoute)
+	apiHandler = httpapi.MountNotificationPreferencesRoute(apiHandler, notificationPreferencesRoute)
+	apiHandler = httpapi.MountSessionRevertRoute(apiHandler, sessionRevertRoute)
+	apiHandler = httpapi.MountRecordSearchRoute(apiHandler, recordSearchRoute)
 	apiHandler = httpapi.MountGoBankingRoute(apiHandler, bankingRoute)
 	apiHandler = httpapi.MountGoAccountingBudgetsRoute(apiHandler, accountingBudgetsRoute)
 	apiHandler = httpapi.MountGoTimeRoute(apiHandler, timeRoute)

@@ -228,7 +228,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
   return (
     <section className="sales-quotes-workspace" aria-labelledby="sales-workspace-title">
       <div className="sales-quotes-heading">
-        <div><p className="sales-eyebrow">Go workspace</p><h2 id="sales-workspace-title">Quotes and relationships</h2></div>
+        <div><p className="sales-eyebrow">Sales workspace</p><h2 id="sales-workspace-title">Quotes and relationships</h2></div>
         <button type="button" className="sales-new-order" onClick={() => { setFormOpen((open) => !open); setActionError(null); }} aria-expanded={formOpen}>{formOpen ? "Close quote form" : "Create quote"}</button>
       </div>
       <nav className="sales-quotes-tabs" aria-label="Sales workspace">

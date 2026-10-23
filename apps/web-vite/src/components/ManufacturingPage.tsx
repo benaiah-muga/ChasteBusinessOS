@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
+import { PageLoading } from "../ui/page-loading";
 import "./ManufacturingPage.css";
 import {
   ManufacturingApiError,
@@ -77,7 +78,7 @@ const styles = {
   list: { display: "grid", gap: 0, margin: 0, padding: 0, listStyle: "none" },
   listItem: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: "1px solid #eceae4", padding: "9px 0", fontSize: 13 },
   badge: { display: "inline-block", borderRadius: 99, padding: "2px 8px", fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" },
-  badgeNeutral: { background: "#eeece5", color: "#57564f" },
+  badgeNeutral: { background: "#eee7da", color: "#57564f" },
   badgeGreen: { background: "#dff0e4", color: "#2f6b45" },
   badgeRed: { background: "#f8e0dc", color: "#9d382c" },
   badgeAmber: { background: "#f7ecd2", color: "#8a6b1c" },
@@ -85,7 +86,7 @@ const styles = {
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
   tableHead: { textAlign: "left", color: "#77766e", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" },
   numeric: { textAlign: "right", fontVariantNumeric: "tabular-nums" },
-  inset: { display: "grid", gap: 8, border: "1px solid #e5e3db", borderRadius: 10, padding: 12, background: "#faf9f5" },
+  inset: { display: "grid", gap: 8, border: "1px solid #e5e3db", borderRadius: 10, padding: 12, background: "#faf6ee" },
   empty: { margin: 0, color: "#6e6d65", fontSize: 13, lineHeight: 1.6 },
 } satisfies Record<string, CSSProperties>;
 
@@ -574,7 +575,7 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
   const lots = report?.lots ?? [];
   const assembliesWithBoms = useMemo(() => [...new Set(boms.map((edge) => edge.assemblySku))], [boms]);
 
-  if (loadedScopeKey !== scopeKey || state.status === "loading") return <main className="manufacturing-page"><p role="status">Loading bills of materials, work orders, and production runs…</p></main>;
+  if (loadedScopeKey !== scopeKey || state.status === "loading") return <main className="manufacturing-page"><PageLoading label="Loading bills of materials, work orders, and production runs…" /></main>;
 
   if (state.status === "disabled") {
     return (

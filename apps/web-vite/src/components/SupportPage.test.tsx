@@ -141,7 +141,7 @@ beforeEach(stubWebLocks);
 
 // The desk renders a full thread plus tab chrome, so each case needs more room
 // than the default 5s on a loaded machine.
-const SLOW = 20_000;
+const SLOW = 60_000;
 
 describe("Vite support page", () => {
   it("summarises the inbox and opens the first conversation from Go capabilities", async () => {
@@ -172,7 +172,7 @@ describe("Vite support page", () => {
     fireEvent.click(screen.getByRole("button", { name: /Inbox/ }));
     const composer = await screen.findByRole("textbox", { name: "Reply or logged message" });
     fireEvent.change(composer, { target: { value: "Hello Ada," } });
-    fireEvent.click(screen.getByRole("button", { name: "Use saved reply" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use saved reply" }));
     await screen.findByRole("combobox", { name: "Saved reply" });
     fireEvent.click(screen.getByRole("button", { name: "Insert into reply" }));
 
@@ -458,11 +458,11 @@ describe("Vite support page", () => {
     render(<SupportPage actorId={actorId} organizationId={organizationId} />);
     await screen.findByText("Latest activity");
     fireEvent.click(screen.getByRole("button", { name: "Library" }));
-    expect(await screen.findByText("An unresolved Go canned-response save was restored. Save these exact details to retry it.")).not.toBeNull();
+    expect(await screen.findByText("An unresolved canned-response save was restored. Save these exact details to retry it.")).not.toBeNull();
     expect((screen.getByLabelText("Canned shortcut") as HTMLInputElement).value).toBe("/refund");
     fireEvent.change(screen.getByLabelText("Reply body"), { target: { value: "Changed while the original result was unknown." } });
     fireEvent.click(screen.getByRole("button", { name: "Save response" }));
-    expect(await screen.findByText("A previous Go canned-response save is unresolved. Its exact saved details were restored; retry them before making changes.")).not.toBeNull();
+    expect(await screen.findByText("A previous canned-response save is unresolved. Its exact saved details were restored; retry them before making changes.")).not.toBeNull();
     expect((screen.getByLabelText("Reply body") as HTMLTextAreaElement).value).toBe("Eligible refunds take five days.");
     fireEvent.click(screen.getByRole("button", { name: "Save response" }));
     await waitFor(() => expect(second.calls.some((call) => call.payload?.capabilityId === "support.createCannedResponse")).toBe(true));

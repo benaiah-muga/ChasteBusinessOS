@@ -220,12 +220,28 @@ func parseProjectsInput(id string, raw json.RawMessage) (any, error) {
 	}
 }
 
-func TestProjectCollectionReadIsNotAnAuditedCapability(t *testing.T) {
-	if supportedCapability(ProjectCollectionReadOperationID) {
-		t.Fatalf("collection operation %q must stay outside the capability registry", ProjectCollectionReadOperationID)
+func TestProjectCollectionReadIsAGoverenedReadCapability(t *testing.T) {
+	spec, exists := capabilitySpecs[ProjectCollectionReadCapabilityID]
+	if !exists || !supportedCapability(ProjectCollectionReadCapabilityID) {
+		t.Fatalf("collection capability %q is not registered", ProjectCollectionReadCapabilityID)
 	}
-	if _, exists := capabilitySpecs[ProjectCollectionReadOperationID]; exists {
-		t.Fatalf("collection operation %q must not have an audited capability spec", ProjectCollectionReadOperationID)
+	if spec.module != "projects" || spec.permission != "projects.read" || spec.risk != "read" || spec.humanOnly || spec.agentHidden != "" {
+		t.Fatalf("collection spec=%+v, want an agent-visible projects.read read", spec)
+	}
+	for _, raw := range []json.RawMessage{json.RawMessage(`{}`), json.RawMessage(`{"ignored":true}`)} {
+		if _, err := ParseProjectCollectionInput(raw); err != nil {
+			t.Errorf("parse %s: %v", raw, err)
+		}
+	}
+	if _, err := ParseProjectCollectionInput(json.RawMessage(`[]`)); err == nil {
+		t.Fatal("accepted non-object input")
+	}
+	active, err := ParseProjectCollectionInput(json.RawMessage(`{"status":"active"}`))
+	if err != nil || active.Status == nil || *active.Status != "active" {
+		t.Fatalf("status filter=%+v err=%v, want active", active, err)
+	}
+	if _, err := ParseProjectCollectionInput(json.RawMessage(`{"status":"deleted"}`)); err == nil {
+		t.Fatal("accepted an unknown project status")
 	}
 }
 

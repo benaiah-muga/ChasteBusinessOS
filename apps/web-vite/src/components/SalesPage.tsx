@@ -357,7 +357,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
 
   async function handleQuickCreateItem(): Promise<void> {
     if (!goInventoryItemWritesEnabled()) {
-      setQuickCreateError("Catalog quick-create is unavailable in this deployment because Go inventory item writes are disabled.");
+      setQuickCreateError("Catalog quick-create is unavailable in this deployment because inventory writes are disabled.");
       return;
     }
     if (quickCreateTargetIndex === null || !createScopeReady || !createScopeIdentity || quickCreateBusy) return;
@@ -401,7 +401,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       setQuickCreateItemDraft(emptyQuickCreateItemDraft());
       setQuickCreatePending(false);
       setQuickCreateError(null);
-      setActionNotice({ tone: "success", message: "Catalog item created through Go and added to the order line." });
+      setActionNotice({ tone: "success", message: "Catalog item created and added to the order line." });
     } catch (error) {
       if (currentCreateScope.current !== submittedScope) return;
       const uncertain = !(error instanceof InventoryItemActionError)
@@ -700,7 +700,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         <section className="sales-write-card" aria-labelledby="sales-retry-title">
           <div className="sales-write-heading">
             <div>
-              <p className="sales-eyebrow">Saved Go action</p>
+              <p className="sales-eyebrow">Saved action</p>
               <h2 id="sales-retry-title">Retry the unresolved {recoveredWriteAction.action === "deliver" ? "delivery" : recoveredWriteAction.action === "update" ? "draft edit" : "cancellation"}</h2>
             </div>
             <button
@@ -713,18 +713,18 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
             </button>
           </div>
           <p>
-            This sends the saved {recoveredWriteAction.action === "deliver" ? "delivery quantities" : recoveredWriteAction.action === "update" ? "draft changes" : "cancellation"} to Go again with the original intent ID. Other Sales writes stay locked until the action is resolved.
+            This sends the saved {recoveredWriteAction.action === "deliver" ? "delivery quantities" : recoveredWriteAction.action === "update" ? "draft changes" : "cancellation"} again with the original intent ID. Other Sales writes stay locked until the action is resolved.
           </p>
         </section>
       )}
       <header className="sales-page-header">
         <div>
-          <p className="sales-eyebrow">Revenue · preview</p>
+          <p className="sales-eyebrow">Revenue</p>
           <h1 id="sales-title">Sales orders</h1>
-          <p>Review and create orders, quotes, and customer relationships. Quote actions and CRM views run through authenticated Go capabilities.</p>
+          <p>Review orders, quotes, and customer relationships without leaving the sales workspace.</p>
         </div>
         <div className="sales-header-actions">
-          {visibleState.status === "ready" && <span className="sales-order-count">{visibleState.orders.length} {visibleState.orders.length === 1 ? "order" : "orders"}</span>}
+          {visibleState.status === "ready" && visibleState.orders.length > 0 && <span className="sales-order-count">{visibleState.orders.length} {visibleState.orders.length === 1 ? "order" : "orders"}</span>}
           <button className="sales-new-order" type="button" disabled={createAttemptPending || quickCreateBusy || quickCreatePending} onClick={() => { const nextOpen = !showCreateForm; setShowCreateForm(nextOpen); if (nextOpen) { setEditingOrderId(null); setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] }); } setCreateError(null); }} aria-expanded={showCreateForm}>
             {showCreateForm ? "Close order form" : "Create sales order"}
           </button>
@@ -775,7 +775,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
             {createForm.lines.map((line, index) => (
               <div className="sales-write-line" key={index}>
                 <label>SKU (optional)<input value={line.sku} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, sku: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
-                <button type="button" className="sales-write-secondary" disabled={!goInventoryItemWritesEnabled() || writeBusy || !createScopeReady || createWriteLocked} onClick={() => { setQuickCreateTargetIndex(index); setQuickCreateError(null); }} title={!goInventoryItemWritesEnabled() ? "Go inventory item writes are disabled in this deployment." : undefined}>Create catalog item</button>
+                <button type="button" className="sales-write-secondary" disabled={!goInventoryItemWritesEnabled() || writeBusy || !createScopeReady || createWriteLocked} onClick={() => { setQuickCreateTargetIndex(index); setQuickCreateError(null); }} title={!goInventoryItemWritesEnabled() ? "Inventory writes are disabled in this deployment." : undefined}>Create catalog item</button>
                 <label>Description<input value={line.description} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item) })); setCreateError(null); }} disabled={writeBusy || createWriteLocked} /></label>
                 <label>Quantity<input inputMode="decimal" value={line.quantity} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
                 <label>Unit price<input inputMode="decimal" value={line.unitPrice} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
@@ -797,7 +797,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
           <section className="sales-action-dialog" role="dialog" aria-modal="true" aria-labelledby="sales-quick-item-title">
             <div className="sales-write-heading">
               <div><p className="sales-eyebrow">Catalog</p><h2 id="sales-quick-item-title">Create catalog item</h2></div>
-              <p>This creates the item through the Go inventory capability, then links it to this draft line.</p>
+              <p>This creates the item through the inventory service, then links it to this draft line.</p>
             </div>
             <div className="sales-write-grid">
               <label>SKU<input value={quickCreateItemDraft.sku} maxLength={40} onChange={(event) => { const value = event.currentTarget.value; setQuickCreateItemDraft((current) => ({ ...current, sku: value })); }} disabled={quickCreateBusy || quickCreatePending} /></label>
@@ -869,6 +869,9 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
           <span aria-hidden="true">↗</span>
           <h2>No sales orders yet</h2>
           <p>Create a draft order, then confirm it to check credit and reserve stock.</p>
+          <button type="button" className="sales-empty-action" disabled={createAttemptPending || quickCreateBusy || quickCreatePending} onClick={() => { setShowCreateForm(true); setEditingOrderId(null); setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] }); setCreateError(null); }}>
+            Create your first sales order
+          </button>
         </section>
       )}
       {visibleState.status === "ready" && visibleState.orders.length > 0 && filtered.length === 0 && (

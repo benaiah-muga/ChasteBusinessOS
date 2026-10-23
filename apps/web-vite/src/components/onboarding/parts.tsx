@@ -226,11 +226,11 @@ export const ink = "#202922";
 export const muted = "#6f726a";
 export const gold = "#a9863f";
 export const hairline = "#e2dfd6";
-const surface = "#fffefa";
+const surface = "#fffdf8";
 const sand = "#efece3";
 
 export const styles = {
-  page: { minHeight: "100vh", background: "#f4f3ee", color: ink } satisfies CSSProperties,
+  page: { minHeight: "100vh", background: "#f4efe5", color: ink } satisfies CSSProperties,
   header: { background: "#111416", color: "#f7f1e8", borderBottom: "1px solid #23262a" } satisfies CSSProperties,
   headerInner: {
     display: "flex",
@@ -371,7 +371,7 @@ export const secondaryButton: CSSProperties = {
   borderColor: "#d9d7cd",
   background: "#f7f6f0",
   boxShadow: "none",
-  color: "#354238",
+  color: "#2e2b24",
 };
 
 export const ghostButton: CSSProperties = {
@@ -487,7 +487,7 @@ export function StepRail({ steps, current }: { steps: RailStep[]; current: numbe
                   height: 19,
                   placeItems: "center",
                   borderRadius: "50%",
-                  background: active ? "#c8a866" : done ? "rgb(200 168 102 / 22%)" : "#e4e1d7",
+                  background: active ? "#c19a32" : done ? "rgb(200 168 102 / 22%)" : "#e4e1d7",
                   color: active ? "#211f1b" : done ? "#7d6428" : muted,
                   fontSize: 10,
                   fontWeight: 700,
@@ -559,7 +559,7 @@ export function ChoiceCard({
         display: "grid",
         gap: 12,
         width: "100%",
-        border: `1px solid ${selected ? "#c8a866" : "#e6e2d7"}`,
+        border: `1px solid ${selected ? "#c19a32" : "#e6e2d7"}`,
         borderRadius: 14,
         padding: 18,
         background: selected ? "#fdfaf1" : surface,
@@ -578,7 +578,7 @@ export function ChoiceCard({
             flex: "0 0 auto",
             placeItems: "center",
             borderRadius: 10,
-            background: selected ? "#c8a866" : "rgb(200 168 102 / 14%)",
+            background: selected ? "#c19a32" : "rgb(200 168 102 / 14%)",
             color: selected ? "#fff" : gold,
             fontSize: 18,
           }}
@@ -597,9 +597,9 @@ export function ChoiceCard({
             height: 20,
             flex: "0 0 auto",
             placeItems: "center",
-            border: `1px solid ${selected ? "#c8a866" : "#ddd9cc"}`,
+            border: `1px solid ${selected ? "#c19a32" : "#ddd9cc"}`,
             borderRadius: "50%",
-            background: selected ? "#c8a866" : surface,
+            background: selected ? "#c19a32" : surface,
             color: "#fff",
             fontSize: 11,
           }}

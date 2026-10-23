@@ -101,21 +101,3 @@ func (r *PgOrgRepository) AgentSoul(ctx context.Context, orgID string) (string, 
 	}
 	return *soul, nil
 }
-
-func (r *PgOrgRepository) SetAgentSoul(ctx context.Context, orgID, soul string) error {
-	if r == nil || r.pool == nil {
-		return errors.New("org repository has no pool")
-	}
-	var value any
-	if soul != "" {
-		value = soul
-	}
-	if _, err := dbx.WithOrgTx(ctx, r.pool, orgID, func(tx pgx.Tx) (struct{}, error) {
-		_, err := tx.Exec(ctx,
-			`UPDATE organizations SET agent_soul = $2 WHERE id = $1::uuid`, orgID, value)
-		return struct{}{}, err
-	}); err != nil {
-		return fmt.Errorf("set agent soul: %w", err)
-	}
-	return nil
-}

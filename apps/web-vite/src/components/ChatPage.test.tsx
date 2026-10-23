@@ -47,6 +47,13 @@ function harness(options: { modules?: () => Response; steer?: () => Response; ap
     if (url === "/api/chat/steer") {
       return options.steer ? options.steer() : Response.json({ queued: true });
     }
+    if (url === "/api/sessions") return Response.json({ sessions: [] });
+    if (url.startsWith("/api/search?")) {
+      return Response.json({
+        query: "Acme",
+        groups: [{ type: "customer", label: "Customers", items: [{ id: "11111111-1111-4111-8111-111111111111", title: "Acme Ltd", href: "/crm" }] }],
+      });
+    }
     if (url === "/api/approvals") {
       return options.approvals ? options.approvals() : Response.json({ error: "approvals unavailable" }, { status: 500 });
     }
@@ -108,6 +115,47 @@ describe("ChatPage", () => {
     expect(screen.getByText(/this session: in 10/)).not.toBeNull();
   });
 
+  it("continues a previous conversation from the session query parameter", async () => {
+    const sessionID = "00000000-0000-4000-8000-000000000077";
+    const at = "2026-10-20T09:00:00.000Z";
+    window.history.replaceState(null, "", `/chat?session=${sessionID}`);
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const streams: ControlledStream[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/modules") return creatorModulesResponse(false);
+      if (url === "/api/sessions") return Response.json({ sessions: [] });
+      if (url === `/api/sessions/${sessionID}`) {
+        return Response.json({
+          session: {
+            id: sessionID, orgId: "org-1", userId: "user-1", title: "Quarter close",
+            mode: "assist", status: "completed", summary: null, modelRef: null,
+            tokenUsage: { input: 12, output: 4, cachedInput: 8 }, createdAt: at, updatedAt: at,
+          },
+          events: [
+            { seq: 1, role: "user", content: { text: "Earlier question" }, at },
+            { seq: 2, role: "assistant", content: { text: "Earlier answer" }, at },
+          ],
+        });
+      }
+      requests.push({ url, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
+      const stream = controlledStream();
+      streams.push(stream);
+      return stream.response;
+    }));
+
+    render(<ChatPage organizationId="org-1" actorId="user-1" />);
+    expect(await screen.findByText("Earlier answer")).not.toBeNull();
+    expect(screen.getByText(/Continuing/)).not.toBeNull();
+    expect(window.location.search).toBe("");
+
+    sendMessage("Next question");
+    await waitFor(() => expect(streams).toHaveLength(1));
+    expect(requests[0]!.body.sessionId).toBe(sessionID);
+    await completeTurn(streams[0]!, "Next answer", sessionID);
+    expect(await screen.findByText("Next answer")).not.toBeNull();
+  });
+
   it("shows the live console strip while the agent works", async () => {
     const { streams } = harness();
     render(<ChatPage />);
@@ -119,7 +167,7 @@ describe("ChatPage", () => {
     expect(await screen.findByText("working")).not.toBeNull();
     expect(screen.getByText("step 2/8")).not.toBeNull();
     // Once on the message activity chips and once in the live strip.
-    expect(screen.getAllByText("hr.runPayroll")).toHaveLength(2);
+    expect(screen.getAllByText("People · Run Payroll")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Stop" })).not.toBeNull();
 
     await completeTurn(streams[0]!, "Payroll queued.");
@@ -257,6 +305,19 @@ describe("ChatPage", () => {
     await completeTurn(streams[0]!, "CEM-1 is below its reorder point.");
   });
 
+  it("explains context compaction and offers a copy action on the reply", async () => {
+    const { streams } = harness();
+    render(<ChatPage />);
+    sendMessage("Keep going on the long job.");
+    await waitFor(() => expect(streams).toHaveLength(1));
+    streams[0]!.push('{"type":"compaction","compactedToMessages":12}\n');
+    await completeTurn(streams[0]!, "Still here with the full answer.");
+
+    expect(await screen.findByText(/Older context summarized/)).not.toBeNull();
+    expect(screen.getByText(/12 recent messages kept/)).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "Copy reply" }).length).toBeGreaterThan(0);
+  });
+
   it("renders the exact stored proposal when a pending approval tool result arrives", async () => {
     const organizationId = "22222222-2222-4222-8222-222222222222";
     const approvalId = "11111111-1111-4111-8111-111111111111";
@@ -298,4 +359,21 @@ describe("ChatPage", () => {
     await completeTurn(streams[0]!, "I prepared the order and it is waiting for your approval.");
   });
 
+});
+
+
+it("attaches a searched record as a source chip and sends its id with the turn", async () => {
+  const { requests } = harness();
+  render(<ChatPage />);
+
+  fireEvent.click(screen.getByRole("button", { name: /Sources/ }));
+  fireEvent.change(screen.getByPlaceholderText("Search customers, invoices, documents…"), { target: { value: "Acme" } });
+  fireEvent.click(await screen.findByRole("button", { name: /Acme Ltd/ }));
+  expect(screen.getByText("Acme Ltd")).not.toBeNull();
+  sendMessage("What changed on this account?");
+
+  await waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0]!.body.attachments).toEqual([
+    { type: "customer", id: "11111111-1111-4111-8111-111111111111", title: "Acme Ltd" },
+  ]);
 });

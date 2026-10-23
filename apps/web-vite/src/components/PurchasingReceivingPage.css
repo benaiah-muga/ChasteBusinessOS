@@ -6,7 +6,7 @@
   width: min(100%, 74rem);
   margin: 0 auto;
   padding: 20px clamp(12px, 2.5vw, 26px) 36px;
-  color: #41483f;
+  color: #35312a;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -18,7 +18,7 @@
   justify-content: space-between;
   gap: 14px;
   padding-bottom: 13px;
-  border-bottom: 1px solid #e5e3da;
+  border-bottom: 1px solid #e5dccb;
 }
 
 .purchasing-receiving-header h1,
@@ -26,7 +26,7 @@
 .purchasing-receiving-disabled h2,
 .purchasing-receiving-error h2 {
   margin: 0 0 5px;
-  color: #29372d;
+  color: #171613;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 25px;
   font-weight: 500;
@@ -45,14 +45,14 @@
 .purchasing-receiving-error p {
   max-width: 44rem;
   margin: 0;
-  color: #71746b;
+  color: #625d53;
   font-size: 11px;
   line-height: 1.6;
 }
 
 .purchasing-receiving-eyebrow {
   margin: 0 0 6px;
-  color: #927b4d;
+  color: #8b6a22;
   font-size: 9px;
   font-weight: 750;
   letter-spacing: .15em;
@@ -63,11 +63,11 @@
   display: inline-flex;
   align-items: center;
   min-height: 34px;
-  border: 1px solid #e0ddd3;
+  border: 1px solid #ddd4c4;
   border-radius: 6px;
   padding: 0 11px;
-  background: #fffefa;
-  color: #29473a;
+  background: #fffdf8;
+  color: #171613;
   font-size: 10px;
   font-weight: 650;
   text-decoration: none;
@@ -76,18 +76,18 @@
 }
 
 .purchasing-receiving-legacy-link:hover {
-  border-color: #cfcab9;
-  background: #f8f7f2;
+  border-color: #cec4b1;
+  background: #f7f2e8;
 }
 
 /* Cards ------------------------------------------------------------------- */
 
 .purchasing-receiving-card {
   min-width: 0;
-  border: 1px solid #e5e3da;
+  border: 1px solid #e5dccb;
   border-radius: 10px;
   padding: 15px;
-  background: #fffefa;
+  background: #fffdf8;
   box-shadow: 0 6px 19px rgb(44 40 29 / 3%);
 }
 
@@ -102,7 +102,7 @@
 
 .purchasing-receiving-card-title {
   margin: 0;
-  color: #29372d;
+  color: #171613;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 16px;
   font-weight: 500;
@@ -111,7 +111,7 @@
 
 .purchasing-receiving-card-hint {
   margin: 0 0 11px;
-  color: #92938b;
+  color: #756f63;
   font-size: 10px;
   line-height: 1.55;
 }
@@ -121,11 +121,11 @@
 .purchasing-receiving-status-pill {
   display: inline-flex;
   align-items: center;
-  border: 1px solid #dfddd4;
+  border: 1px solid #ddd4c4;
   border-radius: 999px;
   padding: 2px 8px;
-  background: #f8f7f2;
-  color: #71746b;
+  background: #f7f2e8;
+  color: #625d53;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: .04em;
@@ -140,7 +140,7 @@
 }
 
 .purchasing-receiving-status-pill.is-closed {
-  border-color: #e0ddd3;
+  border-color: #ddd4c4;
   background: #f3f2ec;
   color: #6f7268;
 }
@@ -159,7 +159,7 @@
   justify-content: space-between;
   gap: 12px;
   margin: 0;
-  border: 1px solid #dfddd4;
+  border: 1px solid #ddd4c4;
   border-radius: 8px;
   padding: 9px 12px;
   font-size: 11px;
@@ -216,7 +216,7 @@
   display: grid;
   gap: 4px;
   min-width: 0;
-  color: #71746b;
+  color: #625d53;
   font-size: 10px;
   font-weight: 650;
 }
@@ -230,27 +230,27 @@
   width: 100%;
   min-width: 0;
   min-height: 34px;
-  border: 1px solid #dfddd4;
+  border: 1px solid #ddd4c4;
   border-radius: 6px;
   padding: 0 9px;
-  background: #fffefa;
-  color: #41483f;
+  background: #fffdf8;
+  color: #35312a;
   font: inherit;
   font-size: 11px;
   transition: border-color 120ms ease, background 120ms ease;
 }
 
 .purchasing-receiving-input::placeholder {
-  color: #a0a197;
+  color: #716b5f;
 }
 
 .purchasing-receiving-input:hover:not(:disabled) {
-  border-color: #cfcab9;
+  border-color: #cec4b1;
 }
 
 .purchasing-receiving-input:disabled {
-  background: #f8f7f2;
-  color: #a0a197;
+  background: #f7f2e8;
+  color: #716b5f;
   cursor: not-allowed;
 }
 
@@ -269,11 +269,11 @@
   align-items: center;
   justify-content: center;
   min-height: 34px;
-  border: 1px solid #dfddd4;
+  border: 1px solid #ddd4c4;
   border-radius: 6px;
   padding: 0 11px;
   background: #ffffff;
-  color: #41483f;
+  color: #35312a;
   cursor: pointer;
   font: inherit;
   font-size: 10px;
@@ -283,42 +283,42 @@
 }
 
 .purchasing-receiving-button:hover:not(:disabled) {
-  border-color: #cfcab9;
-  background: #f8f7f2;
+  border-color: #cec4b1;
+  background: #f7f2e8;
 }
 
 .purchasing-receiving-button:disabled {
   border-color: #e7e5dc;
-  background: #f8f7f2;
-  color: #a0a197;
+  background: #f7f2e8;
+  color: #716b5f;
   cursor: not-allowed;
 }
 
 .purchasing-receiving-button.is-primary {
-  border-color: #29473a;
-  background: #29473a;
-  color: #fffefa;
+  border-color: #171613;
+  background: #171613;
+  color: #fffdf8;
 }
 
 .purchasing-receiving-button.is-primary:hover:not(:disabled) {
-  border-color: #203a30;
-  background: #203a30;
+  border-color: #34302a;
+  background: #34302a;
 }
 
 .purchasing-receiving-button.is-primary:disabled {
   border-color: #e7e5dc;
-  background: #f8f7f2;
-  color: #a0a197;
+  background: #f7f2e8;
+  color: #716b5f;
 }
 
 .purchasing-receiving-button.is-danger {
-  border-color: #a84e3d;
+  border-color: #9d4438;
   background: #ffffff;
-  color: #85473b;
+  color: #85382e;
 }
 
 .purchasing-receiving-button.is-danger:hover:not(:disabled) {
-  border-color: #a84e3d;
+  border-color: #9d4438;
   background: #fff0ed;
 }
 
@@ -326,7 +326,7 @@
 .purchasing-receiving-page input:focus-visible,
 .purchasing-receiving-page select:focus-visible,
 .purchasing-receiving-page a:focus-visible {
-  outline: 2px solid #927b4d;
+  outline: 2px solid #8b6a22;
   outline-offset: 2px;
 }
 
@@ -339,7 +339,7 @@
 
 .purchasing-receiving-line {
   min-width: 0;
-  border: 1px solid #e5e3da;
+  border: 1px solid #e5dccb;
   border-radius: 8px;
   padding: 10px;
   background: #ffffff;
@@ -355,13 +355,13 @@
 
 .purchasing-receiving-line-name {
   margin: 0;
-  color: #374238;
+  color: #26231e;
   font-size: 11px;
   font-weight: 650;
 }
 
 .purchasing-receiving-line-stats {
-  color: #92938b;
+  color: #756f63;
   font-size: 9px;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -382,15 +382,15 @@
 /* Authority gate ---------------------------------------------------------- */
 
 .purchasing-receiving-authority {
-  border: 1px dashed #cfcab9;
+  border: 1px dashed #cec4b1;
   border-radius: 8px;
   padding: 11px;
-  background: #f8f7f2;
+  background: #f7f2e8;
 }
 
 .purchasing-receiving-authority-title {
   margin: 0 0 3px;
-  color: #374238;
+  color: #26231e;
   font-size: 11px;
   font-weight: 650;
 }
@@ -411,7 +411,7 @@
 
 .purchasing-receiving-hint {
   margin: 0;
-  color: #92938b;
+  color: #756f63;
   font-size: 9px;
   line-height: 1.5;
 }
@@ -426,9 +426,9 @@
 .purchasing-receiving-receipt-card {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid #e5e3da;
+  border: 1px solid #e5dccb;
   border-radius: 10px;
-  background: #fffefa;
+  background: #fffdf8;
   box-shadow: 0 4px 14px rgb(44 40 29 / 3%);
 }
 
@@ -439,18 +439,18 @@
   justify-content: space-between;
   gap: 8px;
   padding: 10px 13px;
-  border-bottom: 1px solid #efede7;
+  border-bottom: 1px solid #eee7da;
 }
 
 .purchasing-receiving-receipt-time {
-  color: #92938b;
+  color: #756f63;
   font-size: 9px;
 }
 
 .purchasing-receiving-receipt-note {
   margin: 0;
   padding: 8px 13px 0;
-  color: #71746b;
+  color: #625d53;
   font-size: 10px;
   overflow-wrap: anywhere;
 }
@@ -463,7 +463,7 @@
 .purchasing-receiving-table {
   width: 100%;
   border-collapse: collapse;
-  color: #41483f;
+  color: #35312a;
   font-size: 10px;
   text-align: left;
 }
@@ -471,12 +471,12 @@
 .purchasing-receiving-table th,
 .purchasing-receiving-table td {
   padding: 6px 8px;
-  border-bottom: 1px solid #efede7;
+  border-bottom: 1px solid #eee7da;
   vertical-align: top;
 }
 
 .purchasing-receiving-table thead th {
-  color: #92938b;
+  color: #756f63;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: .05em;
@@ -485,7 +485,7 @@
 }
 
 .purchasing-receiving-table tbody th {
-  color: #374238;
+  color: #26231e;
   font-weight: 650;
 }
 
@@ -508,10 +508,10 @@
 .purchasing-receiving-empty,
 .purchasing-receiving-disabled,
 .purchasing-receiving-error {
-  border: 1px solid #e5e3da;
+  border: 1px solid #e5dccb;
   border-radius: 10px;
   padding: 15px;
-  background: #fffefa;
+  background: #fffdf8;
   box-shadow: 0 6px 19px rgb(44 40 29 / 3%);
 }
 
@@ -520,7 +520,7 @@
   min-height: 120px;
   align-items: center;
   justify-content: center;
-  color: #92938b;
+  color: #756f63;
   font-size: 11px;
 }
 
@@ -530,7 +530,7 @@
   min-height: 220px;
   align-content: center;
   justify-items: center;
-  background: #f8f7f2;
+  background: #f7f2e8;
   text-align: center;
 }
 
@@ -545,7 +545,7 @@
 }
 
 .purchasing-receiving-error h2 {
-  color: #85473b;
+  color: #85382e;
   font-size: 18px;
 }
 
@@ -557,7 +557,7 @@
 }
 
 .purchasing-receiving-error-actions a {
-  color: #85473b;
+  color: #85382e;
   font-size: 10px;
   font-weight: 650;
   text-decoration: underline;

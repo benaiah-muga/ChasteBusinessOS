@@ -21,6 +21,7 @@ import {
   type PendingIngestedDocumentDeletion,
 } from "../api/documents-library";
 import { navigate } from "../navigation";
+import { PageLoading } from "../ui/page-loading";
 import "./documents-page.css";
 
 type ListState =
@@ -658,7 +659,7 @@ export function DocumentsPage() {
         </section>
       )}
 
-      {state.status === "loading" && <p className="documents-loading" role="status">Loading documents…</p>}
+      {state.status === "loading" && <PageLoading label="Loading documents…" compact />}
       {state.status === "disabled" && (
         <section className="documents-empty" role="status">
           <h2>Documents is turned off</h2>
@@ -687,9 +688,6 @@ export function DocumentsPage() {
           </button>
           <button className="documents-secondary-action" type="button" onClick={() => { setIngestMode("file"); setIngestError(null); setIngestSuccess(false); }}>
             Upload a PDF or image
-          </button>
-          <button className="documents-secondary-action" type="button" onClick={() => void createDraft()} disabled={creating}>
-            {creating ? "Creating draft…" : "Create editable draft"}
           </button>
         </section>
       )}

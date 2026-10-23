@@ -6,6 +6,7 @@
     "dev": "pnpm --filter @chaste/web-vite dev",
     "dev:vite": "pnpm --filter @chaste/web-vite dev",
     "dev:api": "node --env-file-if-exists=.env scripts/dev-api.mjs",
+    "agents:catalog": "node scripts/agents/generate-capability-catalog.mjs",
     "api:serve": "go -C apps/api run ./cmd/api",
     "db:provision-runtime": "node --env-file-if-exists=.env --run db:provision-runtime:cmd",
     "db:provision-runtime:cmd": "pnpm --filter @chaste/db db:provision-runtime",

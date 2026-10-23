@@ -88,6 +88,62 @@
       }
     },
     {
+      "id": "crm.reapplyLeadConversion",
+      "title": "Reapply lead conversion",
+      "intent": "Restore the exact lead conversion from its unchanged undo receipt, recreating the customer when required.",
+      "module": "crm",
+      "risk": "write",
+      "permission": "crm.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "crm.undoLeadConversion",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "undoIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "undoIntentId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "reapplied": {
+            "type": "boolean",
+            "const": true
+          },
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversionIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "reapplied",
+          "dealId",
+          "customerId",
+          "conversionIntentId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "crm.undoLeadConversion",
       "title": "Undo lead conversion",
       "intent": "Restore a converted deal to its lead state and remove its unchanged unreferenced customer when safe.",
@@ -144,6 +200,54 @@
           "customerDeleted",
           "conversionIntentId",
           "undoIntentId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "documents.allocateNumber",
+      "title": "Allocate authored document number",
+      "intent": "Reserve the next organization-scoped number for an authored business document.",
+      "module": "documents",
+      "risk": "write",
+      "permission": "documents.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "invoice",
+              "quote",
+              "receipt",
+              "delivery_note",
+              "purchase_order",
+              "voucher",
+              "employment_contract",
+              "employment_agreement"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "number"
         ],
         "additionalProperties": false
       }
@@ -297,91 +401,68 @@
       }
     },
     {
-      "id": "crm.reapplyLeadConversion",
-      "title": "Reapply lead conversion",
-      "intent": "Restore the exact lead conversion from its unchanged undo receipt, recreating the customer when required.",
-      "module": "crm",
-      "risk": "write",
-      "permission": "crm.write",
-      "executionScope": "organization",
-      "moneyThresholdMinor": null,
-      "inverseCapabilityId": "crm.undoLeadConversion",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "undoIntentId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 160
-          }
-        },
-        "required": [
-          "undoIntentId"
-        ],
-        "additionalProperties": false
-      },
-      "outputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "reapplied": {
-            "type": "boolean",
-            "const": true
-          },
-          "dealId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "customerId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "conversionIntentId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 160
-          }
-        },
-        "required": [
-          "reapplied",
-          "dealId",
-          "customerId",
-          "conversionIntentId"
-        ],
-        "additionalProperties": false
-      }
-    },
-    {
-      "id": "documents.allocateNumber",
-      "title": "Allocate authored document number",
-      "intent": "Reserve the next organization-scoped number for an authored business document.",
-      "module": "documents",
-      "risk": "write",
-      "permission": "documents.write",
+      "id": "iam.getOrgPolicy",
+      "title": "Read org approval policy",
+      "intent": "Read the organization's approval policy: the highest risk class that can run autonomously, the money threshold in minor units, and the risk classes that always need human approval. Use it to explain why an action needs approval or to propose a policy change.",
+      "module": "iam",
+      "risk": "read",
+      "permission": "iam.read",
       "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
         "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "invoice",
-              "quote",
-              "receipt",
-              "delivery_note",
-              "purchase_order",
-              "voucher",
-              "employment_contract",
-              "employment_agreement"
-            ]
+          "maxRiskAutonomous": {
+            "type": "string"
+          },
+          "moneyThresholdMinor": {
+            "type": "number"
+          },
+          "requiresApprovalFor": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
-          "kind"
+          "maxRiskAutonomous",
+          "moneyThresholdMinor",
+          "requiresApprovalFor"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "iam.restoreAgentSoul",
+      "title": "Restore agent persona",
+      "intent": "Restore a previously captured organization agent persona after an authorized change. The previous persona is returned so the restore can be reversed again.",
+      "module": "iam",
+      "risk": "write",
+      "permission": "iam.admin",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "iam.setAgentSoul",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Standing instructions, voice, and hard rules for every agent turn. An empty string clears the persona."
+          }
+        },
+        "required": [
+          "agentSoul"
         ],
         "additionalProperties": false
       },
@@ -389,13 +470,59 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "number": {
-            "type": "string",
-            "minLength": 1
+          "agentSoul": {
+            "type": "string"
+          },
+          "previousAgentSoul": {
+            "type": "string"
           }
         },
         "required": [
-          "number"
+          "agentSoul",
+          "previousAgentSoul"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "iam.setAgentSoul",
+      "title": "Set agent persona",
+      "intent": "Replace the organization's standing agent persona, the instructions every agent turn follows. The previous persona is returned so the change can be restored.",
+      "module": "iam",
+      "risk": "write",
+      "permission": "iam.admin",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "iam.restoreAgentSoul",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Standing instructions, voice, and hard rules for every agent turn. An empty string clears the persona."
+          }
+        },
+        "required": [
+          "agentSoul"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string"
+          },
+          "previousAgentSoul": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentSoul",
+          "previousAgentSoul"
         ],
         "additionalProperties": false
       }
@@ -494,6 +621,321 @@
       }
     },
     {
+      "id": "operations.getRecord",
+      "title": "Read operational record",
+      "intent": "Read one persistent objective, exception, or Decision Record and its conversation card.",
+      "module": "operations",
+      "risk": "read",
+      "permission": "operations.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "stableKey": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "operations.listRecords",
+      "title": "List operational records",
+      "intent": "List persistent objectives, exceptions, and Decision Records filtered by kind and status.",
+      "module": "operations",
+      "risk": "read",
+      "permission": "operations.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "operations.upsertRecord",
+      "title": "Upsert operational record",
+      "intent": "Create or update a persistent business objective, deduplicated exception, or Decision Record under a stable key.",
+      "module": "operations",
+      "risk": "write",
+      "permission": "operations.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "stableKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "details": {
+            "type": "object"
+          },
+          "authorityRef": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "approvalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "stableKey",
+          "status",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "pos.listSessions",
+      "title": "List POS sessions",
+      "intent": "List the organization's POS register sessions, newest first, with register, status, opening float, expected and counted cash, variance, and open or close times. Use the session id with pos.shiftSummary for details.",
+      "module": "pos",
+      "risk": "read",
+      "permission": "pos.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "register": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "openingFloatMinor": {
+                  "type": "number"
+                },
+                "expectedCashMinor": {
+                  "type": "number"
+                },
+                "countedCashMinor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "varianceMinor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "varianceReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "openedByUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "closedByUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "openedAt": {
+                  "type": "string"
+                },
+                "closedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "register",
+                "status",
+                "openingFloatMinor",
+                "expectedCashMinor",
+                "countedCashMinor",
+                "varianceMinor",
+                "varianceReason",
+                "openedByUserId",
+                "closedByUserId",
+                "openedAt",
+                "closedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "projects.list",
+      "title": "List projects",
+      "intent": "List the organization's projects with their id, name, active or archived status, due date, and creation time, newest first, so work can be found before opening a board. Optionally filter to active or archived projects.",
+      "module": "projects",
+      "risk": "read",
+      "permission": "projects.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ],
+            "description": "Optional status filter; omit for every project."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "dueAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "status",
+                "dueAt",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "projects"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "purchasing.createPurchaseOrder",
       "title": "Create purchase order",
       "intent": "Commit an authorized purchase order with its vendor, lines, quantities, prices, and promised delivery date.",
@@ -566,122 +1008,6 @@
         },
         "required": [
           "poNumber"
-        ],
-        "additionalProperties": false
-      }
-    },
-    {
-      "id": "purchasing.selectWinningQuote",
-      "title": "Award purchase quote",
-      "intent": "Select a quoted supplier as the winner and commit the resulting purchase order under purchase authority.",
-      "module": "purchasing",
-      "risk": "money",
-      "permission": "purchasing.write",
-      "executionScope": "organization",
-      "moneyThresholdMinor": 0,
-      "inverseCapabilityId": null,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "rfqId": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "rfqId"
-        ],
-        "additionalProperties": false
-      },
-      "outputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "poNumber": {
-            "type": "integer"
-          },
-          "vendorId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "quoteAmountMinor": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "poNumber",
-          "vendorId",
-          "quoteAmountMinor"
-        ],
-        "additionalProperties": false
-      }
-    },
-    {
-      "id": "purchasing.listVendors",
-      "title": "List purchasing vendors",
-      "intent": "List this organization's suppliers with contact details, payment terms, and active state for purchasing decisions.",
-      "module": "purchasing",
-      "risk": "read",
-      "permission": "purchasing.read",
-      "executionScope": "organization",
-      "moneyThresholdMinor": null,
-      "inverseCapabilityId": null,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "includeInactive": {
-            "type": "boolean"
-          }
-        },
-        "additionalProperties": false
-      },
-      "outputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "vendors": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "email": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "paymentTermDays": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                },
-                "active": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "id",
-                "name",
-                "email",
-                "paymentTermDays",
-                "active"
-              ],
-              "additionalProperties": false
-            }
-          }
-        },
-        "required": [
-          "vendors"
         ],
         "additionalProperties": false
       }
@@ -785,144 +1111,119 @@
       }
     },
     {
-      "id": "operations.upsertRecord",
-      "title": "Upsert operational record",
-      "intent": "Create or update a persistent business objective, deduplicated exception, or Decision Record under a stable key.",
-      "module": "operations",
-      "risk": "write",
-      "permission": "operations.write",
+      "id": "purchasing.listVendors",
+      "title": "List purchasing vendors",
+      "intent": "List this organization's suppliers with contact details, payment terms, and active state for purchasing decisions.",
+      "module": "purchasing",
+      "risk": "read",
+      "permission": "purchasing.read",
       "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "objective",
-              "exception",
-              "decision"
-            ]
-          },
-          "stableKey": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "status": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 40
-          },
-          "title": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "summary": {
-            "type": "string",
-            "maxLength": 2000
-          },
-          "details": {
-            "type": "object"
-          },
-          "authorityRef": {
-            "type": "string",
-            "maxLength": 200
-          },
-          "approvalId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "ownerUserId": {
+          "includeInactive": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "paymentTermDays": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "active": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "email",
+                "paymentTermDays",
+                "active"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "vendors"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.selectWinningQuote",
+      "title": "Award purchase quote",
+      "intent": "Select a quoted supplier as the winner and commit the resulting purchase order under purchase authority.",
+      "module": "purchasing",
+      "risk": "money",
+      "permission": "purchasing.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": 0,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rfqId": {
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
-          "kind",
-          "stableKey",
-          "status",
-          "title"
+          "rfqId"
         ],
         "additionalProperties": false
       },
       "outputSchema": {
-        "type": "object"
-      }
-    },
-    {
-      "id": "operations.getRecord",
-      "title": "Read operational record",
-      "intent": "Read one persistent objective, exception, or Decision Record and its conversation card.",
-      "module": "operations",
-      "risk": "read",
-      "permission": "operations.read",
-      "executionScope": "organization",
-      "moneyThresholdMinor": null,
-      "inverseCapabilityId": null,
-      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "id": {
+          "poNumber": {
+            "type": "integer"
+          },
+          "vendorId": {
             "type": "string",
             "format": "uuid"
           },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "objective",
-              "exception",
-              "decision"
-            ]
-          },
-          "stableKey": {
-            "type": "string",
-            "maxLength": 200
+          "quoteAmountMinor": {
+            "type": "integer"
           }
         },
+        "required": [
+          "poNumber",
+          "vendorId",
+          "quoteAmountMinor"
+        ],
         "additionalProperties": false
-      },
-      "outputSchema": {
-        "type": "object"
-      }
-    },
-    {
-      "id": "operations.listRecords",
-      "title": "List operational records",
-      "intent": "List persistent objectives, exceptions, and Decision Records filtered by kind and status.",
-      "module": "operations",
-      "risk": "read",
-      "permission": "operations.read",
-      "executionScope": "organization",
-      "moneyThresholdMinor": null,
-      "inverseCapabilityId": null,
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "objective",
-              "exception",
-              "decision"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "maxLength": 40
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100
-          }
-        },
-        "additionalProperties": false
-      },
-      "outputSchema": {
-        "type": "object"
       }
     }
   ]

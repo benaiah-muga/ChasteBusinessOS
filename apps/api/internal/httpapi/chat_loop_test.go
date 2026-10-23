@@ -180,8 +180,8 @@ func TestChatLoopExecutesToolThenReplies(t *testing.T) {
 	if !strings.HasSuffix(second[0].Content, chatUntrustedContentRule) {
 		t.Fatalf("system prompt missing untrusted-content rule: %q", second[0].Content)
 	}
-	if !strings.HasSuffix(second[1].Content, chatNoCapabilityNote) {
-		t.Fatalf("user goal missing no-capability note: %q", second[1].Content)
+	if second[1].Content != "do the thing" {
+		t.Fatalf("user goal should pass through unmodified: %q", second[1].Content)
 	}
 }
 
@@ -463,5 +463,218 @@ func TestChatCompactionHelpers(t *testing.T) {
 	}
 	if chatEstimateTokens([]chatMessage{{Role: "user", Content: strings.Repeat("z", 9)}}) != 3 {
 		t.Fatal("token estimate must be ceil(chars/4)")
+	}
+}
+
+func TestChatLoopIncludesRecentConversationHistory(t *testing.T) {
+	provider := &scriptedChatProvider{turns: []chatTurn{{message: "ok"}}}
+	deps, _ := chatLoopTestDeps(provider, &scriptedChatExecutor{})
+	deps.history = []chatMessage{
+		{Role: "user", Content: "Earlier question"},
+		{Role: "assistant", Content: "Earlier answer"},
+	}
+	if _, err := runChatSessionLoop(context.Background(), deps); err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+	messages := provider.callMessages(0)
+	if len(messages) != 4 || messages[1].Content != "Earlier question" || messages[2].Content != "Earlier answer" {
+		t.Fatalf("messages=%+v", messages)
+	}
+}
+
+func TestChatLoopConfirmsExecutedToolWhenProviderFails(t *testing.T) {
+	executor := &scriptedChatExecutor{results: []capability.Result{{OK: true, Data: json.RawMessage(`{"customers":[]}`)}}}
+	provider := &scriptedChatProvider{
+		turns: []chatTurn{{toolCalls: []chatToolCall{{ID: "call_1", Name: "crm_listCustomers", Arguments: json.RawMessage(`{}`)}}}},
+		errs:  []error{nil, chatProviderError{status: 429}},
+	}
+	deps, _ := chatLoopTestDeps(provider, executor)
+	result, err := runChatSessionLoop(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("runChatSessionLoop: %v", err)
+	}
+	if !strings.Contains(result.finalMessage, "crm · listCustomers") || !strings.Contains(result.finalMessage, "completed") {
+		t.Fatalf("finalMessage=%q", result.finalMessage)
+	}
+}
+
+func TestChatToolFallbackMessageExplainsPendingApproval(t *testing.T) {
+	got := chatToolFallbackMessage("accounting.createInvoice", `{"error":"approval required","pendingApproval":true,"approvalId":"a-1"}`, false)
+	if !strings.Contains(got, "waiting for approval") || !strings.Contains(got, "a-1") {
+		t.Fatalf("message=%q", got)
+	}
+}
+
+func TestDailyBriefComposesCrossModuleSections(t *testing.T) {
+	executor := &scriptedChatExecutor{results: []capability.Result{
+		{OK: true, Data: json.RawMessage(`{"signals":[]}`)},
+		{OK: true, Data: json.RawMessage(`{"aging":{}}`)},
+		{OK: true, Data: json.RawMessage(`{"aging":{}}`)},
+		{OK: true, Data: json.RawMessage(`{"items":[]}`)},
+		{OK: true, Data: json.RawMessage(`{"tasks":[]}`)},
+		{OK: true, Data: json.RawMessage(`{"leave":[]}`)},
+		{OK: true, Data: json.RawMessage(`{"conversations":[]}`)},
+		{OK: true, Data: json.RawMessage(`{"tickets":[]}`)},
+		{OK: true, Data: json.RawMessage(`{"entries":[]}`)},
+	}}
+	deps, _ := chatLoopTestDeps(&scriptedChatProvider{}, executor)
+	deps.user.Permissions = map[string]bool{"*": true}
+	deps.recentChanges = func(context.Context, *session.ResolvedUser, chatToolCall) (string, bool, string) {
+		return `{"total":0,"recent":[]}`, true, ""
+	}
+	deps.approvalsInbox = func(context.Context, *session.ResolvedUser) (string, bool, string) {
+		return `{"count":0,"approvals":[]}`, true, ""
+	}
+	deps.notificationsInbox = func(context.Context, *session.ResolvedUser) (string, bool, string) {
+		return `{"unreadCount":0,"notifications":[]}`, true, ""
+	}
+	payload, ok, message := deps.dailyBrief(context.Background())
+	if !ok {
+		t.Fatalf("dailyBrief failed: %s", message)
+	}
+	var brief struct {
+		Sections map[string]struct {
+			OK    bool            `json:"ok"`
+			Data  json.RawMessage `json:"data"`
+			Error string          `json:"error"`
+		} `json:"sections"`
+	}
+	if err := json.Unmarshal([]byte(payload), &brief); err != nil {
+		t.Fatalf("brief payload: %v", err)
+	}
+	for _, section := range []string{"signals", "overview", "receivables", "payables", "stock", "tasks", "leave", "support", "tickets", "approvals", "notifications", "changes"} {
+		got, exists := brief.Sections[section]
+		if !exists || !got.OK {
+			t.Fatalf("section %s missing or failed: %+v", section, got)
+		}
+	}
+}
+
+func TestCapabilityDiscoveryHonorsTheModuleSwitchboard(t *testing.T) {
+	deps, _ := chatLoopTestDeps(&scriptedChatProvider{}, &scriptedChatExecutor{})
+	deps.user.Permissions = map[string]bool{"*": true}
+	deps.allowedModules = map[string]bool{"crm": true}
+	result, ok, message := deps.searchCapabilities(chatToolCall{Name: "capability_search", Arguments: json.RawMessage(`{"query":"invoice"}`)})
+	if !ok {
+		t.Fatalf("search failed: %s", message)
+	}
+	var payload struct {
+		Capabilities []struct {
+			ID string `json:"id"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("search payload: %v", err)
+	}
+	for _, capability := range payload.Capabilities {
+		if strings.HasPrefix(capability.ID, "accounting.") {
+			t.Fatalf("disabled accounting module leaked into search: %+v", capability)
+		}
+	}
+	invoke, _, _ := deps.invokeCapability(context.Background(), deps.user, chatToolCall{
+		Name: "capability_invoke", Arguments: json.RawMessage(`{"capabilityId":"accounting.createInvoice","input":{}}`),
+	}, 1, 0)
+	if !strings.Contains(invoke, "module is disabled") {
+		t.Fatalf("invoke=%s", invoke)
+	}
+}
+
+func TestChatLoopInvokesDiscoveredCapabilityThroughTheExecutor(t *testing.T) {
+	executor := &scriptedChatExecutor{results: []capability.Result{{OK: true, Data: json.RawMessage(`{"created":true}`)}}}
+	provider := &scriptedChatProvider{turns: []chatTurn{
+		{toolCalls: []chatToolCall{{ID: "call_1", Name: "capability_invoke", Arguments: json.RawMessage(`{"capabilityId":"accounting.createInvoice","input":{"customerId":"c","lines":[]}}`)}}},
+		{message: "Invoice created."},
+	}}
+	deps, _ := chatLoopTestDeps(provider, executor)
+	deps.user.Permissions = map[string]bool{"*": true}
+	result, err := runChatSessionLoop(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+	if result.finalMessage != "Invoice created." {
+		t.Fatalf("finalMessage=%q", result.finalMessage)
+	}
+	calls := executor.recorded()
+	if len(calls) != 1 || calls[0].capabilityID != "accounting.createInvoice" {
+		t.Fatalf("calls=%+v", calls)
+	}
+}
+
+func TestChatToolFallbackMessageExplainsAnEmptyApprovalsInbox(t *testing.T) {
+	got := chatToolFallbackMessage("approvals_inbox", `{"count":0,"approvals":[]}`, true)
+	if !strings.Contains(got, "Nothing is waiting") {
+		t.Fatalf("message=%q", got)
+	}
+}
+
+func TestChatLoopRoutesApprovalsToTheInboxReader(t *testing.T) {
+	executor := &scriptedChatExecutor{}
+	provider := &scriptedChatProvider{turns: []chatTurn{
+		{toolCalls: []chatToolCall{{ID: "call_1", Name: "approvals_inbox", Arguments: json.RawMessage(`{}`)}}},
+		{message: "Nothing is waiting."},
+	}}
+	deps, events := chatLoopTestDeps(provider, executor)
+	called := false
+	deps.approvalsInbox = func(context.Context, *session.ResolvedUser) (string, bool, string) {
+		called = true
+		return `{"count":0,"approvals":[]}`, true, ""
+	}
+	result, err := runChatSessionLoop(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+	if !called || result.finalMessage != "Nothing is waiting." {
+		t.Fatalf("called=%t finalMessage=%q", called, result.finalMessage)
+	}
+	if len(executor.recorded()) != 0 {
+		t.Fatalf("approvals_inbox should not reach the capability executor: %+v", executor.recorded())
+	}
+	if len(*events) < 2 || (*events)[1].content["name"] != "approvals_inbox" {
+		t.Fatalf("events=%+v", *events)
+	}
+}
+
+func TestChatLoopRoutesNotificationsToTheInboxReader(t *testing.T) {
+	executor := &scriptedChatExecutor{}
+	provider := &scriptedChatProvider{turns: []chatTurn{
+		{toolCalls: []chatToolCall{{ID: "call_1", Name: "notifications_inbox", Arguments: json.RawMessage(`{}`)}}},
+		{message: "Two unread notifications."},
+	}}
+	deps, _ := chatLoopTestDeps(provider, executor)
+	called := false
+	deps.notificationsInbox = func(context.Context, *session.ResolvedUser) (string, bool, string) {
+		called = true
+		return `{"unreadCount":2,"notifications":[]}`, true, ""
+	}
+	result, err := runChatSessionLoop(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+	if !called || result.finalMessage != "Two unread notifications." {
+		t.Fatalf("called=%t finalMessage=%q", called, result.finalMessage)
+	}
+	if len(executor.recorded()) != 0 {
+		t.Fatalf("notifications_inbox should not reach the executor: %+v", executor.recorded())
+	}
+}
+
+func TestChatLoopRoutesEntityResolutionBeforeAWrit(t *testing.T) {
+	executor := &scriptedChatExecutor{}
+	provider := &scriptedChatProvider{turns: []chatTurn{
+		{toolCalls: []chatToolCall{{ID: "call_1", Name: "resolve_entity", Arguments: json.RawMessage(`{"type":"customer","query":"Acme"}`)}}},
+		{message: "Found Acme."},
+	}}
+	deps, _ := chatLoopTestDeps(provider, executor)
+	called := false
+	deps.resolveEntity = func(context.Context, *session.ResolvedUser, chatToolCall) (string, bool, string) {
+		called = true
+		return `{"matches":[{"id":"c-1","name":"Acme"}]}`, true, ""
+	}
+	result, err := runChatSessionLoop(context.Background(), deps)
+	if err != nil || !called || result.finalMessage != "Found Acme." {
+		t.Fatalf("err=%v called=%t final=%q", err, called, result.finalMessage)
+	}
+	if len(executor.recorded()) != 0 {
+		t.Fatalf("resolve_entity should not reach the capability executor: %+v", executor.recorded())
 	}
 }

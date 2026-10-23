@@ -5,7 +5,7 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #fffefa;
+  background: #fffdf8;
 }
 
 .widget-header {
@@ -13,8 +13,8 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  background: #111416;
-  color: #fffefa;
+  background: #171613;
+  color: #fffdf8;
 }
 
 .widget-header-title {
@@ -39,7 +39,7 @@
 
 .widget-intro-copy {
   margin: 0;
-  color: #71746b;
+  color: #625d53;
   font-size: 13px;
   line-height: 1.55;
 }
@@ -51,7 +51,7 @@
 }
 
 .widget-label {
-  color: #71746b;
+  color: #625d53;
   font-weight: 650;
   font-size: 10px;
 }
@@ -61,20 +61,20 @@
   min-width: 0;
   min-height: 36px;
   padding: 0 0.6rem;
-  border: 1px solid #dfddd4;
+  border: 1px solid #ddd4c4;
   border-radius: 6px;
-  background: #fffefa;
-  color: #41483f;
+  background: #fffdf8;
+  color: #35312a;
   font: inherit;
   font-size: 13px;
 }
 
 .widget-field input::placeholder {
-  color: #a0a197;
+  color: #716b5f;
 }
 
 .widget-field input:focus-visible {
-  outline: 2px solid #927b4d;
+  outline: 2px solid #8b6a22;
   outline-offset: 2px;
 }
 
@@ -82,10 +82,10 @@
 .widget-composer button {
   min-height: 38px;
   padding: 0 1rem;
-  border: 1px solid #111416;
+  border: 1px solid #171613;
   border-radius: 6px;
-  background: #111416;
-  color: #fffefa;
+  background: #171613;
+  color: #fffdf8;
   cursor: pointer;
   font: inherit;
   font-weight: 650;
@@ -139,8 +139,8 @@
 }
 
 .widget-bubble-customer {
-  background: #111416;
-  color: #fffefa;
+  background: #171613;
+  color: #fffdf8;
 }
 
 .widget-bubble-agent {
@@ -152,14 +152,14 @@
   max-width: 100%;
   padding: 0.25rem 0;
   background: none;
-  color: #92938b;
+  color: #756f63;
   text-align: center;
   font-size: 11px;
 }
 
 .widget-composer {
   padding: 0.75rem;
-  border-top: 1px solid #efede7;
+  border-top: 1px solid #eee7da;
 }
 
 .widget-escalate {
@@ -169,7 +169,7 @@
   padding: 0 !important;
   border: 0 !important;
   background: none !important;
-  color: #71746b !important;
+  color: #625d53 !important;
   font-size: 11px !important;
   font-weight: 500 !important;
   text-decoration: underline;
@@ -178,7 +178,7 @@
 
 .widget-escalate:hover:not(:disabled) {
   background: none !important;
-  color: #374238 !important;
+  color: #26231e !important;
 }
 
 .widget-composer-row {

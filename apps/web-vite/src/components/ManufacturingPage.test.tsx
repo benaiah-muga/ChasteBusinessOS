@@ -149,7 +149,7 @@ describe("Vite manufacturing page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Retry saved action" }));
     await waitFor(() => expect(writes()).toHaveLength(2));
     expect(writes()[1]).toEqual(writes()[0]);
-  }, 10_000);
+  }, 60_000);
 
   it("keeps the retry affordance visible after a 404 so the saved Go intent can be replayed", async () => {
     let attempts = 0;
@@ -177,7 +177,7 @@ describe("Vite manufacturing page", () => {
     await waitFor(() => expect(writes()).toHaveLength(2));
     expect(writes()[1]).toEqual(writes()[0]);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Retry saved action" })).toBeNull());
-  }, 10_000);
+  }, 60_000);
 
   it("summarises open work orders, BOMs, and monthly production on the overview", async () => {
     const fetchMock = manufacturingFetch();

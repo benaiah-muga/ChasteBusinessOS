@@ -46,7 +46,7 @@
 }
 
 .inventory-cycle-count-setup label > span:not(.inventory-cycle-count-scan) {
-  color: #78716c;
+  color: #696357;
   font-size: .75rem;
   font-weight: 400;
 }
@@ -153,7 +153,7 @@
 .inventory-cycle-count-picker small,
 .inventory-cycle-count-review-lines small,
 .inventory-cycle-count-line-heading small {
-  color: #78716c;
+  color: #696357;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .72rem;
 }
@@ -163,7 +163,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: .4rem;
-  color: #78716c;
+  color: #696357;
   font-size: .75rem;
 }
 
@@ -180,7 +180,7 @@
 .inventory-cycle-count-selected .inventory-cycle-count-clear {
   border: 0;
   background: transparent;
-  color: #78716c;
+  color: #696357;
   text-decoration: underline;
 }
 
@@ -199,7 +199,7 @@
 .inventory-cycle-count-start p,
 .inventory-cycle-count-sheet footer p,
 .inventory-cycle-count-muted {
-  color: #78716c;
+  color: #696357;
   font-size: .78rem;
 }
 
@@ -262,7 +262,7 @@
   gap: .35rem;
 }
 
-.inventory-cycle-count-progress > div span { color: #78716c; }
+.inventory-cycle-count-progress > div span { color: #696357; }
 .inventory-cycle-count-progress progress { width: 100%; accent-color: #a16207; }
 
 .inventory-cycle-count-lines li {
@@ -298,7 +298,7 @@
   flex-wrap: wrap;
   justify-content: space-between;
   gap: .35rem;
-  color: #78716c;
+  color: #696357;
   font-size: .72rem;
 }
 
@@ -348,7 +348,7 @@
 }
 
 .inventory-cycle-count-dialog h3 { font-size: 1.05rem; font-weight: 700; }
-.inventory-cycle-count-dialog > p { color: #78716c; font-size: .85rem; }
+.inventory-cycle-count-dialog > p { color: #696357; font-size: .85rem; }
 .inventory-cycle-count .inventory-cycle-count-dialog > header button { min-height: 2rem; border: 0; background: transparent; color: #57534e; font-size: 1.3rem; }
 .inventory-cycle-count-review-reason { border-radius: .5rem; background: #fafaf9; padding: .7rem; font-size: .82rem; }
 .inventory-cycle-count-no-adjustments { border: 1px solid #a7f3d0; border-radius: .5rem; background: #ecfdf5; padding: .7rem; color: #065f46; font-size: .82rem; }

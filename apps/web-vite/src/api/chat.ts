@@ -25,7 +25,7 @@ const ChatCardKindSchema = z.enum(["exception", "progress", "waiting", "result"]
  * A structured record the backend attaches to a tool result. Evidence is
  * arbitrary JSON and stays a record: this card never drives approval.
  */
-const ChatCardSchema = z.object({
+export const ChatCardSchema = z.object({
   kind: ChatCardKindSchema,
   title: z.string().min(1),
   status: z.string().min(1),
@@ -194,10 +194,17 @@ async function chatRequestError(response: Response): Promise<ChatStreamError> {
   }
 }
 
+export interface ChatAttachment {
+  type: "customer" | "vendor" | "item" | "invoice" | "bill" | "document" | "project" | "employee" | "receipt";
+  id: string;
+  title: string;
+}
+
 export interface StreamChatOptions {
   message: string;
   sessionId?: string;
   mode?: "assist" | "creator";
+  attachments?: ChatAttachment[];
   signal?: AbortSignal;
   onSession?: (sessionId: string) => void;
 }
@@ -220,6 +227,7 @@ export async function streamChat(options: StreamChatOptions, onEvent: (event: Ch
         message: options.message,
         ...(options.sessionId ? { sessionId: options.sessionId } : {}),
         ...(options.mode ? { mode: options.mode } : {}),
+        ...(options.attachments?.length ? { attachments: options.attachments } : {}),
       }),
       signal: options.signal,
     });

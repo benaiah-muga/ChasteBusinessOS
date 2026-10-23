@@ -1,0 +1,13 @@
+.saved-view-bar { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 5px; }
+.saved-view-label { display: inline-flex; align-items: center; gap: 4px; margin-right: 2px; color: #857e70; font-size: 8px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.saved-view-chip { display: inline-flex; align-items: stretch; overflow: hidden; border: 1px solid #e4dac8; border-radius: 999px; background: #fffdf8; }
+.saved-view-chip.is-active { border-color: #d8c7a8; background: #fbf5e7; color: #6b551f; }
+.saved-view-chip > button:first-child { display: inline-flex; align-items: center; gap: 3px; border: 0; padding: 3px 7px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 9px; font-weight: 650; }
+.saved-view-remove { display: grid; width: 17px; place-items: center; border: 0; border-left: 1px solid #eee4d2; background: transparent; color: #9a8f7b; cursor: pointer; }
+.saved-view-remove:hover { background: #f7edda; color: #7d5e1a; }
+.saved-view-add { display: inline-flex; align-items: center; gap: 3px; border: 1px dashed #d9cdb8; border-radius: 999px; padding: 3px 8px; background: transparent; color: #7d7466; cursor: pointer; font: inherit; font-size: 9px; font-weight: 650; }
+.saved-view-add:hover { border-color: #bfa97f; color: #6b551f; background: #fbf7ef; }
+.saved-view-save { display: inline-flex; align-items: center; gap: 3px; }
+.saved-view-save input { width: 100px; min-height: 23px; border: 1px solid #d9cdb8; border-radius: 5px; padding: 0 6px; background: #fffdf8; color: #35312a; font: inherit; font-size: 9px; }
+.saved-view-save button { display: grid; min-height: 22px; place-items: center; border: 1px solid #d9cdb8; border-radius: 5px; padding: 0 6px; background: #fffdf8; color: #6b551f; cursor: pointer; font: inherit; font-size: 8px; font-weight: 700; }
+.saved-view-save button:disabled { opacity: .5; cursor: not-allowed; }

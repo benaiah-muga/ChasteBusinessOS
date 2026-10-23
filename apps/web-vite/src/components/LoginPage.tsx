@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { authClient } from "../api/auth";
+import { BrandMark } from "../ui/brand-mark";
 import { navigate } from "../navigation";
 import "./LoginPage.css";
 
@@ -39,9 +40,9 @@ function Spinner() {
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <div className="login-brand">
-      <span className={compact ? "login-mark login-mark-compact" : "login-mark"} aria-hidden="true">C</span>
+      <BrandMark variant={compact ? "ink" : "gold"} size={compact ? "md" : "lg"} />
       <span>
-        <strong>Chaste Business OS</strong>
+        <strong>Chaste BusinessOS</strong>
         <small>The AI-native business operating system</small>
       </span>
     </div>

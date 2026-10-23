@@ -213,21 +213,21 @@ export function PurchasingPaymentRunsPage({ actorId = null, organizationId = nul
   function renderRecoveryControls(): ReactNode {
     return <>
       {notice && <p className={`payment-run-notice is-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-      {recoveryAction && <div className="payment-run-retry"><p>An exact action is saved for this account and organization.</p><button type="button" disabled={busy || !goPurchasingPaymentRunsUseGo()} onClick={() => void perform(recoveryAction, "Payment run action", true)}>Retry exact payment run action</button>{!goPurchasingPaymentRunsUseGo() && <small>Re-enable the Go payment run selector to retry it.</small>}</div>}
+      {recoveryAction && <div className="payment-run-retry"><p>An exact action is saved for this account and organization.</p><button type="button" disabled={busy || !goPurchasingPaymentRunsUseGo()} onClick={() => void perform(recoveryAction, "Payment run action", true)}>Retry exact payment run action</button>{!goPurchasingPaymentRunsUseGo() && <small>Payment runs are disabled in this deployment, so this action cannot be retried here.</small>}</div>}
     </>;
   }
 
   if (state.status === "loading") return <main className="purchasing-runs-page"><p role="status" className="purchasing-runs-message">Loading supplier payment runs…</p>{renderRecoveryControls()}</main>;
   if (state.status === "failed") {
     return <main className="purchasing-runs-page"><section className="purchasing-runs-message purchasing-runs-error" role="alert">
-      <div><p className="purchasing-runs-eyebrow">Go payment runs</p><h1>{state.error.status === 401 ? "Sign in again" : state.error.status === 403 ? "Access denied" : "Could not load payment runs"}</h1><p>{state.error.message}</p></div>
+      <div><p className="purchasing-runs-eyebrow">Payment runs</p><h1>{state.error.status === 401 ? "Sign in again" : state.error.status === 403 ? "Access denied" : "Could not load payment runs"}</h1><p>{state.error.message}</p></div>
       <div className="purchasing-runs-error-actions">{state.error.status === 401 && <a href="/login">Sign in again</a>}<button type="button" onClick={() => void load()}>Try again</button></div>
     </section>{renderRecoveryControls()}</main>;
   }
 
   return <main className="purchasing-runs-page">
     <header className="purchasing-runs-header">
-      <div><p className="purchasing-runs-eyebrow">Purchasing · Go governed</p><h1>Supplier payment runs</h1><p>Build a draft from open bills, request approval to instruct payment, and confirm settlement through Bank reconciliation.</p></div>
+      <div><p className="purchasing-runs-eyebrow">Purchasing · Governed</p><h1>Supplier payment runs</h1><p>Build one draft from open bills, send it for approval, then confirm settlement in bank reconciliation.</p></div>
       <a className="purchasing-runs-full-workspace" href="/purchasing">Open Purchasing workspace</a>
     </header>
 

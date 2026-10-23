@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -31,10 +30,6 @@ type goProjectsReadAssertionClaims struct {
 	AuthSessionID  string   `json:"auth_session_id"`
 	IssuedAt       int64    `json:"iat"`
 	ExpiresAt      int64    `json:"exp"`
-}
-
-type ProjectsCollectionReader interface {
-	ReadProjectCollection(context.Context, authbridge.CapabilityClaims, json.RawMessage) (capability.Result, error)
 }
 
 type GoProjectsReadHandler struct {
@@ -84,17 +79,7 @@ func (h *GoProjectsReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		ExpiresAt:      claims.ExpiresAt,
 	}
 
-	var result capability.Result
-	if capabilityID == capability.ProjectCollectionReadOperationID {
-		reader, ok := h.executor.(ProjectsCollectionReader)
-		if !ok {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "projects service unavailable"})
-			return
-		}
-		result, err = reader.ReadProjectCollection(r.Context(), capabilityClaims, input)
-	} else {
-		result, err = h.executor.Execute(r.Context(), capabilityClaims, capabilityID, input)
-	}
+	result, err := h.executor.Execute(r.Context(), capabilityClaims, capabilityID, input)
 	if err != nil {
 		if errors.Is(err, capability.ErrSessionInvalid) || errors.Is(err, capability.ErrScopeMismatch) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -107,11 +92,7 @@ func (h *GoProjectsReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		if h.logger != nil {
 			h.logger.Error("Go Projects read failed", "operation", capabilityID, "error", err)
 		}
-		if capabilityID == capability.ProjectCollectionReadOperationID {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		} else {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
-		}
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}
 	if !result.OK {
@@ -140,7 +121,7 @@ func projectsReadRequest(query url.Values) (string, json.RawMessage, error) {
 	}
 	projectIDs, present := query["projectId"]
 	if !present || (len(projectIDs) == 1 && projectIDs[0] == "") {
-		return capability.ProjectCollectionReadOperationID, json.RawMessage(`{}`), nil
+		return capability.ProjectCollectionReadCapabilityID, json.RawMessage(`{}`), nil
 	}
 	if len(projectIDs) != 1 {
 		return "", nil, errors.New("ambiguous project id")
@@ -169,7 +150,7 @@ func verifyProjectsReadAssertion(secret, token string, now time.Time) (goProject
 		!isUUID(claims.Subject) || !isUUID(claims.OrganizationID) || claims.ActorID == nil ||
 		!isUUID(*claims.ActorID) || *claims.ActorID != claims.Subject || claims.ActorType != "human" ||
 		strings.TrimSpace(claims.AuthSessionID) == "" || claims.ExpiresAt-claims.IssuedAt > 30 ||
-		(claims.CapabilityID != capability.ProjectBoardReadCapabilityID && claims.CapabilityID != capability.ProjectCollectionReadOperationID) {
+		(claims.CapabilityID != capability.ProjectBoardReadCapabilityID && claims.CapabilityID != capability.ProjectCollectionReadCapabilityID) {
 		return goProjectsReadAssertionClaims{}, authbridge.ErrInvalidAssertion
 	}
 	if claims.Permissions == nil || !sort.StringsAreSorted(claims.Permissions) {

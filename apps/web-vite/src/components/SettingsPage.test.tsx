@@ -396,3 +396,31 @@ describe("Vite settings page", () => {
     expect(screen.getByText("sha256:composition")).not.toBeNull();
   }, 20_000);
 });
+
+
+it("saves in-app notification preferences without changing approval authority", async () => {
+  let muted: string[] = ["system"];
+  const fetchMock = routedFetch({
+    "/api/modules": () => jsonResponse(switchboard),
+    "/api/organizations": () => orgRoute(),
+    "/api/notification-preferences": (init) => {
+      if (init?.method === "PUT") {
+        muted = (JSON.parse(String(init.body)) as { mutedKinds: string[] }).mutedKinds;
+        return jsonResponse({ kinds: ["approval.requested", "ticket.filed", "routine.run", "system"], mutedKinds: muted });
+      }
+      return jsonResponse({ kinds: ["approval.requested", "ticket.filed", "routine.run", "system"], mutedKinds: muted });
+    },
+  });
+  render(<SettingsPage organizationId="11111111-1111-4111-8111-111111111111" actorId="22222222-2222-4222-8222-222222222222" />);
+
+  fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+  expect(await screen.findByText("Approval requests")).not.toBeNull();
+  expect((screen.getByRole("checkbox", { name: /Approval requests/ }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole("checkbox", { name: /System notices/ }) as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByRole("checkbox", { name: /Approval requests/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+
+  expect(await screen.findByText("Notification preferences saved.")).not.toBeNull();
+  expect([...muted].sort()).toEqual(["approval.requested", "system"]);
+  expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/notification-preferences")).toBe(true);
+});

@@ -7,6 +7,8 @@ import { InventoryLocationsReservationsPanel } from "./InventoryLocationsReserva
 import { InventoryStockHistoryPanel } from "./InventoryStockHistoryPanel";
 import { InventoryTransfersPanel } from "./InventoryTransfersPanel";
 import { InventoryValuationPanel } from "./InventoryValuationPanel";
+import { PageLoading } from "../ui/page-loading";
+import { SavedViewBar } from "../ui/saved-view-bar";
 import "./inventory-page.css";
 
 type PageState =
@@ -158,7 +160,7 @@ export function InventoryPage({
         </div>
       </header>
 
-      {state.status === "loading" && <p className="inventory-loading" role="status">Loading stock levels…</p>}
+      {state.status === "loading" && <PageLoading label="Loading stock levels…" compact />}
       {state.status === "disabled" && (
         <section className="inventory-empty" role="status">
           <h2>Inventory is turned off</h2>
@@ -193,6 +195,14 @@ export function InventoryPage({
             <article><span>Need reorder</span><strong>{state.items.filter((item) => item.reorderNeeded).length.toLocaleString()}</strong></article>
           </section>
           <div className="inventory-tools">
+            <div className="inventory-saved-views">
+              <SavedViewBar
+                module="inventory.items"
+                organizationId={organizationId}
+                current={{ search, filter }}
+                onApply={(value) => { setSearch(value.search); setFilter(value.filter); }}
+              />
+            </div>
             <div className="inventory-filters" role="group" aria-label="Filter inventory items">
               <button type="button" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All items</button>
               <button type="button" aria-pressed={filter === "reorder"} onClick={() => setFilter("reorder")}>Reorder needed</button>

@@ -1165,3 +1165,50 @@ func TestPosSalesLegacyFullStockReturn(t *testing.T) {
 		t.Fatalf("journal drift after legacy return = %d, want balanced books", drift)
 	}
 }
+
+func TestPosListSessionsIsGovernedAndTenantScoped(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupPosSalesFixture(t, fx)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO role_permissions (role_id, permission_key, org_id)
+		VALUES ($1::uuid, 'pos.read', $2::uuid) ON CONFLICT DO NOTHING`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO pos_sessions (org_id, register, status, opening_float_minor, expected_cash_minor)
+		VALUES ($1::uuid, 'front', 'open', 10000, 25000)`, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO pos_sessions (org_id, register, status, opening_float_minor, expected_cash_minor)
+		VALUES ($1::uuid, 'foreign', 'open', 5000, 5000)`, fx.otherOrgID); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(`{}`)
+	claims := fx.humanClaims(input, "")
+	claims.CapabilityID = posListSessionsCapabilityID
+	claims.Permissions = []string{"pos.read"}
+	result, err := fx.executor.Execute(fx.ctx, claims, posListSessionsCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("list sessions result=%+v err=%v", result, err)
+	}
+	var output PosListSessionsOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatalf("decode sessions %s: %v", result.Data, err)
+	}
+	if len(output.Sessions) != 1 || output.Sessions[0].Register != "front" || output.Sessions[0].ExpectedCashMinor != 25000 {
+		t.Fatalf("sessions=%+v, want only the organization's front register", output.Sessions)
+	}
+	if audits := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2`, fx.orgID, posListSessionsCapabilityID); audits != 1 {
+		t.Fatalf("session list audit events=%d, want 1", audits)
+	}
+}
+
+func TestPosListSessionsParserAcceptsOnlyEmptyObject(t *testing.T) {
+	if _, err := ParsePosListSessionsInput(json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("empty object refused: %v", err)
+	}
+	if _, err := ParsePosListSessionsInput(json.RawMessage(`[]`)); err == nil {
+		t.Fatal("non-object input accepted")
+	}
+}

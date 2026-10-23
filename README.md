@@ -37,6 +37,7 @@ It cannot spend above your approval threshold without sign-off. It cannot assign
 |---|---|
 | **Accounting** | Double-entry GL with immutable postings and mirror reversals, AR/AP subledgers, period close, trial balance, P&L, balance sheet, direct-method cash flow, customer and supplier statements, 13-week cash forecast |
 | **Approvals** | Human-in-the-loop gates on money above thresholds; identity and destructive actions always require a person |
+| **Inbox** | One ranked queue for approvals, risks, and opportunities across accounting, inventory, CRM, people, documents, and support, with a governed next step and an AI brief |
 | **Audit** | Append-only hash-chained event ledger of everything humans and agents did; replayable agent session trajectories |
 | **Sales** | Reservation-anchored orders: confirming checks credit headroom and reserves stock, delivery consumes reservations and invoices exactly what shipped, oversell is refused |
 | **CRM** | Leads, deals pipeline with weighted forecasting, lead conversion, tasks with due dates, duplicate detection, and a customer 360 timeline merging invoices, payments, quotes, deals and tasks |
@@ -58,8 +59,9 @@ It cannot spend above your approval threshold without sign-off. It cannot assign
 
 Requirements: Node 24+ (matches CI), pnpm 11+, Go 1.27.1 (pinned in
 `.go-version`), Postgres 16 **with pgvector**, and - optionally - one model
-provider key (NVIDIA NIM ([build.nvidia.com](https://build.nvidia.com)) by
-default, or OpenRouter, Groq, Mistral, or Z.ai (GLM) via `MODEL_PROVIDER`).
+provider key (DeepSeek by default, or NVIDIA NIM, OpenRouter, Groq,
+Mistral, or Z.ai (GLM) via `MODEL_PROVIDER`). NVIDIA is still used for
+embedding-based document search unless another embedding provider is configured.
 
 **Docker is not required.** The commands below use it for the database because
 it is the shortest path, but [docs/SETUP.md](docs/SETUP.md) covers three
@@ -71,7 +73,7 @@ git clone https://github.com/benaiah-muga/ChasteBusinessOS.git
 cd ChasteBusinessOS
 pnpm install
 
-cp .env.example .env        # add NVIDIA_API_KEY, BETTER_AUTH_SECRET, and SMTP settings
+cp .env.example .env        # add DEEPSEEK_API_KEY, BETTER_AUTH_SECRET, and SMTP settings
 
 docker run -d --name chaste-pgvector \
   -e POSTGRES_PASSWORD=chaste_dev -e POSTGRES_USER=chaste \
@@ -414,6 +416,7 @@ Controls and safety nets:
 - [Vision](VISION.md), what we're building and what we won't compromise
 - [Architecture](ARCHITECTURE.md), capability kernel, governance pipeline, memory tiers
 - [Roadmap](ROADMAP.md), milestones and standing principles
+- [Capability coverage](docs/CAPABILITY_COVERAGE.md), module-by-module agent parity and the contract gate
 - [ADRs](docs/adr/), why things are the way they are
 - [Changelog](CHANGELOG.md), every behavioral change, per Keep a Changelog
 

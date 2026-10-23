@@ -39,13 +39,13 @@ describe("Vite Accounting invoices preview", () => {
     const fetchMock = stubAccounting();
     render(<AccountingInvoicesPage />);
 
-    expect(await screen.findByRole("heading", { name: "Accounting invoices" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Invoices" })).not.toBeNull();
     expect(screen.getByText("Kampala Coffee")).not.toBeNull();
     expect(screen.getByText("#1042")).not.toBeNull();
-    expect(screen.getByText("Sent")).not.toBeNull();
-    expect(screen.getAllByText(/UGX/)).toHaveLength(3);
-    expect(screen.getByText((value) => value.includes("100,000"))).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open full Accounting workspace" }).getAttribute("href")).toBe("/accounting?tab=receivables");
+    expect(screen.getAllByText("Sent")).toHaveLength(2);
+    expect(screen.getAllByText(/UGX/)).toHaveLength(5);
+    expect(screen.getAllByText((value) => value.includes("100,000"))).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "Open Accounting" }).getAttribute("href")).toBe("/accounting?tab=receivables");
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
@@ -60,7 +60,7 @@ describe("Vite Accounting invoices preview", () => {
     stubAccounting([{ ...invoice, currency: "BHD", totalMinor: 123_456, paidMinor: 0, outstandingMinor: 123_456 }]);
     render(<AccountingInvoicesPage />);
 
-    expect(await screen.findAllByText((value) => value.includes("123.456"))).toHaveLength(2);
+    expect(await screen.findAllByText((value) => value.includes("123.456"))).toHaveLength(4);
   });
 
   it("does not call the accounting endpoint when its module is disabled", async () => {
@@ -76,7 +76,7 @@ describe("Vite Accounting invoices preview", () => {
     stubAccounting([]);
     render(<AccountingInvoicesPage />);
 
-    expect(await screen.findByRole("heading", { name: "No invoices yet" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Your first invoice starts here" })).not.toBeNull();
   });
 
   it("keeps the loading status visible until the Go invoice capability responds", async () => {
@@ -103,7 +103,7 @@ describe("Vite Accounting invoices preview", () => {
     render(<AccountingInvoicesPage />);
 
     expect(await screen.findByRole("heading", { name: "Access denied" })).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open full Accounting workspace" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Open Accounting" })).not.toBeNull();
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/accounting")).toBe(false);
   });
@@ -120,4 +120,15 @@ describe("Vite Accounting invoices preview", () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/modules", "/api/capabilities/execute"]);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/accounting")).toBe(false);
   });
+});
+
+
+it("does not add different currencies into one misleading total", async () => {
+  stubAccounting([
+    invoice,
+    { ...invoice, id: "invoice-2", number: 1043, currency: "USD", totalMinor: 50_000, outstandingMinor: 0 },
+  ]);
+  render(<AccountingInvoicesPage />);
+
+  expect(await screen.findAllByText("Mixed currencies")).toHaveLength(2);
 });

@@ -217,7 +217,7 @@ export type AiSaveOutcome =
   | { kind: "completed"; config: AiConfig }
   | { kind: "pending"; reason: string };
 
-export const AI_PROVIDER_IDS = ["nvidia", "openrouter", "groq", "mistral", "zai", "openai", "custom"] as const;
+export const AI_PROVIDER_IDS = ["nvidia", "openrouter", "groq", "mistral", "zai", "openai", "deepseek", "custom"] as const;
 export type AiProviderId = (typeof AI_PROVIDER_IDS)[number];
 
 export const AI_PROVIDER_OPTIONS: ReadonlyArray<{ id: AiProviderId; label: string; baseUrl: string }> = [
@@ -227,13 +227,14 @@ export const AI_PROVIDER_OPTIONS: ReadonlyArray<{ id: AiProviderId; label: strin
   { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1" },
   { id: "zai", label: "Z.ai (GLM)", baseUrl: "https://api.z.ai/api/paas/v4" },
   { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com" },
   { id: "custom", label: "Custom OpenAI-compatible", baseUrl: "" },
 ];
 
 export const DEFAULT_AI_MODELS: AiModels = {
-  primary: "moonshotai/kimi-k2.6",
-  fast: "meta/muse-glimmer-30b",
-  reasoning: "nvidia/nemotron-3-ultra-550b-a55b",
+  primary: "deepseek-chat",
+  fast: "deepseek-chat",
+  reasoning: "deepseek-reasoner",
   embeddings: "nvidia/nv-embedqa-e5-v5",
 };
 

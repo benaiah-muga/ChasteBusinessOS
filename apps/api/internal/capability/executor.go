@@ -68,10 +68,16 @@ const (
 const approvalTTL = 7 * 24 * time.Hour
 
 type capabilitySpec struct {
-	module               string
-	permission           string
-	risk                 string
-	intent               string
+	module      string
+	permission  string
+	risk        string
+	title       string
+	intent      string
+	inputSchema string
+	// agentHidden is a reviewed reason to keep a capability out of model
+	// discovery while still allowing a human or internal system actor to use
+	// it. Empty means the capability is agent-visible when supported.
+	agentHidden          string
 	approvalExempt       bool
 	executionScope       string
 	moneyThresholdMinor  int64
@@ -89,93 +95,99 @@ type inverseFieldMapping struct {
 }
 
 var capabilitySpecs = map[string]capabilitySpec{
-	createCustomerCapabilityID:                          {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.deactivateCustomer"},
-	saveCustomerViewCapabilityID:                        {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerView"},
-	restoreCustomerViewCapabilityID:                     {module: "crm", permission: "crm.write", risk: "write"},
-	deactivateCustomerCapabilityID:                      {module: "crm", permission: "crm.write", risk: "write"},
-	mergeCustomersCapabilityID:                          {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerMerge"},
-	restoreCustomerMergeCapabilityID:                    {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.mergeCustomers"},
-	importCustomersCapabilityID:                         {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
-	undoCustomerImportCapabilityID:                      {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreImportedCustomers"},
-	restoreImportedCustomersCapabilityID:                {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
-	updateCustomerProfilesCapabilityID:                  {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
-	restoreCustomerProfilesCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.reapplyCustomerProfiles"},
-	reapplyCustomerProfilesCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
-	listCustomersCapabilityID:                           {module: "crm", permission: "crm.read", risk: "read"},
-	listCRMCustomerCollectionCapabilityID:               {module: "crm", permission: "crm.read", risk: "read", humanOnly: true},
-	listCustomerViewsCapabilityID:                       {module: "crm", permission: "crm.read", risk: "read"},
-	listDealsCapabilityID:                               {module: "crm", permission: "crm.read", risk: "read"},
-	documentsListDocsCapabilityID:                       {module: "documents", permission: "documents.read", risk: "read"},
-	documentsListIngestedCapabilityID:                   {module: "documents", permission: "documents.read", risk: "read"},
-	documentsListDocVersionsCapabilityID:                {module: "documents", permission: "documents.read", risk: "read"},
-	documentsGetDocVersionCapabilityID:                  {module: "documents", permission: "documents.read", risk: "read"},
-	pipelineReportCapabilityID:                          {module: "crm", permission: "crm.read", risk: "read"},
-	listTasksCapabilityID:                               {module: "crm", permission: "crm.read", risk: "read"},
-	customerTimelineCapabilityID:                        {module: "crm", permission: "crm.read", risk: "read"},
-	createDealCapabilityID:                              {module: "crm", permission: "crm.write", risk: "write"},
-	moveDealStageCapabilityID:                           {module: "crm", permission: "crm.write", risk: "write"},
-	convertLeadCapabilityID:                             {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
-	undoLeadConversionCapabilityID:                      {module: "crm", permission: "crm.write", risk: "destructive", inverseCapabilityID: reapplyLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"undoIntentId"}},
-	reapplyLeadConversionCapabilityID:                   {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
-	createTaskCapabilityID:                              {module: "crm", permission: "crm.write", risk: "write"},
-	completeTaskCapabilityID:                            {module: "crm", permission: "crm.write", risk: "write"},
-	updateTaskDetailsCapabilityID:                       {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreTaskDetails"},
-	restoreTaskDetailsCapabilityID:                      {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.updateTaskDetails"},
-	createQuoteCapabilityID:                             {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.declineQuote"},
-	acceptQuoteCapabilityID:                             {module: "accounting", permission: "accounting.write", risk: "write"},
-	declineQuoteCapabilityID:                            {module: "accounting", permission: "accounting.write", risk: "write"},
-	expireQuoteCapabilityID:                             {module: "accounting", permission: "accounting.write", risk: "write"},
-	listQuotesCapabilityID:                              {module: "accounting", permission: "accounting.read", risk: "read"},
-	createRecurringTemplateCapabilityID:                 {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.pauseRecurringTemplate"},
-	pauseRecurringTemplateCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.resumeRecurringTemplate"},
-	resumeRecurringTemplateCapabilityID:                 {module: "accounting", permission: "accounting.write", risk: "write"},
-	listRecurringTemplatesCapabilityID:                  {module: "accounting", permission: "accounting.read", risk: "read"},
-	hrHireEmployeeCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.deactivateEmployee"},
-	hrDeactivateEmployeeCapabilityID:                    {module: "hr", permission: "hr.write", risk: "write"},
-	hrListEmployeesCapabilityID:                         {module: "hr", permission: "hr.read", risk: "read"},
-	hrReportCapabilityID:                                {module: "hr", permission: "hr.read", risk: "read"},
-	hrUpdateEmployeeStructureCapabilityID:               {module: "hr", permission: "hr.write", risk: "write"},
-	salesCreateOrderCapabilityID:                        {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
-	salesUpdateDraftOrderCapabilityID:                   {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: salesRestoreDraftOrderCapabilityID},
-	salesRestoreDraftOrderCapabilityID:                  {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: salesUpdateDraftOrderCapabilityID},
-	salesConfirmOrderCapabilityID:                       {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
-	salesDeliverOrderCapabilityID:                       {module: "sales", permission: "sales.write", risk: "write"},
-	salesCancelOrderCapabilityID:                        {module: "sales", permission: "sales.write", risk: "write"},
-	salesListOrdersCapabilityID:                         {module: "sales", permission: "sales.read", risk: "read"},
-	createInvoiceCapabilityID:                           {module: "accounting", permission: "accounting.write", risk: "write"},
-	recordFxRateCapabilityID:                            {module: "accounting", permission: "accounting.post", risk: "write"},
-	recordPaymentCapabilityID:                           {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000, inverseCapabilityID: "accounting.reversePayment"},
-	reversePaymentCapabilityID:                          {module: "accounting", permission: "accounting.post", risk: "money"},
-	trialBalanceCapabilityID:                            {module: "accounting", permission: "accounting.read", risk: "read"},
-	submitExpenseClaimCapabilityID:                      {module: "accounting", permission: "expenses.submit", risk: "write", inverseCapabilityID: "accounting.decideExpenseClaim"},
-	decideExpenseClaimCapabilityID:                      {module: "accounting", permission: "expenses.decide", risk: "write"},
-	payExpenseClaimCapabilityID:                         {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
-	listExpenseClaimsCapabilityID:                       {module: "accounting", permission: "expenses.decide", risk: "read"},
-	listExpensePoliciesCapabilityID:                     {module: "accounting", permission: "expenses.decide", risk: "read"},
-	setExpensePolicyCapabilityID:                        {module: "accounting", permission: "expenses.decide", risk: "write"},
-	createVendorCapabilityID:                            {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	createPurchaseOrderCapabilityID:                     {module: "purchasing", permission: "purchasing.write", risk: "money", moneyThresholdMinor: 0},
-	receiveGoodsCapabilityID:                            {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	returnGoodsCapabilityID:                             {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	createBillCapabilityID:                              {module: "purchasing", permission: "purchasing.write", risk: "write", inverseCapabilityID: "accounting.reverseEntry"},
-	payBillCapabilityID:                                 {module: "purchasing", permission: "purchasing.post", risk: "money", moneyThresholdMinor: 50_000, inverseCapabilityID: "purchasing.reverseVendorPayment"},
-	reverseVendorPaymentCapabilityID:                    {module: "purchasing", permission: "purchasing.post", risk: "money"},
-	inventoryAdjustStockCapabilityID:                    {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryCreateCycleCountCapabilityID:               {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.cancelCycleCount"},
-	inventoryRecordCycleCountsCapabilityID:              {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryPostCycleCountCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryCancelCycleCountCapabilityID:               {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryListCycleCountsCapabilityID:                {module: "inventory", permission: "inventory.read", risk: "read"},
-	inventoryCreateTransferCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.cancelTransfer"},
-	inventoryConfirmTransferCapabilityID:                {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.reverseTransfer"},
-	inventoryCancelTransferCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryReverseTransferCapabilityID:                {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryListTransfersCapabilityID:                  {module: "inventory", permission: "inventory.read", risk: "read"},
-	posOpenSessionCapabilityID:                          {module: "pos", permission: "pos.write", risk: "write"},
-	posCompleteSaleCapabilityID:                         {module: "pos", permission: "pos.sell", risk: "money", moneyThresholdMinor: 100_000, inverseCapabilityID: "pos.returnSale"},
-	posCloseSessionCapabilityID:                         {module: "pos", permission: "pos.write", risk: "write"},
-	posReturnSaleCapabilityID:                           {module: "pos", permission: "pos.sell", risk: "money"},
-	posShiftSummaryCapabilityID:                         {module: "pos", permission: "pos.read", risk: "read"},
+	createCustomerCapabilityID:             {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.deactivateCustomer"},
+	saveCustomerViewCapabilityID:           {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerView"},
+	restoreCustomerViewCapabilityID:        {module: "crm", permission: "crm.write", risk: "write"},
+	deactivateCustomerCapabilityID:         {module: "crm", permission: "crm.write", risk: "write"},
+	mergeCustomersCapabilityID:             {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerMerge"},
+	restoreCustomerMergeCapabilityID:       {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.mergeCustomers"},
+	importCustomersCapabilityID:            {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
+	undoCustomerImportCapabilityID:         {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreImportedCustomers"},
+	restoreImportedCustomersCapabilityID:   {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
+	updateCustomerProfilesCapabilityID:     {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
+	restoreCustomerProfilesCapabilityID:    {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.reapplyCustomerProfiles"},
+	reapplyCustomerProfilesCapabilityID:    {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
+	listCustomersCapabilityID:              {module: "crm", permission: "crm.read", risk: "read"},
+	listCRMCustomerCollectionCapabilityID:  {module: "crm", permission: "crm.read", risk: "read", humanOnly: true},
+	listCustomerViewsCapabilityID:          {module: "crm", permission: "crm.read", risk: "read"},
+	listDealsCapabilityID:                  {module: "crm", permission: "crm.read", risk: "read"},
+	documentsListDocsCapabilityID:          {module: "documents", permission: "documents.read", risk: "read"},
+	documentsListIngestedCapabilityID:      {module: "documents", permission: "documents.read", risk: "read"},
+	documentsListDocVersionsCapabilityID:   {module: "documents", permission: "documents.read", risk: "read"},
+	documentsGetDocVersionCapabilityID:     {module: "documents", permission: "documents.read", risk: "read"},
+	pipelineReportCapabilityID:             {module: "crm", permission: "crm.read", risk: "read"},
+	listTasksCapabilityID:                  {module: "crm", permission: "crm.read", risk: "read"},
+	customerTimelineCapabilityID:           {module: "crm", permission: "crm.read", risk: "read"},
+	createDealCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write"},
+	moveDealStageCapabilityID:              {module: "crm", permission: "crm.write", risk: "write"},
+	convertLeadCapabilityID:                {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
+	undoLeadConversionCapabilityID:         {module: "crm", permission: "crm.write", risk: "destructive", inverseCapabilityID: reapplyLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"undoIntentId"}},
+	reapplyLeadConversionCapabilityID:      {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
+	createTaskCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write"},
+	completeTaskCapabilityID:               {module: "crm", permission: "crm.write", risk: "write"},
+	updateTaskDetailsCapabilityID:          {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreTaskDetails"},
+	restoreTaskDetailsCapabilityID:         {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.updateTaskDetails"},
+	createQuoteCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.declineQuote"},
+	acceptQuoteCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
+	declineQuoteCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
+	expireQuoteCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
+	listQuotesCapabilityID:                 {module: "accounting", permission: "accounting.read", risk: "read"},
+	createRecurringTemplateCapabilityID:    {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.pauseRecurringTemplate"},
+	pauseRecurringTemplateCapabilityID:     {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.resumeRecurringTemplate"},
+	resumeRecurringTemplateCapabilityID:    {module: "accounting", permission: "accounting.write", risk: "write"},
+	listRecurringTemplatesCapabilityID:     {module: "accounting", permission: "accounting.read", risk: "read"},
+	hrHireEmployeeCapabilityID:             {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.deactivateEmployee"},
+	hrDeactivateEmployeeCapabilityID:       {module: "hr", permission: "hr.write", risk: "write"},
+	hrListEmployeesCapabilityID:            {module: "hr", permission: "hr.read", risk: "read"},
+	hrReportCapabilityID:                   {module: "hr", permission: "hr.read", risk: "read"},
+	hrUpdateEmployeeStructureCapabilityID:  {module: "hr", permission: "hr.write", risk: "write"},
+	salesCreateOrderCapabilityID:           {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
+	salesUpdateDraftOrderCapabilityID:      {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: salesRestoreDraftOrderCapabilityID},
+	salesRestoreDraftOrderCapabilityID:     {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: salesUpdateDraftOrderCapabilityID, agentHidden: "internal inverse checkpoint used by the session revert path; callers edit through sales.updateDraftOrder"},
+	salesConfirmOrderCapabilityID:          {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
+	salesDeliverOrderCapabilityID:          {module: "sales", permission: "sales.write", risk: "write"},
+	salesCancelOrderCapabilityID:           {module: "sales", permission: "sales.write", risk: "write"},
+	salesListOrdersCapabilityID:            {module: "sales", permission: "sales.read", risk: "read"},
+	createInvoiceCapabilityID:              {module: "accounting", permission: "accounting.write", risk: "write"},
+	recordFxRateCapabilityID:               {module: "accounting", permission: "accounting.post", risk: "write"},
+	recordPaymentCapabilityID:              {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000, inverseCapabilityID: "accounting.reversePayment"},
+	reversePaymentCapabilityID:             {module: "accounting", permission: "accounting.post", risk: "money"},
+	trialBalanceCapabilityID:               {module: "accounting", permission: "accounting.read", risk: "read"},
+	submitExpenseClaimCapabilityID:         {module: "accounting", permission: "expenses.submit", risk: "write", inverseCapabilityID: "accounting.decideExpenseClaim"},
+	decideExpenseClaimCapabilityID:         {module: "accounting", permission: "expenses.decide", risk: "write"},
+	payExpenseClaimCapabilityID:            {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
+	listExpenseClaimsCapabilityID:          {module: "accounting", permission: "expenses.decide", risk: "read"},
+	listExpensePoliciesCapabilityID:        {module: "accounting", permission: "expenses.decide", risk: "read"},
+	setExpensePolicyCapabilityID:           {module: "accounting", permission: "expenses.decide", risk: "write"},
+	createVendorCapabilityID:               {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	createPurchaseOrderCapabilityID:        {module: "purchasing", permission: "purchasing.write", risk: "money", moneyThresholdMinor: 0},
+	receiveGoodsCapabilityID:               {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	returnGoodsCapabilityID:                {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	createBillCapabilityID:                 {module: "purchasing", permission: "purchasing.write", risk: "write", inverseCapabilityID: "accounting.reverseEntry"},
+	payBillCapabilityID:                    {module: "purchasing", permission: "purchasing.post", risk: "money", moneyThresholdMinor: 50_000, inverseCapabilityID: "purchasing.reverseVendorPayment"},
+	reverseVendorPaymentCapabilityID:       {module: "purchasing", permission: "purchasing.post", risk: "money"},
+	inventoryAdjustStockCapabilityID:       {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCreateCycleCountCapabilityID:  {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.cancelCycleCount"},
+	inventoryRecordCycleCountsCapabilityID: {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryPostCycleCountCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCancelCycleCountCapabilityID:  {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryListCycleCountsCapabilityID:   {module: "inventory", permission: "inventory.read", risk: "read"},
+	inventoryCreateTransferCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.cancelTransfer"},
+	inventoryConfirmTransferCapabilityID:   {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.reverseTransfer"},
+	inventoryCancelTransferCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryReverseTransferCapabilityID:   {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryListTransfersCapabilityID:     {module: "inventory", permission: "inventory.read", risk: "read"},
+	posOpenSessionCapabilityID:             {module: "pos", permission: "pos.write", risk: "write"},
+	posCompleteSaleCapabilityID:            {module: "pos", permission: "pos.sell", risk: "money", moneyThresholdMinor: 100_000, inverseCapabilityID: "pos.returnSale"},
+	posCloseSessionCapabilityID:            {module: "pos", permission: "pos.write", risk: "write"},
+	posReturnSaleCapabilityID:              {module: "pos", permission: "pos.sell", risk: "money"},
+	posShiftSummaryCapabilityID:            {module: "pos", permission: "pos.read", risk: "read"},
+	posListSessionsCapabilityID: {
+		module: "pos", permission: "pos.read", risk: "read",
+		title:       "List POS sessions",
+		intent:      "List the organization's POS register sessions, newest first, with register, status, opening float, expected and counted cash, variance, and open or close times. Use the session id with pos.shiftSummary for details.",
+		inputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
+	},
 	creditNoteCapabilityID:                              {module: "accounting", permission: "accounting.post", risk: "money"},
 	shareInvoiceCapabilityID:                            {module: "accounting", permission: "accounting.write", risk: "write"},
 	generateDueInvoicesCapabilityID:                     {module: "accounting", permission: "accounting.write", risk: "write"},
@@ -307,24 +319,47 @@ var capabilitySpecs = map[string]capabilitySpec{
 	manufacturingRestoreBomCapabilityID: {module: "manufacturing", permission: "manufacturing.write", risk: "write", inverseCapabilityID: manufacturingDefineBomCapabilityID, inverseInputSource: "output", inverseFieldMappings: []inverseFieldMapping{
 		{outputField: "assemblySku", inputField: "assemblySku"}, {outputField: "components", inputField: "expectedComponents"}, {outputField: "previousComponents", inputField: "components"},
 	}},
-	manufacturingBomTreeCapabilityID:          {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
-	manufacturingBomReportCapabilityID:        {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
-	manufacturingCostPreviewCapabilityID:      {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
-	manufacturingLotTraceCapabilityID:         {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
-	manufacturingProductionRunsCapabilityID:   {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
-	manufacturingOverviewReportCapabilityID:   {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
-	marketingCreateSegmentCapabilityID:        {module: "marketing", permission: "marketing.write", risk: "write"},
-	marketingCreateCampaignCapabilityID:       {module: "marketing", permission: "marketing.write", risk: "write"},
-	marketingSendCampaignCapabilityID:         {module: "marketing", permission: "marketing.write", risk: "write"},
-	marketingCampaignAnalyticsCapabilityID:    {module: "marketing", permission: "marketing.read", risk: "read"},
-	marketingOverviewSnapshotCapabilityID:     {module: "marketing", permission: "marketing.read", risk: "read"},
-	hrCreateOpeningCapabilityID:               {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.closeOpening"},
-	hrCloseOpeningCapabilityID:                {module: "hr", permission: "hr.write", risk: "write"},
-	iamSetModulesCapabilityID:                 {module: "iam", permission: "iam.admin", risk: "identity", inverseCapabilityID: "iam.restoreModules"},
-	iamRestoreModulesCapabilityID:             {module: "iam", permission: "iam.admin", risk: "identity"},
-	iamSetModuleConfigCapabilityID:            {module: "iam", permission: "iam.admin", risk: "write"},
-	iamSetOrgPolicyCapabilityID:               {module: "iam", permission: "iam.admin", risk: "identity"},
-	iamSetOrgBrandingCapabilityID:             {module: "iam", permission: "iam.admin", risk: "write"},
+	manufacturingBomTreeCapabilityID:        {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
+	manufacturingBomReportCapabilityID:      {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
+	manufacturingCostPreviewCapabilityID:    {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
+	manufacturingLotTraceCapabilityID:       {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
+	manufacturingProductionRunsCapabilityID: {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
+	manufacturingOverviewReportCapabilityID: {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
+	marketingCreateSegmentCapabilityID:      {module: "marketing", permission: "marketing.write", risk: "write"},
+	marketingCreateCampaignCapabilityID:     {module: "marketing", permission: "marketing.write", risk: "write"},
+	marketingSendCampaignCapabilityID:       {module: "marketing", permission: "marketing.write", risk: "write"},
+	marketingCampaignAnalyticsCapabilityID:  {module: "marketing", permission: "marketing.read", risk: "read"},
+	marketingOverviewSnapshotCapabilityID:   {module: "marketing", permission: "marketing.read", risk: "read"},
+	hrCreateOpeningCapabilityID:             {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.closeOpening"},
+	hrCloseOpeningCapabilityID:              {module: "hr", permission: "hr.write", risk: "write"},
+	iamSetModulesCapabilityID:               {module: "iam", permission: "iam.admin", risk: "identity", inverseCapabilityID: "iam.restoreModules"},
+	iamRestoreModulesCapabilityID:           {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamSetModuleConfigCapabilityID:          {module: "iam", permission: "iam.admin", risk: "write"},
+	iamGetOrgPolicyCapabilityID: {
+		module: "iam", permission: "iam.read", risk: "read",
+		title:       "Read org approval policy",
+		intent:      "Read the organization's approval policy: the highest risk class that can run autonomously, the money threshold in minor units, and the risk classes that always need human approval. Use it to explain why an action needs approval or to propose a policy change.",
+		inputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
+	},
+	iamSetOrgPolicyCapabilityID:   {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamSetOrgBrandingCapabilityID: {module: "iam", permission: "iam.admin", risk: "write"},
+	iamSetAgentSoulCapabilityID: {
+		module: "iam", permission: "iam.admin", risk: "write",
+		title:               "Set agent persona",
+		intent:              "Replace the organization's standing agent persona, the instructions every agent turn follows. The previous persona is returned so the change can be restored.",
+		inputSchema:         `{"type":"object","properties":{"agentSoul":{"type":"string","maxLength":8000,"description":"Standing instructions, voice, and hard rules for every agent turn. An empty string clears the persona."}},"required":["agentSoul"],"additionalProperties":false}`,
+		inverseCapabilityID: iamRestoreAgentSoulCapabilityID, inverseInputSource: "output",
+		inverseFieldMappings: []inverseFieldMapping{{outputField: "previousAgentSoul", inputField: "agentSoul"}},
+	},
+	iamRestoreAgentSoulCapabilityID: {
+		module: "iam", permission: "iam.admin", risk: "write",
+		title:               "Restore agent persona",
+		intent:              "Restore a previously captured organization agent persona after an authorized change. The previous persona is returned so the restore can be reversed again.",
+		inputSchema:         `{"type":"object","properties":{"agentSoul":{"type":"string","maxLength":8000}},"required":["agentSoul"],"additionalProperties":false}`,
+		agentHidden:         "internal inverse checkpoint used by the session revert path; people edit through iam.setAgentSoul",
+		inverseCapabilityID: iamSetAgentSoulCapabilityID, inverseInputSource: "output",
+		inverseFieldMappings: []inverseFieldMapping{{outputField: "previousAgentSoul", inputField: "agentSoul"}},
+	},
 	purchasingSupplierPerformanceCapabilityID: {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	purchasingListWorkspaceCapabilityID:       {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	purchasingListVendorsCapabilityID:         {module: "purchasing", permission: "purchasing.read", risk: "read"},
@@ -364,11 +399,11 @@ var capabilitySpecs = map[string]capabilitySpec{
 	creatorRollbackCandidateCapabilityID:   {module: "creator", permission: "platform.creator", risk: "destructive"},
 	creatorRecordCanaryOutcomeCapabilityID: {module: "creator", permission: "platform.creator.release", risk: "write"},
 	supportStartConversationCapabilityID:   {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.resolveConversation"},
-	supportUpdateChannelSettingsCapabilityID: {module: "support", permission: "iam.admin", risk: "write", intent: "Update the organization's support channel reply settings and widget token.", inverseCapabilityID: supportRestoreChannelSettingsCapabilityID, inverseInputSource: "output", inverseFieldMappings: []inverseFieldMapping{
+	supportUpdateChannelSettingsCapabilityID: {module: "support", permission: "iam.admin", risk: "write", intent: "Update the organization's support channel reply settings and widget token.", agentHidden: "changes the public widget embed token, so credential handling stays in the human support console", inverseCapabilityID: supportRestoreChannelSettingsCapabilityID, inverseInputSource: "output", inverseFieldMappings: []inverseFieldMapping{
 		{outputField: "previous", inputField: "target"},
 		{outputField: "current", inputField: "expectedCurrent"},
 	}},
-	supportRestoreChannelSettingsCapabilityID: {module: "support", permission: "iam.admin", risk: "write", intent: "Restore support channel settings only when the expected state is still current.", inverseCapabilityID: supportRestoreChannelSettingsCapabilityID, inverseInputSource: "output", inverseFieldMappings: []inverseFieldMapping{
+	supportRestoreChannelSettingsCapabilityID: {module: "support", permission: "iam.admin", risk: "write", intent: "Restore support channel settings only when the expected state is still current.", agentHidden: "restores the public widget embed token, so credential handling stays in the human support console", inverseCapabilityID: supportRestoreChannelSettingsCapabilityID, inverseInputSource: "output", inverseFieldMappings: []inverseFieldMapping{
 		{outputField: "previous", inputField: "target"},
 		{outputField: "current", inputField: "expectedCurrent"},
 	}},
@@ -389,6 +424,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	supportCreateKbArticleCapabilityID:      {module: "support", permission: "support.write", risk: "write"},
 	createProjectCapabilityID:               {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: archiveProjectCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
 	ProjectBoardReadCapabilityID:            {module: "projects", permission: "projects.read", risk: "read"},
+	ProjectCollectionReadCapabilityID:       {module: "projects", permission: "projects.read", risk: "read", title: "List projects", intent: "List the organization's projects with their id, name, active or archived status, due date, and creation time, newest first, so work can be found before opening a board. Optionally filter to active or archived projects.", inputSchema: `{"type":"object","properties":{"status":{"type":"string","enum":["active","archived"],"description":"Optional status filter; omit for every project."}},"additionalProperties":false}`},
 	archiveProjectCapabilityID:              {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: projectRestoreCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
 	projectRestoreCapabilityID:              {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: archiveProjectCapabilityID, inverseInputSource: "output", inverseFields: []string{"projectId"}},
 	createProjectTaskCapabilityID:           {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: deleteProjectTaskCapabilityID, inverseInputSource: "output", inverseFields: []string{"taskId", "projectId", "title", "parentTaskId", "status", "priority", "assigneeUserId", "dueAt", "position", "note", "createdAt"}},
@@ -402,13 +438,13 @@ var capabilitySpecs = map[string]capabilitySpec{
 	// SCIM deprovisioning removes role grants and revokes pending invitations.
 	// It deliberately has no inverse because an IdP re-provision must not
 	// silently restore authorization that an administrator needs to review.
-	scimProvisionUserCapabilityID: {module: "iam", permission: "iam.scim.provision", risk: "identity"},
+	scimProvisionUserCapabilityID: {module: "iam", permission: "iam.scim.provision", risk: "identity", agentHidden: "external SCIM provisioning is authenticated by an Identity Provider assertion, not an agent turn"},
 	// The management handler alone returns the generated bearer. Receipts and
 	// ledger events store only the token id and nonsecret metadata.
-	SCIMTokenCreateCapabilityID: {module: "iam", permission: "iam.admin", risk: "secret", inverseCapabilityID: SCIMTokenRevokeCapabilityID, inverseInputSource: "output", inverseFields: []string{"tokenId"}, oneTimeOutput: true},
+	SCIMTokenCreateCapabilityID: {module: "iam", permission: "iam.admin", risk: "secret", agentHidden: "returns a one-time bearer credential that must not enter a model transcript", inverseCapabilityID: SCIMTokenRevokeCapabilityID, inverseInputSource: "output", inverseFields: []string{"tokenId"}, oneTimeOutput: true},
 	// Revocation is destructive because hash-only storage makes the bearer
 	// material unrecoverable, so there is no safe inverse capability.
-	SCIMTokenRevokeCapabilityID:             {module: "iam", permission: "iam.admin", risk: "destructive"},
+	SCIMTokenRevokeCapabilityID:             {module: "iam", permission: "iam.admin", risk: "destructive", agentHidden: "requires a token id that is only listed in the human IAM admin console"},
 	iamCreateRoleCapabilityID:               {module: "iam", permission: "iam.admin", risk: "identity"},
 	iamUpdateRolePermissionsCapabilityID:    {module: "iam", permission: "iam.admin", risk: "identity"},
 	iamAssignRoleCapabilityID:               {module: "iam", permission: "iam.admin", risk: "identity"},
@@ -446,6 +482,9 @@ func init() {
 			inverseFields:       spec.InverseFields,
 		}
 	}
+	// Notification specs are registered in this later init, so merge the
+	// hand-written tool definitions into the discovery catalog again.
+	mergeAgentDefinitionsIntoCatalog()
 	RegisterHarnessCapabilities()
 }
 
@@ -502,7 +541,7 @@ func supportedCapability(capabilityID string) bool {
 		inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID, inventoryListTransfersCapabilityID,
 		inventoryCreateCycleCountCapabilityID, inventoryRecordCycleCountsCapabilityID,
 		inventoryPostCycleCountCapabilityID, inventoryCancelCycleCountCapabilityID, inventoryListCycleCountsCapabilityID,
-		posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID,
+		posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID, posListSessionsCapabilityID,
 		creditNoteCapabilityID, shareInvoiceCapabilityID, generateDueInvoicesCapabilityID, reverseEntryCapabilityID,
 		addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
 		unmatchBankTransactionCapabilityID, bankReconciliationCapabilityID, excludeBankTransactionCapabilityID,
@@ -555,7 +594,7 @@ func supportedCapability(capabilityID string) bool {
 		marketingCampaignAnalyticsCapabilityID, marketingOverviewSnapshotCapabilityID,
 		hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID,
 		iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
-		iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID,
+		iamGetOrgPolicyCapabilityID, iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID, iamSetAgentSoulCapabilityID, iamRestoreAgentSoulCapabilityID,
 		purchasingListWorkspaceCapabilityID, purchasingListVendorsCapabilityID, purchasingGetPurchaseOrderCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
 		purchasingSupplierStatementCapabilityID,
 		signalsListCapabilityID, skillsFindCapabilityID, skillsLoadCapabilityID,
@@ -579,7 +618,7 @@ func supportedCapability(capabilityID string) bool {
 		supportUpdateTicketCapabilityID, supportSuggestCategoryCapabilityID,
 		supportCreateCannedResponseCapabilityID, supportCreateKbArticleCapabilityID,
 		supportUpdateChannelSettingsCapabilityID, supportRestoreChannelSettingsCapabilityID,
-		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID,
+		createProjectCapabilityID, ProjectBoardReadCapabilityID, ProjectCollectionReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID,
 		projectRestoreCapabilityID, deleteProjectTaskCapabilityID, restoreProjectTaskCapabilityID, restoreProjectTaskPlacementCapabilityID, restoreProjectTaskAssigneeCapabilityID,
 		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID,
 		iamCreateSSOConnectionCapabilityID, iamDisableSSOConnectionCapabilityID, iamRestoreSSOConnectionCapabilityID,
@@ -840,9 +879,9 @@ func (e *Executor) executeWithFinalizer(
 		// declared capability gates.
 		legacyMarketplaceHumanAccess := !system && claims.ActorType == "human" &&
 			(capabilityID == creatorListMarketplaceCapabilityID || capabilityID == creatorVerifyPluginCapabilityID)
-		legacyNotificationHumanAccess := !system && claims.ActorType == "human" &&
+		legacyNotificationSelfAccess := !system && (claims.ActorType == "human" || claims.ActorType == "agent") &&
 			(capabilityID == notificationMarkReadCapabilityID || capabilityID == notificationRestoreReadCapabilityID)
-		if !legacyMarketplaceHumanAccess && !legacyNotificationHumanAccess {
+		if !legacyMarketplaceHumanAccess && !legacyNotificationSelfAccess {
 			enabled, err := isModuleEnabled(ctx, tx, claims.OrganizationID, spec.module)
 			if err != nil {
 				return Result{}, err
@@ -1083,6 +1122,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case ProjectCollectionReadCapabilityID:
+			parsed, err := ParseProjectCollectionInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
 		case archiveProjectCapabilityID:
 			parsed, err := ParseArchiveProjectInput(rawInput)
 			if err != nil {
@@ -1181,7 +1226,7 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID:
+		case posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID, posListSessionsCapabilityID:
 			parsed, err := parsePosSaleInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -1377,7 +1422,8 @@ func (e *Executor) executeWithFinalizer(
 			}
 			input = parsed
 		case iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
-			iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID:
+			iamGetOrgPolicyCapabilityID, iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID,
+			iamSetAgentSoulCapabilityID, iamRestoreAgentSoulCapabilityID:
 			parsed, err := parseIAMOrgSettingsInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -1529,7 +1575,7 @@ func (e *Executor) executeWithFinalizer(
 			}
 		}
 		legacyHarnessAdminInspection := !system && !externalSCIM && capabilityID == harnessListCompositionsCapabilityID && claims.ActorType == "human" && permissions["iam.admin"]
-		if !legacyMarketplaceHumanAccess && !legacyNotificationHumanAccess && !legacyHarnessAdminInspection && !permissions["*"] && !permissions[spec.permission] {
+		if !legacyMarketplaceHumanAccess && !legacyNotificationSelfAccess && !legacyHarnessAdminInspection && !permissions["*"] && !permissions[spec.permission] {
 			return Result{OK: false, Error: "forbidden: missing permission: " + spec.permission}, nil
 		}
 
@@ -1600,7 +1646,7 @@ func (e *Executor) executeWithFinalizer(
 		approvalRequired := false
 		rationale := "within policy"
 		// The legacy mark-read endpoint has no approval handshake, so preserve its immediate response.
-		if !legacyNotificationHumanAccess {
+		if !legacyNotificationSelfAccess {
 			approvalRequired, rationale, err = requiresApproval(ctx, tx, claims, capabilityID, spec, input)
 			if err != nil {
 				return Result{}, err
@@ -2514,6 +2560,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case PosListSessionsInput:
+			output, err := posListSessions(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case PosShiftSummaryInput:
 			output, err := posShiftSummary(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -2528,6 +2580,12 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case ProjectBoardInput:
 			output, err := listProjectBoard(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ProjectCollectionInput:
+			output, err := listProjectCollection(ctx, tx, claims.OrganizationID, parsed.Status)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3415,6 +3473,12 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case IAMGetOrgPolicyInput:
+			output, err := iamGetOrgPolicy(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case IAMSetOrgPolicyInput:
 			output, err := iamSetOrgPolicy(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -3423,6 +3487,12 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case IAMSetOrgBrandingInput:
 			output, err := iamSetOrgBranding(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case IAMSetAgentSoulInput:
+			output, err := iamSetAgentSoul(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3790,7 +3860,7 @@ func canonicalInputHash(input any) (string, error) {
 		InventoryAdjustStockInput, InventoryCreateTransferInput, InventoryConfirmTransferInput, InventoryCancelTransferInput,
 		InventoryReverseTransferInput, InventoryListTransfersInput,
 		InventoryCreateCycleCountInput, InventoryRecordCycleCountsInput, InventoryPostCycleCountInput, InventoryCancelCycleCountInput,
-		PosOpenSessionInput, PosCompleteSaleInput, PosCloseSessionInput, PosReturnSaleInput, PosShiftSummaryInput,
+		PosOpenSessionInput, PosCompleteSaleInput, PosCloseSessionInput, PosReturnSaleInput, PosShiftSummaryInput, PosListSessionsInput,
 		CreditNoteInput, ShareInvoiceInput, GenerateDueInvoicesInput, ReverseEntryInput,
 		AddBankAccountInput, ImportBankFeedInput, DeleteBankTransactionInput, MatchBankTransactionInput,
 		UnmatchBankTransactionInput, BankReconciliationInput, ExcludeBankTransactionInput,
@@ -3823,12 +3893,12 @@ func canonicalInputHash(input any) (string, error) {
 		ManufacturingDefineBomInput, ManufacturingDeleteBomInput, ManufacturingRestoreBomInput, ManufacturingBomTreeInput, ManufacturingBomReportInput,
 		ManufacturingCostPreviewInput, ManufacturingLotTraceInput, ManufacturingProductionRunsInput, ManufacturingOverviewReportInput,
 		MarketingCreateSegmentInput, MarketingCreateCampaignInput, MarketingSendCampaignInput, MarketingCampaignAnalyticsInput, MarketingOverviewSnapshotInput,
-		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, RestoreProjectInput,
+		CreateProjectInput, ProjectBoardInput, ProjectCollectionInput, ArchiveProjectInput, RestoreProjectInput,
 		CreateProjectTaskInput, DeleteProjectTaskInput, RestoreProjectTaskInput,
 		MoveProjectTaskInput, RestoreProjectTaskPlacementInput,
 		AssignProjectTaskInput, RestoreProjectTaskAssigneeInput,
 		HRCreateOpeningInput, HRCloseOpeningInput,
-		IAMModulesInput, IAMSetModuleConfigInput, IAMSetOrgPolicyInput, IAMSetOrgBrandingInput,
+		IAMModulesInput, IAMSetModuleConfigInput, IAMGetOrgPolicyInput, IAMSetOrgPolicyInput, IAMSetOrgBrandingInput, IAMSetAgentSoulInput,
 		PurchasingListWorkspaceInput, PurchasingListVendorsInput, PurchasingGetPurchaseOrderInput, PurchasingSupplierPerformanceInput, PurchasingPriceHistoryInput, PurchasingSupplierStatementInput,
 		SignalsListInput, SkillsFindInput, SkillsLoadInput,
 		RoutinesCreateInput, RoutinesListInput, RoutinesUpdateInput, RoutinesDeleteInput, RoutinesRunNowInput,

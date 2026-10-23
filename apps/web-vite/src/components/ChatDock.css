@@ -10,21 +10,21 @@
   justify-content: center;
   border: 0;
   border-radius: 50%;
-  background: #223b32;
+  background: #171613;
   color: #e8dcc0;
   box-shadow: 0 10px 24px rgb(32 41 34 / 28%);
   cursor: pointer;
   font-size: 20px;
   transition: transform .15s ease, background .15s ease;
 }
-.chat-dock-bubble:hover { transform: scale(1.06); background: #1a2d26; }
+.chat-dock-bubble:hover { transform: scale(1.06); background: #211f1a; }
 .chat-dock-bubble-pulse {
   position: absolute;
   top: -1px;
   right: -1px;
   width: 13px;
   height: 13px;
-  border: 2px solid #fffefa;
+  border: 2px solid #fffdf8;
   border-radius: 50%;
   background: #3f9d6b;
   animation: chat-strip-pulse 1.4s ease infinite;
@@ -39,9 +39,9 @@
   width: min(420px, calc(100vw - 2rem));
   height: min(560px, calc(100vh - 5rem));
   flex-direction: column;
-  border: 1px solid #e5e3da;
+  border: 1px solid #e5dccb;
   border-radius: 15px;
-  background: #fffefa;
+  background: #fffdf8;
   box-shadow: 0 24px 60px rgb(32 41 34 / 22%);
   overflow: hidden;
 }
@@ -50,7 +50,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  border-bottom: 1px solid #efede7;
+  border-bottom: 1px solid #eee7da;
   padding: 11px 12px 10px 14px;
 }
 
@@ -73,16 +73,16 @@
   right: -2px;
   width: 9px;
   height: 9px;
-  border: 1.5px solid #fffefa;
+  border: 1.5px solid #fffdf8;
   border-radius: 50%;
   background: #3f9d6b;
   animation: chat-strip-pulse 1.4s ease infinite;
 }
 
 .chat-dock-title { min-width: 0; flex: 1; line-height: 1.25; }
-.chat-dock-title p { margin: 0; color: #223b32; font-size: 12.5px; font-weight: 700; }
+.chat-dock-title p { margin: 0; color: #171613; font-size: 12.5px; font-weight: 700; }
 .chat-dock-status { display: inline-flex; align-items: center; color: #a3a196; font-size: 10.5px; }
-.chat-dock-status-busy { color: #5f655d; }
+.chat-dock-status-busy { color: #5f5a51; }
 
 .chat-dock-icon-button {
   display: flex;
@@ -99,13 +99,28 @@
   font-size: 15px;
   line-height: 1;
 }
-.chat-dock-icon-button:hover { background: #f2f0e8; color: #223b32; }
+.chat-dock-icon-button:hover { background: #f1ece2; color: #171613; }
 
 .chat-dock-scroll { min-height: 0; flex: 1; overflow-y: auto; }
 
-.chat-dock-composer { border-top: 1px solid #efede7; padding: 10px 12px 12px; background: #fffefa; }
+.chat-dock-composer { border-top: 1px solid #eee7da; padding: 10px 12px 12px; background: #fffdf8; }
 
 @media (max-width: 480px) {
   .chat-dock-panel { right: 0; bottom: 0; width: 100vw; height: calc(100vh - 3.5rem); border-radius: 15px 15px 0 0; }
   .chat-dock-bubble { right: 14px; bottom: 14px; }
 }
+
+/* Brand pass: the dock is a pocket-sized Workmate, not a chat widget. */
+.chat-dock-bubble { background: var(--ink-950); box-shadow: 0 12px 30px rgb(17 16 14 / 32%), inset 0 0 0 1px rgb(212 178 106 / 18%); }
+.chat-dock-bubble:hover { background: var(--ink-800); transform: translateY(-2px); }
+.chat-dock-bubble .ui-brand-mark { width: 34px; height: 34px; }
+.chat-dock-panel { border-color: var(--line); background: var(--paper-50); box-shadow: 0 28px 70px -24px rgb(17 16 14 / 45%); }
+.chat-dock-head { background: var(--paper-50); border-color: var(--line); }
+.chat-dock-avatar { width: 30px; height: 30px; background: transparent; }
+.chat-dock-avatar .ui-brand-mark { width: 28px; height: 28px; }
+.chat-dock-title p { color: var(--ink-900); font-size: 13px; }
+.chat-dock-status { color: var(--ink-400); }
+.chat-dock-status-busy { color: var(--gold-700); }
+.chat-dock-icon-button { color: var(--ink-400); }
+.chat-dock-icon-button:hover { background: var(--paper-200); color: var(--ink-800); }
+.chat-dock-composer { border-color: var(--line); background: var(--paper-50); }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchDurableRunDetail,
   fetchDurableRuns,
+  fetchSessionDetail,
   fetchSessionEvents,
   fetchSessionMetrics,
   fetchSessionReplay,
@@ -87,6 +88,34 @@ describe("sessions API", () => {
       { seq: 1, role: "user", content: { text: "First" }, at },
     ] }));
     await expect(fetchSessionEvents("session-1")).rejects.toBeInstanceOf(SessionsApiError);
+  });
+
+  it("loads a resumable session with its metadata and ordered events", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValue(Response.json({
+      session: {
+        id: "session-1",
+        orgId: "org-1",
+        userId: "user-1",
+        title: "Quarter close",
+        mode: "assist",
+        status: "completed",
+        summary: null,
+        modelRef: "provider/model",
+        tokenUsage: { input: 120, output: 30, cachedInput: 80 },
+        createdAt: at,
+        updatedAt: at,
+      },
+      events: [
+        { seq: 1, role: "user", content: { text: "Check the books" }, at },
+        { seq: 2, role: "assistant", content: { text: "The books are balanced." }, at },
+      ],
+    }));
+    const detail = await fetchSessionDetail("session-1");
+    expect(detail.session.title).toBe("Quarter close");
+    expect(detail.session.tokenUsage).toEqual({ input: 120, output: 30, cachedInput: 80 });
+    expect(detail.events.map((event) => event.seq)).toEqual([1, 2]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/sessions/session-1", expect.any(Object));
   });
 
   it("loads the canonical replay without invoking a different session path", async () => {

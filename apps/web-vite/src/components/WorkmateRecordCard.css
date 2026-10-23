@@ -1,8 +1,8 @@
 .workmate-record-card {
   --record-ink: #26352c;
   --record-muted: #73766d;
-  --record-line: #e5e3da;
-  --record-surface: #fffefa;
+  --record-line: #e5dccb;
+  --record-surface: #fffdf8;
   --record-accent: #8a6f38;
   --record-tone: var(--record-muted);
   --record-wash: var(--record-surface);
@@ -16,8 +16,8 @@
   color: var(--record-ink);
 }
 
-.workmate-record-card-exception { --record-tone: #8c4c40; --record-wash: #fbf5f2; }
-.workmate-record-card-progress { --record-tone: #26352c; --record-wash: #fffefa; }
+.workmate-record-card-exception { --record-tone: #9d4438; --record-wash: #fbf5f2; }
+.workmate-record-card-progress { --record-tone: #26352c; --record-wash: #fffdf8; }
 .workmate-record-card-waiting { --record-tone: #8a6f38; --record-wash: #fbf8ee; }
 .workmate-record-card-result { --record-tone: #73766d; --record-wash: #f6f5ef; }
 

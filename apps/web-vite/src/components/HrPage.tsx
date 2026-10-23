@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
 import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrTime, HrApiError, readPendingHrEmployeeAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrEmployeeAction, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPayrollRun, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
+import { PageLoading } from "../ui/page-loading";
 import "./hr-page.css";
 
 type TabId = "overview" | "people" | "hiring" | "leave" | "time" | "payroll" | "expenses";
@@ -428,7 +429,7 @@ function HrPageContent({ baseCurrency = null, actorId = null, organizationId = n
   }
 
   if (state.status === "loading") {
-    return <main className="hr-page"><p className="hr-loading" role="status">Loading People workspace…</p>{payrollRecoveryControls()}{hiringRecoveryControls()}{employeeHireRecoveryControls()}</main>;
+    return <main className="hr-page"><PageLoading label="Loading People workspace…" />{payrollRecoveryControls()}{hiringRecoveryControls()}{employeeHireRecoveryControls()}</main>;
   }
   if (state.status === "failed") {
     return (
@@ -742,7 +743,7 @@ function Overview({ report, timeRows, currency, onTabChange }: { report: HrRepor
     <div className="hr-overview-grid">
       <section className="hr-card">
         <div className="hr-section-heading"><div><p className="hr-eyebrow">Team</p><h2>Recently added</h2></div><button className="hr-text-button" type="button" onClick={() => onTabChange("people")}>View people</button></div>
-        {report.employees.length === 0 ? <p className="hr-muted">Add your first employee to start building the team.</p> : <ul className="hr-person-list">{report.employees.slice(0, 5).map((employee) => <li key={employee.id}><span className="hr-avatar" aria-hidden="true">{employee.name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span><span className="hr-person-copy"><strong>{employee.name}</strong><small>{employee.title || employee.department || "Role not set"}</small></span><span className={`hr-pill ${employee.active ? "is-active" : "is-muted"}`}>{employee.active ? "Active" : "Inactive"}</span></li>)}</ul>}
+        {report.employees.length === 0 ? <div className="hr-empty-action"><p className="hr-muted">Add your first employee to start building the team.</p><button className="hr-primary-button" type="button" onClick={() => onTabChange("people")}>Add your first employee</button></div> : <ul className="hr-person-list">{report.employees.slice(0, 5).map((employee) => <li key={employee.id}><span className="hr-avatar" aria-hidden="true">{employee.name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span><span className="hr-person-copy"><strong>{employee.name}</strong><small>{employee.title || employee.department || "Role not set"}</small></span><span className={`hr-pill ${employee.active ? "is-active" : "is-muted"}`}>{employee.active ? "Active" : "Inactive"}</span></li>)}</ul>}
       </section>
       <section className="hr-card">
         <div className="hr-section-heading"><div><p className="hr-eyebrow">Payroll</p><h2>Latest run</h2></div><button className="hr-text-button" type="button" onClick={() => onTabChange("payroll")}>View payroll</button></div>

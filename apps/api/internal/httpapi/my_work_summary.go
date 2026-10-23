@@ -786,9 +786,10 @@ func environmentMyWorkSummaryConfig() myWorkSummaryConfig {
 		"nvidia":     envOrMyWork("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
 		"openrouter": "https://openrouter.ai/api/v1", "groq": "https://api.groq.com/openai/v1",
 		"mistral": "https://api.mistral.ai/v1", "zai": envOrMyWork("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4"),
-		"openai": "https://api.openai.com/v1", "custom": os.Getenv("MODEL_BASE_URL"),
+		"openai": "https://api.openai.com/v1", "deepseek": envOrMyWork("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+		"custom": os.Getenv("MODEL_BASE_URL"),
 	}[provider]
-	keyName := map[string]string{"nvidia": "NVIDIA_API_KEY", "openrouter": "OPENROUTER_API_KEY", "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY", "zai": "ZAI_API_KEY", "openai": "OPENAI_API_KEY"}[provider]
+	keyName := map[string]string{"nvidia": "NVIDIA_API_KEY", "openrouter": "OPENROUTER_API_KEY", "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY", "zai": "ZAI_API_KEY", "openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}[provider]
 	return myWorkSummaryConfig{
 		provider: provider, baseURL: strings.TrimRight(baseURL, "/"), apiKey: strings.TrimSpace(os.Getenv(keyName)),
 		fastModel:    envOrMyWork("MODEL_FAST", "meta/muse-glimmer-30b"),

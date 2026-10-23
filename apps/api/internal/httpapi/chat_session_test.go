@@ -526,11 +526,11 @@ func TestBuildChatToolsFiltersAndRejectsCollisions(t *testing.T) {
 		{ID: "crm.listCustomers", InputSchema: json.RawMessage(`{"type":"object"}`)},
 		{ID: "documents.searchMemory", InputSchema: json.RawMessage(`{"type":"object"}`)},
 	}
-	tools, byName, err := buildChatTools(agentTools, map[string]bool{"crm": true})
+	tools, byName, err := buildChatTools(agentTools, map[string]bool{"crm": true}, false)
 	if err != nil {
 		t.Fatalf("buildChatTools: %v", err)
 	}
-	if len(tools) != 3 || byName["crm_listCustomers"].ID != "crm.listCustomers" {
+	if len(tools) != 8 || byName["crm_listCustomers"].ID != "crm.listCustomers" {
 		t.Fatalf("tools=%+v byName=%v", tools, byName)
 	}
 	if _, exists := byName["documents_searchMemory"]; exists {
@@ -539,18 +539,29 @@ func TestBuildChatToolsFiltersAndRejectsCollisions(t *testing.T) {
 	if tools[1].Name != "file_ticket" || tools[1].Parameters == nil {
 		t.Fatalf("file_ticket spec=%+v", tools[1])
 	}
+	if tools[3].Name != "capability_search" || tools[4].Name != "capability_invoke" ||
+		tools[5].Name != "resolve_entity" || tools[6].Name != "notifications_inbox" || tools[7].Name != "approvals_inbox" {
+		t.Fatalf("built-in specs=%+v %+v %+v %+v %+v", tools[3], tools[4], tools[5], tools[6], tools[7])
+	}
 	if _, _, err := buildChatTools([]capability.AgentToolSpec{
 		{ID: "crm.a.b", InputSchema: json.RawMessage(`{}`)},
 		{ID: "crm.a_b", InputSchema: json.RawMessage(`{}`)},
-	}, nil); err == nil {
+	}, nil, false); err == nil {
 		t.Fatal("collision after sanitization must fail closed")
 	}
-	if _, _, err := buildChatTools([]capability.AgentToolSpec{{ID: "ask.user", InputSchema: json.RawMessage(`{}`)}}, nil); err == nil {
+	if _, _, err := buildChatTools([]capability.AgentToolSpec{{ID: "ask.user", InputSchema: json.RawMessage(`{}`)}}, nil, false); err == nil {
 		t.Fatal("capability colliding with a built-in tool must fail closed")
 	}
-	unfiltered, _, err := buildChatTools(agentTools, nil)
-	if err != nil || len(unfiltered) != 4 {
+	unfiltered, _, err := buildChatTools(agentTools, nil, false)
+	if err != nil || len(unfiltered) != 9 {
 		t.Fatalf("unrestricted tools=%d err=%v", len(unfiltered), err)
+	}
+	briefTools, _, err := buildChatTools(agentTools, nil, true)
+	if err != nil || len(briefTools) != 9 {
+		t.Fatalf("brief tools=%d err=%v", len(briefTools), err)
+	}
+	if briefTools[7].Name != "recent_changes" || briefTools[8].Name != "daily_brief" {
+		t.Fatalf("brief specs=%+v %+v", briefTools[7], briefTools[8])
 	}
 	if allowed := chatAllowedModules(&session.ResolvedUser{ModulesRestricted: true, EnabledModules: []string{"crm"}}); !allowed["crm"] || !allowed["iam"] || allowed["documents"] {
 		t.Fatalf("allowed modules=%v", allowed)
@@ -570,7 +581,7 @@ func TestChatSessionHandlerProviderFailureFrames(t *testing.T) {
 		if types := chatEventTypes(events); strings.Join(types, ",") != "step,error" {
 			t.Fatalf("events=%v", types)
 		}
-		if events[1]["error"] != "model request failed (HTTP 502)" {
+		if events[1]["error"] != "The AI provider is unavailable right now. Try again in a moment." {
 			t.Fatalf("error=%v", events[1]["error"])
 		}
 	})
@@ -742,4 +753,37 @@ func (p *scriptedChatProvider) toolsForCall(t *testing.T, index int) []chatToolS
 		t.Fatalf("provider call %d never happened", index)
 	}
 	return p.tools[index]
+}
+
+func TestChatHistoryMessagesReconstructsToolCallsAndSkipsOrphans(t *testing.T) {
+	events := []chatHistoryEvent{
+		{role: "user", content: map[string]any{"text": "Find Acme"}},
+		{role: "tool_call", content: map[string]any{"callId": "call-1", "name": "crm_listCustomers", "args": map[string]any{"query": "Acme"}}},
+		{role: "tool_result", content: map[string]any{"callId": "call-1", "ok": true, "result": `{"customers":[{"id":"c-1","name":"Acme"}]}`}},
+		{role: "assistant", content: map[string]any{"text": "Found Acme."}},
+		{role: "user", content: map[string]any{"text": "Now invoice them"}},
+		{role: "tool_call", content: map[string]any{"callId": "call-2", "name": "accounting_createInvoice", "args": map[string]any{"customerId": "c-1"}}},
+		{role: "assistant", content: map[string]any{"text": "Drafted it."}},
+	}
+	messages := chatHistoryMessages(events)
+	if len(messages) != 6 {
+		t.Fatalf("messages=%+v", messages)
+	}
+	if messages[0].Role != "user" || messages[0].Content != "Find Acme" {
+		t.Fatalf("first=%+v", messages[0])
+	}
+	if messages[1].Role != "assistant" || len(messages[1].ToolCalls) != 1 || messages[1].ToolCalls[0].ID != "call-1" {
+		t.Fatalf("tool call=%+v", messages[1])
+	}
+	if messages[2].Role != "tool" || messages[2].ToolCallID != "call-1" || !strings.Contains(messages[2].Content, "Acme") {
+		t.Fatalf("tool result=%+v", messages[2])
+	}
+	if messages[5].Content != "Drafted it." {
+		t.Fatalf("last=%+v", messages[5])
+	}
+	for _, message := range messages {
+		if len(message.ToolCalls) == 1 && message.ToolCalls[0].ID == "call-2" {
+			t.Fatal("a tool call without a result must not enter history")
+		}
+	}
 }

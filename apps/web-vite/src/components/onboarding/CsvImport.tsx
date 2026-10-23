@@ -738,7 +738,7 @@ export function CsvImportPanel({
                   border: 0,
                   borderRadius: 7,
                   padding: "7px 12px",
-                  background: entity === option.id ? "#fffefa" : "transparent",
+                  background: entity === option.id ? "#fffdf8" : "transparent",
                   color: entity === option.id ? ink : muted,
                   cursor: "pointer",
                   font: "inherit",
@@ -767,7 +767,7 @@ export function CsvImportPanel({
           }}
           style={{
             ...styles.dropzone,
-            borderColor: dragging ? "#c8a866" : "#d9d5c8",
+            borderColor: dragging ? "#c19a32" : "#d9d5c8",
             background: dragging ? "rgb(200 168 102 / 10%)" : "#faf9f4",
           }}
         >
@@ -896,7 +896,7 @@ export function CsvImportPanel({
             <div key={field} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
               <label htmlFor={`map-${field}`} style={{ display: "flex", width: 200, alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600 }}>
                 {labelFor(field)}
-                <span style={{ color: missing ? "#994838" : gold, fontSize: 9.5, fontWeight: 750, letterSpacing: ".08em", textTransform: "uppercase" }}>
+                <span style={{ color: missing ? "#9d4438" : gold, fontSize: 9.5, fontWeight: 750, letterSpacing: ".08em", textTransform: "uppercase" }}>
                   {isRequired ? "required" : "optional"}
                 </span>
               </label>
@@ -984,7 +984,7 @@ export function CsvImportPanel({
       )}
 
       {duplicateProductCount > 0 && (
-        <p role="status" style={{ ...styles.lede, border: "1px solid #e8d9ae", borderRadius: 10, padding: "9px 12px", background: "#fbf5e4", color: "#6b5a22" }}>
+        <p role="status" style={{ ...styles.lede, border: "1px solid #e8d9ae", borderRadius: 10, padding: "9px 12px", background: "#faf4e6", color: "#6b5a22" }}>
           {duplicateProductCount} row{duplicateProductCount === 1 ? " looks" : "s look"} like an existing SKU or
           barcode. Those rows will be skipped automatically, and you can change the code in your file and import
           again.

@@ -37,16 +37,18 @@ import {
   type GovernedRetryScope,
 } from "../api/settings";
 import { fetchOrganizations } from "../api/organizations";
+import { fetchNotificationPreferences, saveNotificationPreferences, NotificationPreferencesError } from "../api/notification-preferences";
 import { parseScheduleText } from "@chaste/erp-core";
 import { EvaluationPanel } from "./EvaluationPanel";
+import { CodingAgentConnections } from "./CodingAgentConnections";
 import "./SettingsPage.css";
 
 /* ------------------------------------------------------------- styling ---- */
 
-const INK = "#26352c";
-const MUTED = "#73766d";
-const LINE = "#e5e3da";
-const SURFACE = "#fffefa";
+const INK = "#211f1a";
+const MUTED = "#625d53";
+const LINE = "#e5dccb";
+const SURFACE = "#fffdf8";
 const GOLD = "#8a6f38";
 
 const ui = {
@@ -57,34 +59,34 @@ const ui = {
   lede: { maxWidth: "760px", margin: 0, color: MUTED, fontSize: "13px", lineHeight: 1.65 } as CSSProperties,
   tablist: { display: "flex", flexWrap: "wrap", gap: "4px", margin: "0 0 24px", borderBottom: "1px solid " + LINE, paddingBottom: "2px" } as CSSProperties,
   tab: { minHeight: "33px", border: "0", borderRadius: "6px 6px 0 0", padding: "0 11px", background: "transparent", color: "#6e726a", cursor: "pointer", fontSize: "11px", fontWeight: 600 } as CSSProperties,
-  tabActive: { background: "#eef0e9", color: INK } as CSSProperties,
+  tabActive: { background: "#f4efe5", color: INK } as CSSProperties,
   section: { marginBottom: "30px" } as CSSProperties,
-  sectionTitle: { margin: "0 0 5px", color: "#303a32", fontSize: "14px", fontWeight: 650 } as CSSProperties,
+  sectionTitle: { margin: "0 0 5px", color: "#211f1a", fontSize: "14px", fontWeight: 650 } as CSSProperties,
   sectionHint: { maxWidth: "720px", margin: "0 0 14px", color: MUTED, fontSize: "12px", lineHeight: 1.6 } as CSSProperties,
   card: { minWidth: 0, border: "1px solid " + LINE, borderRadius: "12px", padding: "18px", background: SURFACE, boxShadow: "0 9px 28px rgb(48 45 36 / 4%)" } as CSSProperties,
   stack: { display: "grid", gap: "14px" } as CSSProperties,
   row: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px" } as CSSProperties,
-  label: { display: "grid", gap: "5px", color: "#4c5149", fontSize: "11px", fontWeight: 600 } as CSSProperties,
-  hint: { color: "#8d8f86", fontSize: "10px", fontWeight: 400, lineHeight: 1.5 } as CSSProperties,
-  field: { minHeight: "35px", width: "100%", minWidth: 0, border: "1px solid #dddbd2", borderRadius: "6px", padding: "0 9px", background: "#fffefa", color: "#434940", font: "inherit", fontSize: "12px" } as CSSProperties,
-  textarea: { minHeight: "70px", width: "100%", minWidth: 0, border: "1px solid #dddbd2", borderRadius: "6px", padding: "9px", background: "#fffefa", color: "#434940", font: "inherit", fontSize: "12px", lineHeight: 1.6, resize: "vertical" } as CSSProperties,
-  monoField: { minHeight: "35px", width: "100%", minWidth: 0, border: "1px solid #dddbd2", borderRadius: "6px", padding: "0 9px", background: "#fffefa", color: "#434940", font: "inherit", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "11px" } as CSSProperties,
-  primary: { minHeight: "35px", border: "1px solid #264437", borderRadius: "6px", padding: "0 13px", background: "#28473a", color: "#fffefa", cursor: "pointer", font: "inherit", fontSize: "11px", fontWeight: 650 } as CSSProperties,
-  secondary: { minHeight: "35px", border: "1px solid #d9d7cd", borderRadius: "6px", padding: "0 12px", background: "#f7f6f0", color: "#354238", cursor: "pointer", font: "inherit", fontSize: "11px", fontWeight: 650 } as CSSProperties,
-  link: { color: "#4b6b56", fontSize: "11px", fontWeight: 650 } as CSSProperties,
-  chip: { minHeight: "30px", border: "1px solid #e3e1d8", borderRadius: "99px", padding: "0 11px", background: "#f7f6f0", color: "#63655d", cursor: "pointer", font: "inherit", fontSize: "10px", fontWeight: 650 } as CSSProperties,
-  chipOn: { borderColor: "#d8c48c", background: "#fbf4df", color: "#7a6229" } as CSSProperties,
-  listRow: { display: "flex", minHeight: "46px", alignItems: "center", justifyContent: "space-between", gap: "12px", borderTop: "1px solid #eeece5", fontSize: "11px" } as CSSProperties,
+  label: { display: "grid", gap: "5px", color: "#36322b", fontSize: "11px", fontWeight: 600 } as CSSProperties,
+  hint: { color: "#756f63", fontSize: "10px", fontWeight: 400, lineHeight: 1.5 } as CSSProperties,
+  field: { minHeight: "35px", width: "100%", minWidth: 0, border: "1px solid #ddd4c4", borderRadius: "6px", padding: "0 9px", background: "#fffdf8", color: "#322f28", font: "inherit", fontSize: "12px" } as CSSProperties,
+  textarea: { minHeight: "70px", width: "100%", minWidth: 0, border: "1px solid #ddd4c4", borderRadius: "6px", padding: "9px", background: "#fffdf8", color: "#322f28", font: "inherit", fontSize: "12px", lineHeight: 1.6, resize: "vertical" } as CSSProperties,
+  monoField: { minHeight: "35px", width: "100%", minWidth: 0, border: "1px solid #ddd4c4", borderRadius: "6px", padding: "0 9px", background: "#fffdf8", color: "#322f28", font: "inherit", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "11px" } as CSSProperties,
+  primary: { minHeight: "35px", border: "1px solid #171613", borderRadius: "6px", padding: "0 13px", background: "#171613", color: "#fffdf8", cursor: "pointer", font: "inherit", fontSize: "11px", fontWeight: 650 } as CSSProperties,
+  secondary: { minHeight: "35px", border: "1px solid #d9d7cd", borderRadius: "6px", padding: "0 12px", background: "#f7f6f0", color: "#2e2b24", cursor: "pointer", font: "inherit", fontSize: "11px", fontWeight: 650 } as CSSProperties,
+  link: { color: "#8b6a22", fontSize: "11px", fontWeight: 650 } as CSSProperties,
+  chip: { minHeight: "30px", border: "1px solid #e5dccb", borderRadius: "99px", padding: "0 11px", background: "#f7f6f0", color: "#5f5a51", cursor: "pointer", font: "inherit", fontSize: "10px", fontWeight: 650 } as CSSProperties,
+  chipOn: { borderColor: "#e2c98f", background: "#faf1dc", color: "#7d5e1a" } as CSSProperties,
+  listRow: { display: "flex", minHeight: "46px", alignItems: "center", justifyContent: "space-between", gap: "12px", borderTop: "1px solid #eee7da", fontSize: "11px" } as CSSProperties,
   mono: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "10px" } as CSSProperties,
   muted: { color: MUTED, fontSize: "11px", lineHeight: 1.6 } as CSSProperties,
-  empty: { color: "#9a9c93", fontSize: "11px" } as CSSProperties,
-  badge: { display: "inline-flex", alignItems: "center", borderRadius: "99px", padding: "3px 8px", background: "#f4f2ea", color: "#6c6e65", fontSize: "9px", fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" } as CSSProperties,
+  empty: { color: "#817b6e", fontSize: "11px" } as CSSProperties,
+  badge: { display: "inline-flex", alignItems: "center", borderRadius: "99px", padding: "3px 8px", background: "#f4efe5", color: "#625d53", fontSize: "9px", fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" } as CSSProperties,
 } as const;
 
 const NOTICE_STYLE: Record<NoticeTone, CSSProperties> = {
-  success: { border: "1px solid #c8dbc9", background: "#f0f7ef", color: "#30563b" },
-  pending: { border: "1px solid #ead8a9", background: "#fbf4df", color: "#81672c" },
-  error: { border: "1px solid #e7c8c0", background: "#fff7f4", color: "#8e4134" },
+  success: { border: "1px solid #cbdcc9", background: "#edf3eb", color: "#4f6b52" },
+  pending: { border: "1px solid #ead6a8", background: "#faf1dc", color: "#7d5e1a" },
+  error: { border: "1px solid #ecc6bd", background: "#fbf0ed", color: "#9d4438" },
 };
 
 const noticeStyle = (tone: NoticeTone): CSSProperties => ({
@@ -178,6 +180,7 @@ async function copyToClipboard(value: string): Promise<void> {
 
 const TABS = [
   { id: "workspace", label: "Workspace" },
+  { id: "notifications", label: "Notifications" },
   { id: "modules", label: "Modules" },
   { id: "governance", label: "Governance" },
   { id: "quality", label: "Quality" },
@@ -239,6 +242,7 @@ export function SettingsPage({
 
       <div role="tabpanel" id={`settings-panel-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
         {tab === "workspace" && <WorkspaceTab accountingOn={accountingOn} />}
+        {tab === "notifications" && <NotificationsTab />}
         {tab === "modules" && <ModulesTab />}
         {tab === "governance" && <GovernanceTab baseCurrency={baseCurrency} />}
         {tab === "quality" && <EvaluationPanel organizationId={organizationId ?? null} />}
@@ -344,6 +348,100 @@ function WorkspaceTab({ accountingOn }: { accountingOn: boolean | null }) {
 
       <EmailSection />
     </>
+  );
+}
+
+function NotificationsTab() {
+  const [kinds, setKinds] = useState<string[]>([]);
+  const [muted, setMuted] = useState<Set<string>>(() => new Set());
+  const [state, setState] = useState<"loading" | "ready" | "saving" | "failed">("loading");
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchNotificationPreferences(controller.signal)
+      .then((preferences) => {
+        if (controller.signal.aborted) return;
+        setKinds(preferences.kinds);
+        setMuted(new Set(preferences.mutedKinds));
+        setState("ready");
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(reason instanceof NotificationPreferencesError ? reason.message : "Notification preferences could not be loaded.");
+        setState("failed");
+      });
+    return () => controller.abort();
+  }, []);
+
+  const labels: Record<string, string> = {
+    "approval.requested": "Approval requests",
+    "ticket.filed": "Support tickets",
+    "routine.run": "Routine runs",
+    system: "System notices",
+  };
+
+  function toggle(kind: string) {
+    setMuted((current) => {
+      const next = new Set(current);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
+    setMessage(null);
+  }
+
+  async function save() {
+    setState("saving");
+    setError(null);
+    try {
+      const preferences = await saveNotificationPreferences([...muted]);
+      setKinds(preferences.kinds);
+      setMuted(new Set(preferences.mutedKinds));
+      setState("ready");
+      setMessage("Notification preferences saved.");
+    } catch (reason) {
+      setState("ready");
+      setError(reason instanceof NotificationPreferencesError ? reason.message : "Notification preferences could not be saved.");
+    }
+  }
+
+  return (
+    <Section title="Notifications" hint="Choose which in-app notifications appear in the bell and Inbox. Muted events remain in the audit record and approvals still need a decision.">
+      {state === "loading" && <p role="status" style={ui.muted}>Loading notification preferences…</p>}
+      {state === "failed" && <Notice tone="error">{error}</Notice>}
+      {state !== "loading" && state !== "failed" && (
+        <div style={ui.card}>
+          <div style={{ ...ui.stack, gap: "0" }}>
+            {kinds.map((kind) => (
+              <label key={kind} style={{ ...ui.listRow, cursor: "pointer" }}>
+                <span>
+                  <strong style={{ color: INK, fontSize: "12px", display: "block" }}>{labels[kind] ?? kind}</strong>
+                  <span style={ui.muted}>Show {kind} in the in-app feed</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={!muted.has(kind)}
+                  disabled={state === "saving"}
+                  onChange={() => toggle(kind)}
+                  style={{ width: "17px", height: "17px", accentColor: "#8b6a22" }}
+                />
+              </label>
+            ))}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "12px" }}>
+            <button type="button" style={ui.primary} disabled={state === "saving"} onClick={() => void save()}>
+              {state === "saving" ? "Saving…" : "Save preferences"}
+            </button>
+            {message && <span role="status" style={{ ...ui.muted, color: "#4f6b52" }}>{message}</span>}
+          </div>
+          <p style={{ ...ui.muted, margin: "12px 0 0", lineHeight: 1.6 }}>
+            Email delivery uses the workspace SMTP settings. These preferences control the in-app feed, not approval authority.
+          </p>
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -660,7 +758,7 @@ function ModuleSettingsPanel({ moduleId, title, hint, fields }: (typeof MODULE_S
             <button type="button" onClick={() => void save()} disabled={saving} style={ui.primary}>
               {saving ? "Saving…" : "Save defaults"}
             </button>
-            {notice && <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: notice.tone === "success" ? "#30563b" : notice.tone === "pending" ? "#81672c" : "#8e4134" }}>{notice.text}</span>}
+            {notice && <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: notice.tone === "success" ? "#4f6b52" : notice.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>{notice.text}</span>}
           </div>
         </div>
       )}
@@ -847,7 +945,7 @@ function GovernanceTab({ baseCurrency }: { baseCurrency?: string | null }) {
               )}
               {!canEdit && <span style={ui.empty}>Only organization admins can change policy.</span>}
               {notice && (
-                <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: notice.tone === "success" ? "#30563b" : notice.tone === "pending" ? "#81672c" : "#8e4134" }}>
+                <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: notice.tone === "success" ? "#4f6b52" : notice.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>
                   {notice.text}
                 </span>
               )}
@@ -956,7 +1054,7 @@ function AiTab() {
         hint="Choose the provider and model roles used by this workspace. Credentials are encrypted before storage, never returned to the browser, and every change goes through the governed capability pipeline."
       >
         {!config ? (
-          <p role={loadError ? "alert" : "status"} style={loadError ? { ...ui.muted, color: "#8e4134" } : ui.muted}>
+          <p role={loadError ? "alert" : "status"} style={loadError ? { ...ui.muted, color: "#9d4438" } : ui.muted}>
             {loadError ?? "Checking configuration…"}
           </p>
         ) : (
@@ -970,7 +1068,7 @@ function AiTab() {
                   connected {config.keyHint ?? ""}
                 </span>
               ) : (
-                <span style={{ ...ui.badge, background: "#fbf4df", color: "#81672c" }}>credential missing</span>
+                <span style={{ ...ui.badge, background: "#faf1dc", color: "#7d5e1a" }}>credential missing</span>
               )}
             </div>
 
@@ -1042,13 +1140,13 @@ function AiTab() {
                 Clear stored key
               </button>
               {note && (
-                <span role={note.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: note.tone === "success" ? "#30563b" : note.tone === "pending" ? "#81672c" : "#8e4134" }}>
+                <span role={note.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: note.tone === "success" ? "#4f6b52" : note.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>
                   {note.text}
                 </span>
               )}
             </div>
 
-            <div style={{ borderTop: "1px solid #eeece5", paddingTop: "4px" }}>
+            <div style={{ borderTop: "1px solid #eee7da", paddingTop: "4px" }}>
               <div style={ui.listRow}>
                 <span style={ui.muted}>Provider</span>
                 <span style={{ color: INK, fontSize: "12px", fontWeight: 600 }}>
@@ -1088,6 +1186,7 @@ function AiTab() {
         )}
       </Section>
 
+      <CodingAgentConnections />
       <SoulSection />
       <MemorySection />
     </>
@@ -1148,7 +1247,7 @@ function SoulSection() {
             {busy ? "Saving…" : "Save persona"}
           </button>
           {note && (
-            <span role={note.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: note.tone === "success" ? "#30563b" : "#8e4134" }}>
+            <span role={note.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: note.tone === "success" ? "#4f6b52" : "#9d4438" }}>
               {note.text}
             </span>
           )}
@@ -1242,7 +1341,7 @@ function MemorySection() {
                     aria-label="Delete memory entry"
                     title="Forget this"
                     onClick={() => setConfirmId(entry.id)}
-                    style={{ minHeight: "26px", flex: "0 0 auto", border: "1px solid #e3e1d8", borderRadius: "5px", padding: "0 8px", background: "#fffefa", color: "#8e4134", cursor: "pointer", fontSize: "10px", fontWeight: 650 }}
+                    style={{ minHeight: "26px", flex: "0 0 auto", border: "1px solid #e5dccb", borderRadius: "5px", padding: "0 8px", background: "#fffdf8", color: "#9d4438", cursor: "pointer", fontSize: "10px", fontWeight: 650 }}
                   >
                     Forget
                   </button>
@@ -1395,7 +1494,7 @@ function BrandingTab() {
             value={accent}
             disabled={!canEdit}
             onChange={(event) => setAccent(event.currentTarget.value)}
-            style={{ width: "70px", height: "34px", border: "1px solid " + LINE, borderRadius: "6px", background: "#fffefa", padding: "2px" }}
+            style={{ width: "70px", height: "34px", border: "1px solid " + LINE, borderRadius: "6px", background: "#fffdf8", padding: "2px" }}
           />
           <span style={ui.hint}>Rules, headings and totals on printed documents.</span>
         </label>
@@ -1438,7 +1537,7 @@ function BrandingTab() {
               {busy ? "Saving…" : "Save branding"}
             </button>
             {notice && (
-              <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: notice.tone === "success" ? "#30563b" : notice.tone === "pending" ? "#81672c" : "#8e4134" }}>
+              <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: notice.tone === "success" ? "#4f6b52" : notice.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>
                 {notice.text}
               </span>
             )}
@@ -1608,7 +1707,7 @@ function RoutinesTab({ retryScope }: { retryScope?: GovernedRetryScope }) {
                     ...(routine.lastStatus === "ok"
                       ? { background: "#eef5ec", color: "#3d6b4c" }
                       : routine.lastStatus === "failed"
-                        ? { background: "#fff2ef", color: "#8e4134" }
+                        ? { background: "#fff2ef", color: "#9d4438" }
                         : null),
                   }}
                 >
@@ -1639,7 +1738,7 @@ function RoutinesTab({ retryScope }: { retryScope?: GovernedRetryScope }) {
                       type="button"
                       title={routine.webhookUrl}
                       onClick={() => void copyToClipboard(routine.webhookUrl ?? "")}
-                      style={{ border: 0, padding: 0, background: "none", color: "#4b6b56", cursor: "pointer", font: "inherit", fontSize: "10px", textDecoration: "underline" }}
+                      style={{ border: 0, padding: 0, background: "none", color: "#8b6a22", cursor: "pointer", font: "inherit", fontSize: "10px", textDecoration: "underline" }}
                     >
                       copy webhook URL
                     </button>
@@ -1691,7 +1790,7 @@ function RuntimeTab() {
         {rows.map(({ id, createdAt, inspection }) => (
           <div key={id} style={ui.card}>
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px" }}>
-              <span style={{ ...ui.badge, background: inspection.profile.environment === "erp-prod" ? "#fff2ef" : "#eef1f7", color: inspection.profile.environment === "erp-prod" ? "#8e4134" : "#3c4a5e" }}>
+              <span style={{ ...ui.badge, background: inspection.profile.environment === "erp-prod" ? "#fff2ef" : "#eef1f7", color: inspection.profile.environment === "erp-prod" ? "#9d4438" : "#3c4a5e" }}>
                 {inspection.profile.environment}
               </span>
               <h3 style={{ margin: 0, color: INK, fontSize: "13px", fontWeight: 650 }}>{inspection.profile.id}</h3>
@@ -1739,8 +1838,8 @@ function DigestBox({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ border: "1px solid " + LINE, borderRadius: "8px", padding: "9px 10px", background: "#f7f6f0" }}>
       <p style={{ margin: 0, color: "#a3a399", fontSize: "9px", fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>{label}</p>
-      <code style={{ display: "block", marginTop: "4px", color: "#4c5149", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "10px", overflowWrap: "anywhere" }}>{value}</code>
-      <button type="button" onClick={() => void copyToClipboard(value)} style={{ marginTop: "5px", border: 0, padding: 0, background: "none", color: "#4b6b56", cursor: "pointer", fontSize: "10px", fontWeight: 650 }}>Copy</button>
+      <code style={{ display: "block", marginTop: "4px", color: "#36322b", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "10px", overflowWrap: "anywhere" }}>{value}</code>
+      <button type="button" onClick={() => void copyToClipboard(value)} style={{ marginTop: "5px", border: 0, padding: 0, background: "none", color: "#8b6a22", cursor: "pointer", fontSize: "10px", fontWeight: 650 }}>Copy</button>
     </div>
   );
 }

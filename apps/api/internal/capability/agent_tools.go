@@ -1,6 +1,7 @@
 package capability
 
 import (
+	_ "embed"
 	"encoding/json"
 	"sort"
 )
@@ -88,6 +89,36 @@ var agentToolDefinitions = map[string]agentToolDefinition{
 	},
 }
 
+// agentToolContractsJSON is the reviewed model-facing contract catalog. It is
+// generated from the capability manifest and a small hand-written set of empty
+// input schemas, then checked in so tool descriptions can be reviewed like code.
+//
+//go:embed agent_tool_contracts.json
+var agentToolContractsJSON []byte
+
+func init() {
+	var catalog struct {
+		Tools []struct {
+			ID          string          `json:"id"`
+			Description string          `json:"description"`
+			Schema      json.RawMessage `json:"schema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(agentToolContractsJSON, &catalog); err != nil {
+		panic("agent tool contracts are not valid JSON: " + err.Error())
+	}
+	for _, entry := range catalog.Tools {
+		if entry.ID == "" || entry.Description == "" || len(entry.Schema) == 0 {
+			panic("agent tool contract is missing an id, description, or schema")
+		}
+		if _, exists := agentToolDefinitions[entry.ID]; exists {
+			continue
+		}
+		agentToolDefinitions[entry.ID] = agentToolDefinition{description: entry.Description, schema: string(entry.Schema)}
+	}
+	mergeAgentDefinitionsIntoCatalog()
+}
+
 type AgentToolSpec struct {
 	ID          string          `json:"id"`
 	Permission  string          `json:"permission"`
@@ -99,10 +130,11 @@ type AgentToolSpec struct {
 // AgentTools returns only Go-executable capabilities that the signed user may
 // invoke. The executor still rechecks identity, permission, policy, and input.
 func AgentTools(permissions map[string]bool) []AgentToolSpec {
+	ensureCapabilityCatalog()
 	ids := make([]string, 0, len(agentToolDefinitions))
 	for id := range agentToolDefinitions {
 		spec, exists := capabilitySpecs[id]
-		if !exists || !supportedCapability(id) || spec.humanOnly || (!permissions[spec.permission] && !permissions["*"]) {
+		if !exists || !supportedCapability(id) || spec.humanOnly || spec.agentHidden != "" || (!permissions[spec.permission] && !permissions["*"]) {
 			continue
 		}
 		ids = append(ids, id)

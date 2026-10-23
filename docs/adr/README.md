@@ -95,6 +95,14 @@ the next number; superseded ones get a Status update, never deletion.
 | 0088 | Agent evaluations run live models against fixture tool results | accepted |
 | 0089 | Money approvals are versioned proposals and quote awards carry lines | accepted |
 | 0090 | Persistent operating records and read-only Workmate cards | accepted |
+| 0091 | Brand system, command-first shell, and an inbox for human attention | accepted |
+| 0092 | Workmate capability discovery, composed briefs, and honest action confirmation | accepted |
+| 0093 | Tool-aware history, operating surfaces, and a high-throughput default provider | accepted |
+| 0094 | Approval plans, cross-record search, and wider entity resolution | accepted |
+| 0095 | Per-action session checkpoints and declared inverse plans | accepted |
+| 0096 | Flat workspace navigation and content-shaped loading | accepted |
+| 0097 | Agent sources, notification preferences, and turn reverts | accepted |
+| 0098 | Capability parity by default and resumable Workmate sessions | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

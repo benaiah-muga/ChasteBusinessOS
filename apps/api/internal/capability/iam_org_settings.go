@@ -16,6 +16,7 @@ const (
 	iamSetModulesCapabilityID      = "iam.setModules"
 	iamRestoreModulesCapabilityID  = "iam.restoreModules"
 	iamSetModuleConfigCapabilityID = "iam.setModuleConfig"
+	iamGetOrgPolicyCapabilityID    = "iam.getOrgPolicy"
 	iamSetOrgPolicyCapabilityID    = "iam.setOrgPolicy"
 	iamSetOrgBrandingCapabilityID  = "iam.setOrgBranding"
 )
@@ -48,6 +49,14 @@ type IAMSetModuleConfigInput struct {
 type IAMSetModuleConfigOutput struct {
 	Module   string          `json:"module"`
 	Settings json.RawMessage `json:"settings"`
+}
+
+type IAMGetOrgPolicyInput struct{}
+
+type IAMGetOrgPolicyOutput struct {
+	MaxRiskAutonomous   string   `json:"maxRiskAutonomous"`
+	MoneyThresholdMinor int64    `json:"moneyThresholdMinor"`
+	RequiresApprovalFor []string `json:"requiresApprovalFor"`
 }
 
 type IAMSetOrgPolicyInput struct {
@@ -170,6 +179,33 @@ func parseIAMModuleSettings(module string, fields map[string]json.RawMessage) (j
 	return json.Marshal(settings)
 }
 
+func ParseIAMGetOrgPolicyInput(raw json.RawMessage) (IAMGetOrgPolicyInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return IAMGetOrgPolicyInput{}, err
+	}
+	return IAMGetOrgPolicyInput{}, nil
+}
+
+func iamGetOrgPolicy(ctx context.Context, tx pgx.Tx, orgID string) (IAMGetOrgPolicyOutput, error) {
+	output := IAMGetOrgPolicyOutput{MaxRiskAutonomous: "write", MoneyThresholdMinor: 50_000, RequiresApprovalFor: []string{}}
+	var requires []byte
+	err := tx.QueryRow(ctx, `
+		SELECT max_risk_autonomous, COALESCE(money_threshold_minor, 50000), requires_approval_for
+		FROM policies WHERE org_id=$1::uuid AND capability_pattern='*' LIMIT 1`, orgID).
+		Scan(&output.MaxRiskAutonomous, &output.MoneyThresholdMinor, &requires)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return output, nil
+	}
+	if err != nil {
+		return IAMGetOrgPolicyOutput{}, err
+	}
+	var values []string
+	if err := json.Unmarshal(requires, &values); err == nil {
+		output.RequiresApprovalFor = values
+	}
+	return output, nil
+}
+
 func ParseIAMSetOrgPolicyInput(raw json.RawMessage) (IAMSetOrgPolicyInput, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
@@ -272,10 +308,14 @@ func parseIAMOrgSettingsInput(capabilityID string, raw json.RawMessage) (any, er
 		return ParseIAMRestoreModulesInput(raw)
 	case iamSetModuleConfigCapabilityID:
 		return ParseIAMSetModuleConfigInput(raw)
+	case iamGetOrgPolicyCapabilityID:
+		return ParseIAMGetOrgPolicyInput(raw)
 	case iamSetOrgPolicyCapabilityID:
 		return ParseIAMSetOrgPolicyInput(raw)
 	case iamSetOrgBrandingCapabilityID:
 		return ParseIAMSetOrgBrandingInput(raw)
+	case iamSetAgentSoulCapabilityID, iamRestoreAgentSoulCapabilityID:
+		return ParseIAMSetAgentSoulInput(raw)
 	default:
 		return nil, errors.New("unsupported IAM org settings capability")
 	}

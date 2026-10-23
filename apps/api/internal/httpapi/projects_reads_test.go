@@ -25,32 +25,20 @@ const (
 )
 
 type fakeProjectsReadExecutor struct {
-	boardCalls int
-	listCalls  int
-	claims     authbridge.CapabilityClaims
-	capID      string
-	boardInput json.RawMessage
-	listInput  json.RawMessage
-	board      capability.Result
-	boardErr   error
-	list       capability.Result
-	listErr    error
+	calls  int
+	claims authbridge.CapabilityClaims
+	capID  string
+	input  json.RawMessage
+	result capability.Result
+	err    error
 }
 
 func (f *fakeProjectsReadExecutor) Execute(_ context.Context, claims authbridge.CapabilityClaims, capID string, input json.RawMessage) (capability.Result, error) {
-	f.boardCalls++
+	f.calls++
 	f.claims = claims
 	f.capID = capID
-	f.boardInput = append(json.RawMessage(nil), input...)
-	return f.board, f.boardErr
-}
-
-func (f *fakeProjectsReadExecutor) ReadProjectCollection(_ context.Context, claims authbridge.CapabilityClaims, input json.RawMessage) (capability.Result, error) {
-	f.listCalls++
-	f.claims = claims
-	f.capID = claims.CapabilityID
-	f.listInput = append(json.RawMessage(nil), input...)
-	return f.list, f.listErr
+	f.input = append(json.RawMessage(nil), input...)
+	return f.result, f.err
 }
 
 func projectsReadAssertion(t *testing.T, claims goProjectsReadAssertionClaims) string {
@@ -105,7 +93,7 @@ func TestGoProjectsReadHandlerDispatchesListAndBoardWithExactInputs(t *testing.T
 	}{
 		{
 			name:       "collection list",
-			capability: capability.ProjectCollectionReadOperationID,
+			capability: capability.ProjectCollectionReadCapabilityID,
 			input:      `{}`,
 			response:   `{"projects":[{"id":"` + projectsReadTestID + `","name":"Warehouse","status":"active","dueAt":null,"createdAt":"2026-08-10T14:30:01.123Z"}]}`,
 		},
@@ -119,8 +107,7 @@ func TestGoProjectsReadHandlerDispatchesListAndBoardWithExactInputs(t *testing.T
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fake := &fakeProjectsReadExecutor{
-				board: capability.Result{OK: true, Data: json.RawMessage(test.response)},
-				list:  capability.Result{OK: true, Data: json.RawMessage(test.response)},
+				result: capability.Result{OK: true, Data: json.RawMessage(test.response)},
 			}
 			request := httptest.NewRequest(http.MethodGet, "/__go/projects"+test.query, nil)
 			request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, validProjectsReadClaims(t, test.capability, test.input)))
@@ -136,12 +123,8 @@ func TestGoProjectsReadHandlerDispatchesListAndBoardWithExactInputs(t *testing.T
 			if fake.capID != test.capability || fake.claims.OrganizationID != projectsReadTestOrgID || fake.claims.Audience != authbridge.CapabilityExecuteAudience {
 				t.Fatalf("executor cap=%q org=%q aud=%q", fake.capID, fake.claims.OrganizationID, fake.claims.Audience)
 			}
-			if test.capability == capability.ProjectCollectionReadOperationID {
-				if fake.listCalls != 1 || fake.boardCalls != 0 || string(fake.listInput) != test.input {
-					t.Fatalf("collection calls=%d board calls=%d input=%s", fake.listCalls, fake.boardCalls, fake.listInput)
-				}
-			} else if fake.boardCalls != 1 || fake.listCalls != 0 || string(fake.boardInput) != test.input {
-				t.Fatalf("board calls=%d collection calls=%d input=%s", fake.boardCalls, fake.listCalls, fake.boardInput)
+			if fake.calls != 1 || string(fake.input) != test.input {
+				t.Fatalf("calls=%d input=%s, want one dispatch with %s", fake.calls, fake.input, test.input)
 			}
 		})
 	}
@@ -165,7 +148,7 @@ func TestGoProjectsReadHandlerRejectsInvalidAssertionsBeforeDispatch(t *testing.
 		{name: "expired assertion", mutate: func(c *goProjectsReadAssertionClaims) { c.ExpiresAt = time.Now().Unix() - 1 }},
 		{name: "invalid digest", mutate: func(c *goProjectsReadAssertionClaims) { c.InputSHA256 = "not-a-sha256" }},
 		{name: "digest mismatch", mutate: func(c *goProjectsReadAssertionClaims) { c.InputSHA256 = strings.Repeat("0", 64) }},
-		{name: "operation mismatch", mutate: func(c *goProjectsReadAssertionClaims) { c.CapabilityID = capability.ProjectCollectionReadOperationID }},
+		{name: "operation mismatch", mutate: func(c *goProjectsReadAssertionClaims) { c.CapabilityID = capability.ProjectCollectionReadCapabilityID }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fake := &fakeProjectsReadExecutor{}
@@ -175,8 +158,8 @@ func TestGoProjectsReadHandlerRejectsInvalidAssertionsBeforeDispatch(t *testing.
 			request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, claims))
 			response := httptest.NewRecorder()
 			NewGoProjectsReadHandler(assertionSecret, fake, nil).ServeHTTP(response, request)
-			if response.Code != http.StatusUnauthorized || fake.boardCalls != 0 || fake.listCalls != 0 {
-				t.Fatalf("status=%d board calls=%d collection calls=%d body=%s, want unauthorized and no dispatch", response.Code, fake.boardCalls, fake.listCalls, response.Body.String())
+			if response.Code != http.StatusUnauthorized || fake.calls != 0 {
+				t.Fatalf("status=%d calls=%d body=%s, want unauthorized and no dispatch", response.Code, fake.calls, response.Body.String())
 			}
 			if response.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("Cache-Control=%q, want no-store", response.Header().Get("Cache-Control"))
@@ -191,8 +174,8 @@ func TestGoProjectsReadHandlerRejectsInvalidAssertionsBeforeDispatch(t *testing.
 		}
 		response := httptest.NewRecorder()
 		NewGoProjectsReadHandler(assertionSecret, fake, nil).ServeHTTP(response, request)
-		if response.Code != http.StatusUnauthorized || fake.listCalls != 0 {
-			t.Fatalf("token %q status=%d list calls=%d, want unauthorized without list", token, response.Code, fake.listCalls)
+		if response.Code != http.StatusUnauthorized || fake.calls != 0 {
+			t.Fatalf("token %q status=%d calls=%d, want unauthorized without list", token, response.Code, fake.calls)
 		}
 	}
 }
@@ -208,20 +191,20 @@ func TestGoProjectsReadHandlerRechecksSessionAndMapsAuthorizationFailures(t *tes
 		{name: "organization membership revoked", err: capability.ErrNotMember, status: http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			fake := &fakeProjectsReadExecutor{listErr: test.err}
+			fake := &fakeProjectsReadExecutor{err: test.err}
 			request := httptest.NewRequest(http.MethodGet, "/__go/projects", nil)
-			request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, validProjectsReadClaims(t, capability.ProjectCollectionReadOperationID, `{}`)))
+			request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, validProjectsReadClaims(t, capability.ProjectCollectionReadCapabilityID, `{}`)))
 			response := httptest.NewRecorder()
 			NewGoProjectsReadHandler(assertionSecret, fake, nil).ServeHTTP(response, request)
-			if response.Code != test.status || fake.listCalls != 1 {
-				t.Fatalf("status=%d calls=%d body=%s, want %d after backend recheck", response.Code, fake.listCalls, response.Body.String(), test.status)
+			if response.Code != test.status || fake.calls != 1 {
+				t.Fatalf("status=%d calls=%d body=%s, want %d after backend recheck", response.Code, fake.calls, response.Body.String(), test.status)
 			}
 		})
 	}
 
-	fake := &fakeProjectsReadExecutor{list: capability.Result{OK: false, Error: "forbidden: missing permission: projects.read"}}
+	fake := &fakeProjectsReadExecutor{result: capability.Result{OK: false, Error: "forbidden: missing permission: projects.read"}}
 	request := httptest.NewRequest(http.MethodGet, "/__go/projects", nil)
-	request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, validProjectsReadClaims(t, capability.ProjectCollectionReadOperationID, `{}`)))
+	request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, validProjectsReadClaims(t, capability.ProjectCollectionReadCapabilityID, `{}`)))
 	response := httptest.NewRecorder()
 	NewGoProjectsReadHandler(assertionSecret, fake, nil).ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden || response.Body.String() != "{\"error\":\"forbidden: missing permission: projects.read\"}\n" {
@@ -235,34 +218,34 @@ func TestGoProjectsReadHandlerRejectsAmbiguousOrUnsupportedQueries(t *testing.T)
 		request := httptest.NewRequest(http.MethodGet, "/__go/projects"+rawQuery, nil)
 		response := httptest.NewRecorder()
 		NewGoProjectsReadHandler(assertionSecret, fake, nil).ServeHTTP(response, request)
-		if response.Code != http.StatusBadRequest || fake.boardCalls != 0 || fake.listCalls != 0 {
-			t.Fatalf("query %q status=%d board=%d list=%d, want rejected before dispatch", rawQuery, response.Code, fake.boardCalls, fake.listCalls)
+		if response.Code != http.StatusBadRequest || fake.calls != 0 {
+			t.Fatalf("query %q status=%d calls=%d, want rejected before dispatch", rawQuery, response.Code, fake.calls)
 		}
 	}
 	capabilityID, input, err := projectsReadRequest(url.Values{"projectId": {""}})
-	if err != nil || capabilityID != capability.ProjectCollectionReadOperationID || string(input) != `{}` {
+	if err != nil || capabilityID != capability.ProjectCollectionReadCapabilityID || string(input) != `{}` {
 		t.Fatalf("empty projectId maps to %q %s err=%v, want legacy collection list", capabilityID, input, err)
 	}
 }
 
 func TestGoProjectsReadHandlerIsRegisteredOnPrivateRouter(t *testing.T) {
-	fake := &fakeProjectsReadExecutor{list: capability.Result{OK: true, Data: json.RawMessage(`{"projects":[]}`)}}
+	fake := &fakeProjectsReadExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"projects":[]}`)}}
 	request := httptest.NewRequest(http.MethodGet, "/__go/projects", nil)
-	request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, validProjectsReadClaims(t, capability.ProjectCollectionReadOperationID, `{}`)))
+	request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, validProjectsReadClaims(t, capability.ProjectCollectionReadCapabilityID, `{}`)))
 	response := httptest.NewRecorder()
 	NewRouter(nil, nil, assertionSecret, nil, nil, nil, fake).ServeHTTP(response, request)
-	if response.Code != http.StatusOK || fake.listCalls != 1 {
-		t.Fatalf("status=%d list calls=%d body=%s, want private route dispatch", response.Code, fake.listCalls, response.Body.String())
+	if response.Code != http.StatusOK || fake.calls != 1 {
+		t.Fatalf("status=%d calls=%d body=%s, want private route dispatch", response.Code, fake.calls, response.Body.String())
 	}
 }
 
-func TestGoProjectsReadHandlerMapsCollectionBackendFailureToInternalError(t *testing.T) {
-	fake := &fakeProjectsReadExecutor{listErr: errors.New("database unavailable")}
+func TestGoProjectsReadHandlerMapsBackendFailureToUnprocessable(t *testing.T) {
+	fake := &fakeProjectsReadExecutor{err: errors.New("database unavailable")}
 	request := httptest.NewRequest(http.MethodGet, "/__go/projects", nil)
-	request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, validProjectsReadClaims(t, capability.ProjectCollectionReadOperationID, `{}`)))
+	request.Header.Set(sessionAssertionHeader, projectsReadAssertion(t, validProjectsReadClaims(t, capability.ProjectCollectionReadCapabilityID, `{}`)))
 	response := httptest.NewRecorder()
 	NewGoProjectsReadHandler(assertionSecret, fake, nil).ServeHTTP(response, request)
-	if response.Code != http.StatusInternalServerError || response.Body.String() != "{\"error\":\"internal error\"}\n" {
-		t.Fatalf("status=%d body=%q, want fail-closed internal error", response.Code, response.Body.String())
+	if response.Code != http.StatusUnprocessableEntity || response.Body.String() != "{\"error\":\"database unavailable\"}\n" {
+		t.Fatalf("status=%d body=%q, want fail-closed unprocessable", response.Code, response.Body.String())
 	}
 }

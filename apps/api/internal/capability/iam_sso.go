@@ -46,14 +46,17 @@ type IAMSSOConnectionOutput struct {
 func init() {
 	capabilitySpecs[iamCreateSSOConnectionCapabilityID] = capabilitySpec{
 		module: "iam", permission: "iam.admin", risk: "identity",
+		agentHidden:         "accepts SSO client secrets, so identity-provider setup stays in the human admin console",
 		inverseCapabilityID: iamDisableSSOConnectionCapabilityID, inverseInputSource: "output", inverseFields: []string{"connectionId"},
 	}
 	capabilitySpecs[iamDisableSSOConnectionCapabilityID] = capabilitySpec{
 		module: "iam", permission: "iam.admin", risk: "identity",
+		agentHidden:         "can lock every member out of the organization, so it requires an authenticated human session",
 		inverseCapabilityID: iamRestoreSSOConnectionCapabilityID, inverseInputSource: "output", inverseFields: []string{"connectionId"},
 	}
 	capabilitySpecs[iamRestoreSSOConnectionCapabilityID] = capabilitySpec{
 		module: "iam", permission: "iam.admin", risk: "identity",
+		agentHidden:         "changes organization-wide sign-in, so it requires an authenticated human session",
 		inverseCapabilityID: iamDisableSSOConnectionCapabilityID, inverseInputSource: "output", inverseFields: []string{"connectionId"},
 	}
 }

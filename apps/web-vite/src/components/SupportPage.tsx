@@ -257,7 +257,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       const pending = readPendingSupportConversationWrite(retryScope);
       if (pending) {
         restoreConversationAction(pending);
-        setNotice({ tone: "pending", text: "An unresolved Go support action was restored. Retry the exact saved action to recover its result." });
+        setNotice({ tone: "pending", text: "An unresolved support action was restored. Retry the exact saved action to recover its result." });
       }
     } catch (error) {
       setNotice({ tone: "error", text: friendlyError(error) });
@@ -269,7 +269,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
       const pending = readPendingSupportTicket(retryScope);
       if (pending) {
         setFileTicket(pending);
-        setNotice({ tone: "pending", text: "An unresolved Go support ticket was restored. Retry these exact details to recover its result." });
+        setNotice({ tone: "pending", text: "An unresolved support ticket was restored. Retry these exact details to recover its result." });
       }
     } catch (error) {
       setNotice({ tone: "error", text: friendlyError(error) });
@@ -400,7 +400,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
           const pending = readPendingSupportConversationWrite(retryScope);
           if (pending) {
             restoreConversationAction(pending);
-            setNotice({ tone: "error", text: "A Go support action is unresolved. Its exact saved details were restored; retry them to recover the result." });
+            setNotice({ tone: "error", text: "A support action is unresolved. Its exact saved details were restored; retry them to recover the result." });
             return null;
           }
         } catch {
@@ -565,7 +565,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
         const pending = readPendingSupportTicket(retryScope);
         if (pending && JSON.stringify(pending) !== JSON.stringify(input)) {
           setFileTicket(pending);
-          setNotice({ tone: "pending", text: "A previous Go ticket filing is unresolved. Its exact saved details were restored; retry them before making changes." });
+          setNotice({ tone: "pending", text: "A previous ticket filing is unresolved. Its exact saved details were restored; retry them before making changes." });
           return;
         }
       } catch {
@@ -621,7 +621,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
           )}
           {pendingGoAction && (
             <div className="support-notice support-notice-pending" role="status">
-              <span>The saved Go action is still unresolved. Retry the exact saved details to recover it.</span>
+              <span>The saved action is still unresolved. Retry the exact saved details to recover it.</span>
               <button type="button" disabled={busy} onClick={() => void run(supportWriteActionFromPending(pendingGoAction))}>Retry saved action</button>
             </div>
           )}
@@ -634,49 +634,50 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
 
           {tab === "overview" && (
             <section aria-label="Customer care overview">
-              <div className="support-kpis">
-                <button type="button" onClick={() => openInbox("open")}>
-                  <span>Open inquiries</span><strong>{openCount}</strong>
-                  <small>{openCount > 0 ? "Open inquiries awaiting a reply" : "Nothing waiting"}</small>
-                </button>
-                <button type="button" onClick={() => openInbox("escalated")}>
-                  <span>Escalated</span><strong>{escalatedCount}</strong>
-                  <small>Review escalated conversations</small>
-                </button>
-                <button type="button" onClick={() => openInbox("resolved")}>
-                  <span>Resolved</span><strong>{resolvedCount}</strong>
-                  <small>Review resolved conversations</small>
-                </button>
-                <button type="button" onClick={() => openInbox("all")}>
-                  <span>Conversations</span><strong>{conversations.length}</strong>
-                  <small>Open all conversations</small>
-                </button>
-              </div>
+              {conversations.length === 0 ? (
+                <section className="support-welcome">
+                  <div className="support-welcome-copy">
+                    <p className="support-welcome-kicker">Your care desk is ready</p>
+                    <h2>No customer conversations yet</h2>
+                    <p>Connect the website widget or open an inbox conversation. Your workmate drafts every reply from the customer record, and a person sends it.</p>
+                    <div className="support-actions">
+                      <button className="shell-button" type="button" onClick={() => setTab("widget")}>Connect website widget</button>
+                      <button className="shell-button shell-button-secondary" type="button" onClick={() => openInbox("all")}>Open inbox</button>
+                    </div>
+                  </div>
+                  <ol className="support-welcome-steps">
+                    <li><span>1</span><div><strong>Connect a channel</strong><small>Website widget or inbound address.</small></div></li>
+                    <li><span>2</span><div><strong>Let the workmate draft</strong><small>Replies use this customer's orders and history.</small></div></li>
+                    <li><span>3</span><div><strong>You send or edit</strong><small>Nothing reaches a customer without a human.</small></div></li>
+                  </ol>
+                </section>
+              ) : (
+                <div className="support-kpis">
+                  <button type="button" onClick={() => openInbox("open")}>
+                    <span>Open inquiries</span><strong>{openCount}</strong>
+                    <small>{openCount > 0 ? "Open inquiries awaiting a reply" : "Nothing waiting"}</small>
+                  </button>
+                  <button type="button" onClick={() => openInbox("escalated")}>
+                    <span>Escalated</span><strong>{escalatedCount}</strong>
+                    <small>Review escalated conversations</small>
+                  </button>
+                  <button type="button" onClick={() => openInbox("resolved")}>
+                    <span>Resolved</span><strong>{resolvedCount}</strong>
+                    <small>Review resolved conversations</small>
+                  </button>
+                  <button type="button" onClick={() => openInbox("all")}>
+                    <span>Conversations</span><strong>{conversations.length}</strong>
+                    <small>Open all conversations</small>
+                  </button>
+                </div>
+              )}
+
               <div className="support-overview-grid">
                 <section className="support-panel">
-                  <header><h2>File an internal support ticket</h2></header>
-                  <p className="support-muted">Record a request, bug, or capability gap for your team to follow up.</p>
-                  <label className="support-label">Title
-                    <input value={fileTicket.title} maxLength={200} onChange={(event) => setFileTicket({ ...fileTicket, title: event.target.value })} />
-                  </label>
-                  <label className="support-label">Details
-                    <textarea rows={4} maxLength={8000} value={fileTicket.description} onChange={(event) => setFileTicket({ ...fileTicket, description: event.target.value })} />
-                  </label>
-                  <label className="support-label">Type
-                    <select value={fileTicket.origin} onChange={(event) => setFileTicket({ ...fileTicket, origin: event.target.value as PendingSupportTicket["origin"] })}>
-                      <option value="request">Request</option>
-                      <option value="bug">Bug</option>
-                      <option value="capability_gap">Capability gap</option>
-                    </select>
-                  </label>
-                  <div className="support-actions">
-                    <button className="shell-button" type="button" disabled={busy || !fileTicket.title.trim() || !fileTicket.description.trim()} onClick={() => void submitTicket()}>
-                      File ticket
-                    </button>
-                  </div>
-                </section>
-                <section className="support-panel">
-                  <header><h2>Latest activity</h2></header>
+                  <header>
+                    <h2>Latest activity</h2>
+                    {conversations.length > 0 && <button type="button" className="support-link-button" onClick={() => openInbox("all")}>View all</button>}
+                  </header>
                   {latestActivity.length === 0 ? (
                     <p className="support-muted">No conversations yet. Open one per customer inquiry so every answer stays on the record.</p>
                   ) : (
@@ -693,6 +694,7 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
                     </ul>
                   )}
                 </section>
+
                 <section className="support-panel" aria-label="Filed support tickets">
                   <header>
                     <h2>Filed tickets</h2>
@@ -722,6 +724,29 @@ export function SupportPage({ actorId = null, organizationId = null }: { actorId
                     </ul>
                   )}
                 </section>
+
+                <section className="support-panel support-panel-ticket">
+                  <header><h2>Internal team ticket</h2><span className="support-panel-hint">For bugs and requests, not customer replies</span></header>
+                  <label className="support-label">Title
+                    <input value={fileTicket.title} maxLength={200} onChange={(event) => setFileTicket({ ...fileTicket, title: event.target.value })} />
+                  </label>
+                  <label className="support-label">Details
+                    <textarea rows={3} maxLength={8000} value={fileTicket.description} onChange={(event) => setFileTicket({ ...fileTicket, description: event.target.value })} />
+                  </label>
+                  <label className="support-label">Type
+                    <select value={fileTicket.origin} onChange={(event) => setFileTicket({ ...fileTicket, origin: event.target.value as PendingSupportTicket["origin"] })}>
+                      <option value="request">Request</option>
+                      <option value="bug">Bug</option>
+                      <option value="capability_gap">Capability gap</option>
+                    </select>
+                  </label>
+                  <div className="support-actions">
+                    <button className="shell-button" type="button" disabled={busy || !fileTicket.title.trim() || !fileTicket.description.trim()} onClick={() => void submitTicket()}>
+                      File ticket
+                    </button>
+                  </div>
+                </section>
+
                 <section className="support-panel">
                   <header><h2>How care works here</h2></header>
                   <ul className="support-principles">
@@ -1137,7 +1162,7 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
         setCannedForm(pending);
         onNotice({
           tone: "pending",
-          text: "An unresolved Go canned-response save was restored. Save these exact details to retry it.",
+          text: "An unresolved canned-response save was restored. Save these exact details to retry it.",
         });
       }
     } catch (error) {
@@ -1153,7 +1178,7 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
         setArticleForm({ title: pending.title, body: pending.body, category: pending.category ?? "", isPublic: pending.isPublic });
         onNotice({
           tone: "pending",
-          text: "An unresolved Go article save was restored. Save these exact details to retry it.",
+          text: "An unresolved article save was restored. Save these exact details to retry it.",
         });
       }
     } catch (error) {
@@ -1198,7 +1223,7 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
           const submitted = { shortcut: action.shortcut, title: action.title, body: action.body };
           if (pending && JSON.stringify(pending) !== JSON.stringify(submitted)) {
             setCannedForm(pending);
-            onNotice({ tone: "pending", text: "A previous Go canned-response save is unresolved. Its exact saved details were restored; retry them before making changes." });
+            onNotice({ tone: "pending", text: "A previous canned-response save is unresolved. Its exact saved details were restored; retry them before making changes." });
             return;
           }
         } catch {
@@ -1211,7 +1236,7 @@ function SupportLibraryPanel({ onNotice, retryScope }: { onNotice: (notice: Noti
           const submitted = { title: action.title, body: action.body, ...(action.category !== undefined ? { category: action.category } : {}), isPublic: action.isPublic ?? false };
           if (pending && JSON.stringify(pending) !== JSON.stringify(submitted)) {
             setArticleForm({ title: pending.title, body: pending.body, category: pending.category ?? "", isPublic: pending.isPublic });
-            onNotice({ tone: "pending", text: "A previous Go article save is unresolved. Its exact saved details were restored; retry them before making changes." });
+            onNotice({ tone: "pending", text: "A previous article save is unresolved. Its exact saved details were restored; retry them before making changes." });
             return;
           }
         } catch {
@@ -1344,7 +1369,7 @@ const SUPPORT_PAGE_CSS = `
 .support-notice { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid #d6e0d9; border-radius: .65rem; padding: .7rem .9rem; background: #f7faf7; font-size: .84rem; }
 .support-notice button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 1rem; }
 .support-notice-pending { border-color: #ecdcb0; background: #fffaec; color: #775d23; }
-.support-notice-error { border-color: #e9c6bd; background: #fff7f4; color: #994838; }
+.support-notice-error { border-color: #e9c6bd; background: #fbf0ed; color: #9d4438; }
 .support-panel { display: grid; gap: .75rem; padding: 1.1rem; border: 1px solid #e3e6e1; border-radius: .9rem; background: #fff; box-shadow: 0 8px 24px rgb(23 38 31 / 4%); }
 .support-panel > header { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
 .support-panel h2 { margin: 0; font-size: 1rem; }
@@ -1368,7 +1393,7 @@ const SUPPORT_PAGE_CSS = `
 .support-actions button:disabled { cursor: not-allowed; opacity: .5; }
 .support-link { border: 0; padding: 0; background: none; color: #2f6b4a; cursor: pointer; font-size: .78rem; font-weight: 600; text-decoration: underline; }
 .support-muted { color: #7d847b; font-size: .85rem; }
-.support-error { margin: 0; color: #994838; font-size: .8rem; }
+.support-error { margin: 0; color: #9d4438; font-size: .8rem; }
 .support-help { color: #7d847b; font-size: .78rem; }
 .support-badge { border-radius: 999px; padding: .15rem .5rem; background: #eef1ed; color: #4a544c; font-size: .7rem; font-weight: 700; }
 .support-badge-open { background: #e6f2fb; color: #315d7a; }

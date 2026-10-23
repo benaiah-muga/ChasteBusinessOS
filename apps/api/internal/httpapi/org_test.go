@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 )
 
@@ -48,14 +50,40 @@ func (s *stubOrgRepo) SetAgentSoul(_ context.Context, _, soul string) error {
 	return nil
 }
 
+type stubOrgExecutor struct {
+	repo       *stubOrgRepo
+	calls      int
+	capability string
+	input      json.RawMessage
+}
+
+func (e *stubOrgExecutor) Execute(ctx context.Context, claims authbridge.CapabilityClaims, capabilityID string, input json.RawMessage) (capability.Result, error) {
+	e.calls++
+	e.capability = capabilityID
+	e.input = append(json.RawMessage(nil), input...)
+	if capabilityID != capability.IAMSetAgentSoulCapabilityID {
+		return capability.Result{OK: false, Error: "unexpected capability"}, nil
+	}
+	var body struct {
+		AgentSoul string `json:"agentSoul"`
+	}
+	if err := json.Unmarshal(input, &body); err != nil {
+		return capability.Result{}, err
+	}
+	if err := e.repo.SetAgentSoul(ctx, claims.OrganizationID, body.AgentSoul); err != nil {
+		return capability.Result{}, err
+	}
+	return capability.Result{OK: true, Data: json.RawMessage(`{"agentSoul":"set","previousAgentSoul":""}`)}, nil
+}
+
 // newOrgTestHandler builds the handler with a session resolver whose decision is
 // fixed, so the route's own logic can be exercised without a database.
-func newOrgTestHandler(t *testing.T, repo OrgRepository, resolve func() (*session.ResolvedUser, error)) http.Handler {
+func newOrgTestHandler(t *testing.T, repo *stubOrgRepo, resolve func() (*session.ResolvedUser, error)) http.Handler {
 	t.Helper()
 	resolver := SessionResolverFunc(func(context.Context, string, string) (*session.ResolvedUser, error) {
 		return resolve()
 	})
-	return NewOrgHandler(repo, resolver, orgTestSecret, nil)
+	return NewOrgHandler(repo, resolver, &stubOrgExecutor{repo: repo}, orgTestSecret, nil)
 }
 
 func verifiedActor(orgID string, permissions ...string) *session.ResolvedUser {
@@ -201,7 +229,7 @@ func TestOrgResolverInfrastructureErrorReturnsLoggedInternalError(t *testing.T) 
 	resolver := SessionResolverFunc(func(context.Context, string, string) (*session.ResolvedUser, error) {
 		return nil, errors.New("session database is unavailable")
 	})
-	handler := NewOrgHandler(&stubOrgRepo{}, resolver, orgTestSecret, slog.New(slog.NewTextHandler(&logs, nil)))
+	handler := NewOrgHandler(&stubOrgRepo{}, resolver, &stubOrgExecutor{}, orgTestSecret, slog.New(slog.NewTextHandler(&logs, nil)))
 	recorder := orgRequest(t, handler, http.MethodGet, "", nil)
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", recorder.Code)
@@ -395,6 +423,26 @@ func TestOrgPatchRequiresAdmin(t *testing.T) {
 	}
 	if repo.soul != "be helpful" {
 		t.Fatalf("stored soul = %q", repo.soul)
+	}
+}
+
+func TestOrgPatchRunsTheGovernedPersonaCapability(t *testing.T) {
+	orgID := "aaaaaaaa-0000-4000-8000-000000000001"
+	repo := &stubOrgRepo{}
+	executor := &stubOrgExecutor{repo: repo}
+	resolver := SessionResolverFunc(func(context.Context, string, string) (*session.ResolvedUser, error) {
+		return verifiedActor(orgID, "iam.admin"), nil
+	})
+	handler := NewOrgHandler(repo, resolver, executor, orgTestSecret, nil)
+	recorder := orgRequest(t, handler, http.MethodPatch, `{"agentSoul":"be helpful"}`, nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if executor.capability != capability.IAMSetAgentSoulCapabilityID || string(executor.input) != `{"agentSoul":"be helpful"}` {
+		t.Fatalf("capability=%q input=%s, want the governed persona write", executor.capability, executor.input)
+	}
+	if repo.soul != "be helpful" {
+		t.Fatalf("stored soul=%q", repo.soul)
 	}
 }
 

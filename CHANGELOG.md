@@ -11,11 +11,46 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
-### Changed
-
-- Purchase order creation and quote award are now money-risk capabilities with a zero threshold. Agent and system commitments fail closed without a verified human approval, and a system purchase-order job without one writes no order. A deactivated supplier cannot receive a new commitment, and the public capability route rejects money, destructive, or identity capabilities without an intent. Human purchasing under the default autonomy policy is unchanged.
-
 ### Added
+
+- The organization agent persona (`agent_soul`) is now a governed capability: `iam.setAgentSoul` requires `iam.admin`, writes a ledger event, returns the previous persona, and is reversible through `iam.restoreAgentSoul`. Workmate can update it when an administrator asks, and the persona still cannot override security, approval, or financial integrity rules.
+- Workmate can read the organization's approval policy through `iam.getOrgPolicy`, including the autonomy ceiling, money threshold, and risk classes that always need approval, so it can explain why an action is waiting.
+- Workmate can list POS register sessions through `pos.listSessions`, including register, status, opening float, expected and counted cash, variance, and open or close times, then drill into a shift with `pos.shiftSummary`.
+- Capability coverage is now gated at the module and HTTP layers. Every installed module must have a supported, agent-visible capability, and every HTTP-layer file that writes to PostgreSQL outside the executor is listed with a reviewed reason. A new module without capabilities or a new unreviewed direct write fails CI.
+- Every supported governed capability is now discoverable by the workmate as soon as it is registered. The discovery catalog merges `capabilitySpecs` after domain initialization, and a conformance gate fails CI unless each visible capability has an authored intent and closed input schema. Human-only and agent-hidden capabilities require a reviewed reason.
+- `projects.list` is now a governed read capability with a `projects.read` gate, module check, audit event, and agent contract. The workmate can answer "are there any active projects?" without being given a project id.
+- Eight capabilities that were executable but absent from discovery are now visible with contracts: `creator.listCapabilityGaps`, `hr.pendingTimeEntries`, `inventory.listItemMetadata`, `inventory.listLocationRecords`, `notifications.restoreRead`, `purchasing.listPaymentRunBills`, `sales.updateDraftOrder`, and `support.listLibrary`. Identity, SCIM, SSO, widget credential, and internal inverse capabilities are explicitly hidden with reasons.
+- Workmate can resume a previous conversation from Agent runs, the recent runs list, or a `/chat?session=<id>` link. The active session is remembered per organization and user, so a reload reopens the last thread and the next message appends to the same server session.
+- Session revert can plan the inverse of `sales.updateDraftOrder` from its nested before snapshot, restoring the previous customer, note, and lines.
+
+- Session replay can revert a single governed action through its declared inverse, with confirmation, human authority, audit, and an approval stop when the inverse needs one. Supported actions are customer creation, project creation, sales orders, invoice payments, supplier bill payments, and supplier bills.
+- Approvals now show an execution plan: the concrete steps, projected ledger direction, risk class, and the inverse action that can reverse the decision.
+- The command palette searches customers, suppliers, items, invoices, supplier bills, documents, and projects through permission-aware `GET /api/search`, with a Records group above the workmate fallback.
+- `resolve_entity` now also finds invoices by number or customer, supplier bills by number or supplier, goods receipts by number, and documents by title.
+
+- Workmate now retains tool calls and bounded tool results across turns, so a follow-up can reuse the customer id or report rows it just retrieved without re-reading the world.
+- Workmate can read the signed-in person's notifications with an unread count, and the daily brief includes notifications alongside approvals, signals, and changes.
+- Workmate can resolve customers, vendors, items, employees, and projects by name, email, SKU, or code through `resolve_entity` before a write that needs an id.
+- The model default is now DeepSeek through `DEEPSEEK_API_KEY`, with `deepseek-chat` for primary and fast roles and `deepseek-reasoner` for reasoning. The provider is selectable in Settings and the environment example matches the deployment.
+- Sessions can be searched by title, id, model, mode, or status and filtered to assist, creator, or failed runs. Tool results persisted for follow-up context are also inspectable from the replay.
+
+- Workmate commands now include `/notifications` and `/views` for the notification feed and saved customer views.
+
+- Workmate can now compose a daily brief from signals, financial overview, receivables, payables, low stock, open tasks, leave, open support, pending approvals, and state-changing ledger events, and answer "what needs my attention", "what changed", and "what should I do first" with concrete figures and one recommendation.
+- Workmate can search every supported governed capability and invoke it with a schema-valid input, so a request no longer depends on the hand-written shortlist. Human-only capabilities stay hidden, and the executor still enforces permissions, policy, approvals, inverses, and audit.
+- Workmate has an approvals inbox tool for "what needs my sign-off", and a recent-changes tool that reads only state-changing ledger events.
+- Workmate now loads bounded user, assistant, and tool-result history into the next turn, so follow-up questions remember both the conversation and the ids or rows returned by earlier tools.
+- A failed provider request after a successful tool execution now returns a deterministic confirmation that names the action, says whether it completed or is waiting for approval, and includes the approval id.
+
+- A branded product shell built from the supplied logo and campaign identity: warm paper, near-black ink, burnished gold, a transparent mark with a gold variant, a matching favicon and touch icon, and a custom orbit loader used for session checks and lazy routes.
+- A shadcn-style primitive layer in `apps/web-vite/src/ui/` using Radix Dialog, Dropdown Menu, Popover, Tooltip, and Toast plus `class-variance-authority`, `clsx`, and `cmdk`. The components use product tokens and custom CSS rather than a default Tailwind palette.
+- A command palette at Cmd/Ctrl+K with grouped navigation, recent destinations, quick asks, and an unmatched-query fallback that opens Workmate with the query. The shell also gains a rail search trigger, a Create menu for six common jobs, keyboard shortcuts, and a shortcut sheet.
+- A first-class Inbox at `/inbox` that combines the previously unsurfaced `/api/signals` feed with pending approvals. It ranks urgent, coming-up, and opportunity items, filters and searches them, links each item to its owning workspace, offers an ask-Workmate action, and summarizes the queue through `my-work/summarize`.
+- A Workmate redesign with grouped starter prompts, a live session card, a context meter, slash commands, a command menu, copy transcript, a confirmed new conversation, recent agent runs that deep-link into replay, and a dock that shares the same session. A compaction event now renders a plain-language context card, tool activity uses readable names such as "People · Run Payroll", and each reply has a copy action.
+- An OpenCode 2 connection surface in Settings > AI & automation. It lists coding-agent connections, connects a local OpenCode server through `/api/ai-connections`, sets or clears the default runtime, disconnects, and explains the governed MCP boundary.
+- A branded notifications popover with unread counts, mark-all-read, error and empty states, an inbox handoff, and humanized capability labels.
+- Toast notifications for organization switching, sign out, chat transcript copy, new conversations, coding-agent actions, and queue briefs.
+- A mobile navigation drawer with scrim, Escape handling, body scroll lock, a close control, and a compact top bar.
 
 - Business objectives, deduplicated exceptions, and Decision Records are now persistent operating records with stable keys, revisions, authority references, and JSON evidence. Workmate renders read-only exception, progress, waiting, and verified-result cards from tool results without treating them as approvals.
 - Workmate tool results can now carry a structured record card for exceptions, progress, waiting states, and results. The card shows the kind, title, status, optional severity, summary, and next step, with bounded evidence text, and it stays read-only so approvals remain with the proposal card.
@@ -98,11 +133,67 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite Hiring can hire offer-stage applicants as employees through Go `hr.hireApplicant`.
 - Creator Mode proposals now scaffold Go capability artifacts: a `generated_<module>_<action>.go` file with the capability id constant, spec entry, typed input parser reusing the package validation helpers, and a refusal stub; a Go test skeleton; and the risk document restated in Go terms. Rendered Go is gofmt-formatted and validated with `go/parser` by the renderer tests (ADR 0085).
 
+- The workspace rail is flat: every top-level surface is one click, with no expandable sub-surfaces or chevrons.
+- Workspaces use a content-shaped loading skeleton instead of a blank card or one line of text, covering CRM, Purchasing, People, Projects, Documents, Inventory, and Manufacturing.
+- Invoices has a real receivables workspace: search, status filter, billed and outstanding summary, status tones, row actions, a clear empty state, and a direct `?create=invoice` handoff into Accounting.
+- Accounting overview has a finance action rail for receivables, supplier bills, period close, and asking the workmate, with live counts.
+- Support opens with a care-desk setup path and three-step explanation when there are no conversations, and the internal team ticket form is secondary.
+- Projects shows one honest empty state instead of a duplicate empty list and board, with a direct focus action on the project name.
+- CRM has a New customer action and a single pipeline empty state with a Create a deal action.
+- People's empty team card offers Add your first employee instead of only instructional text.
+
+- Workmate can mark a notification read from chat through `notifications.markRead`, and capability discovery now includes that self-scoped receipt tool.
+- Settings has per-person in-app notification preferences for approval requests, support tickets, routine runs, and system notices. Muted kinds stay in the audit feed table but leave the person's bell and unread count.
+- Session replay can revert a whole turn: the server plans every reversible write in the turn, executes inverses in reverse order, stops on approval, and reports each action.
+- Workmate accepts up to five attached record or document sources. The composer searches permission-filtered records, shows source chips, uploads a PDF or image into Documents, and sends the exact ids with the turn. Sources are persisted on the user event.
+- Saved views are reusable across Invoices, Inventory, and Agent sessions, scoped to the active organization in browser storage; CRM keeps its server-backed shared views.
+
+### Changed
+
+- `crm.listCustomerViews` is selected directly for saved-view questions, and notifications are a first-class read instead of an incidental dashboard feed.
+- Tool trajectory writes are ordered under a mutex so a tool call never lands after its result and history reconstruction stays valid.
+- DeepSeek joins the supported provider list in the API and Settings UI, with a 128k context window in the example environment.
+
+- Workmate selects at most twelve capabilities per turn from a reviewed catalog, with brief requests reduced to the core reads plus `daily_brief`. This keeps provider requests small and replaces the previous eighteen-tool hand-written list.
+- Provider failures now explain rate limits, oversized requests, missing models, credential refusals, and outages in product language. The implicit fallback to an unverified model is disabled; a fallback runs only when `MODEL_PRIMARY_NIM` is configured.
+- Workmate's ticket fallback now runs only after capability search returns no useful fit, instead of being the first response to a hard request.
+
+- The rail is grouped by workflow and uses Lucide icons: Overview, Money, Operations, Relationships, People, and Company. Accounting, Sales, Purchasing, and Inventory expose their real sub-surfaces, the active branch is expanded, and the rail can collapse to an icon-only form.
+- Approvals is once again a direct rail destination, alongside the broader Inbox. The live approval badge is suppressed on routes that already load approvals so the page owns the read.
+- Page headings now use one product type treatment. Editorial serif remains on the login story, portal, and print surfaces where it carries the brand.
+- The dashboard now uses the inked brand masthead with a gold watermark, a direct "Open inbox" action, a personalized greeting, larger labels, and the new currency formatting.
+- Tables across the product share a hover and keyboard-focus treatment, and disclosure summaries and in-page anchors use the same brand interaction language.
+- Workmate replaces the raw greeting with a designed welcome, visible governance guarantees, and a right-hand context rail. Creator mode uses the brand gold instead of purple.
+- Internal implementation language was removed from customer-facing screens, including "Go workspace", "Go governed", "Go payment runs", and capability-name notifications.
+- CRM now formats money with the active workspace currency instead of a hardcoded UGX formatter.
+- CRM tabs are deep-linkable through `?tab=`, so Inbox and external links open the right view.
+- Agent runs can be opened directly with `?session=`, and Workmate links recent runs to their replay.
+- The page title is now the product name and page name rather than "Chaste BusinessOS | React migration".
+
+- Purchase order creation and quote award are now money-risk capabilities with a zero threshold. Agent and system commitments fail closed without a verified human approval, and a system purchase-order job without one writes no order. A deactivated supplier cannot receive a new commitment, and the public capability route rejects money, destructive, or identity capabilities without an intent. Human purchasing under the default autonomy policy is unchanged.
+
+- Project startup no longer shows a false "wait for your account and organization" error while the workspace scope is still resolving.
+- CRM startup no longer shows a permission-looking error banner while the active organization is still loading.
+
 ### Fixed
 
-- `.env.example` now includes `NOTIFICATION_EMAIL_OUTBOX_WORKER_DATABASE_URL`; `pnpm worker` previously failed at startup because the notification email worker requires it.
-- CRM and purchasing Go routes now answer capability domain refusals with 422, 404, or 403 instead of a generic 500, while genuine database and context failures still return a logged 500. CRM import now requires a same-origin cookie write like its sibling collection routes.
-- Go accounts receivable parsers now reject non-UUID customer IDs and malformed non-empty `fxRate` and `settleFxRate` values before any database access, so malformed capability requests get a governed refusal instead of a PostgreSQL cast error surfaced as a 500, and an invalid rate is no longer silently replaced by the latest stored rate. The contract now documents that an empty `currency`, `fxRate`, or `settleFxRate` selects the base currency or latest stored rate, matching the legacy clients.
+- Follow-ups no longer lose the ids and rows returned by earlier tool calls; the recent conversation window now includes structured tool messages.
+- DeepSeek requests no longer fall back to an unverified NIM model, and the default provider no longer rate-limits a normal multi-step brief.
+
+- Workmate no longer appends "No registered capability can do this" to every user request, and no longer files a ticket merely because no single brief tool exists.
+- Internal model reasoning is no longer rendered as the final answer when a provider returns reasoning without content. The loop nudges once, then fails honestly.
+- Daily-brief changes no longer count read-only capability events as business changes.
+- Approval and ledger reads now have a first-class Workmate surface instead of being invisible to the agent.
+
+- The desktop shell no longer shows the mobile menu control, and the mobile drawer no longer exposes navigation items under its footer.
+- The notifications popover returns focus to its trigger on Escape.
+- The rail and top bar no longer overflow or hide active content behind the footer on narrow screens.
+- Chat and shell keyboard shortcuts ignore non-element event targets and pause while a field is focused.
+
+### Added
+
+- Business objectives, deduplicated exceptions, and Decision Records are now persistent operating records with stable keys, revisions, authority references, and JSON evidence. Workmate renders read-only exception, progress, waiting, and verified-result cards from tool results without treating them as approvals.
+- Workmate tool results can now carry a structured record card for exceptions, progress, waiting states, and results. The card shows the Go accounts receivable parsers now reject non-UUID customer IDs and malformed non-empty `fxRate` and `settleFxRate` values before any database access, so malformed capability requests get a governed refusal instead of a PostgreSQL cast error surfaced as a 500, and an invalid rate is no longer silently replaced by the latest stored rate. The contract now documents that an empty `currency`, `fxRate`, or `settleFxRate` selects the base currency or latest stored rate, matching the legacy clients.
 - The Go auth integration suites now run the email outbox on a session-local shadow table with a single-connection pool, so they pass while the development API's outbox worker is running instead of racing it for the same rows.
 - The Go worker supervisor keeps routine scheduling and agent execution opt-in until their migration parity gates pass, while preserving explicit `GO_ROUTINE_SCHEDULER=1` and `GO_ROUTINE_AGENT_RUNNER=1` configuration.
 - The Go webhook outbox worker now marks a 429 response on the final allowed attempt as failed, retaining the provider receipt and completion time instead of leaving an unclaimable pending message.

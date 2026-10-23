@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PageLoading } from "../ui/page-loading";
 import "./CRMPage.css";
 import {
   type CrmCustomer,
@@ -70,8 +71,8 @@ function friendlyError(error: unknown): string {
   return error instanceof Error ? error.message : "The CRM service is unavailable. Try again.";
 }
 
-function money(minor: number): string {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "UGX", maximumFractionDigits: 0 }).format(minor / 100);
+function money(minor: number, currency: string): string {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(minor / 100);
 }
 
 function parseCsv(text: string): string[][] {
@@ -160,8 +161,12 @@ function downloadCustomerTemplate() {
   URL.revokeObjectURL(href);
 }
 
-export function CRMPage({ actorId = null, organizationId = null }: { actorId?: string | null; organizationId?: string | null } = {}) {
-  const [tab, setTab] = useState<Tab>("overview");
+export function CRMPage({ actorId = null, organizationId = null, baseCurrency = null }: { actorId?: string | null; organizationId?: string | null; baseCurrency?: string | null } = {}) {
+  const formatMoney = (minor: number) => money(minor, baseCurrency ?? "USD");
+  const [tab, setTab] = useState<Tab>(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return requested === "pipeline" || requested === "customers" || requested === "tasks" ? requested : "overview";
+  });
   const [deals, setDeals] = useState<CrmDeal[]>([]);
   const [pipelineReport, setPipelineReport] = useState<CrmPipelineReport | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
@@ -310,6 +315,16 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
 
   const load = useCallback(async (signal?: AbortSignal, isCurrent: () => boolean = () => true) => {
     const organizationScope = organizationId?.trim().toLowerCase() ?? null;
+    if (!organizationScope) {
+      setError(null);
+      setLoading(false);
+      setDeals([]);
+      setCustomers([]);
+      setTasks([]);
+      setPipelineReport(null);
+      setLoadedOrganizationId(null);
+      return;
+    }
     if (collectionLoadScope.current !== organizationScope || !isCurrent()) return;
     const generation = ++collectionLoadGeneration.current;
     const isLoadCurrent = () => collectionLoadGeneration.current === generation
@@ -345,9 +360,11 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     setTimeline([]);
     setDraftState({ status: "idle" });
     void load(controller.signal);
-    void fetchCrmViews(organizationId, controller.signal).then((result) => {
-      if (!controller.signal.aborted) setViews(result);
-    }).catch(() => undefined);
+    if (organizationId?.trim()) {
+      void fetchCrmViews(organizationId, controller.signal).then((result) => {
+        if (!controller.signal.aborted) setViews(result);
+      }).catch(() => undefined);
+    }
     return () => {
       timelineRequest.current += 1;
       controller.abort();
@@ -645,6 +662,14 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   function navigateToTab(nextTab: Tab) {
     closeProfile();
     setTab(nextTab);
+    try {
+      const url = new URL(window.location.href);
+      if (nextTab === "overview") url.searchParams.delete("tab");
+      else url.searchParams.set("tab", nextTab);
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // A blocked URL update leaves the tab usable for this session.
+    }
   }
 
   const openProfile = useCallback(async (customer: CrmCustomer, initial: ProfileTab = "overview") => {
@@ -1272,10 +1297,11 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const visibleImportRows = importRows.slice(importPage * importPageSize, (importPage + 1) * importPageSize);
   const selectedImportCount = importRows.filter((row) => row.include && !row.error).length;
   const currentOrganizationId = organizationId?.trim().toLowerCase() ?? null;
+  const scopeReady = Boolean(currentOrganizationId);
 
-  if (loadedOrganizationId !== currentOrganizationId || (loading && !deals.length && !customers.length)) return <main className="crm-page"><p role="status">Loading CRM…</p></main>;
+  if (loadedOrganizationId !== currentOrganizationId || (loading && !deals.length && !customers.length)) return <main className="crm-page"><PageLoading label="Loading CRM…" /></main>;
   return <main className="crm-page">
-    <header className="crm-header"><div><p className="crm-eyebrow">Customer relationships</p><h1>CRM</h1><p>Keep customer history, deal progress, and follow-up work together.</p></div><button type="button" onClick={() => void load()}>Refresh</button></header>
+    <header className="crm-header"><div><p className="crm-eyebrow">Customer relationships</p><h1>CRM</h1><p>Keep customer history, deal progress, and follow-up work together.</p></div><div className="crm-header-actions"><button type="button" className="crm-button-secondary" onClick={() => void load()}>Refresh</button><button type="button" className="crm-button-primary" onClick={() => navigateToTab("customers")}>New customer</button></div></header>
     {notice && <div className={`crm-notice crm-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}><span>{notice.text}</span><button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}>×</button></div>}
     {error && <div className="crm-error" role="alert">{error}<button type="button" onClick={() => void load()}>Retry</button></div>}
     {(tab === "customers" || tab === "tasks" || tab === "pipeline") && membersLoading && <p role="status">Loading team members…</p>}
@@ -1283,9 +1309,9 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     <nav className="crm-tabs" aria-label="CRM sections">{tabButton("overview", "Overview")}{tabButton("pipeline", "Pipeline", deals.length)}{tabButton("customers", "Customers", activeCustomers.length)}{tabButton("tasks", "Tasks", tasks.filter((task) => !task.doneAt).length)}</nav>
 
     {tab === "overview" && <section className="crm-overview" aria-label="CRM overview">
-      <div className="crm-kpis"><article><span>Open pipeline</span><strong>{openDealCount ?? "Unavailable"}</strong></article><article><span>Weighted forecast</span><strong>{pipelineReport ? money(pipelineReport.weightedForecastMinor) : "Unavailable"}</strong></article><article><span>Won</span><strong>{pipelineStages.has("won") ? money(pipelineStages.get("won")!.totalMinor) : "Unavailable"}</strong></article><article><span>Active customers</span><strong>{activeCustomers.length}</strong></article></div>
-      <div className="crm-overview-grid"><section className="crm-panel"><header><h2>Pipeline by stage</h2><button type="button" onClick={() => navigateToTab("pipeline")}>Open pipeline</button></header>{stages.map((stageName) => { const summary = pipelineStages.get(stageName); return <button className="crm-stage-summary" type="button" key={stageName} onClick={() => { setDealFilter(stageName === "won" || stageName === "lost" ? stageName : "open"); navigateToTab("pipeline"); }}><span>{stageLabels[stageName]}</span><strong>{summary?.count ?? "Unavailable"}</strong><span>{summary ? money(summary.totalMinor) : "Unavailable"}</span></button>; })}</section>
-        <section className="crm-panel"><header><h2>Recent customers</h2><button type="button" onClick={() => navigateToTab("customers")}>Browse customers</button></header>{activeCustomers.slice(0, 6).map((customer) => <button className="crm-list-row" key={customer.id} type="button" onClick={() => void openProfile(customer)}><span><strong>{customer.name}</strong><small>{customer.email ?? customer.phone ?? "No contact details"}</small></span><span>{customer.nextStep?.summary ?? "View profile"}</span></button>)}</section></div>
+      <div className="crm-kpis"><article><span>Open pipeline</span><strong>{!scopeReady ? "…" : openDealCount ?? "Unavailable"}</strong></article><article><span>Weighted forecast</span><strong>{!scopeReady ? "…" : pipelineReport ? formatMoney(pipelineReport.weightedForecastMinor) : "Unavailable"}</strong></article><article><span>Won</span><strong>{!scopeReady ? "…" : pipelineStages.has("won") ? formatMoney(pipelineStages.get("won")!.totalMinor) : "Unavailable"}</strong></article><article><span>Active customers</span><strong>{scopeReady ? activeCustomers.length : "…"}</strong></article></div>
+      <div className="crm-overview-grid"><section className="crm-panel"><header><h2>Pipeline by stage</h2><button type="button" onClick={() => navigateToTab("pipeline")}>Open pipeline</button></header>{!scopeReady ? <div className="crm-pipeline-loading" role="status">Preparing your pipeline…</div> : openDealCount === 0 && stages.every((stageName) => (pipelineStages.get(stageName)?.count ?? 0) === 0) ? <div className="crm-pipeline-empty"><span aria-hidden="true">◇</span><strong>Your pipeline is clear</strong><p>Add a customer, then create a deal to track the next conversation and its value.</p><button type="button" onClick={() => navigateToTab("pipeline")}>Create a deal</button></div> : stages.map((stageName) => { const summary = pipelineStages.get(stageName); return <button className="crm-stage-summary" type="button" key={stageName} onClick={() => { setDealFilter(stageName === "won" || stageName === "lost" ? stageName : "open"); navigateToTab("pipeline"); }}><span>{stageLabels[stageName]}</span><strong>{summary?.count ?? "Unavailable"}</strong><span>{summary ? formatMoney(summary.totalMinor) : "Unavailable"}</span></button>; })}</section>
+        <section className="crm-panel"><header><h2>Recent customers</h2><button type="button" onClick={() => navigateToTab("customers")}>Browse customers</button></header>{!scopeReady ? <p className="crm-pipeline-loading" role="status">Preparing customer records…</p> : activeCustomers.length === 0 ? <p className="crm-pipeline-loading">No customers yet. Add your first customer to start the record.</p> : activeCustomers.slice(0, 6).map((customer) => <button className="crm-list-row" key={customer.id} type="button" onClick={() => void openProfile(customer)}><span><strong>{customer.name}</strong><small>{customer.email ?? customer.phone ?? "No contact details"}</small></span><span>{customer.nextStep?.summary ?? "View profile"}</span></button>)}</section></div>
     </section>}
 
     {tab === "pipeline" && <section className="crm-panel" aria-label="Deals pipeline"><header className="crm-panel-heading"><div><h2>Deals pipeline</h2><p>Move deals through six stages. Stage changes that affect the forecast require confirmation, and lost deals require a reason.</p></div><label>Show <select aria-label="Filter deals" value={dealFilter} onChange={(event) => setDealFilter(event.target.value as typeof dealFilter)}><option value="all">All deals</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></label></header>
@@ -1293,7 +1319,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       {!dealCreateReady && <p role="status">CRM is waiting for account and organization details or restoring a saved deal draft.</p>}
       {dealCreateLocked && <p role="status">This deal creation is pending or uncertain. Retry the same details to resolve it.</p>}
       <div className="crm-deal-controls"><label>Search deals<input type="search" value={dealSearch} onChange={(event) => setDealSearch(event.target.value)} placeholder="Deal, customer, or note" /></label><div role="group" aria-label="Deal layout"><button type="button" aria-pressed={dealView === "board"} onClick={() => setDealView("board")}>Board</button><button type="button" aria-pressed={dealView === "table"} onClick={() => setDealView("table")}>Table</button></div></div>
-      {dealView === "board" ? <div className="crm-deal-board">{stages.filter((stageName) => dealFilter === "all" || (dealFilter === "open" ? stageName !== "won" && stageName !== "lost" : stageName === dealFilter)).map((stageName) => <section className={`crm-deal-column${overStage === stageName ? " crm-deal-column-over" : ""}`} key={stageName} aria-label={`${stageLabels[stageName]} deals`} onDragOver={(event) => { event.preventDefault(); setOverStage(stageName); }} onDragLeave={() => setOverStage((current) => current === stageName ? null : current)} onDrop={(event) => { event.preventDefault(); const deal = deals.find((entry) => entry.id === draggingDealId); if (deal) requestMove(deal, stageName); setDraggingDealId(null); setOverStage(null); }}><h3>{stageLabels[stageName]} <span>{visibleDeals.filter((deal) => deal.stage === stageName).length}</span></h3>{visibleDeals.filter((deal) => deal.stage === stageName).map((deal) => <article className={`crm-deal-card${draggingDealId === deal.id ? " crm-deal-card-dragging" : ""}`} key={deal.id} draggable onDragStart={(event) => { setDraggingDealId(deal.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", deal.id); }} onDragEnd={() => { setDraggingDealId(null); setOverStage(null); }}><strong>{deal.title}</strong><span>{money(deal.valueMinor)}</span>{deal.customerName && <small>{deal.customerName}</small>}{deal.source && <small>Source: {deal.source}</small>}{deal.ownerName && <small>Owner: {deal.ownerName}</small>}{deal.note && <small>{deal.note}</small>}<label>Move to<select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}><option value={deal.stage}>{stageLabels[deal.stage]}</option>{stages.filter((candidate) => candidate !== deal.stage).map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></label>{deal.stage === "lead" && <button type="button" onClick={() => { void openLeadConversion(deal); }}>Convert lead</button>}</article>)}</section>)}</div> : <div className="crm-table-wrap"><table className="crm-table crm-deal-table"><thead><tr><th>Deal</th><th>Customer</th><th>Stage</th><th>Value</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{visibleDeals.map((deal) => <tr key={deal.id}><td><strong>{deal.title}</strong>{deal.note && <small>{deal.note}</small>}{deal.source && <small>Source: {deal.source}</small>}</td><td>{deal.customerName ?? "Unlinked"}{deal.ownerName && <small>Owner: {deal.ownerName}</small>}</td><td><select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}>{stages.map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></td><td>{money(deal.valueMinor)}</td><td>{new Date(deal.updatedAt).toLocaleDateString()}</td><td>{deal.stage === "lead" && <button type="button" onClick={() => { void openLeadConversion(deal); }}>Convert lead</button>}</td></tr>)}</tbody></table>{visibleDeals.length === 0 && <p className="crm-empty">No deals match these filters.</p>}</div>}
+      {dealView === "board" ? <div className="crm-deal-board">{stages.filter((stageName) => dealFilter === "all" || (dealFilter === "open" ? stageName !== "won" && stageName !== "lost" : stageName === dealFilter)).map((stageName) => <section className={`crm-deal-column${overStage === stageName ? " crm-deal-column-over" : ""}`} key={stageName} aria-label={`${stageLabels[stageName]} deals`} onDragOver={(event) => { event.preventDefault(); setOverStage(stageName); }} onDragLeave={() => setOverStage((current) => current === stageName ? null : current)} onDrop={(event) => { event.preventDefault(); const deal = deals.find((entry) => entry.id === draggingDealId); if (deal) requestMove(deal, stageName); setDraggingDealId(null); setOverStage(null); }}><h3>{stageLabels[stageName]} <span>{visibleDeals.filter((deal) => deal.stage === stageName).length}</span></h3>{visibleDeals.filter((deal) => deal.stage === stageName).map((deal) => <article className={`crm-deal-card${draggingDealId === deal.id ? " crm-deal-card-dragging" : ""}`} key={deal.id} draggable onDragStart={(event) => { setDraggingDealId(deal.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", deal.id); }} onDragEnd={() => { setDraggingDealId(null); setOverStage(null); }}><strong>{deal.title}</strong><span>{formatMoney(deal.valueMinor)}</span>{deal.customerName && <small>{deal.customerName}</small>}{deal.source && <small>Source: {deal.source}</small>}{deal.ownerName && <small>Owner: {deal.ownerName}</small>}{deal.note && <small>{deal.note}</small>}<label>Move to<select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}><option value={deal.stage}>{stageLabels[deal.stage]}</option>{stages.filter((candidate) => candidate !== deal.stage).map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></label>{deal.stage === "lead" && <button type="button" onClick={() => { void openLeadConversion(deal); }}>Convert lead</button>}</article>)}</section>)}</div> : <div className="crm-table-wrap"><table className="crm-table crm-deal-table"><thead><tr><th>Deal</th><th>Customer</th><th>Stage</th><th>Value</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{visibleDeals.map((deal) => <tr key={deal.id}><td><strong>{deal.title}</strong>{deal.note && <small>{deal.note}</small>}{deal.source && <small>Source: {deal.source}</small>}</td><td>{deal.customerName ?? "Unlinked"}{deal.ownerName && <small>Owner: {deal.ownerName}</small>}</td><td><select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}>{stages.map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></td><td>{formatMoney(deal.valueMinor)}</td><td>{new Date(deal.updatedAt).toLocaleDateString()}</td><td>{deal.stage === "lead" && <button type="button" onClick={() => { void openLeadConversion(deal); }}>Convert lead</button>}</td></tr>)}</tbody></table>{visibleDeals.length === 0 && <p className="crm-empty">No deals match these filters.</p>}</div>}
     </section>}
 
     {tab === "customers" && <section className="crm-panel" aria-label="Customer directory"><header className="crm-panel-heading"><div><h2>Customers</h2><p>Profiles retain linked records when a customer is deactivated or merged.</p></div><div>{importSummary?.ids.length ? <button type="button" onClick={() => setImportOpen(true)}>Undo last import</button> : null}<button type="button" onClick={() => { setImportOpen(true); if (!importSummary?.ids.length || importSummary.undone) { setImportSummary(null); setImportRows([]); } }}>Import CSV</button></div></header>

@@ -303,7 +303,7 @@ func aiConfigSessionClaims(resolved *session.ResolvedUser, intentID string, inpu
 }
 
 func validAIConfigBody(body aiConfigBody) bool {
-	providers := []string{"nvidia", "openrouter", "groq", "mistral", "zai", "openai", "custom"}
+	providers := []string{"nvidia", "openrouter", "groq", "mistral", "zai", "openai", "deepseek", "custom"}
 	if !slices.Contains(providers, body.Provider) || len(body.BaseURL) == 0 || utf16Length(body.BaseURL) > 500 ||
 		strings.TrimSpace(body.Models.Primary) == "" || strings.TrimSpace(body.Models.Fast) == "" ||
 		strings.TrimSpace(body.Models.Reasoning) == "" || strings.TrimSpace(body.Models.Embeddings) == "" {
@@ -342,20 +342,21 @@ func publicAIConfig(raw json.RawMessage) aiConfigDTO {
 		return aiConfigDTO{Provider: config.Provider, BaseURL: config.BaseURL, Models: aiConfigModelsFromSettings(config.Models), Configured: configured, KeyHint: hint, Source: "workspace"}
 	}
 	provider := os.Getenv("MODEL_PROVIDER")
-	if !slices.Contains([]string{"nvidia", "openrouter", "groq", "mistral", "zai", "openai", "custom"}, provider) {
+	if !slices.Contains([]string{"nvidia", "openrouter", "groq", "mistral", "zai", "openai", "deepseek", "custom"}, provider) {
 		provider = "nvidia"
 	}
 	baseURL := map[string]string{
 		"nvidia":     envOr("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
 		"openrouter": "https://openrouter.ai/api/v1", "groq": "https://api.groq.com/openai/v1",
 		"mistral": "https://api.mistral.ai/v1", "zai": envOr("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4"),
-		"openai": "https://api.openai.com/v1", "custom": "",
+		"openai": "https://api.openai.com/v1", "deepseek": envOr("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+		"custom": "",
 	}[provider]
 	models := aiConfigModels{
 		Primary: envOr("MODEL_PRIMARY", "moonshotai/kimi-k2.6"), Fast: envOr("MODEL_FAST", "meta/muse-glimmer-30b"),
 		Reasoning: envOr("MODEL_REASONING", "nvidia/nemotron-3-ultra-550b-a55b"), Embeddings: envOr("MODEL_EMBEDDINGS", "nvidia/nv-embedqa-e5-v5"),
 	}
-	keyName := map[string]string{"nvidia": "NVIDIA_API_KEY", "openrouter": "OPENROUTER_API_KEY", "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY", "zai": "ZAI_API_KEY", "openai": "OPENAI_API_KEY"}[provider]
+	keyName := map[string]string{"nvidia": "NVIDIA_API_KEY", "openrouter": "OPENROUTER_API_KEY", "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY", "zai": "ZAI_API_KEY", "openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}[provider]
 	key := os.Getenv(keyName)
 	var hint *string
 	if key != "" {

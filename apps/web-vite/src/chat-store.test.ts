@@ -5,8 +5,11 @@ import {
   refreshChatCreatorAvailability,
   removeQueuedChatMessage,
   resetChat,
+  restoreChatSession,
+  resumeChat,
   setChatCreator,
   stopChatRun,
+  transcriptFromEvents,
 } from "./chat-store";
 
 const encoder = new TextEncoder();
@@ -325,6 +328,111 @@ describe("chat store", () => {
     expect(chatStore.getState().creatorAvailable).toBe(false);
     setChatCreator(true);
     expect(chatStore.getState().creator).toBe(false);
+  });
+
+  it("restores a persisted conversation and appends the next turn to it", async () => {
+    const resumedID = "00000000-0000-4000-8000-000000000099";
+    const at = "2026-10-20T09:00:00.000Z";
+    window.localStorage.setItem("chaste:chat:session:v1", JSON.stringify({
+      organizationId: "org-1",
+      userId: "user-1",
+      sessionId: resumedID,
+    }));
+    const chatBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/sessions/${resumedID}`) {
+        return Response.json({
+          session: {
+            id: resumedID, orgId: "org-1", userId: "user-1", title: "Quarter close",
+            mode: "assist", status: "completed", summary: null, modelRef: null,
+            tokenUsage: { input: 40, output: 10, cachedInput: 20 },
+            createdAt: at, updatedAt: at,
+          },
+          events: [
+            { seq: 1, role: "user", content: { text: "Check the books" }, at },
+            { seq: 2, role: "tool_call", content: { name: "accounting.trialBalance", callId: "call-1" }, at },
+            { seq: 3, role: "tool_result", content: { name: "accounting.trialBalance", capabilityId: "accounting.trialBalance", callId: "call-1", ok: true }, at },
+            { seq: 4, role: "assistant", content: { text: "The books are balanced." }, at },
+          ],
+        });
+      }
+      chatBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return controlledStream(resumedID).response;
+    }));
+
+    await expect(restoreChatSession("org-1", "user-1")).resolves.toBe(true);
+    const restored = chatStore.getState();
+    expect(restored.sessionId).toBe(resumedID);
+    expect(restored.sessionTitle).toBe("Quarter close");
+    expect(restored.resumed).toBe(true);
+    expect(restored.sessionUsage).toEqual({ input: 40, output: 10, cachedInput: 20 });
+    expect(restored.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(restored.messages[1]!.text).toBe("The books are balanced.");
+    expect(restored.messages[1]!.activity).toEqual(["accounting.trialBalance"]);
+
+    void chatStore.send("And last quarter?");
+    await vi.waitFor(() => expect(chatBodies).toHaveLength(1));
+    expect(chatBodies[0]!.sessionId).toBe(resumedID);
+  });
+
+  it("rebuilds tool activity, record cards, proposals, and clarifications from a trajectory", () => {
+    const at = "2026-10-20T09:00:00.000Z";
+    const messages = transcriptFromEvents([
+      { seq: 1, role: "user", content: { text: "What is blocked?" }, at },
+      { seq: 2, role: "tool_call", content: { name: "signals.list" }, at },
+      {
+        seq: 3,
+        role: "tool_result",
+        content: {
+          name: "signals.list",
+          card: { kind: "waiting", title: "Two approvals waiting", status: "open", summary: "Approve the payroll run." },
+          pendingApproval: true,
+          approvalId: "44444444-4444-4444-8444-444444444444",
+          approvalRationale: "Money above your threshold.",
+        },
+        at,
+      },
+      { seq: 4, role: "ask", content: { id: "ask-1", question: "Which payroll run?", options: ["October", "September"], allowOther: true }, at },
+      { seq: 5, role: "assistant", content: { text: "I need one choice." }, at },
+    ]);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]!.role).toBe("user");
+    const assistant = messages[1]!;
+    expect(assistant.text).toBe("I need one choice.");
+    expect(assistant.activity).toEqual(["signals.list"]);
+    expect(assistant.card?.title).toBe("Two approvals waiting");
+    expect(assistant.proposal?.approvalId).toBe("44444444-4444-4444-8444-444444444444");
+    expect(assistant.proposal?.rationale).toBe("Money above your threshold.");
+    expect(assistant.ask).toEqual({ id: "ask-1", question: "Which payroll run?", options: ["October", "September"], allowOther: true });
+  });
+
+  it("drops a stored session that the server no longer has", async () => {
+    window.localStorage.setItem("chaste:chat:session:v1", JSON.stringify({
+      organizationId: "org-1",
+      userId: "user-1",
+      sessionId: "00000000-0000-4000-8000-000000000098",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "not found" }, { status: 404 })));
+    await expect(restoreChatSession("org-1", "user-1")).resolves.toBe(false);
+    expect(window.localStorage.getItem("chaste:chat:session:v1")).toBeNull();
+    expect(chatStore.getState().sessionId).toBeNull();
+  });
+
+  it("reopens a session by id without leaving the previous transcript behind", async () => {
+    const resumedID = "00000000-0000-4000-8000-000000000097";
+    const at = "2026-10-20T09:00:00.000Z";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      session: {
+        id: resumedID, orgId: "org-1", userId: "user-1", title: null,
+        mode: "assist", status: "completed", summary: null, modelRef: null,
+        createdAt: at, updatedAt: at,
+      },
+      events: [{ seq: 1, role: "user", content: { text: "Only this turn" }, at }],
+    })));
+    await resumeChat(resumedID);
+    expect(chatStore.getState().messages.map((message) => message.text)).toEqual(["Only this turn"]);
+    expect(chatStore.getState().sessionId).toBe(resumedID);
   });
 
   it("treats an interrupted stream as an error the user can retry from", async () => {

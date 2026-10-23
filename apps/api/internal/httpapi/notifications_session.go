@@ -55,6 +55,10 @@ func (reader pgNotificationsSessionReader) ForUser(ctx context.Context, orgID, u
 			  ON nr.notification_id = n.id AND nr.org_id = $1::uuid AND nr.user_id = $2::uuid
 			WHERE n.org_id = $1::uuid
 			  AND (n.user_id IS NULL OR n.user_id = $2::uuid)
+			  AND n.kind <> ALL(COALESCE((
+			    SELECT np.muted_kinds FROM notification_preferences np
+			    WHERE np.org_id = $1::uuid AND np.user_id = $2::uuid
+			  ), ARRAY[]::text[]))
 			  AND COALESCE(nr.read_at, CASE WHEN n.user_id IS NOT NULL THEN n.read_at ELSE NULL END) IS NULL`,
 			orgID, userID).Scan(&unreadCount)
 		if err != nil {
@@ -70,6 +74,10 @@ func (reader pgNotificationsSessionReader) ForUser(ctx context.Context, orgID, u
 			  ON nr.notification_id = n.id AND nr.org_id = $1::uuid AND nr.user_id = $2::uuid
 			WHERE n.org_id = $1::uuid
 			  AND (n.user_id IS NULL OR n.user_id = $2::uuid)
+			  AND n.kind <> ALL(COALESCE((
+			    SELECT np.muted_kinds FROM notification_preferences np
+			    WHERE np.org_id = $1::uuid AND np.user_id = $2::uuid
+			  ), ARRAY[]::text[]))
 			ORDER BY n.created_at DESC
 			LIMIT $3`, orgID, userID, limit)
 		if err != nil {

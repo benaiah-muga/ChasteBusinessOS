@@ -3402,3 +3402,24 @@ export const notificationReads = pgTable(
   },
   (t) => [uniqueIndex("notification_read_per_user_idx").on(t.notificationId, t.userId)],
 );
+
+/**
+ * Per-user notification delivery preferences. Muted kinds stay in the feed
+ * table for audit and reconciliation but are omitted from the recipient's
+ * in-app inbox and unread count.
+ */
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    mutedKinds: text("muted_kinds").array().notNull().default(sql`ARRAY[]::text[]`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("notification_preference_user_idx").on(t.orgId, t.userId)],
+);

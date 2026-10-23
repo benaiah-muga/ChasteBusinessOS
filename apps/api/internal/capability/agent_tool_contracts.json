@@ -1,0 +1,1700 @@
+{
+  "tools": [
+    {
+      "id": "signals.list",
+      "description": "Collect every module's needs-attention signals, sorted red first, each with evidence and a suggested governed action. Use this first for daily briefs, 'what needs my attention', 'what is at risk', and 'what should I do first'. Then read recent_changes for what changed and the relevant reports for the numbers.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "red",
+              "orange",
+              "green"
+            ]
+          },
+          "module": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 40
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "skills.find",
+      "description": "Find an advisory playbook for a multi-step job such as buying stock, collecting overdue invoices, closing the books, running payroll, or triaging support. Search before inventing a process.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 500,
+            "description": "What the user wants done, in a few words, e.g. 'buy stock from a new vendor'"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "skills.load",
+      "description": "Load one advisory playbook by the id returned by skills.find. Follow its steps when they fit, and adapt to the actual data.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 80,
+            "description": "Skill id returned by skills.find"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "documents.searchMemory",
+      "description": "Search organization memory, policies, SOPs, the business profile, and ingested documents. Always call this before saying you do not know something about the business.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 500
+          },
+          "limit": {
+            "default": 5,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "query",
+          "limit"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "documents.searchRecords",
+      "description": "Search records for a document. Find a customer, supplier, employee, invoice, quote, or order and return only the fields needed to populate a document template. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "supplier",
+              "employee",
+              "invoice",
+              "quote",
+              "purchase_order",
+              "sales_order"
+            ]
+          },
+          "query": {
+            "default": "",
+            "type": "string",
+            "maxLength": 120
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "type",
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "documents.listDocuments",
+      "description": "List ingested documents. Show every ingested document with its parse status and how many open coding suggestions are waiting, so staff know what still needs review. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "documents.listIngestedDocuments",
+      "description": "Read documents.listIngestedDocuments. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "analytics.revenueByMonth",
+      "description": "Extract monthly invoiced revenue. Monthly totals and counts of non-void invoices over a lookback window, for revenue trend analysis. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "monthsBack": {
+            "default": 12,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36
+          }
+        },
+        "required": [
+          "monthsBack"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "analytics.pipelineByStage",
+      "description": "Extract pipeline by stage. Deal counts and values per pipeline stage with weighted forecast, for revenue forecasting analysis. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "analytics.invoiceAging",
+      "description": "Extract invoice aging buckets. Open invoice balances grouped into aging buckets so collections can chase the oldest money first. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "analytics.salesByCustomer",
+      "description": "Extract top customers by invoiced value. Customers ranked by total invoiced value with invoice counts, for concentration and growth analysis. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 10,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "analytics.stockLevels",
+      "description": "Extract stock levels and valuation. On-hand quantity per item with latest unit cost and derived value, for stock and reorder analysis. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "analytics.explainChange",
+      "description": "Explain a change between two date ranges by customer or product, with exact contributing invoices and amounts. Use for \"what changed\" or \"why did revenue move\" questions. Explain metric change. Attribute a revenue change across a dimension - customers or products - with exact contributions that sum to the delta and drill down to the underlying invoices. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "product"
+            ]
+          },
+          "periodAFrom": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "periodATo": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "periodBFrom": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "periodBTo": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          }
+        },
+        "required": [
+          "dimension",
+          "periodAFrom",
+          "periodATo",
+          "periodBFrom",
+          "periodBTo"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "analytics.askYourBusiness",
+      "description": "Ask your business. Compose a cited answer about revenue, collections, and pipeline from governed extracts plus the signal feed, ending in one proposed governed action. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "focus": {
+            "type": "string",
+            "enum": [
+              "revenue",
+              "collections",
+              "pipeline"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.overview",
+      "description": "Read the finance overview: cash, revenue, expenses, receivables, payables, and recent posted activity. Use this before answering any question about the financial position.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.incomeStatement",
+      "description": "Read the income statement for the current period: revenue, expenses, and net income by account. Use for profit, margin, and period comparison questions. Profit & loss report. Show revenue minus expenses and net income from the ledger, so you know if the business is profitable. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.balanceSheet",
+      "description": "Read the balance sheet: assets, liabilities, and equity by account. Use for solvency, balance, and what the business owns or owes. Balance sheet. Show what the business owns, owes, and is worth right now; verifies assets equal liabilities plus equity plus results. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.cashFlow",
+      "description": "Read the direct-method cash flow statement for the current period. Use for where cash came from and where it went. Cash flow statement. Derive the direct-method cash flow statement from the ledger - operating, investing, and financing buckets that provably tie to the cash balance. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "cashAccountCodes": {
+            "default": [
+              "1000"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "cashAccountCodes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.cashForecast",
+      "description": "Read the 13-week cash forecast and runway outlook. Use for cash planning and liquidity questions. 13-week cash forecast. Project thirteen weekly cash closes from current cash plus open receivable and payable due dates, and flag the projected trough. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "cashAccountCodes": {
+            "default": [
+              "1000"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "budgetScenarioId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "cashAccountCodes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.trialBalance",
+      "description": "Read the trial balance by account, including debit and credit totals. Use to verify the books and find imbalances. Get trial balance. Total debits and credits per account; proves the books balance and shows balances by account. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.listInvoices",
+      "description": "List issued invoices with status, customer, totals, and outstanding balances. Use to find overdue invoices and answer receivables questions. List invoices. Find invoices by customer name or status so the agent can look up the invoice number needed to record a payment against it. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "sent",
+              "paid",
+              "void"
+            ]
+          },
+          "limit": {
+            "default": 50,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.listQuotes",
+      "description": "List quotes. Show the organization's price quotes with their totals and status so sales can follow up on open ones. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "sent",
+              "accepted",
+              "declined",
+              "expired"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.listExpenseClaims",
+      "description": "List expense claims with status, submitter, amount, and category. Use to review what is waiting for a decision. List expense claims. Review submitted and decided expense claims so managers can act on pending reimbursements quickly. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted",
+              "approved",
+              "rejected",
+              "paid"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.listBudgetScenarios",
+      "description": "List budget scenarios. List saved budget versions for a fiscal year so the team can switch between plans and inspect the version history. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "fiscalYear": {
+            "type": "integer",
+            "minimum": 2000,
+            "maximum": 2100
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.periodCloseWorkbench",
+      "description": "Review period close readiness. Show the month's reconciliation blockers, FX review, and accountant sign-off checklist before the period can be sealed. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "minimum": 2000,
+            "maximum": 2100
+          },
+          "month": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          }
+        },
+        "required": [
+          "year",
+          "month"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.listWorkspace",
+      "description": "Read the purchasing workspace: purchase requests, RFQs, purchase orders, bills, vendors, and receipts in one snapshot. List Purchasing workspace. List vendors, recent purchase orders with lines, and recent vendor bills for the active organization. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.apAging",
+      "description": "Summarize accounts payable aging by supplier and bucket. Use for what the business owes and when it is due. AP aging report. Show outstanding vendor bills bucketed by age so you know what you owe and when. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.listPurchaseWorkflow",
+      "description": "List purchase requests and RFQs. List recent internal purchase requests with their approval state and every RFQ bid on them, so you can review, chase quotes, or award a winner. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.listPaymentRuns",
+      "description": "List supplier payment runs. List draft, instructed, confirmed, and reversed supplier payment runs with their bill-level remittance details and reconciliation state. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.listPaymentRunBills",
+      "description": "List open supplier bills that are eligible for a payment run, with vendor, due balance in minor units, currency, and due date. Use it before preparing a payment run.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.priceHistory",
+      "description": "Supplier price history. Show what each vendor has actually charged per item across purchase orders over time, so a 'special price' can be checked against the record. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "sku": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.supplierStatement",
+      "description": "Supplier statement. Render a vendor's account as a dated, running-balance statement of bills, payments, and supplier credits - what you reconcile their month-end statement against. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "vendorId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "vendorId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.stockReport",
+      "description": "Read stock levels, availability, reorder points, and stock value for every item. Use for stock questions and restock planning. Stock levels report. Show every tracked item with on-hand quantity, moving-average value, open reservations, and available-to-promise so purchasing and sales see the same truth. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "belowReorderOnly": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "belowReorderOnly"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.itemHistory",
+      "description": "Read the movement history for one SKU, including receipts, sales, adjustments, and running balance. Stock movement history. Show the append-only movement history of one item - every quantity change with its reason, reference, cost, lot, and actor. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "sku": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "sku",
+          "limit"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.listLots",
+      "description": "List lots. Show production/inspection lots with their derived on-hand balance from the ledger, so expiring or stuck batches are visible. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.listLocations",
+      "description": "List stock locations. Show every registered stock location with its code and human name. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.listLocationRecords",
+      "description": "List stock location records with their id, organization, code, name, and creation time. Use the id when moving, reserving, or counting stock at a specific location.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.listItemMetadata",
+      "description": "List every item's id, SKU, kind, unit label, sale price in minor units, and barcode. Use it to resolve an item before preparing a stock action or a sale.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.listReservations",
+      "description": "List stock reservations. Show open (or all recent) stock reservations so overbooking is visible before it becomes a stockout. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "openOnly": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "openOnly"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.listTransfers",
+      "description": "List stock transfers. Show stock transfers with route, status, and notes so pending relocations and their history stay visible alongside the stock ledger. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "openOnly": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "openOnly"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.listCycleCounts",
+      "description": "List recent cycle counts. Review recent physical stock counts with their location, status, notes, expected quantities, counted quantities, and variances. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "crm.listCustomerViews",
+      "description": "List saved customer views. Show shared workspace customer filters and private views created by the current user. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "crm.customerTimeline",
+      "description": "Read the full customer 360 timeline: invoices, payments, quotes, deals, tasks, and support history for one customer. Customer timeline. Assemble one reverse-chronological view of everything that happened with a customer - quotes, invoices, payments, deals, and tasks - from a single read. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "customerId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "sales.listOrders",
+      "description": "List sales orders with customer, status, totals, and delivery progress. List sales orders. Show the organization's sales orders with status, backorder flags, and totals so the team can see what is committed, short, and ready to ship. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "confirmed",
+              "delivered",
+              "cancelled"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "hr.report",
+      "description": "Read the people overview: headcount, leave, time, payroll, hiring, and expense signals. Use for people and payroll questions. Read People workspace report. Read the complete People workspace report for team, leave, payroll, hiring, and active attendance. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "hr.listEmployees",
+      "description": "List employees. Show every employee with salary, tax rate and active status so payroll scope is visible. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "hr.leaveCalendar",
+      "description": "Read leave requests for a date range with employee, kind, dates, and decision status. Leave calendar. List approved leave across the team for a month so staffing clashes surface before they happen. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "month": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          }
+        },
+        "required": [
+          "year",
+          "month"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "hr.timeReport",
+      "description": "Time report. Summarize approved hours per employee over a date range for payroll review and client billing decisions. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "range start, ISO date (YYYY-MM-DD)"
+          },
+          "to": {
+            "type": "string",
+            "description": "range end, ISO date (YYYY-MM-DD)"
+          },
+          "employeeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "hr.pendingTimeEntries",
+      "description": "List employee time entries waiting for approval, including the employee, work date, minutes, note, and whether the entry was late. Use it before deciding a time entry.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "projects.listBoard",
+      "description": "Project board. Render a project's kanban board - every task with its column, position, assignee, due date, and priority. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "projects.list",
+      "description": "List this organization's projects with their id, name, status (active or archived), due date, and creation time, newest first. Optionally filter to active or archived projects, and use this before opening a project board when you do not already have a project id.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ],
+            "description": "Optional status filter; omit for every project."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "creator.listCapabilityGaps",
+      "description": "List capability gaps recorded for this organization, newest first, with title, description, and status. Use it to decide what governed capability to propose or build.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "support.listConversations",
+      "description": "List customer support conversations with status, customer, and latest activity. List support conversations. List the organization's customer care threads with their latest activity, optionally filtered by status. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "escalated",
+              "resolved"
+            ]
+          },
+          "limit": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "support.listTickets",
+      "description": "List internal support tickets with status, priority, category, and ownership. Read support.listTickets. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "support.listLibrary",
+      "description": "List support canned responses and knowledge base articles with their ids, titles, shortcuts, and bodies. Use it before replying to a customer or creating a ticket.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "support.searchKnowledge",
+      "description": "Search knowledge base. Search the organization's remembered policies and business profile to ground customer answers in real facts instead of inventing them. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "marketing.overviewSnapshot",
+      "description": "Read marketing.overviewSnapshot. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "manufacturing.overviewReport",
+      "description": "Read manufacturing.overviewReport. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.createInvoice",
+      "description": "Create invoice. Issue an invoice to a customer for goods or services with line items; posts the receivable and revenue to the ledger. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string"
+          },
+          "memo": {
+            "type": "string"
+          },
+          "lines": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quantity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "thousandths of a unit; 1000 = one unit"
+                },
+                "unitPriceMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxCodeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                }
+              },
+              "required": [
+                "description",
+                "quantity",
+                "unitPriceMinor"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "currency": {
+            "type": "string"
+          },
+          "fxRate": {
+            "type": "string"
+          },
+          "dueAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          }
+        },
+        "required": [
+          "customerId",
+          "lines"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.createQuote",
+      "description": "Create quote. Draft a price quote for a customer with line items so they can accept it later and it becomes an invoice without retyping anything. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string"
+          },
+          "memo": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "lines": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quantity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "thousandths of a unit; 1000 = one unit"
+                },
+                "unitPriceMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxCodeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                }
+              },
+              "required": [
+                "description",
+                "quantity",
+                "unitPriceMinor"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "customerId",
+          "lines"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.recordPayment",
+      "description": "Record customer payment. Record money received against an outstanding invoice and post cash to the ledger. Amounts above the policy threshold require approval. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "invoiceNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "amountMinor": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "amount received in minor units"
+          },
+          "method": {
+            "default": "bank_transfer",
+            "type": "string",
+            "enum": [
+              "cash",
+              "bank_transfer",
+              "card"
+            ]
+          },
+          "settleFxRate": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "invoiceNumber",
+          "amountMinor",
+          "method"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.submitExpenseClaim",
+      "description": "Submit expense claim. File a reimbursable business expense with amount and explanation so a manager can approve it for payment. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "amountMinor": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "memo": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 500
+          },
+          "accountCode": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "amountMinor",
+          "memo"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.createBill",
+      "description": "Record vendor bill. Record an invoice received from a supplier; posts the expense and the amount owed to Accounts Payable. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "vendorId": {
+            "type": "string"
+          },
+          "vendorRef": {
+            "type": "string"
+          },
+          "memo": {
+            "type": "string"
+          },
+          "poNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "lines": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quantity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "thousandths of a unit"
+                },
+                "unitPriceMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "expenseAccountCode": {
+                  "default": "6000",
+                  "description": "chart-of-accounts code the cost lands on, e.g. 5000 for COGS",
+                  "type": "string",
+                  "pattern": "^\\d{4}$"
+                },
+                "taxMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxCodeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "poLineNumber": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "description",
+                "quantity",
+                "unitPriceMinor",
+                "expenseAccountCode"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "vendorId",
+          "lines"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.createVendor",
+      "description": "Create vendor. Register a supplier so bills can be recorded against them. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          },
+          "paymentTermDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 365
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.createItem",
+      "description": "Create stock item. Register a product or service in the catalog: goods carry a SKU and optional reorder point so quantities can be tracked, services sell directly with no stock. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "sku": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "default": "goods",
+            "type": "string",
+            "enum": [
+              "goods",
+              "service"
+            ]
+          },
+          "unitLabel": {
+            "default": "unit",
+            "type": "string",
+            "maxLength": 20
+          },
+          "salePriceMinor": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "reorderPointThousandths": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "imageUrl": {
+            "type": "string",
+            "maxLength": 500,
+            "format": "uri"
+          },
+          "tags": {
+            "default": [],
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 30
+            }
+          },
+          "barcode": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "sku",
+          "name",
+          "kind",
+          "unitLabel",
+          "salePriceMinor",
+          "reorderPointThousandths",
+          "tags"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.adjustStock",
+      "description": "Adjust stock. Record a manual stock correction (breakage, count fix, donation) on the stock ledger with a reason; sales and purchases use their own movements instead. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "sku": {
+            "type": "string"
+          },
+          "quantityDelta": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "note": {
+            "type": "string",
+            "minLength": 3,
+            "description": "why this correction happened"
+          },
+          "lotCode": {
+            "description": "tag an inward correction with a lot code",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "locationCode": {
+            "description": "record where this stock sits",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20
+          }
+        },
+        "required": [
+          "sku",
+          "quantityDelta",
+          "note"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "sales.createOrder",
+      "description": "Create sales order. Draft a sales order for a customer with priced lines so that confirming it later can reserve stock and ship without retyping anything. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "note": {
+            "type": "string"
+          },
+          "lines": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quantity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "unitPriceMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "sku": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description",
+                "quantity",
+                "unitPriceMinor"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "customerId",
+          "lines"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "sales.updateDraftOrder",
+      "description": "Replace the customer, note, and lines on a draft sales order. Only draft orders can be edited; the result includes the previous snapshot so the change can be reversed. Send the full replacement line set, not a patch.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Customer UUID that owns the order."
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "lines": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "quantity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Thousandths of a unit; 1000 is one unit."
+                },
+                "unitPriceMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "sku": {
+                  "type": "string",
+                  "maxLength": 120
+                }
+              },
+              "required": [
+                "description",
+                "quantity",
+                "unitPriceMinor"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "orderId",
+          "customerId",
+          "lines"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "support.createTicket",
+      "description": "File support ticket. Record a ticket for something that cannot be handled honestly right now - a capability gap, a bug, or an explicit request - so a human picks it up on the record. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000
+          },
+          "origin": {
+            "default": "request",
+            "type": "string",
+            "enum": [
+              "capability_gap",
+              "bug",
+              "request"
+            ]
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "title",
+          "description",
+          "origin"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "hr.requestLeave",
+      "description": "Request leave. File a leave request for an employee; approved unpaid leave reduces the next payroll run for the days taken. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string"
+          },
+          "kind": {
+            "default": "annual",
+            "type": "string",
+            "enum": [
+              "annual",
+              "sick",
+              "unpaid"
+            ]
+          },
+          "startDate": {
+            "type": "string",
+            "description": "first day of leave as an ISO date (YYYY-MM-DD)"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "last day of leave as an ISO date (YYYY-MM-DD)"
+          }
+        },
+        "required": [
+          "employeeId",
+          "kind",
+          "startDate",
+          "endDate"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "projects.createTask",
+      "description": "Create project task. Add a task (or a subtask under a parent) to a project with an assignee, due date, and priority, positioned in its kanban column. Use this governed read when the user asks for this information.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "parentTaskId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "assigneeUserId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "dueAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "projectId",
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "projects.createProject",
+      "description": "Create a project with a name and an optional due date. The result returns the project id, and the project can be archived later. Use projects.list first to avoid creating a duplicate.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Project name."
+          },
+          "dueAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Optional RFC 3339 due date in UTC."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "notifications.markRead",
+      "description": "Mark one in-app notification read. Use only when the user explicitly asks to mark a notification read; the inverse restores read state. Requires notifications.read.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "notifications.restoreRead",
+      "description": "Restore a notification to unread after a mark-read action, using the notification id and the receiptCreated flag returned by notifications.markRead. This is the governed inverse of marking a notification read.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Notification UUID returned by notifications_inbox."
+          },
+          "receiptCreated": {
+            "type": "boolean",
+            "description": "The receiptCreated value returned by notifications.markRead."
+          }
+        },
+        "required": [
+          "id",
+          "receiptCreated"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "iam.setAgentSoul",
+      "description": "Replace the organization's standing agent persona, the instructions every workmate turn follows. Requires iam.admin, is recorded in the ledger, and is reversible through the session revert path. Use it only when an administrator explicitly asks to change the persona; it cannot override security, approvals, or financial integrity.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Standing instructions, voice, and hard rules. An empty string clears the persona."
+          }
+        },
+        "required": [
+          "agentSoul"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "pos.listSessions",
+      "description": "List the organization's POS register sessions, newest first, with register, status, opening float, expected and counted cash, variance, and open or close times. Use the session id with pos.shiftSummary for the detailed shift totals.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "iam.getOrgPolicy",
+      "description": "Read the organization's approval policy: the highest risk class that can run autonomously, the money threshold in minor units, and the risk classes that always need human approval. Use it to explain why an action needs approval or before proposing a policy change.",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  ]
+}

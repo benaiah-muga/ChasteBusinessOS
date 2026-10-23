@@ -1052,3 +1052,72 @@ func newRouterWithApprovalInbox(pinger Pinger, logger *slog.Logger, bridgeSecret
 	}
 	return mux
 }
+
+// MountRecordSearchRoute gives GET /api/search exact ownership while leaving
+// other methods on the base handler when search is disabled.
+func MountRecordSearchRoute(base, searchRoute http.Handler) http.Handler {
+	if searchRoute == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		searchRoute.ServeHTTP(w, r)
+	})
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
+// MountSessionRevertRoute owns POST /api/sessions/{id}/revert and leaves every
+// other session path with the base handler.
+func MountSessionRevertRoute(base, revertRoute http.Handler) http.Handler {
+	if revertRoute == nil {
+		return base
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/api/sessions/") && strings.HasSuffix(path, "/revert") {
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", http.MethodPost)
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Pragma", "no-cache")
+				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+				return
+			}
+			revertRoute.ServeHTTP(w, r)
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+}
+
+// MountNotificationPreferencesRoute owns /api/notification-preferences and
+// leaves every other request with the base handler.
+func MountNotificationPreferencesRoute(base, preferences http.Handler) http.Handler {
+	if preferences == nil {
+		return base
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/notification-preferences" {
+			preferences.ServeHTTP(w, r)
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+}

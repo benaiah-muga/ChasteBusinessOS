@@ -78,7 +78,7 @@ func TestHandleChatLoopEventStreamsPendingApprovalMetadata(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	writer := newChatNDJSONWriter(recorder, "session")
 	handler := &chatSessionHandler{}
-	handler.handleChatLoopEvent(writer, "org", "session", "tool_result", map[string]any{
+	handler.handleChatLoopEvent(writer, "org", "session", "turn-1", "tool_result", map[string]any{
 		"name":              "purchasing.createPurchaseOrder",
 		"capabilityId":      "purchasing.createPurchaseOrder",
 		"ok":                false,

@@ -52,6 +52,7 @@ import {
   readPendingPurchasingBillPayment,
   PurchasingApiError,
 } from "../api/purchasing";
+import { PageLoading } from "../ui/page-loading";
 import "./AccountingPage.css";
 
 /* ------------------------------------------------------------------ money -- */
@@ -355,6 +356,11 @@ const EMPTY_LINE: InvoiceLineDraft = {
 
 export function AccountingPage({ actorId = null, organizationId = null }: { actorId?: string | null; organizationId?: string | null }) {
   const [tab, setTab] = useState<TabId>(() => readTabParam(window.location.search));
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("create") === "invoice") setTab("receivables");
+  }, []);
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
@@ -773,7 +779,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       </header>
 
       {state.status === "loading" && (
-        <p className="accounting-loading" role="status">Loading your books…</p>
+        <PageLoading label="Loading your books…" compact />
       )}
 
       {state.status === "disabled" && (
@@ -1066,7 +1072,8 @@ function OverviewTab({
 
   return (
     <div className="accounting-stack">
-      <section aria-label="Financial position">
+      <section aria-label="Financial position" className="accounting-position-grid">
+        <div className="accounting-position-main">
         <div className="accounting-position-head">
           <div>
             <p className="accounting-figure-label">Net income · to date</p>
@@ -1119,6 +1126,24 @@ function OverviewTab({
             and excluded from those totals.
           </p>
         )}
+        </div>
+        <aside className="accounting-next-actions" aria-label="Finance next actions">
+          <p className="accounting-eyebrow">Next actions</p>
+          <h2>Keep the books moving</h2>
+          <button type="button" onClick={() => onTabChange("receivables")}>
+            <span><strong>Review receivables</strong><small>{data.agingInvoices.length === 0 ? "Nothing outstanding" : `${data.agingInvoices.length} invoice${data.agingInvoices.length === 1 ? "" : "s"} open`}</small></span>
+            <span aria-hidden="true">→</span>
+          </button>
+          <button type="button" onClick={() => onTabChange("payables")}>
+            <span><strong>Pay supplier bills</strong><small>{openBills.length === 0 ? "No bills due" : `${openBills.length} bill${openBills.length === 1 ? "" : "s"} waiting`}</small></span>
+            <span aria-hidden="true">→</span>
+          </button>
+          <button type="button" onClick={() => onTabChange("periods")}>
+            <span><strong>Check period close</strong><small>Readiness and locked periods</small></span>
+            <span aria-hidden="true">→</span>
+          </button>
+          <a href="/chat"><span><strong>Ask your workmate</strong><small>Explain a number or draft a correction</small></span><span aria-hidden="true">↗</span></a>
+        </aside>
       </section>
 
       <section className="accounting-two-col" aria-label="Working capital">
@@ -1555,6 +1580,15 @@ function ReceivablesSection({
   const [showAllInvoices, setShowAllInvoices] = useState(false);
   const [taxCodes, setTaxCodes] = useState<AccountingTaxCode[]>([]);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("create") !== "invoice") return;
+    setInvoiceOpen(true);
+    params.delete("create");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  }, []);
   const [invoiceForm, setInvoiceForm] = useState(EMPTY_INVOICE_FORM);
   const [emailFor, setEmailFor] = useState<number | null>(null);
   const [emailTo, setEmailTo] = useState("");

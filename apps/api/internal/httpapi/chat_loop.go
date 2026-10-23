@@ -15,8 +15,6 @@ import (
 )
 
 const (
-	chatNoCapabilityNote = "No registered capability can do this. State honestly that you cannot, and call file_ticket."
-
 	// chatUntrustedContentRule is appended to every system prompt: retrieved
 	// memories, parsed documents, and transcripts are attacker-influenceable,
 	// so they are framed as data, never commands.
@@ -57,6 +55,7 @@ type chatLoopDeps struct {
 	turnID string
 
 	systemPrompt  string
+	history       []chatMessage
 	userGoal      string
 	maxSteps      int
 	contextWindow int
@@ -64,8 +63,14 @@ type chatLoopDeps struct {
 
 	tools                []chatToolSpec
 	capabilityByToolName map[string]capability.AgentToolSpec
+	allowedModules       map[string]bool
 	enableTickets        bool
 	enableAsk            bool
+	recentChanges        func(context.Context, *session.ResolvedUser, chatToolCall) (string, bool, string)
+	buildDailyBrief      func(context.Context) (string, bool, string)
+	approvalsInbox       func(context.Context, *session.ResolvedUser) (string, bool, string)
+	notificationsInbox   func(context.Context, *session.ResolvedUser) (string, bool, string)
+	resolveEntity        func(context.Context, *session.ResolvedUser, chatToolCall) (string, bool, string)
 
 	// drainSteering returns messages queued while the run was in flight; the
 	// caller persists them as user trajectory events as it drains them.
@@ -80,6 +85,9 @@ type chatLoopDeps struct {
 // replayable trajectory stay identical across runtimes.
 func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult, error) {
 	var result chatLoopResult
+	var lastToolName, lastToolResult string
+	var lastToolOK bool
+	var lastSearchResult string
 	user := deps.user
 	if user == nil || user.OrgID == nil {
 		return result, errors.New("chat loop requires a resolved organization member")
@@ -88,10 +96,10 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 	if maxSteps <= 0 {
 		maxSteps = chatDefaultMaxSteps
 	}
-	messages := []chatMessage{
-		{Role: "system", Content: deps.systemPrompt + "\n\n" + chatUntrustedContentRule},
-		{Role: "user", Content: deps.userGoal + "\n\n" + chatNoCapabilityNote},
-	}
+	messages := make([]chatMessage, 0, len(deps.history)+2)
+	messages = append(messages, chatMessage{Role: "system", Content: deps.systemPrompt + "\n\n" + chatUntrustedContentRule})
+	messages = append(messages, deps.history...)
+	messages = append(messages, chatMessage{Role: "user", Content: deps.userGoal})
 
 	for step := 1; step <= maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -120,6 +128,16 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 		}
 		turn, err := deps.provider.Stream(ctx, messages, deps.tools, deps.onDelta)
 		if err != nil {
+			if lastToolName != "" {
+				// The action may already have been executed and audited. Never
+				// replace a real result with a generic transport error.
+				result.finalMessage = chatToolFallbackMessage(lastToolName, lastToolResult, lastToolOK)
+				return result, nil
+			}
+			if lastSearchResult != "" {
+				result.finalMessage = chatToolFallbackMessage("capability_search", lastSearchResult, true)
+				return result, nil
+			}
 			return result, err
 		}
 		result.usage.Input += turn.usage.Input
@@ -130,14 +148,35 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 			messages = append(messages, chatMessage{Role: "assistant", Content: turn.message})
 		}
 		if len(turn.toolCalls) == 0 {
+			if turn.message == "" && strings.TrimSpace(turn.reasoning) != "" {
+				// The provider exposed internal analysis but no answer and no tool
+				// call. Nudge once instead of showing chain of thought to the user.
+				if step < maxSteps {
+					messages = append(messages, chatMessage{Role: "system", Content: "Your last response was internal reasoning with no answer and no tool call. Answer the user directly now, or call one available tool. Do not repeat your reasoning."})
+					continue
+				}
+				return result, errors.New("the model returned reasoning without an answer")
+			}
 			break
 		}
 		messages = append(messages, chatMessage{Role: "assistant", Content: turn.message, ToolCalls: turn.toolCalls})
 
 		asked := false
 		for index, call := range turn.toolCalls {
+			displayName := call.Name
+			if call.Name == "capability_invoke" {
+				var invoked struct {
+					CapabilityID string `json:"capabilityId"`
+				}
+				if json.Unmarshal(call.Arguments, &invoked) == nil && invoked.CapabilityID != "" {
+					displayName = invoked.CapabilityID
+				}
+			}
 			if deps.onEvent != nil {
-				deps.onEvent("tool_call", map[string]any{"name": call.Name, "args": json.RawMessage(call.Arguments)})
+				deps.onEvent("tool_call", map[string]any{
+					"name": displayName, "args": json.RawMessage(call.Arguments),
+					"callId": call.ID, "step": step, "index": index,
+				})
 			}
 			capabilityID := call.Name
 			if spec, known := deps.capabilityByToolName[call.Name]; known {
@@ -163,14 +202,55 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 				if deps.onEvent != nil {
 					deps.onEvent("ask", chatQuestionContent(call))
 				}
+			case capabilityID == "recent_changes" && deps.recentChanges != nil:
+				toolResult, ok, errorMessage = deps.recentChanges(ctx, user, call)
+				emitResult = true
+			case capabilityID == "daily_brief" && deps.buildDailyBrief != nil:
+				toolResult, ok, errorMessage = deps.buildDailyBrief(ctx)
+				emitResult = true
+			case capabilityID == "approvals_inbox" && deps.approvalsInbox != nil:
+				toolResult, ok, errorMessage = deps.approvalsInbox(ctx, user)
+				emitResult = true
+			case capabilityID == "notifications_inbox" && deps.notificationsInbox != nil:
+				toolResult, ok, errorMessage = deps.notificationsInbox(ctx, user)
+				emitResult = true
+			case capabilityID == "resolve_entity" && deps.resolveEntity != nil:
+				toolResult, ok, errorMessage = deps.resolveEntity(ctx, user, call)
+				emitResult = true
+			case capabilityID == "capability_search":
+				toolResult, ok, errorMessage = deps.searchCapabilities(call)
+				emitResult = true
+			case capabilityID == "capability_invoke":
+				toolResult, ok, errorMessage = deps.invokeCapability(ctx, user, call, step, index)
+				emitResult = true
 			default:
 				toolResult, ok, errorMessage = deps.executeChatTool(ctx, user, call, capabilityID, step, index)
 				emitResult = true
 			}
+			if capabilityID == "capability_search" {
+				lastSearchResult = toolResult
+			} else if capabilityID != "ask_user" && capabilityID != "file_ticket" {
+				lastToolName = displayName
+				lastToolResult = toolResult
+				lastToolOK = ok
+			}
 			// The kernel emits tool_result only for executor calls; the ticket
 			// and ask paths are covered by their own persisted events.
 			if emitResult && deps.onEvent != nil {
-				content := map[string]any{"name": capabilityID, "capabilityId": capabilityID, "ok": ok}
+				resultName := capabilityID
+				if capabilityID == "capability_invoke" {
+					var invoked struct {
+						CapabilityID string `json:"capabilityId"`
+					}
+					if json.Unmarshal(call.Arguments, &invoked) == nil && invoked.CapabilityID != "" {
+						resultName = invoked.CapabilityID
+					}
+				}
+				content := map[string]any{
+					"name": resultName, "capabilityId": resultName, "ok": ok,
+					"callId": call.ID, "step": step, "index": index,
+					"result": chatHistoryResult(toolResult),
+				}
 				if !ok && errorMessage != "" {
 					content["error"] = errorMessage
 				}
@@ -340,6 +420,12 @@ func (deps chatLoopDeps) executeChatTool(ctx context.Context, user *session.Reso
 }
 
 func (deps chatLoopDeps) executeCapability(ctx context.Context, capabilityID string, input json.RawMessage, step, index int) capability.Result {
+	return deps.executeCapabilityKey(ctx, capabilityID, input, "", step, index)
+}
+
+// executeCapabilityKey gives composed tools a stable sub-key so two reads of
+// different capabilities in one daily brief never share an intent receipt.
+func (deps chatLoopDeps) executeCapabilityKey(ctx context.Context, capabilityID string, input json.RawMessage, suffix string, step, index int) capability.Result {
 	user := deps.user
 	permissions := make([]string, 0, len(user.Permissions))
 	for permission, granted := range user.Permissions {
@@ -354,11 +440,15 @@ func (deps chatLoopDeps) executeCapability(ctx context.Context, capabilityID str
 	if err != nil {
 		return capability.Result{Error: "invalid capability arguments"}
 	}
+	intentKey := fmt.Sprintf("chat-tool:%s:%s:%d:%d", deps.sessionID, deps.turnID, step, index)
+	if suffix != "" {
+		intentKey += ":" + suffix
+	}
 	claims := authbridge.CapabilityClaims{
 		Audience: authbridge.CapabilityExecuteAudience, Subject: user.UserID, OrganizationID: deps.orgID,
 		CapabilityID: capabilityID, InputSHA256: inputHash, ActorID: &actorID, ActorType: "agent",
 		Permissions: permissions, AuthSessionID: user.AuthSessionID, AgentSessionID: deps.sessionID,
-		IntentID:  deterministicMessagingUUID(fmt.Sprintf("chat-tool:%s:%s:%d:%d", deps.sessionID, deps.turnID, step, index)),
+		IntentID:  deterministicMessagingUUID(intentKey),
 		IssuedAt:  now.Unix(),
 		ExpiresAt: now.Add(30 * time.Second).Unix(),
 	}
@@ -421,4 +511,184 @@ func chatCompactTrajectory(messages []chatMessage) []chatMessage {
 		compacted = append(compacted, chatMessage{Role: "assistant", Content: content})
 	}
 	return append(compacted, messages[cut:]...)
+}
+
+type chatBriefSection struct {
+	OK    bool            `json:"ok"`
+	Data  json.RawMessage `json:"data,omitempty"`
+	Error string          `json:"error,omitempty"`
+}
+
+func briefSection(result capability.Result) chatBriefSection {
+	if !result.OK {
+		message := result.Error
+		if message == "" {
+			message = "read unavailable"
+		}
+		return chatBriefSection{OK: false, Error: message}
+	}
+	return chatBriefSection{OK: true, Data: result.Data}
+}
+
+// dailyBrief composes the reads a person would use to triage a working day.
+// It is deliberately deterministic and read-only; the model only phrases the
+// result, and every underlying read still runs through the governed executor.
+func (deps chatLoopDeps) dailyBrief(ctx context.Context) (string, bool, string) {
+	if deps.user == nil {
+		return chatMustEncode(chatToolRefusal{Error: "no signed-in user"}), false, "no signed-in user"
+	}
+	now := time.Now().UTC()
+	year, month := now.Year(), int(now.Month())
+	reads := []struct {
+		key        string
+		cap        string
+		input      string
+		permission string
+	}{
+		{"signals", "signals.list", `{}`, "signals.read"},
+		{"overview", "accounting.overview", `{}`, "accounting.read"},
+		{"receivables", "accounting.arAging", `{}`, "accounting.read"},
+		{"payables", "purchasing.apAging", `{}`, "purchasing.read"},
+		{"stock", "inventory.stockReport", `{"belowReorderOnly":true}`, "inventory.read"},
+		{"tasks", "crm.listTasks", `{"openOnly":true}`, "crm.read"},
+		{"leave", "hr.leaveCalendar", fmt.Sprintf(`{"year":%d,"month":%d}`, year, month), "hr.read"},
+		{"support", "support.listConversations", `{"status":"open","limit":10}`, "support.read"},
+		{"tickets", "support.listTickets", `{"limit":10}`, "support.read"},
+	}
+	sections := map[string]chatBriefSection{}
+	for _, read := range reads {
+		module, _, _ := strings.Cut(read.cap, ".")
+		if deps.allowedModules != nil && !deps.allowedModules[module] {
+			continue
+		}
+		if !deps.user.HasPermission(read.permission) && !deps.user.HasPermission("*") {
+			continue
+		}
+		sections[read.key] = briefSection(deps.executeCapabilityKey(ctx, read.cap, json.RawMessage(read.input), "brief-"+read.key, 0, 0))
+	}
+	if deps.approvalsInbox != nil {
+		approvals, ok, message := deps.approvalsInbox(ctx, deps.user)
+		if ok {
+			sections["approvals"] = chatBriefSection{OK: true, Data: json.RawMessage(approvals)}
+		} else {
+			sections["approvals"] = chatBriefSection{OK: false, Error: message}
+		}
+	}
+	if deps.notificationsInbox != nil {
+		notifications, ok, message := deps.notificationsInbox(ctx, deps.user)
+		if ok {
+			sections["notifications"] = chatBriefSection{OK: true, Data: json.RawMessage(notifications)}
+		} else {
+			sections["notifications"] = chatBriefSection{OK: false, Error: message}
+		}
+	}
+	if deps.recentChanges != nil {
+		recent, ok, message := deps.recentChanges(ctx, deps.user, chatToolCall{Name: "recent_changes", Arguments: json.RawMessage(`{"hours":24}`)})
+		if ok {
+			sections["changes"] = chatBriefSection{OK: true, Data: json.RawMessage(recent)}
+		} else {
+			sections["changes"] = chatBriefSection{OK: false, Error: message}
+		}
+	}
+	payload := map[string]any{
+		"generatedAt":   now.Format(time.RFC3339),
+		"lookbackHours": 24,
+		"summary":       "Use signals for attention, changes for what happened, and the reports for exact figures. Recommend one next action.",
+		"sections":      sections,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return chatMustEncode(chatToolRefusal{Error: "could not encode the brief"}), false, "could not encode the brief"
+	}
+	return string(encoded), true, ""
+}
+
+func (deps chatLoopDeps) searchCapabilities(call chatToolCall) (string, bool, string) {
+	var input struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := json.Unmarshal(call.Arguments, &input); err != nil {
+		return chatMustEncode(chatToolRefusal{Error: "invalid capability search arguments"}), false, "invalid capability search arguments"
+	}
+	results := capability.SearchAgentCapabilities(deps.user.Permissions, input.Query, input.Limit)
+	filtered := results[:0]
+	for _, result := range results {
+		module, _, _ := strings.Cut(result.ID, ".")
+		if deps.allowedModules != nil && !deps.allowedModules[module] {
+			continue
+		}
+		filtered = append(filtered, result)
+	}
+	return chatMustEncode(map[string]any{"ok": true, "query": input.Query, "capabilities": filtered, "count": len(filtered)}), true, ""
+}
+
+func (deps chatLoopDeps) invokeCapability(ctx context.Context, user *session.ResolvedUser, call chatToolCall, step, index int) (string, bool, string) {
+	var input struct {
+		CapabilityID string          `json:"capabilityId"`
+		Input        json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(call.Arguments, &input); err != nil {
+		return chatMustEncode(chatToolRefusal{Error: "invalid capability invoke arguments"}), false, "invalid capability invoke arguments"
+	}
+	if strings.TrimSpace(input.CapabilityID) == "" {
+		return chatMustEncode(chatToolRefusal{Error: "capabilityId is required"}), false, "capabilityId is required"
+	}
+	module, _, _ := strings.Cut(input.CapabilityID, ".")
+	if deps.allowedModules != nil && !deps.allowedModules[module] {
+		return chatMustEncode(chatToolRefusal{Error: "that module is disabled for this workspace"}), false, "that module is disabled for this workspace"
+	}
+	if _, ok := capability.AgentCapabilityByID(user.Permissions, input.CapabilityID); !ok {
+		return chatMustEncode(chatToolRefusal{Error: "that capability is not available to this user"}), false, "that capability is not available to this user"
+	}
+	if len(input.Input) == 0 || string(input.Input) == "null" {
+		input.Input = json.RawMessage(`{}`)
+	}
+	return deps.executeChatTool(ctx, user, chatToolCall{Name: "capability_invoke", Arguments: input.Input}, input.CapabilityID, step, index)
+}
+
+func chatToolFallbackMessage(capabilityID, result string, ok bool) string {
+	if capabilityID == "daily_brief" && ok {
+		return "I gathered the daily brief from signals, finance, stock, tasks, leave, support, approvals, and recent changes. I could not phrase the summary because the AI provider is temporarily unavailable. The underlying data is current; ask me again in a moment for the short version."
+	}
+	if capabilityID == "capability_search" && ok {
+		return "I found matching governed capabilities, but the AI provider is temporarily unavailable before I could act on them. Ask me again in a moment and I will continue."
+	}
+	if capabilityID == "approvals_inbox" && ok {
+		var payload struct {
+			Count int `json:"count"`
+		}
+		if json.Unmarshal([]byte(result), &payload) == nil && payload.Count == 0 {
+			return "I checked the approvals inbox. Nothing is waiting for your decision right now. I could not write the full summary because the AI provider is temporarily unavailable."
+		}
+	}
+	label := strings.NewReplacer(".", " · ", "_", " · ").Replace(capabilityID)
+	if label == "capability_invoke" {
+		label = "the requested action"
+	}
+	var refusal chatToolRefusal
+	_ = json.Unmarshal([]byte(result), &refusal)
+	if refusal.PendingApproval {
+		message := "I prepared " + label + " and it is waiting for approval. I could not write the full summary because the AI provider is temporarily unavailable; you can review the request in Approvals."
+		if refusal.ApprovalID != "" {
+			message += " Approval id: " + refusal.ApprovalID + "."
+		}
+		return message
+	}
+	if !ok {
+		return "I attempted " + label + ", but it did not complete. The workspace did not record a successful result. The AI provider is temporarily unavailable, so try again in a moment."
+	}
+	return "I completed " + label + " and the result is available in the workspace. I could not generate the full summary because the AI provider is temporarily unavailable. You can review the result in the relevant page or ask me again in a moment."
+}
+
+const chatHistoryResultMax = 8 << 10
+
+// chatHistoryResult bounds what a later turn can replay into the model. The
+// live tool result is not truncated; only the stored transcript is.
+func chatHistoryResult(result string) string {
+	if len(result) <= chatHistoryResultMax {
+		return result
+	}
+	cut := result[:chatHistoryResultMax]
+	return strings.ToValidUTF8(cut, "") + "\n[result truncated in history]"
 }

@@ -243,7 +243,7 @@ describe("Vite sales page", () => {
     expect(localStorage.length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Retry saved item" }));
-    expect(await screen.findByText("Catalog item created through Go and added to the order line.")).not.toBeNull();
+    expect(await screen.findByText("Catalog item created and added to the order line.")).not.toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
     expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();

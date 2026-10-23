@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Search } from "lucide-react";
 import {
   fetchDurableRunDetail,
   fetchDurableRuns,
@@ -6,6 +7,8 @@ import {
   fetchSessionMetrics,
   fetchSessionReplay,
   fetchSessions,
+  revertSessionAction,
+  revertSessionTurn,
   SessionsApiError,
   type AgentSession,
   type DurableRun,
@@ -14,6 +17,7 @@ import {
   type SessionMetrics,
   type TrajectoryEvent,
 } from "../api/sessions";
+import { SavedViewBar } from "../ui/saved-view-bar";
 import "./SessionsPage.css";
 
 type SessionListState =
@@ -97,29 +101,173 @@ function eventBody(event: TrajectoryEvent): ReactNode {
     const ok = content?.ok === true;
     const name = stringField(content ?? {}, "name") ?? "unknown tool";
     const error = stringField(content ?? {}, "error");
+    const result = stringField(content ?? {}, "result");
     return (
       <>
         <span className={`session-tool-result${ok ? " session-tool-result-ok" : " session-tool-result-blocked"}`}>
           <span aria-hidden="true">›</span> {ok ? "ok" : "blocked"} · {name}
         </span>
         {error && <span className="session-tool-error">{error}</span>}
+        {result && (
+          <details className="session-event-details">
+            <summary>result</summary>
+            <pre>{result}</pre>
+          </details>
+        )}
       </>
     );
   }
   return <pre className="session-event-raw">{jsonText(event.content)}</pre>;
 }
 
-function SessionTimeline({ events }: { events: TrajectoryEvent[] }) {
+const REVERTIBLE_ACTIONS = new Set([
+  "crm.createCustomer",
+  "projects.createProject",
+  "sales.createOrder",
+  "accounting.recordPayment",
+  "purchasing.payBill",
+  "purchasing.createBill",
+  "sales.updateDraftOrder",
+]);
+
+function revertibleCall(event: TrajectoryEvent): { callId: string; capabilityId: string } | null {
+  if (event.role !== "tool_result") return null;
+  const content = record(event.content);
+  if (!content || content.ok !== true) return null;
+  const callId = stringField(content, "callId");
+  const capabilityId = stringField(content, "capabilityId");
+  if (!callId || !capabilityId || !REVERTIBLE_ACTIONS.has(capabilityId)) return null;
+  return { callId, capabilityId };
+}
+
+function SessionTimeline({
+  events,
+  sessionId,
+  onReverted,
+}: {
+  events: TrajectoryEvent[];
+  sessionId: string;
+  onReverted: () => void;
+}) {
+  const [confirmCallId, setConfirmCallId] = useState<string | null>(null);
+  const [busyCallId, setBusyCallId] = useState<string | null>(null);
+  const [revertedCalls, setRevertedCalls] = useState<Set<string>>(() => new Set());
+  const [revertedTurns, setRevertedTurns] = useState<Set<string>>(() => new Set());
+  const [confirmTurnId, setConfirmTurnId] = useState<string | null>(null);
+  const [busyTurnId, setBusyTurnId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "success" | "pending" | "error"; text: string } | null>(null);
+
+  async function revert(callId: string) {
+    if (confirmCallId !== callId) {
+      setConfirmCallId(callId);
+      return;
+    }
+    setBusyCallId(callId);
+    setNotice(null);
+    try {
+      const outcome = await revertSessionAction(sessionId, callId);
+      if (outcome.pendingApproval) {
+        setNotice({ tone: "pending", text: `The reversal is waiting for approval.${outcome.approvalId ? ` Approval ${outcome.approvalId}.` : ""}` });
+      } else if (outcome.ok) {
+        setNotice({ tone: "success", text: `Reverted through ${outcome.inverseCapabilityId}.` });
+        setRevertedCalls((current) => new Set(current).add(callId));
+        onReverted();
+      } else {
+        setNotice({ tone: "error", text: outcome.error || "The reversal did not complete." });
+      }
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof SessionsApiError ? error.message : "The reversal did not complete." });
+    } finally {
+      setBusyCallId(null);
+      setConfirmCallId(null);
+    }
+  }
+
+  const turnLastSeq = new Map<string, number>();
+  const turnActions = new Map<string, number>();
+  for (const event of events) {
+    const content = record(event.content);
+    const turnId = content ? stringField(content, "turnId") : null;
+    if (!turnId) continue;
+    turnLastSeq.set(turnId, event.seq);
+    if (revertibleCall(event)) turnActions.set(turnId, (turnActions.get(turnId) ?? 0) + 1);
+  }
+
+  async function revertTurn(turnId: string) {
+    if (confirmTurnId !== turnId) {
+      setConfirmTurnId(turnId);
+      return;
+    }
+    setBusyTurnId(turnId);
+    setNotice(null);
+    try {
+      const outcome = await revertSessionTurn(sessionId, turnId);
+      const pending = outcome.reverted.some((item) => item.pendingApproval);
+      if (pending) {
+        setNotice({ tone: "pending", text: "The turn revert is waiting for approval. Decisions already made remain in the audit ledger." });
+      } else if (outcome.ok) {
+        setNotice({ tone: "success", text: `Reverted ${outcome.reverted.length} action${outcome.reverted.length === 1 ? "" : "s"} in turn ${turnId}.` });
+        setRevertedTurns((current) => new Set(current).add(turnId));
+        setRevertedCalls((current) => {
+          const next = new Set(current);
+          for (const item of outcome.reverted) next.add(item.callId);
+          return next;
+        });
+        onReverted();
+      } else {
+        const failed = outcome.reverted.find((item) => !item.ok);
+        setNotice({ tone: "error", text: failed?.error || "The turn revert did not complete." });
+      }
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof SessionsApiError ? error.message : "The turn revert did not complete." });
+    } finally {
+      setBusyTurnId(null);
+      setConfirmTurnId(null);
+    }
+  }
+
   return (
     <div className="session-event-list">
-      {events.map((event) => (
-        <article className="session-event" key={event.seq}>
-          <span className="session-event-meta">#{event.seq} · {new Date(event.at).toLocaleTimeString()}</span>
-          <div className={`session-event-card session-event-${event.role.replace(/[^a-z0-9_-]/gi, "-")}`}>
-            {eventBody(event)}
-          </div>
-        </article>
-      ))}
+      {notice && <p className={`session-revert-notice session-revert-notice-${notice.tone}`} role="status">{notice.text}</p>}
+      {events.map((event) => {
+        const action = revertibleCall(event);
+        return (
+          <article className="session-event" key={event.seq}>
+            <span className="session-event-meta">#{event.seq} · {new Date(event.at).toLocaleTimeString()}</span>
+            <div className={`session-event-card session-event-${event.role.replace(/[^a-z0-9_-]/gi, "-")}`}>
+              {eventBody(event)}
+            </div>
+            {action && !revertedCalls.has(action.callId) && (
+              <button
+                type="button"
+                className="session-revert-button"
+                disabled={busyCallId !== null || busyTurnId !== null}
+                onClick={() => void revert(action.callId)}
+              >
+                {busyCallId === action.callId ? "Reverting…" : confirmCallId === action.callId ? "Confirm revert" : "Revert action"}
+              </button>
+            )}
+            {(() => {
+              const content = record(event.content);
+              const turnId = content ? stringField(content, "turnId") : null;
+              const count = turnId ? turnActions.get(turnId) ?? 0 : 0;
+              if (!turnId || count < 2 || turnLastSeq.get(turnId) !== event.seq || revertedTurns.has(turnId)) return null;
+              return (
+                <div className="session-turn-revert">
+                  <span>{count} governed actions in this turn</span>
+                  <button
+                    type="button"
+                    disabled={busyCallId !== null || busyTurnId !== null}
+                    onClick={() => void revertTurn(turnId)}
+                  >
+                    {busyTurnId === turnId ? "Reverting turn…" : confirmTurnId === turnId ? "Confirm turn revert" : "Revert turn"}
+                  </button>
+                </div>
+              );
+            })()}
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -170,9 +318,9 @@ function RunDossier({ detail }: { detail: DurableRunDetail }) {
   );
 }
 
-export function SessionsPage() {
+export function SessionsPage({ organizationId = null }: { organizationId?: string | null }) {
   const [sessionState, setSessionState] = useState<SessionListState>({ status: "loading" });
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("session"));
   const [timelineRevision, setTimelineRevision] = useState(0);
   const [timeline, setTimeline] = useState<TimelineState>({ status: "idle" });
   const [runs, setRuns] = useState<RunsState>({ status: "loading" });
@@ -180,6 +328,31 @@ export function SessionsPage() {
   const [runDetailRevision, setRunDetailRevision] = useState(0);
   const [runDetail, setRunDetail] = useState<RunDetailState | null>(null);
   const [metrics, setMetrics] = useState<MetricsState>({ status: "loading" });
+  const [sessionQuery, setSessionQuery] = useState("");
+  const [sessionFilter, setSessionFilter] = useState<"all" | "assist" | "creator" | "failed">("all");
+  const filteredSessions = useMemo(() => {
+    if (sessionState.status !== "ready") return [];
+    const query = sessionQuery.trim().toLowerCase();
+    return sessionState.sessions.filter((session) => {
+      if (sessionFilter === "failed" && session.status !== "failed") return false;
+      if ((sessionFilter === "assist" || sessionFilter === "creator") && session.mode !== sessionFilter) return false;
+      if (!query) return true;
+      return [session.title, session.id, session.mode, session.status, session.modelRef]
+        .filter((value): value is string => typeof value === "string")
+        .some((value) => value.toLowerCase().includes(query));
+    });
+  }, [sessionFilter, sessionQuery, sessionState]);
+
+  const selectSession = useCallback((sessionId: string) => {
+    setActiveSessionId(sessionId);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("session", sessionId);
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // A blocked URL update still opens the selected session for this view.
+    }
+  }, []);
 
   const loadSessions = useCallback(async (signal?: AbortSignal) => {
     setSessionState({ status: "loading" });
@@ -231,7 +404,7 @@ export function SessionsPage() {
       return;
     }
     const controller = new AbortController();
-    setTimeline({ status: "loading" });
+    setTimeline((current) => current.status === "ready" ? current : { status: "loading" });
     void Promise.allSettled([
       fetchSessionEvents(activeSessionId, controller.signal),
       fetchSessionReplay(activeSessionId, controller.signal),
@@ -372,13 +545,46 @@ export function SessionsPage() {
       {sessionState.status === "ready" && sessionState.sessions.length > 0 && (
         <div className="sessions-browser">
           <aside className="sessions-list" aria-label="Agent session list">
-            {sessionState.sessions.map((session) => (
+            <div className="sessions-saved">
+              <SavedViewBar
+                module="agent.sessions"
+                organizationId={organizationId}
+                current={{ query: sessionQuery, filter: sessionFilter }}
+                onApply={(value) => { setSessionQuery(value.query); setSessionFilter(value.filter); }}
+              />
+            </div>
+            <div className="sessions-list-tools">
+              <label className="sessions-search">
+                <Search size={13} aria-hidden="true" />
+                <span className="sessions-visually-hidden">Search sessions</span>
+                <input
+                  type="search"
+                  value={sessionQuery}
+                  onChange={(event) => setSessionQuery(event.currentTarget.value)}
+                  placeholder="Search sessions"
+                />
+              </label>
+              <select
+                aria-label="Filter sessions"
+                value={sessionFilter}
+                onChange={(event) => setSessionFilter(event.currentTarget.value as typeof sessionFilter)}
+              >
+                <option value="all">All sessions</option>
+                <option value="assist">Assist</option>
+                <option value="creator">Creator</option>
+                <option value="failed">Failed</option>
+              </select>
+            </div>
+            {filteredSessions.length === 0 && (
+              <p className="sessions-list-empty" role="status">No sessions match.</p>
+            )}
+            {filteredSessions.map((session) => (
               <button
                 className={`sessions-list-item${activeSessionId === session.id ? " sessions-list-item-current" : ""}`}
                 key={session.id}
                 type="button"
                 aria-current={activeSessionId === session.id ? "true" : undefined}
-                onClick={() => setActiveSessionId(session.id)}
+                onClick={() => selectSession(session.id)}
               >
                 <strong>{session.title ?? "Untitled session"}</strong>
                 <span className="sessions-list-meta">
@@ -396,6 +602,12 @@ export function SessionsPage() {
                 <span aria-hidden="true">⌁</span>
                 <h2>Pick a session</h2>
                 <p>Select a session on the left to replay its full trajectory.</p>
+              </div>
+            )}
+            {activeSessionId && (
+              <div className="sessions-continue-bar">
+                <span>Continue this conversation with the workmate.</span>
+                <a href={`/chat?session=${encodeURIComponent(activeSessionId)}`}>Continue in Workmate</a>
               </div>
             )}
             {timeline.status === "loading" && <p className="sessions-subtle-status" role="status">Loading session trajectory…</p>}
@@ -437,7 +649,13 @@ export function SessionsPage() {
                 <button type="button" onClick={() => setTimelineRevision((revision) => revision + 1)}>Retry</button>
               </div>
             )}
-            {timeline.status === "ready" && timeline.events.length > 0 && <SessionTimeline events={timeline.events} />}
+            {timeline.status === "ready" && timeline.events.length > 0 && activeSessionId && (
+              <SessionTimeline
+                events={timeline.events}
+                sessionId={activeSessionId}
+                onReverted={() => setTimelineRevision((revision) => revision + 1)}
+              />
+            )}
           </section>
         </div>
       )}

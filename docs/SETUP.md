@@ -260,8 +260,8 @@ retrieval falls back to keyword search rather than erroring.
 To enable the agent, add one provider to `.env`:
 
 ```sh
-NVIDIA_API_KEY=""      # default; free tier at build.nvidia.com
-# or set MODEL_PROVIDER to openrouter | groq | mistral | zai and supply that key
+DEEPSEEK_API_KEY=""   # default; OpenAI-compatible DeepSeek chat
+# or set MODEL_PROVIDER to nvidia | openrouter | groq | mistral | zai and supply that key
 ```
 
 ---

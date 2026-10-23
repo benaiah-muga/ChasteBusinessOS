@@ -16,6 +16,7 @@ import {
   type PendingProjectAction,
   type ProjectsRetryScope,
 } from "../api/projects";
+import { PageLoading } from "../ui/page-loading";
 import "./ProjectsPage.css";
 
 type ProjectListState =
@@ -151,6 +152,10 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
   }, [loadModules]);
 
   const refreshPendingActions = useCallback(async () => {
+    if (!actorId?.trim() || !organizationId?.trim()) {
+      setPendingActions([]);
+      return;
+    }
     try { setPendingActions(await readPendingProjectActions(retryScope)); }
     catch (error) { setNotice({ tone: "error", message: errorMessage(error) }); }
   }, [actorId, organizationId]);
@@ -432,7 +437,7 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
         </section>
       )}
 
-      {projectState.status === "loading" && <p className="projects-loading" role="status">Loading projects…</p>}
+      {projectState.status === "loading" && <PageLoading label="Loading projects…" compact />}
       {projectState.status === "failed" && (
         <section className="projects-error" role="alert" aria-labelledby="projects-error-title">
           <div>
@@ -476,32 +481,34 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
               </form>
             </section>
 
-            <section className="projects-card" aria-labelledby="projects-list-heading">
-              <header className="projects-card-heading"><h2 id="projects-list-heading">Projects</h2><span>{projects.length}</span></header>
-              {projects.length === 0 ? (
-                <div className="projects-empty projects-empty-compact">
-                  <span aria-hidden="true">□</span>
-                  <h3>No projects yet</h3>
-                  <p>Create your first project above. Tasks live on its board.</p>
-                </div>
-              ) : (
-                <ul className="projects-list">
-                  {projects.map((project) => (
-                    <li key={project.id}>
-                      <button
-                        type="button"
-                        aria-pressed={project.id === selectedId}
-                        onClick={() => setSelectedId(project.id)}
-                        className={`projects-list-button${project.id === selectedId ? " projects-list-button-current" : ""}`}
-                      >
-                        <span className="projects-list-title"><strong>{project.name}</strong><span className={`project-status ${statusClass(project.status)}`}>{project.status}</span></span>
-                        <span className="projects-list-date">{project.dueAt ? `Due ${formatDate(project.dueAt)}` : "No due date"}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            {projects.length > 0 && (
+              <section className="projects-card" aria-labelledby="projects-list-heading">
+                <header className="projects-card-heading"><h2 id="projects-list-heading">Projects</h2><span>{projects.length}</span></header>
+                {projects.length === 0 ? (
+                  <div className="projects-empty projects-empty-compact">
+                    <span aria-hidden="true">□</span>
+                    <h3>No projects yet</h3>
+                    <p>Create your first project above. Tasks live on its board.</p>
+                  </div>
+                ) : (
+                  <ul className="projects-list">
+                    {projects.map((project) => (
+                      <li key={project.id}>
+                        <button
+                          type="button"
+                          aria-pressed={project.id === selectedId}
+                          onClick={() => setSelectedId(project.id)}
+                          className={`projects-list-button${project.id === selectedId ? " projects-list-button-current" : ""}`}
+                        >
+                          <span className="projects-list-title"><strong>{project.name}</strong><span className={`project-status ${statusClass(project.status)}`}>{project.status}</span></span>
+                          <span className="projects-list-date">{project.dueAt ? `Due ${formatDate(project.dueAt)}` : "No due date"}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
           </aside>
 
           <section className="projects-card projects-board-card" aria-labelledby="project-board-heading">
@@ -517,8 +524,9 @@ export function ProjectsPage({ actorId = null, organizationId = null }: Partial<
             {!selected ? (
               <div className="projects-empty">
                 <span aria-hidden="true">□</span>
-                <h3>Select a project</h3>
-                <p>Pick a project on the left to see its board.</p>
+                <h3>{projects.length === 0 ? "No projects yet" : "Select a project"}</h3>
+                <p>{projects.length === 0 ? "Name your first project on the left. Its board opens here with tasks, owners, and due dates." : "Pick a project on the left to see its board."}</p>
+                {projects.length === 0 && <button type="button" className="projects-primary-button" onClick={() => document.getElementById("project-name")?.focus()}>Name your first project</button>}
               </div>
             ) : (
               <>

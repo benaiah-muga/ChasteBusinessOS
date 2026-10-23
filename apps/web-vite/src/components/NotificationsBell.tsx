@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Bell, Check, Inbox, RefreshCw, TriangleAlert } from "lucide-react";
 import { fetchNotifications, markNotificationRead, safeNotificationHref, type Notification } from "../api/notifications";
+import { navigate } from "../navigation";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import "./notifications-bell.css";
+
+const NOTIFICATION_CAPABILITY = /\b(iam|accounting|purchasing|inventory|crm|sales|hr|documents|support|pos|manufacturing|marketing|projects|creator|approval)\.([a-zA-Z0-9]+)\b/g;
+
+function humanizeNotificationTitle(title: string): string {
+  return title
+    .replace(NOTIFICATION_CAPABILITY, (_match, _domain: string, action: string) => action.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase()))
+    .replace(/risk class '([^']+)'/gi, "risk: $1")
+    .replace(/ - /g, " · ");
+}
 
 function timeAgo(value: string): string {
   const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
@@ -12,70 +25,6 @@ function timeAgo(value: string): string {
   return `${days}d ago`;
 }
 
-const styles = {
-  root: { position: "relative" as const },
-  trigger: {
-    position: "relative" as const,
-    display: "grid",
-    width: 40,
-    height: 40,
-    placeItems: "center",
-    border: "1px solid #e7e5e4",
-    borderRadius: 12,
-    background: "#fff",
-    color: "#57534e",
-    cursor: "pointer",
-  },
-  badge: {
-    position: "absolute" as const,
-    top: -4,
-    right: -4,
-    display: "grid",
-    minWidth: 18,
-    height: 18,
-    padding: "0 4px",
-    placeItems: "center",
-    borderRadius: 999,
-    background: "#a87817",
-    color: "white",
-    fontSize: 10,
-    fontWeight: 700,
-  },
-  panel: {
-    position: "absolute" as const,
-    zIndex: 40,
-    top: "calc(100% + 8px)",
-    right: 0,
-    width: "min(340px, calc(100vw - 24px))",
-    overflow: "hidden",
-    border: "1px solid #e7e5e4",
-    borderRadius: 14,
-    background: "white",
-    boxShadow: "0 12px 32px rgb(28 25 23 / 14%)",
-  },
-  heading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    margin: 0,
-    padding: "12px 15px",
-    borderBottom: "1px solid #f1f0ee",
-    color: "#57534e",
-    fontSize: 12,
-    fontWeight: 700,
-    letterSpacing: "0.06em",
-    textTransform: "uppercase" as const,
-  },
-  list: { maxHeight: 360, overflowY: "auto" as const, margin: 0, padding: 0, listStyle: "none" },
-  item: { borderBottom: "1px solid #f5f5f4" },
-  link: { display: "block", padding: "12px 15px", color: "inherit", textDecoration: "none" },
-  title: { margin: 0, color: "#292524", fontSize: 13, lineHeight: 1.4 },
-  time: { margin: "4px 0 0", color: "#78716c", fontSize: 11 },
-  muted: { margin: 0, padding: "24px 16px", color: "#78716c", fontSize: 12, textAlign: "center" as const },
-  error: { margin: 0, padding: "16px", color: "#9f3528", fontSize: 12, textAlign: "center" as const },
-  retry: { marginTop: 8, border: 0, background: "transparent", color: "#784f06", font: "inherit", fontWeight: 650, cursor: "pointer" },
-} as const;
-
 export function NotificationsBell({
   align = "right",
   onNavigate,
@@ -87,7 +36,6 @@ export function NotificationsBell({
   const [rows, setRows] = useState<Notification[] | null>(null);
   const [unread, setUnread] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const boxRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const pendingReadRef = useRef(new Map<string, Promise<void>>());
   const requestRef = useRef(0);
@@ -123,26 +71,7 @@ export function NotificationsBell({
     };
   }, [load]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        if (boxRef.current?.contains(document.activeElement)) triggerRef.current?.focus();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
-  async function markRead(row: Notification) {
+  async function markRead(row: Notification): Promise<void> {
     if (row.readAt) return;
     const pending = pendingReadRef.current.get(row.id);
     if (pending) return pending;
@@ -163,80 +92,126 @@ export function NotificationsBell({
     if (failed) void load();
   }
 
-  const panelStyle = align === "left" ? { ...styles.panel, right: "auto", left: 0 } : styles.panel;
+  async function markAllRead() {
+    const unreadRows = rows?.filter((row) => !row.readAt) ?? [];
+    if (unreadRows.length === 0) return;
+    await Promise.all(unreadRows.map((row) => markRead(row)));
+  }
+
+  function openHref(href: string) {
+    setOpen(false);
+    if (onNavigate) onNavigate(href);
+    else navigate(href);
+  }
 
   return (
-    <div ref={boxRef} style={styles.root}>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}
-        aria-expanded={open}
-        aria-controls="notifications-menu"
-        onClick={() => {
-          setOpen((current) => !current);
-          void load();
+    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) void load(); }}>
+      <PopoverTrigger asChild>
+        <button
+          ref={triggerRef}
+          type="button"
+          className="topbar-icon-button notifications-trigger"
+          aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}
+        >
+          <Bell size={16} aria-hidden="true" />
+          {unread > 0 && <span className="notifications-badge" aria-hidden="true">{unread > 9 ? "9+" : unread}</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align={align === "left" ? "start" : "end"}
+        className="notifications-panel"
+        aria-label="Recent notifications"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          triggerRef.current?.focus();
         }}
-        style={styles.trigger}
+        onKeyDownCapture={(event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          triggerRef.current?.focus();
+        }}
       >
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="19" height="19">
-          <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M13.7 21a2 2 0 0 1-3.4 0" strokeLinecap="round" />
-        </svg>
-        {unread > 0 && <span aria-hidden="true" style={styles.badge}>{unread > 9 ? "9+" : unread}</span>}
-      </button>
-
-      {open && (
-        <section id="notifications-menu" aria-label="Recent notifications" style={panelStyle}>
-          <h2 style={styles.heading}>Notifications</h2>
-          {error ? (
-            <p role="alert" style={styles.error}>
-              {error}<br />
-              <button type="button" style={styles.retry} onClick={() => void load()}>Try again</button>
-            </p>
-          ) : rows === null ? (
-            <p role="status" style={styles.muted}>Loading notifications…</p>
-          ) : rows.length === 0 ? (
-            <p style={styles.muted}>Nothing new. Recent approvals and updates appear here.</p>
-          ) : (
-            <ul style={styles.list}>
-              {rows.map((row) => {
-                const href = safeNotificationHref(row.href);
-                const contents = <>
-                  <p style={{ ...styles.title, fontWeight: row.readAt ? 450 : 650 }}>{row.title}</p>
-                  <p style={styles.time}>{timeAgo(row.createdAt)}</p>
-                </>;
-                return (
-                  <li key={row.id} role="none" style={{ ...styles.item, background: row.readAt ? "white" : "#fbf7ed" }}>
-                    {href ? (
-                      <a
-                        href={href}
-                        onClick={(event) => {
-                          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-                            void markRead(row);
-                            return;
-                          }
-                          event.preventDefault();
-                          void markRead(row).then(() => {
-                            setOpen(false);
-                            if (onNavigate) onNavigate(href);
-                            else window.location.assign(href);
-                          });
-                        }}
-                        style={styles.link}
-                      >
-                        {contents}
-                      </a>
-                    ) : (
-                      <div aria-disabled="true" style={styles.link}>{contents}</div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+        <header className="notifications-head">
+          <div>
+            <p className="notifications-eyebrow">Workspace activity</p>
+            <h2>Notifications</h2>
+          </div>
+          {unread > 0 && (
+            <button type="button" className="notifications-mark-all" onClick={() => void markAllRead()}>
+              <Check size={12} aria-hidden="true" /> Mark all read
+            </button>
           )}
-        </section>
-      )}
-    </div>
+        </header>
+
+        {error ? (
+          <div className="notifications-state" role="alert">
+            <span className="notifications-state-icon notifications-state-icon-error"><TriangleAlert size={17} aria-hidden="true" /></span>
+            <strong>Could not load notifications</strong>
+            <p>{error}</p>
+            <button type="button" className="ui-button ui-button-secondary ui-button-sm" onClick={() => void load()}>
+              <RefreshCw size={12} aria-hidden="true" /> Try again
+            </button>
+          </div>
+        ) : rows === null ? (
+          <div className="notifications-loading" role="status">
+            <span /><span /><span />
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="notifications-state">
+            <span className="notifications-state-icon"><Bell size={17} aria-hidden="true" /></span>
+            <strong>Nothing new</strong>
+            <p>Approvals, mentions, and workspace updates land here.</p>
+          </div>
+        ) : (
+          <ul className="notifications-list">
+            {rows.map((row) => {
+              const href = safeNotificationHref(row.href);
+              const contents = (
+                <>
+                  <span className={`notifications-dot${row.readAt ? "" : " is-unread"}`} aria-hidden="true" />
+                  <span className="notifications-copy">
+                    <span className="notifications-title">{humanizeNotificationTitle(row.title)}</span>
+                    <span className="notifications-time">{timeAgo(row.createdAt)}</span>
+                  </span>
+                </>
+              );
+              return (
+                <li key={row.id}>
+                  {href ? (
+                    <a
+                      href={href}
+                      className={`notifications-item${row.readAt ? "" : " is-unread"}`}
+                      onClick={(event) => {
+                        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                          void markRead(row);
+                          return;
+                        }
+                        event.preventDefault();
+                        void markRead(row).then(() => openHref(href));
+                      }}
+                    >
+                      {contents}
+                    </a>
+                  ) : (
+                    <div className={`notifications-item${row.readAt ? "" : " is-unread"}`} aria-disabled="true">{contents}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <footer className="notifications-footer">
+          <a href="/inbox" onClick={(event) => { event.preventDefault(); openHref("/inbox"); }}>
+            <Inbox size={13} aria-hidden="true" /> Open your inbox
+          </a>
+          <button type="button" onClick={() => void load()} aria-label="Refresh notifications">
+            <RefreshCw size={13} aria-hidden="true" />
+          </button>
+        </footer>
+      </PopoverContent>
+    </Popover>
   );
 }

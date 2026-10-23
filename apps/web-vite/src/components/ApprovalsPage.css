@@ -64,21 +64,21 @@
   line-height: 1.55;
 }
 
-.approval-notice-success { border-color: #c8dbc9; background: #f0f7ef; color: #30563b; }
-.approval-notice-error, .approval-load-error { border-color: #e7c8c0; background: #fff7f4; color: #8e4134; }
+.approval-notice-success { border-color: #cbdcc9; background: #edf3eb; color: #4f6b52; }
+.approval-notice-error, .approval-load-error { border-color: #ecc6bd; background: #fbf0ed; color: #9d4438; }
 .approval-notice a { color: inherit; font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }
-.approval-load-error button { flex: 0 0 auto; border: 1px solid #d9b4a9; border-radius: 6px; padding: 6px 9px; background: #fffefa; color: inherit; cursor: pointer; font-size: 11px; font-weight: 650; }
+.approval-load-error button { flex: 0 0 auto; border: 1px solid #d9b4a9; border-radius: 6px; padding: 6px 9px; background: #fffdf8; color: inherit; cursor: pointer; font-size: 11px; font-weight: 650; }
 .approval-load-error button:hover { background: #fdf0ec; }
-.approval-loading, .approval-refreshing { color: #777a70; font-size: 12px; }
+.approval-loading, .approval-refreshing { color: #6b6559; font-size: 12px; }
 .approval-refreshing { margin: 0 0 10px; }
 
 .approval-queue { display: grid; gap: 15px; }
 
 .approval-card {
   overflow: hidden;
-  border: 1px solid #e5e3da;
+  border: 1px solid #e5dccb;
   border-radius: 12px;
-  background: #fffefa;
+  background: #fffdf8;
   box-shadow: 0 9px 28px rgb(48 45 36 / 4%);
 }
 
@@ -88,16 +88,16 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 9px;
-  border-bottom: 1px solid #eeece5;
+  border-bottom: 1px solid #eee7da;
   padding: 9px 17px;
-  background: #faf9f5;
+  background: #faf6ee;
 }
 
 .approval-card-head > strong { color: #333b33; font-size: 12px; font-weight: 650; }
-.approval-card-head time { margin-left: auto; color: #92938b; font-size: 10px; white-space: nowrap; }
+.approval-card-head time { margin-left: auto; color: #756f63; font-size: 10px; white-space: nowrap; }
 .approval-risk, .approval-raised, .approval-status { display: inline-flex; align-items: center; border-radius: 99px; padding: 4px 8px; font-size: 9px; font-weight: 700; letter-spacing: .035em; text-transform: uppercase; }
 .approval-risk { border: 1px solid #dedbd0; background: #f3f1e9; color: #62635a; }
-.approval-risk-money { border-color: #ead8a9; background: #fbf4df; color: #81672c; }
+.approval-risk-money { border-color: #ead6a8; background: #fbf4df; color: #81672c; }
 .approval-risk-identity, .approval-risk-destructive { border-color: #e7c6bc; background: #fff0eb; color: #984a39; }
 .approval-risk-secret { border-color: #d8c9e9; background: #f5eefb; color: #6d4b8a; }
 .approval-raised-agent { background: #eee7f7; color: #68478a; }
@@ -132,22 +132,22 @@
 .approval-documents a { color: #27577a; text-underline-offset: 2px; }
 
 .approval-technical { margin-top: 11px; }
-.approval-technical summary { margin-bottom: 7px; color: #85867d; cursor: pointer; font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.approval-technical summary { margin-bottom: 7px; color: #746e62; cursor: pointer; font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .approval-technical pre { max-height: 230px; overflow: auto; margin: 0; border-radius: 7px; padding: 12px; background: #232723; color: #e6e9e4; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .approval-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; }
 .approval-button { min-height: 36px; border: 1px solid; border-radius: 7px; padding: 0 12px; cursor: pointer; font-size: 11px; font-weight: 650; transition: background 120ms ease, border-color 120ms ease; }
-.approval-button:focus-visible, .approval-load-error button:focus-visible, .approval-copy:focus-visible { outline: 2px solid #84744e; outline-offset: 3px; }
+.approval-button:focus-visible, .approval-load-error button:focus-visible, .approval-copy:focus-visible { outline: 2px solid #8b6a22; outline-offset: 3px; }
 .approval-button:disabled { cursor: wait; opacity: .58; }
-.approval-button-approve { border-color: #254638; background: #294c3c; color: #fffefa; }
+.approval-button-approve { border-color: #254638; background: #294c3c; color: #fffdf8; }
 .approval-button-approve:hover:not(:disabled) { border-color: #1d382c; background: #1f4031; }
-.approval-button-reject { border-color: #dedbd1; background: #fffefa; color: #6f5149; }
-.approval-button-reject:hover:not(:disabled) { border-color: #dab7ad; background: #fff7f4; }
+.approval-button-reject { border-color: #dedbd1; background: #fffdf8; color: #6f5149; }
+.approval-button-reject:hover:not(:disabled) { border-color: #dab7ad; background: #fbf0ed; }
 
 .approval-empty { display: grid; justify-items: center; border: 1px dashed #d8d6cd; border-radius: 11px; padding: 35px 20px; background: rgb(255 254 250 / 70%); text-align: center; }
 .approval-empty > span { display: grid; width: 35px; height: 35px; place-items: center; border: 1px solid #d8e2d6; border-radius: 50%; background: #edf4eb; color: #466d4c; font-size: 17px; }
-.approval-empty h2 { margin: 12px 0 5px; color: #38463b; font-family: Georgia, "Times New Roman", serif; font-size: 21px; font-weight: 500; }
-.approval-empty p { margin: 0; color: #7d8076; font-size: 11px; }
+.approval-empty h2 { margin: 12px 0 5px; color: #2e2b24; font-family: Georgia, "Times New Roman", serif; font-size: 21px; font-weight: 500; }
+.approval-empty p { margin: 0; color: #7c766b; font-size: 11px; }
 
 .approval-history { margin-top: 32px; }
 .approval-history > header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -155,13 +155,13 @@
 .approval-history header p { margin: 0; color: #898a81; font-size: 10px; }
 .approval-history header > a { color: #806a3e; font-size: 10px; font-weight: 650; text-decoration: none; }
 .approval-history header > a:hover { text-decoration: underline; text-underline-offset: 2px; }
-.approval-history ul { overflow: hidden; margin: 0; border: 1px solid #e5e3da; border-radius: 9px; padding: 0; background: #fffefa; list-style: none; }
-.approval-history li { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; border-bottom: 1px solid #efede7; padding: 10px 12px; color: #7b7c73; font-size: 10px; }
+.approval-history ul { overflow: hidden; margin: 0; border: 1px solid #e5dccb; border-radius: 9px; padding: 0; background: #fffdf8; list-style: none; }
+.approval-history li { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; border-bottom: 1px solid #eee7da; padding: 10px 12px; color: #7b7c73; font-size: 10px; }
 .approval-history li:last-child { border-bottom: 0; }
 .approval-history li strong { color: #424940; font-size: 11px; }
 .approval-history li time { margin-left: auto; color: #94958d; font-size: 9px; }
 .approval-history li > p { flex-basis: 100%; margin: 0; padding-left: 2px; color: #75766d; font-size: 10px; }
-.approval-status { padding: 4px 7px; background: #efeee9; color: #66675e; font-size: 8px; }
+.approval-status { padding: 4px 7px; background: #eee7da; color: #66675e; font-size: 8px; }
 .approval-status-executed, .approval-status-approved { background: #e7f1e5; color: #416346; }
 .approval-status-rejected { background: #fbebe7; color: #914d40; }
 .approval-history-note { margin: 8px 0 0; color: #909188; font-size: 9px; line-height: 1.5; }
@@ -173,3 +173,9 @@
   .approval-preview dl { grid-template-columns: 1fr; }
   .approval-history li time { width: 100%; margin-left: 0; }
 }
+
+.approval-plan { border: 1px solid #e5dccb; border-radius: 8px; padding: 12px 14px; background: #fbf7ef; }
+.approval-plan h3 { margin: 0 0 8px; color: #414840; font-size: 11px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.approval-plan ol { display: grid; gap: 5px; margin: 0; padding-left: 18px; color: #5f645a; font-size: 11px; line-height: 1.55; }
+.approval-plan p { margin: 10px 0 0; border-top: 1px solid #e9e0d0; padding-top: 8px; color: #746e62; font-size: 10px; line-height: 1.55; }
+.approval-plan strong { color: #4a5148; }

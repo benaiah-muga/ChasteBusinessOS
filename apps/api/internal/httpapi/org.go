@@ -9,10 +9,14 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 	"unicode/utf16"
 
 	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 	"github.com/google/uuid"
 )
@@ -35,8 +39,6 @@ type OrgRepository interface {
 	IsMember(ctx context.Context, userID, orgID string) (bool, error)
 	// AgentSoul reads the organization's standing agent persona.
 	AgentSoul(ctx context.Context, orgID string) (string, error)
-	// SetAgentSoul replaces it. An empty persona clears it.
-	SetAgentSoul(ctx context.Context, orgID, soul string) error
 }
 
 // OrgSummary is one entry of the organization switcher.
@@ -64,17 +66,18 @@ const maxSoulBodyBytes = 64 * 1024
 type OrgHandler struct {
 	repo              OrgRepository
 	session           SessionResolver
+	executor          CapabilityExecutor
 	logger            *slog.Logger
 	secret            string
 	trustedProxyCIDRs []*net.IPNet
 }
 
-func NewOrgHandler(repo OrgRepository, resolver SessionResolver, secret string, logger *slog.Logger, trustedProxyCIDRs ...[]*net.IPNet) *OrgHandler {
+func NewOrgHandler(repo OrgRepository, resolver SessionResolver, executor CapabilityExecutor, secret string, logger *slog.Logger, trustedProxyCIDRs ...[]*net.IPNet) *OrgHandler {
 	var trusted []*net.IPNet
 	if len(trustedProxyCIDRs) > 0 {
 		trusted = trustedProxyCIDRs[0]
 	}
-	return &OrgHandler{repo: repo, session: resolver, secret: secret, logger: logger, trustedProxyCIDRs: trusted}
+	return &OrgHandler{repo: repo, session: resolver, executor: executor, secret: secret, logger: logger, trustedProxyCIDRs: trusted}
 }
 
 // orgActor is the resolved caller plus the cookies needed for the switch.
@@ -222,7 +225,8 @@ func (h *OrgHandler) post(w http.ResponseWriter, r *http.Request, actor *orgActo
 }
 
 // patch replaces the organization's agent persona. This text steers every agent
-// turn for the whole organization, so it is admin-gated.
+// turn for the whole organization, so it is admin-gated and runs through the
+// governed iam.setAgentSoul capability.
 func (h *OrgHandler) patch(w http.ResponseWriter, r *http.Request, actor *orgActor) {
 	if !sameOriginCapabilityRequest(r, h.trustedProxyCIDRs) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "same-origin request required"})
@@ -232,8 +236,12 @@ func (h *OrgHandler) patch(w http.ResponseWriter, r *http.Request, actor *orgAct
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	if !actor.resolved.HasPermission("iam.admin") {
+	if !actor.resolved.HasPermission("iam.admin") && !actor.resolved.HasPermission("*") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if h.executor == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "organization service unavailable"})
 		return
 	}
 
@@ -241,12 +249,48 @@ func (h *OrgHandler) patch(w http.ResponseWriter, r *http.Request, actor *orgAct
 	if !ok {
 		return
 	}
-
-	if err := h.repo.SetAgentSoul(r.Context(), *actor.resolved.OrgID, soul); err != nil {
+	input, err := json.Marshal(map[string]string{"agentSoul": soul})
+	if err != nil {
+		h.fail(w, "encode agent soul", err)
+		return
+	}
+	result, err := h.executor.Execute(r.Context(), orgCapabilityClaims(actor.resolved, *actor.resolved.OrgID, capability.IAMSetAgentSoulCapabilityID, input), capability.IAMSetAgentSoulCapabilityID, input)
+	if err != nil {
+		if errors.Is(err, capability.ErrSessionInvalid) || errors.Is(err, capability.ErrScopeMismatch) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
 		h.fail(w, "set agent soul", err)
 		return
 	}
+	if !result.OK {
+		status := http.StatusUnprocessableEntity
+		if strings.HasPrefix(result.Error, "forbidden:") {
+			status = http.StatusForbidden
+		}
+		writeJSON(w, status, map[string]string{"error": result.Error})
+		return
+	}
 	writeJSON(w, http.StatusOK, businesscontract.OrganizationWriteSuccess{Ok: businesscontract.OrganizationWriteSuccessOkTrue})
+}
+
+func orgCapabilityClaims(resolved *session.ResolvedUser, orgID, capabilityID string, input json.RawMessage) authbridge.CapabilityClaims {
+	permissions := make([]string, 0, len(resolved.Permissions))
+	for permission, granted := range resolved.Permissions {
+		if granted {
+			permissions = append(permissions, permission)
+		}
+	}
+	sort.Strings(permissions)
+	actorID := resolved.UserID
+	digest, _ := capability.InputHash(input)
+	now := time.Now().UTC()
+	return authbridge.CapabilityClaims{
+		Audience: authbridge.CapabilityExecuteAudience, Subject: resolved.UserID, OrganizationID: orgID,
+		CapabilityID: capabilityID, InputSHA256: digest, ActorID: &actorID, ActorType: "human",
+		Permissions: permissions, AuthSessionID: resolved.AuthSessionID,
+		IssuedAt: now.Unix(), ExpiresAt: now.Add(30 * time.Second).Unix(),
+	}
 }
 
 // put returns the organization's agent persona for the settings editor.

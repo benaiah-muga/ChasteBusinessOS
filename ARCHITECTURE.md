@@ -63,6 +63,14 @@ Every action, by human UI click or agent tool-call, funnels through the same
 place to enforce security, one place to audit, and the AI can do *everything* the human
 can because they share the same contract.
 
+Registration is also the agent discovery index: every supported, non-hidden
+capability is merged into the model-facing catalog after its domain registers
+it. A capability must carry a reviewed contract (title, intent, and a closed
+input schema) in its spec, the migration manifest, or the hand-written tool
+catalog; CI fails otherwise. Hiding a business capability from the agent
+requires an explicit `humanOnly` or `agentHidden` reason, reviewed in the
+conformance test. See [capability coverage](docs/CAPABILITY_COVERAGE.md).
+
 ### Governance pipeline (per action)
 
 ```

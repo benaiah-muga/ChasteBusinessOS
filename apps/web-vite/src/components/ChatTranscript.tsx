@@ -1,9 +1,41 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { ArrowUp, Check, Copy, Layers3 } from "lucide-react";
 import { answerChatAsk, chatStore, useChat, type AskPayload, type ChatMsg } from "../chat-store";
 import { CHAT_MESSAGE_MAX_UNITS, type ChatUsage } from "../api/chat";
 import { ProposalCard } from "./ProposalCard";
 import { WorkmateRecordCard } from "./WorkmateRecordCard";
+import { BrandMark } from "../ui/brand-mark";
 import "./ChatTranscript.css";
+
+const TOOL_MODULE_LABELS: Record<string, string> = {
+  accounting: "Accounting",
+  analytics: "Analytics",
+  approval: "Approval",
+  crm: "CRM",
+  documents: "Documents",
+  hr: "People",
+  inventory: "Inventory",
+  manufacturing: "Manufacturing",
+  marketing: "Marketing",
+  messaging: "Messages",
+  pos: "Register",
+  projects: "Projects",
+  purchasing: "Purchasing",
+  sales: "Sales",
+  support: "Support",
+};
+
+/** Turns a capability id into a readable tool action for the transcript. */
+export function formatToolName(name: string): string {
+  const [module, ...rest] = name.split(".");
+  const action = rest.join(".") || module || name;
+  const label = action
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[._-]+/g, " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+  const moduleLabel = TOOL_MODULE_LABELS[module ?? ""];
+  return moduleLabel ? `${moduleLabel} · ${label}` : label;
+}
 
 /** Compact token counts for chips: 1234 -> "1.2k". */
 export function formatTokens(n: number): string {
@@ -19,7 +51,7 @@ export function formatTokens(n: number): string {
  * no em dash ever reaches the screen and hyphens survive untouched.
  */
 export function sanitizeReply(text: string): string {
-  return text.replace(/\u2014/g, ", ").replace(/\u2013/g, "-");
+  return text.replace(/\u2014/g, ", ").replace(/[\u2012\u2013\u2015]/g, "-").replace(/\u2011/g, "-").replace(/\u202f/g, " ");
 }
 
 export function UsageChip({ usage }: { usage: ChatUsage }) {
@@ -185,6 +217,18 @@ export function MessageList({
   compact?: boolean;
   organizationId?: string | null;
 }) {
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  async function copyReply(index: number, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIndex(index);
+      window.setTimeout(() => setCopiedIndex((current) => current === index ? null : current), 1600);
+    } catch {
+      setCopiedIndex(null);
+    }
+  }
+
   return (
     <div className={`chat-transcript${compact ? " chat-transcript-compact" : ""}`}>
       {messages.map((message, index) => {
@@ -194,6 +238,13 @@ export function MessageList({
             <div key={index} className="chat-row chat-row-user">
               <div className="chat-bubble-user">
                 {message.text}
+                {(message.attachments?.length ?? 0) > 0 && (
+                  <div className="chat-source-chips" aria-label="Attached sources">
+                    {message.attachments!.map((attachment) => (
+                      <span className="chat-source-chip" key={`${attachment.type}:${attachment.id}`}>{attachment.title}</span>
+                    ))}
+                  </div>
+                )}
                 {message.steered && <span className="chat-steered-note">steered into the running turn</span>}
               </div>
             </div>
@@ -202,7 +253,7 @@ export function MessageList({
         return (
           <div key={index} className="chat-row">
             <span aria-hidden="true" className="chat-avatar">
-              ✦
+              <BrandMark variant="gold" size="sm" />
             </span>
             <div className="chat-message-body">
               {(message.activity?.length ?? 0) > 0 && (
@@ -210,8 +261,8 @@ export function MessageList({
                   {message.activity!.map((activity, activityIndex) => {
                     const pending = busy && isLast && activityIndex === message.activity!.length - 1;
                     return (
-                      <span key={activityIndex} className={pending ? "chat-activity-chip chat-activity-chip-pending" : "chat-activity-chip"}>
-                        {activity}
+                      <span key={activityIndex} title={activity} className={pending ? "chat-activity-chip chat-activity-chip-pending" : "chat-activity-chip"}>
+                        {formatToolName(activity)}
                       </span>
                     );
                   })}
@@ -237,10 +288,29 @@ export function MessageList({
                   </span>
                 )
               )}
+              {message.compactedToMessages !== undefined && (
+                <div className="chat-compaction" role="status">
+                  <Layers3 size={13} aria-hidden="true" />
+                  <span>Older context summarized to keep the session moving. {message.compactedToMessages} recent messages kept.</span>
+                </div>
+              )}
               {message.ask && <AskCard ask={message.ask} answered={message.answered} />}
               {message.card && <WorkmateRecordCard card={message.card} />}
               {message.proposal && <ProposalCard proposal={message.proposal} organizationId={organizationId} />}
-              {message.usage && <UsageChip usage={message.usage} />}
+              <div className="chat-message-footer">
+                {message.usage && <UsageChip usage={message.usage} />}
+                {message.role === "assistant" && message.text && !message.error && (
+                  <button
+                    type="button"
+                    className="chat-copy-reply"
+                    aria-label={copiedIndex === index ? "Reply copied" : "Copy reply"}
+                    onClick={() => void copyReply(index, sanitizeReply(message.text))}
+                  >
+                    {copiedIndex === index ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+                    <span>{copiedIndex === index ? "Copied" : "Copy"}</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -317,7 +387,7 @@ export function ChatComposer({
         disabled={!value.trim()}
         aria-label={busy ? "Steer the running turn" : "Send message"}
       >
-        →
+        <ArrowUp size={16} aria-hidden="true" />
       </button>
     </form>
   );

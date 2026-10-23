@@ -13,20 +13,19 @@ import (
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
-	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/jackc/pgx/v5"
 )
 
 var projectUUIDPattern = regexp.MustCompile(`(?i)^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$`)
 
 const (
-	ProjectBoardReadCapabilityID     = "projects.listBoard"
-	ProjectCollectionReadOperationID = "projects.list"
-	projectRestoreCapabilityID       = "projects.restoreProject"
-	projectDeleteTaskCapabilityID    = "projects.deleteTask"
-	projectRestoreTaskCapabilityID   = "projects.restoreTask"
-	projectRestorePlacementID        = "projects.restoreTaskPlacement"
-	projectRestoreAssigneeID         = "projects.restoreTaskAssignment"
+	ProjectBoardReadCapabilityID      = "projects.listBoard"
+	ProjectCollectionReadCapabilityID = "projects.list"
+	projectRestoreCapabilityID        = "projects.restoreProject"
+	projectDeleteTaskCapabilityID     = "projects.deleteTask"
+	projectRestoreTaskCapabilityID    = "projects.restoreTask"
+	projectRestorePlacementID         = "projects.restoreTaskPlacement"
+	projectRestoreAssigneeID          = "projects.restoreTaskAssignment"
 )
 
 type ProjectBoardInput struct {
@@ -65,6 +64,10 @@ type ProjectCollectionItem struct {
 
 type ProjectCollectionOutput struct {
 	Projects []ProjectCollectionItem `json:"projects"`
+}
+
+type ProjectCollectionInput struct {
+	Status *string `json:"status,omitempty"`
 }
 
 type CreateProjectInput struct {
@@ -205,6 +208,18 @@ func ParseCreateProjectInput(raw json.RawMessage) (CreateProjectInput, error) {
 		return CreateProjectInput{}, err
 	}
 	return CreateProjectInput{Name: name, DueAt: dueAt}, nil
+}
+
+func ParseProjectCollectionInput(raw json.RawMessage) (ProjectCollectionInput, error) {
+	fields, err := projectInputObject(raw)
+	if err != nil {
+		return ProjectCollectionInput{}, err
+	}
+	status, err := projectOptionalEnum(fields, "status", []string{"active", "archived"})
+	if err != nil {
+		return ProjectCollectionInput{}, err
+	}
+	return ProjectCollectionInput{Status: status}, nil
 }
 
 func ParseProjectBoardInput(raw json.RawMessage) (ProjectBoardInput, error) {
@@ -640,13 +655,13 @@ func listProjectBoard(ctx context.Context, tx pgx.Tx, orgID string, input Projec
 	return output, nil
 }
 
-func listProjectCollection(ctx context.Context, tx pgx.Tx, orgID string) (ProjectCollectionOutput, error) {
+func listProjectCollection(ctx context.Context, tx pgx.Tx, orgID string, status *string) (ProjectCollectionOutput, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, name, status, due_at, created_at
 		FROM projects
-		WHERE org_id = $1::uuid
+		WHERE org_id = $1::uuid AND ($2::text IS NULL OR status = $2::text)
 		ORDER BY created_at DESC
-		LIMIT 50`, orgID)
+		LIMIT 50`, orgID, status)
 	if err != nil {
 		return ProjectCollectionOutput{}, err
 	}
@@ -677,54 +692,6 @@ func projectISOTime(value *time.Time) *string {
 	}
 	formatted := value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
 	return &formatted
-}
-
-// ReadProjectCollection intentionally shares identity and grant checks with capabilities without emitting a capability audit event.
-func (e *Executor) ReadProjectCollection(ctx context.Context, claims authbridge.CapabilityClaims, rawInput json.RawMessage) (Result, error) {
-	if e == nil || e.pool == nil {
-		return Result{}, errors.New("capability executor is unavailable")
-	}
-	if claims.CapabilityID != ProjectCollectionReadOperationID || claims.Audience != authbridge.CapabilityExecuteAudience ||
-		claims.ActorType != "human" || !isUUID(claims.Subject) || !isUUID(claims.OrganizationID) || claims.ActorID == nil ||
-		!isUUID(*claims.ActorID) || *claims.ActorID != claims.Subject || claims.AgentSessionID != "" {
-		return Result{}, ErrSessionInvalid
-	}
-	if !bytes.Equal(bytes.TrimSpace(rawInput), []byte("{}")) {
-		return Result{}, ErrScopeMismatch
-	}
-	inputDigest, err := InputHash(rawInput)
-	if err != nil || inputDigest != claims.InputSHA256 {
-		return Result{}, ErrScopeMismatch
-	}
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	return dbx.WithOrgTx(ctx, e.pool, claims.OrganizationID, func(tx pgx.Tx) (Result, error) {
-		if err := verifyIdentity(ctx, tx, claims, now); err != nil {
-			return Result{}, err
-		}
-		enabled, err := isModuleEnabled(ctx, tx, claims.OrganizationID, "projects")
-		if err != nil {
-			return Result{}, err
-		}
-		if !enabled {
-			return Result{OK: false, Error: `module "projects" is disabled for this organization`}, nil
-		}
-		permissions, err := effectivePermissions(ctx, tx, claims)
-		if err != nil {
-			return Result{}, err
-		}
-		if !permissions["*"] && !permissions["projects.read"] {
-			return Result{OK: false, Error: "forbidden: missing permission: projects.read"}, nil
-		}
-		output, err := listProjectCollection(ctx, tx, claims.OrganizationID)
-		if err != nil {
-			return Result{}, err
-		}
-		data, err := marshalJS(output)
-		if err != nil {
-			return Result{}, err
-		}
-		return Result{OK: true, Data: data}, nil
-	})
 }
 
 func projectRequiredEnum(fields map[string]json.RawMessage, key string, allowed []string) (string, error) {

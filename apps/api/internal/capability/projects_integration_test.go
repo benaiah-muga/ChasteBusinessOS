@@ -659,7 +659,7 @@ func TestGoProjectsReadBoardMatchesLegacyColumnsAndAuditBehavior(t *testing.T) {
 	}
 }
 
-func TestGoProjectsReadCollectionPreservesLegacyOrderingLimitDatesAndNoAudit(t *testing.T) {
+func TestGoProjectsReadCollectionPreservesLegacyOrderingLimitDatesAndAudits(t *testing.T) {
 	fx := newProjectsFixture(t)
 	grantProjectsRead(t, fx)
 	if _, err := fx.owner.Exec(fx.ctx, `
@@ -677,14 +677,14 @@ func TestGoProjectsReadCollectionPreservesLegacyOrderingLimitDatesAndNoAudit(t *
 	}
 	fx.setModuleList(`[]`)
 	input := json.RawMessage(`{}`)
-	disabled, err := fx.executor.ReadProjectCollection(fx.ctx, projectReadClaims(fx, ProjectCollectionReadOperationID, input), input)
+	disabled, err := fx.executor.Execute(fx.ctx, projectReadClaims(fx, ProjectCollectionReadCapabilityID, input), ProjectCollectionReadCapabilityID, input)
 	if err != nil || disabled.OK || disabled.Error != `module "projects" is disabled for this organization` {
 		t.Fatalf("disabled Projects collection result=%+v err=%v, want module gate", disabled, err)
 	}
 	fx.setModuleList(`null`)
 
 	before := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid`, fx.orgID)
-	result, err := fx.executor.ReadProjectCollection(fx.ctx, projectReadClaims(fx, ProjectCollectionReadOperationID, input), input)
+	result, err := fx.executor.Execute(fx.ctx, projectReadClaims(fx, ProjectCollectionReadCapabilityID, input), ProjectCollectionReadCapabilityID, input)
 	if err != nil || !result.OK {
 		t.Fatalf("collection result=%+v err=%v", result, err)
 	}
@@ -706,8 +706,11 @@ func TestGoProjectsReadCollectionPreservesLegacyOrderingLimitDatesAndNoAudit(t *
 			t.Fatalf("collection included foreign or over-limit row %+v", project)
 		}
 	}
-	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid`, fx.orgID); got != before {
-		t.Fatalf("collection read appended ledger rows: before=%d after=%d", before, got)
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid`, fx.orgID); got != before+1 {
+		t.Fatalf("collection read ledger rows: before=%d after=%d, want one governed read event", before, got)
+	}
+	if audits := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2`, fx.orgID, ProjectCollectionReadCapabilityID); audits != 1 {
+		t.Fatalf("collection audit events=%d, want 1", audits)
 	}
 }
 
@@ -715,20 +718,20 @@ func TestGoProjectsReadCollectionRechecksSessionMembershipAndCurrentGrants(t *te
 	fx := newProjectsFixture(t)
 	grantProjectsRead(t, fx)
 	raw := json.RawMessage(`{}`)
-	claims := projectReadClaims(fx, ProjectCollectionReadOperationID, raw)
+	claims := projectReadClaims(fx, ProjectCollectionReadCapabilityID, raw)
 	claims.AuthSessionID = "missing-project-read-session"
-	if _, err := fx.executor.ReadProjectCollection(fx.ctx, claims, raw); !errors.Is(err, ErrSessionInvalid) {
+	if _, err := fx.executor.Execute(fx.ctx, claims, ProjectCollectionReadCapabilityID, raw); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatalf("missing active verified session err=%v, want ErrSessionInvalid", err)
 	}
-	claims = projectReadClaims(fx, ProjectCollectionReadOperationID, raw)
+	claims = projectReadClaims(fx, ProjectCollectionReadCapabilityID, raw)
 	claims.OrganizationID = fx.otherOrgID
-	if _, err := fx.executor.ReadProjectCollection(fx.ctx, claims, raw); !errors.Is(err, ErrNotMember) {
+	if _, err := fx.executor.Execute(fx.ctx, claims, ProjectCollectionReadCapabilityID, raw); !errors.Is(err, ErrNotMember) {
 		t.Fatalf("cross-organization membership err=%v, want ErrNotMember", err)
 	}
 	if _, err := fx.owner.Exec(fx.ctx, `DELETE FROM role_permissions WHERE role_id=$1::uuid AND org_id=$2::uuid AND permission_key='projects.read'`, fx.roleID, fx.orgID); err != nil {
 		t.Fatal(err)
 	}
-	denied, err := fx.executor.ReadProjectCollection(fx.ctx, projectReadClaims(fx, ProjectCollectionReadOperationID, raw), raw)
+	denied, err := fx.executor.Execute(fx.ctx, projectReadClaims(fx, ProjectCollectionReadCapabilityID, raw), ProjectCollectionReadCapabilityID, raw)
 	if err != nil || denied.OK || denied.Error != "forbidden: missing permission: projects.read" {
 		t.Fatalf("revoked current grant result=%+v err=%v, want denied projects.read", denied, err)
 	}

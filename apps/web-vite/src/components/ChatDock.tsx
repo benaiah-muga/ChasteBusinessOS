@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { Maximize2, X } from "lucide-react";
 import { chatStore, useChat } from "../chat-store";
 import { navigate } from "../navigation";
-import { ChatComposer, MessageList, formatTokens, useAutoScroll } from "./ChatTranscript";
+import { ChatComposer, MessageList, formatTokens, formatToolName, useAutoScroll } from "./ChatTranscript";
+import { BrandMark } from "../ui/brand-mark";
 import "./ChatDock.css";
 
 /**
@@ -9,11 +11,18 @@ import "./ChatDock.css";
  * sharing the chat page's store. History and an in-flight stream survive
  * shrinking or expanding because both surfaces render the same conversation.
  */
-export function ChatDock({ pathname, organizationId = null }: { pathname: string; organizationId?: string | null }) {
+export function ChatDock({ pathname, organizationId = null, actorId = null }: { pathname: string; organizationId?: string | null; actorId?: string | null }) {
   const { messages, busy, creator, queue, step, lastTool, sessionUsage } = useChat();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const scrollRef = useAutoScroll(messages);
+
+  useEffect(() => {
+    if (!open || !organizationId || !actorId) return;
+    // Restore the last conversation lazily so opening the dock can continue
+    // where the workmate left off, without a session read on every page load.
+    void chatStore.restore(organizationId, actorId);
+  }, [actorId, open, organizationId]);
 
   useEffect(() => {
     if (!open) return;
@@ -30,7 +39,7 @@ export function ChatDock({ pathname, organizationId = null }: { pathname: string
 
   const statusLine = busy
     ? step
-      ? `Step ${step.step}/${step.maxSteps}${lastTool ? ` · ${lastTool.split(".").pop() ?? lastTool}` : ""}`
+      ? `Step ${step.step}/${step.maxSteps}${lastTool ? ` · ${formatToolName(lastTool)}` : ""}`
       : "Working…"
     : creator
       ? "Creator mode"
@@ -53,7 +62,7 @@ export function ChatDock({ pathname, organizationId = null }: { pathname: string
           title="Chat with your workmate"
           onClick={() => setOpen(true)}
         >
-          ✦
+          <BrandMark variant="gold" size="sm" />
           {busy && <span className="chat-dock-bubble-pulse" aria-hidden="true" />}
         </button>
       )}
@@ -61,8 +70,8 @@ export function ChatDock({ pathname, organizationId = null }: { pathname: string
       {open && (
         <section className="chat-dock-panel" role="dialog" aria-label="Chat with your workmate">
           <header className="chat-dock-head">
-            <span aria-hidden="true" className="chat-dock-avatar">
-              ✦
+            <span className="chat-dock-avatar" aria-hidden="true">
+              <BrandMark variant="gold" size="sm" />
               {busy && <span className="chat-dock-avatar-pulse" />}
             </span>
             <div className="chat-dock-title">
@@ -79,7 +88,7 @@ export function ChatDock({ pathname, organizationId = null }: { pathname: string
                 navigate("/chat");
               }}
             >
-              ⤢
+              <Maximize2 size={13} aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -88,7 +97,7 @@ export function ChatDock({ pathname, organizationId = null }: { pathname: string
               title="Close chat"
               onClick={() => setOpen(false)}
             >
-              ×
+              <X size={14} aria-hidden="true" />
             </button>
           </header>
 
@@ -105,7 +114,7 @@ export function ChatDock({ pathname, organizationId = null }: { pathname: string
                   step {step.step}/{step.maxSteps}
                 </span>
               )}
-              {lastTool && <span className="chat-strip-tool">{lastTool}</span>}
+              {lastTool && <span className="chat-strip-tool">{formatToolName(lastTool)}</span>}
               <span className="chat-strip-tokens">{formatTokens(sessionUsage.input + sessionUsage.output)} tok</span>
             </div>
           )}

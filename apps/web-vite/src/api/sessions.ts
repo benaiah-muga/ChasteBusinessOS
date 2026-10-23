@@ -20,12 +20,45 @@ const TrajectoryEventSchema = z.object({
   at: IsoDateSchema,
 });
 
-const SessionEventsSchema = z.object({ events: z.array(TrajectoryEventSchema) }).superRefine(({ events }, context) => {
+function eventsAreOrdered(events: Array<{ seq: number }>): boolean {
   for (let index = 1; index < events.length; index += 1) {
-    if (events[index - 1]!.seq >= events[index]!.seq) {
-      context.addIssue({ code: "custom", message: "Session events must be in strictly increasing sequence order." });
-      return;
-    }
+    if (events[index - 1]!.seq >= events[index]!.seq) return false;
+  }
+  return true;
+}
+
+const SessionEventsSchema = z.object({ events: z.array(TrajectoryEventSchema) }).superRefine(({ events }, context) => {
+  if (!eventsAreOrdered(events)) {
+    context.addIssue({ code: "custom", message: "Session events must be in strictly increasing sequence order." });
+  }
+});
+
+const SessionTokenUsageSchema = z.object({
+  input: z.number().nonnegative().default(0),
+  output: z.number().nonnegative().default(0),
+  cachedInput: z.number().nonnegative().optional(),
+});
+
+const SessionDetailRecordSchema = z.object({
+  id: z.string().min(1),
+  orgId: z.string().min(1),
+  userId: z.string().nullable(),
+  title: z.string().nullable(),
+  mode: z.string().min(1),
+  status: z.string().min(1),
+  summary: z.string().nullable(),
+  modelRef: z.string().nullable(),
+  tokenUsage: SessionTokenUsageSchema.nullable().optional(),
+  createdAt: IsoDateSchema,
+  updatedAt: IsoDateSchema,
+});
+
+const SessionDetailSchema = z.object({
+  session: SessionDetailRecordSchema,
+  events: z.array(TrajectoryEventSchema),
+}).superRefine(({ events }, context) => {
+  if (!eventsAreOrdered(events)) {
+    context.addIssue({ code: "custom", message: "Session events must be in strictly increasing sequence order." });
   }
 });
 
@@ -40,6 +73,34 @@ const ReplaySchema = z.object({
 });
 
 const SessionReplaySchema = z.object({ trace: ReplaySchema });
+
+const SessionRevertSchema = z.object({
+  ok: z.boolean(),
+  inverseCapabilityId: z.string().min(1),
+  data: z.unknown().optional(),
+  error: z.string().optional(),
+  pendingApproval: z.boolean().optional(),
+  approvalId: z.string().optional(),
+  approvalRationale: z.string().optional(),
+});
+
+export type SessionRevertOutcome = z.infer<typeof SessionRevertSchema>;
+
+const SessionTurnRevertSchema = z.object({
+  turnId: z.string().min(1),
+  ok: z.boolean(),
+  planCount: z.number().int().nonnegative(),
+  reverted: z.array(z.object({
+    callId: z.string().min(1),
+    inverseCapabilityId: z.string().min(1),
+    ok: z.boolean(),
+    error: z.string().optional(),
+    pendingApproval: z.boolean().optional(),
+    approvalId: z.string().optional(),
+  })),
+});
+
+export type SessionTurnRevertOutcome = z.infer<typeof SessionTurnRevertSchema>;
 
 const DurableRunSchema = z.object({
   id: z.string().min(1),
@@ -94,6 +155,8 @@ const MetricsSchema = z.object({
 const ErrorBodySchema = z.object({ error: z.string().optional(), message: z.string().optional() });
 
 export type AgentSession = z.infer<typeof SessionSchema>;
+export type SessionDetail = z.infer<typeof SessionDetailSchema>;
+export type SessionTokenUsage = z.infer<typeof SessionTokenUsageSchema>;
 export type TrajectoryEvent = z.infer<typeof TrajectoryEventSchema>;
 export type ReplayTrace = z.infer<typeof ReplaySchema>;
 export type DurableRun = z.infer<typeof DurableRunSchema>;
@@ -178,6 +241,15 @@ export async function fetchSessionEvents(sessionId: string, signal?: AbortSignal
   return response.events;
 }
 
+export function fetchSessionDetail(sessionId: string, signal?: AbortSignal): Promise<SessionDetail> {
+  return fetchValidated(
+    `/api/sessions/${encodeURIComponent(sessionId)}`,
+    "session",
+    SessionDetailSchema,
+    signal,
+  );
+}
+
 export async function fetchSessionReplay(sessionId: string, signal?: AbortSignal): Promise<ReplayTrace> {
   const response = await fetchValidated(
     `/api/sessions/${encodeURIComponent(sessionId)}/replay`,
@@ -204,4 +276,52 @@ export function fetchDurableRunDetail(runId: string, signal?: AbortSignal): Prom
 
 export function fetchSessionMetrics(signal?: AbortSignal): Promise<SessionMetrics> {
   return fetchValidated("/api/metrics", "context metrics", MetricsSchema, signal);
+}
+
+
+export async function revertSessionAction(sessionId: string, callId: string, signal?: AbortSignal): Promise<SessionRevertOutcome> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/revert`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ callId }),
+      signal: requestSignal(signal, 30_000),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new SessionsApiError(0, "The revert service took too long. Check the record before retrying.");
+    }
+    throw new SessionsApiError(0, "Could not reach the revert service. Check your connection and try again.");
+  }
+  if (!response.ok) throw new SessionsApiError(response.status, await errorMessage(response, "revert"));
+  const parsed = SessionRevertSchema.safeParse(await parseJson(response, "revert"));
+  if (!parsed.success) throw new SessionsApiError(200, "The revert service returned an unexpected response.");
+  return parsed.data;
+}
+
+
+export async function revertSessionTurn(sessionId: string, turnId: string, signal?: AbortSignal): Promise<SessionTurnRevertOutcome> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/revert`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ turnId }),
+      signal: requestSignal(signal, 60_000),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new SessionsApiError(0, "The turn revert took too long. Check the affected records before retrying.");
+    }
+    throw new SessionsApiError(0, "Could not reach the revert service. Check your connection and try again.");
+  }
+  if (!response.ok) throw new SessionsApiError(response.status, await errorMessage(response, "revert"));
+  const parsed = SessionTurnRevertSchema.safeParse(await parseJson(response, "revert"));
+  if (!parsed.success) throw new SessionsApiError(200, "The revert service returned an unexpected response.");
+  return parsed.data;
 }

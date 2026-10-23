@@ -107,7 +107,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (["GET", "POST"].includes(method ?? "") && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   // These namespaces have Go handlers for their active Vite flows. Keep malformed
   // paths and unsupported methods on Go so they cannot silently invoke Next.
-  if (/^\/api\/(?:branding|ledger|notifications|onboarding|support\/public|my-work|modules|scim\/tokens|scim\/v2\/Users|sessions|durable-runs)(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
+  if (/^\/api\/(?:branding|ledger|notifications|onboarding|support\/public|my-work|modules|scim\/tokens|scim\/v2\/Users|sessions|durable-runs|search)(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
   if (/^\/api\/routines(?:\/[^?]*)?(?:\?.*)?$/.test(path)) return true;
   const attachmentID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
   if (method === "GET" && new RegExp(`^/api/go/documents/${attachmentID}/content(?:\\?.*)?$`, "i").test(path)) return true;

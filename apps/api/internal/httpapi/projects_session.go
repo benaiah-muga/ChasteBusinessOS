@@ -26,7 +26,6 @@ var projectRouteUUID = regexp.MustCompile(`(?i)^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8]
 type ProjectsSessionHandler struct {
 	resolver          DirectCapabilitySessionResolver
 	executor          CapabilityExecutor
-	collectionReader  ProjectsCollectionReader
 	logger            *slog.Logger
 	trustedProxyCIDRs []*net.IPNet
 }
@@ -46,12 +45,12 @@ type projectRouteBody struct {
 	Position       json.RawMessage `json:"position"`
 }
 
-func NewProjectsSessionHandler(resolver DirectCapabilitySessionResolver, executor CapabilityExecutor, collectionReader ProjectsCollectionReader, logger *slog.Logger, trustedProxyCIDRs ...[]*net.IPNet) http.Handler {
+func NewProjectsSessionHandler(resolver DirectCapabilitySessionResolver, executor CapabilityExecutor, logger *slog.Logger, trustedProxyCIDRs ...[]*net.IPNet) http.Handler {
 	var trusted []*net.IPNet
 	if len(trustedProxyCIDRs) > 0 {
 		trusted = trustedProxyCIDRs[0]
 	}
-	return &ProjectsSessionHandler{resolver: resolver, executor: executor, collectionReader: collectionReader, logger: logger, trustedProxyCIDRs: trusted}
+	return &ProjectsSessionHandler{resolver: resolver, executor: executor, logger: logger, trustedProxyCIDRs: trusted}
 }
 
 func (h *ProjectsSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +60,7 @@ func (h *ProjectsSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
-	if h.resolver == nil || h.executor == nil || h.collectionReader == nil {
+	if h.resolver == nil || h.executor == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "projects service unavailable"})
 		return
 	}
@@ -110,8 +109,10 @@ func (h *ProjectsSessionHandler) serveRead(w http.ResponseWriter, r *http.Reques
 	var result capability.Result
 	var err error
 	if projectID == "" {
-		claims.CapabilityID = capability.ProjectCollectionReadOperationID
-		result, err = h.collectionReader.ReadProjectCollection(r.Context(), claims, json.RawMessage(`{}`))
+		input := json.RawMessage(`{}`)
+		claims.CapabilityID = capability.ProjectCollectionReadCapabilityID
+		claims.InputSHA256, _ = capability.InputHash(input)
+		result, err = h.executor.Execute(r.Context(), claims, claims.CapabilityID, input)
 	} else {
 		input, marshalErr := json.Marshal(struct {
 			ProjectID string `json:"projectId"`

@@ -86,7 +86,7 @@ describe("messaging session routes", () => {
 
 afterEach(async () => {
   await Promise.all(runningServers.splice(0).map((server) => server.close()));
-});
+}, 30_000);
 
 async function listen(server: Server): Promise<string> {
   await new Promise<void>((resolve, reject) => {

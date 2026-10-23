@@ -416,7 +416,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
-		case posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID:
+		case posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID, posListSessionsCapabilityID:
 			parsed, parseErr := parsePosSaleInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
@@ -613,7 +613,8 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
 		case iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
-			iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID:
+			iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID,
+			iamSetAgentSoulCapabilityID, iamRestoreAgentSoulCapabilityID:
 			parsed, parseErr := parseIAMOrgSettingsInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
@@ -847,7 +848,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "pos.write", true
 	case posCompleteSaleCapabilityID, posReturnSaleCapabilityID:
 		return "pos.sell", true
-	case posShiftSummaryCapabilityID:
+	case posShiftSummaryCapabilityID, posListSessionsCapabilityID:
 		return "pos.read", true
 	case creditNoteCapabilityID, reverseEntryCapabilityID:
 		return "accounting.post", true
@@ -940,7 +941,8 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID:
 		return "hr.write", true
 	case iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetOrgPolicyCapabilityID,
-		iamSetModuleConfigCapabilityID, iamSetOrgBrandingCapabilityID:
+		iamSetModuleConfigCapabilityID, iamSetOrgBrandingCapabilityID,
+		iamGetOrgPolicyCapabilityID, iamSetAgentSoulCapabilityID, iamRestoreAgentSoulCapabilityID:
 		return "iam.admin", true
 	case purchasingListWorkspaceCapabilityID, purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID, purchasingSupplierStatementCapabilityID:
 		return "purchasing.read", true

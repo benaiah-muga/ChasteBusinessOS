@@ -84,6 +84,9 @@ describe("Vite approvals page", () => {
     expect(screen.getByText("Please confirm the billing address first.")).not.toBeNull();
     expect(screen.queryByText("never-render-this-value")).toBeNull();
     expect(screen.queryByText("also-secret")).toBeNull();
+    const plan = screen.getByRole("region", { name: "Execution plan" });
+    expect(plan.textContent).toContain("Projected ledger direction: debit cash, credit accounts receivable.");
+    expect(plan.textContent).toContain("Reversible by: reverse payment.");
     const preview = screen.getByRole("region", { name: "Affected record preview" });
     expect(preview.textContent).not.toContain("apiKey");
     expect(preview.textContent).not.toContain("privateKey");

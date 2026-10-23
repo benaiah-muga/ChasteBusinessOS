@@ -81,7 +81,7 @@ func TestChatProviderStreamsContentToolsAndUsage(t *testing.T) {
 	}
 }
 
-func TestChatProviderFallsBackToReasoningDeltas(t *testing.T) {
+func TestChatProviderKeepsReasoningSeparateFromTheAnswer(t *testing.T) {
 	t.Setenv("GO_AUTH_MODE", "development")
 	server := chatSSEServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatSSE(t, w,
@@ -95,8 +95,8 @@ func TestChatProviderFallsBackToReasoningDeltas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	if turn.message != "Thinking harder" {
-		t.Fatalf("message=%q, want reasoning fallback", turn.message)
+	if turn.message != "" || turn.reasoning != "Thinking harder" {
+		t.Fatalf("message=%q reasoning=%q, want reasoning kept out of the answer", turn.message, turn.reasoning)
 	}
 }
 
@@ -156,8 +156,8 @@ func TestChatProviderReportsGenericProviderErrorWithoutBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error")
 	}
-	if got := err.Error(); got != "model request failed (HTTP 401)" {
-		t.Fatalf("error=%q, want a generic status message", got)
+	if got := err.Error(); got != "The AI provider rejected its credentials. Check Settings > AI & automation." {
+		t.Fatalf("error=%q, want an actionable credential message", got)
 	}
 	if strings.Contains(err.Error(), "secret upstream detail") {
 		t.Fatalf("provider body leaked into the public error: %q", err)
@@ -275,5 +275,21 @@ func TestChatSafeArgumentsRejectsInvalidJSON(t *testing.T) {
 	}
 	if got := string(chatSafeArguments(`{"a":1}`)); got != `{"a":1}` {
 		t.Fatalf("chatSafeArguments=%s, want passthrough", got)
+	}
+}
+
+func TestChatProviderErrorMessagesAreActionable(t *testing.T) {
+	cases := []struct {
+		status int
+		want   string
+	}{
+		{http.StatusTooManyRequests, "The AI model is rate limited right now. Try again in a moment."},
+		{http.StatusRequestEntityTooLarge, "The request was too large for the configured AI model. Try a shorter request."},
+		{http.StatusNotFound, "The configured AI model is unavailable. Try again, or check the model in Settings > AI & automation."},
+	}
+	for _, test := range cases {
+		if got := (chatProviderError{status: test.status}).Error(); got != test.want {
+			t.Fatalf("status %d: got %q, want %q", test.status, got, test.want)
+		}
 	}
 }

@@ -501,7 +501,7 @@ describe("Vite documents page", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<DocumentsPage />);
 
-    const create = await screen.findByRole("button", { name: "Create editable draft" });
+    const create = await screen.findByRole("button", { name: "New draft" });
     fireEvent.click(create);
     await waitFor(() => expect(window.location.pathname).toBe(`/documents/editor/${goDocumentId}`));
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes(":3001"))).toBe(false);

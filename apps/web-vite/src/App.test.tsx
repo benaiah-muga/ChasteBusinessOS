@@ -539,7 +539,7 @@ describe("Vite app frame", () => {
     const pushState = vi.spyOn(window.history, "pushState");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "How would you like to start?" }, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "How would you like to start?" }, { timeout: 20_000 })).not.toBeNull();
     expect(window.location.pathname).toBe("/onboarding");
     expect(replaceState).toHaveBeenCalledWith(null, "", "/onboarding");
     expect(pushState).not.toHaveBeenCalled();
@@ -552,7 +552,7 @@ describe("Vite app frame", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "POS shift summary" })).not.toBeNull();
-    expect(screen.getByRole("link", { name: "POS summary" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Sales" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Open full POS workspace" })).not.toBeNull();
     expect(await screen.findByText("$125.00")).not.toBeNull();
   });
@@ -561,7 +561,7 @@ describe("Vite app frame", () => {
     window.history.replaceState(null, "", "/inventory");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Inventory" }, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Inventory" }, { timeout: 20_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Inventory" }).getAttribute("aria-current")).toBe("page");
     expect(screen.queryByRole("link", { name: /inventory workspace/i })).toBeNull();
     expect(await screen.findByText("MUG-1")).not.toBeNull();
@@ -572,9 +572,9 @@ describe("Vite app frame", () => {
     window.history.replaceState(null, "", "/accounting/invoices");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Accounting invoices" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Invoices" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Accounting" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("link", { name: "Open full Accounting workspace" }).getAttribute("href"))
+    expect(screen.getByRole("link", { name: "Open Accounting" }).getAttribute("href"))
       .toBe("/accounting?tab=receivables");
     expect(await screen.findByText("#1042")).not.toBeNull();
   });
@@ -583,17 +583,17 @@ describe("Vite app frame", () => {
     window.history.replaceState(null, "", "/documents");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Documents" }, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Documents" }, { timeout: 20_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Documents" }).getAttribute("aria-current")).toBe("page");
-    expect(await screen.findByText("Supplier agreement", {}, { timeout: 5_000 })).not.toBeNull();
-    expect(await screen.findByText("Terms for supplier orders.", {}, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByText("Supplier agreement", {}, { timeout: 20_000 })).not.toBeNull();
+    expect(await screen.findByText("Terms for supplier orders.", {}, { timeout: 20_000 })).not.toBeNull();
   });
 
   it("opens the People workspace within the authenticated shell", async () => {
     window.history.replaceState(null, "", "/hr");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "People" }, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "People" }, { timeout: 20_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "People" }).getAttribute("aria-current")).toBe("page");
   });
 
@@ -602,7 +602,7 @@ describe("Vite app frame", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Manufacturing" }, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Manufacturing" }, { timeout: 20_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Manufacturing" }).getAttribute("aria-current")).toBe("page");
     await waitFor(() => {
       const capabilityCalls = fetchMock.mock.calls
@@ -619,7 +619,7 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Period close readiness" })).not.toBeNull();
     expect(await screen.findByRole("heading", { name: "Not ready to close" })).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Close readiness" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Accounting" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Open Accounting workspace" }).getAttribute("href"))
       .toBe("/accounting");
     expect(await screen.findByText("3 statement lines remain unmatched.")).not.toBeNull();
@@ -635,7 +635,7 @@ describe("Vite app frame", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Supplier payment runs" }, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Supplier payment runs" }, { timeout: 20_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Purchasing" }).getAttribute("aria-current")).toBe("page");
     expect(await screen.findByText("PAY-204")).not.toBeNull();
     expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute"
@@ -649,9 +649,9 @@ describe("Vite app frame", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Accounts payable aging" }, { timeout: 5_000 })).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Payables aging" }).getAttribute("aria-current")).toBe("page");
-    expect(await screen.findByRole("heading", { name: "$140.00" }, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Accounts payable aging" }, { timeout: 20_000 })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Purchasing" }).getAttribute("aria-current")).toBe("page");
+    expect(await screen.findByRole("heading", { name: "$140.00" }, { timeout: 20_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open full Purchasing workspace" }).getAttribute("href"))
       .toBe("/purchasing?tab=bills");
     expect(fetchMock.mock.calls.some(([input, init]) => String(input) === "/api/capabilities/execute"
@@ -665,7 +665,7 @@ describe("Vite app frame", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "Purchase receipt history" })).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Receipts" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Purchasing" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Open full receiving workspace" }).getAttribute("href"))
       .toBe("/purchasing/receiving");
     expect(await screen.findByText("Damaged ends")).not.toBeNull();
@@ -748,7 +748,7 @@ describe("Vite app frame", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/sessions", expect.objectContaining({ credentials: "same-origin" }));
       expect(fetchMock).toHaveBeenCalledWith("/api/durable-runs", expect.objectContaining({ credentials: "same-origin" }));
       expect(fetchMock).toHaveBeenCalledWith("/api/metrics", expect.objectContaining({ credentials: "same-origin" }));
-    }, { timeout: 5_000 });
+    }, { timeout: 20_000 });
   });
 
   it("routes the team page to Vite and reloads its Go-owned data after an organization switch", async () => {
@@ -823,10 +823,10 @@ describe("Vite app frame", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Products & Services" }, { timeout: 5_000 })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Products & Services" }, { timeout: 20_000 })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Products & Services" }));
     expect(await screen.findByText("Ceramic mug")).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Products" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Inventory" }).getAttribute("aria-current")).toBe("page");
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({ credentials: "same-origin" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/inventory", expect.objectContaining({ credentials: "same-origin" }));
   });

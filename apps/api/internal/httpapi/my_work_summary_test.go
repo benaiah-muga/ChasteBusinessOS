@@ -658,3 +658,15 @@ func TestMyWorkSummaryHandlerDoesNotExposeProviderErrorText(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestEnvironmentProviderConfigSupportsDeepSeek(t *testing.T) {
+	t.Setenv("MODEL_PROVIDER", "deepseek")
+	t.Setenv("DEEPSEEK_API_KEY", "deepseek-key")
+	t.Setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+	t.Setenv("MODEL_PRIMARY", "deepseek-chat")
+	config := environmentMyWorkSummaryConfig()
+	if config.provider != "deepseek" || config.baseURL != "https://api.deepseek.com" ||
+		config.apiKey != "deepseek-key" || config.primaryModel != "deepseek-chat" {
+		t.Fatalf("config=%+v", config)
+	}
+}

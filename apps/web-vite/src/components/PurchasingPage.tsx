@@ -42,6 +42,7 @@ import {
   type PurchasingWorkspace,
 } from "../api/purchasing";
 import { submitReceiveGoods } from "../api/purchasing-receiving";
+import { PageLoading } from "../ui/page-loading";
 import "./PurchasingPage.css";
 
 type Tab = "overview" | "requests" | "orders" | "bills" | "vendors" | "intel";
@@ -602,7 +603,7 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   const activeCreditDraftKey = creditTarget ? creditDraftKey(creditTarget.id) : null;
 
   if (state.status === "loading") {
-    return <main className="purchasing-page"><p className="purchasing-loading" role="status">Loading the purchasing workspace…</p></main>;
+    return <main className="purchasing-page"><PageLoading label="Loading the purchasing workspace…" /></main>;
   }
 
   if (state.status === "disabled") {

@@ -181,3 +181,114 @@ func TestIAMOrgSettingsLifecycle(t *testing.T) {
 func strPtr(v string) *string {
 	return &v
 }
+
+func TestIAMAgentSoulParserTrimsBoundsAndClears(t *testing.T) {
+	input, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{"agentSoul":"  Be concise.  "}`))
+	if err != nil || input.AgentSoul != "Be concise." {
+		t.Fatalf("persona parse=%+v err=%v", input, err)
+	}
+	cleared, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{"agentSoul":"   "}`))
+	if err != nil || cleared.AgentSoul != "" {
+		t.Fatalf("whitespace persona parse=%+v err=%v", cleared, err)
+	}
+	if _, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{}`)); err == nil {
+		t.Fatal("missing agentSoul accepted")
+	}
+	if _, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{"agentSoul":42}`)); err == nil {
+		t.Fatal("non-string agentSoul accepted")
+	}
+	if _, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{"agentSoul":"` + strings.Repeat("界", iamMaxAgentSoulUnits+1) + `"}`)); err == nil {
+		t.Fatal("persona over 8000 UTF-16 units accepted")
+	}
+}
+
+func TestIAMAgentSoulIsGovernedAuditedAndReversible(t *testing.T) {
+	fx := newExecutorFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO role_permissions (role_id, permission_key, org_id)
+		VALUES ($1::uuid, 'iam.admin', $2::uuid) ON CONFLICT DO NOTHING`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(`{"agentSoul":"  Be concise and mention outstanding balances.  "}`)
+	claims := fx.humanClaims(input, "")
+	claims.CapabilityID = iamSetAgentSoulCapabilityID
+	claims.Permissions = []string{"iam.admin"}
+	result, err := fx.executor.Execute(fx.ctx, claims, iamSetAgentSoulCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("set persona result=%+v err=%v", result, err)
+	}
+	var set IAMSetAgentSoulOutput
+	if err := json.Unmarshal(result.Data, &set); err != nil {
+		t.Fatalf("decode persona result %s: %v", result.Data, err)
+	}
+	if set.AgentSoul != "Be concise and mention outstanding balances." || set.PreviousAgentSoul != "" {
+		t.Fatalf("persona set=%+v, want trimmed persona and empty previous", set)
+	}
+	var stored *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT agent_soul FROM organizations WHERE id=$1::uuid`, fx.orgID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil || *stored != "Be concise and mention outstanding balances." {
+		t.Fatalf("stored persona=%v, want the trimmed value", stored)
+	}
+	if audits := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2`, fx.orgID, iamSetAgentSoulCapabilityID); audits != 1 {
+		t.Fatalf("persona audit events=%d, want 1", audits)
+	}
+
+	plan, ok := PlanInverse(iamSetAgentSoulCapabilityID, result.Data)
+	if !ok || plan.CapabilityID != iamRestoreAgentSoulCapabilityID {
+		t.Fatalf("persona inverse plan=%+v ok=%t", plan, ok)
+	}
+	restoreClaims := fx.humanClaims(plan.Input, "")
+	restoreClaims.CapabilityID = plan.CapabilityID
+	restoreClaims.Permissions = []string{"iam.admin"}
+	if restored, err := fx.executor.Execute(fx.ctx, restoreClaims, plan.CapabilityID, plan.Input); err != nil || !restored.OK {
+		t.Fatalf("restore persona result=%+v err=%v", restored, err)
+	}
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT agent_soul FROM organizations WHERE id=$1::uuid`, fx.orgID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != nil {
+		t.Fatalf("restored persona=%v, want an empty persona", stored)
+	}
+}
+
+func TestIAMGetOrgPolicyReadsDefaultsAndSavedPolicy(t *testing.T) {
+	fx := newExecutorFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO role_permissions (role_id, permission_key, org_id)
+		VALUES ($1::uuid, 'iam.read', $2::uuid) ON CONFLICT DO NOTHING`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	run := func() IAMGetOrgPolicyOutput {
+		input := json.RawMessage(`{}`)
+		claims := fx.humanClaims(input, "")
+		claims.CapabilityID = iamGetOrgPolicyCapabilityID
+		claims.Permissions = []string{"iam.read"}
+		result, err := fx.executor.Execute(fx.ctx, claims, iamGetOrgPolicyCapabilityID, input)
+		if err != nil || !result.OK {
+			t.Fatalf("policy read result=%+v err=%v", result, err)
+		}
+		var output IAMGetOrgPolicyOutput
+		if err := json.Unmarshal(result.Data, &output); err != nil {
+			t.Fatalf("decode policy %s: %v", result.Data, err)
+		}
+		return output
+	}
+	defaults := run()
+	if defaults.MaxRiskAutonomous != "write" || defaults.MoneyThresholdMinor != 50_000 || len(defaults.RequiresApprovalFor) != 0 {
+		t.Fatalf("default policy=%+v, want write/50000/[]", defaults)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO policies (org_id, capability_pattern, max_risk_autonomous, money_threshold_minor, requires_approval_for)
+		VALUES ($1::uuid, '*', 'money', 250000, '["identity"]'::jsonb)`, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	saved := run()
+	if saved.MaxRiskAutonomous != "money" || saved.MoneyThresholdMinor != 250000 || len(saved.RequiresApprovalFor) != 1 || saved.RequiresApprovalFor[0] != "identity" {
+		t.Fatalf("saved policy=%+v, want money/250000/[identity]", saved)
+	}
+	if audits := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2`, fx.orgID, iamGetOrgPolicyCapabilityID); audits != 2 {
+		t.Fatalf("policy read audit events=%d, want 2", audits)
+	}
+}

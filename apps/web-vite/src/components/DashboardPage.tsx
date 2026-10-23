@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardApiError, fetchDashboard, fetchMyWork, fetchSetup, summarizeWork, type DashboardData, type SetupItem, type WorkCard } from "../api/dashboard";
+import { BrandMark } from "../ui/brand-mark";
 import "./DashboardPage.css";
 
 type PageState =
@@ -25,7 +26,7 @@ const QUICK_PROMPTS = [
 ];
 
 const VITE_ROUTES = new Set([
-  "/", "/approvals", "/ledger", "/sessions", "/projects", "/analytics", "/team", "/marketplace",
+  "/", "/inbox", "/approvals", "/ledger", "/sessions", "/projects", "/analytics", "/team", "/marketplace",
   "/documents", "/hr", "/crm", "/sales", "/pos/shift-summary", "/inventory", "/products", "/onboarding",
   "/accounting/invoices", "/accounting/close", "/purchasing/payment-runs", "/purchasing/ap-aging",
   "/purchasing/receipts", "/accounting", "/messages", "/settings", "/purchasing",
@@ -92,7 +93,7 @@ function friendlyError(error: unknown): string {
   return "Could not reach the dashboard service. Check your connection and try again.";
 }
 
-export function DashboardPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
+export function DashboardPage({ baseCurrency = null, userName = null }: { baseCurrency?: string | null; userName?: string | null }) {
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [expandedSetup, setExpandedSetup] = useState(false);
@@ -141,11 +142,12 @@ export function DashboardPage({ baseCurrency = null }: { baseCurrency?: string |
   return (
     <main className="dashboard-page">
       <header className="dashboard-intro">
-        <div><p className="section-kicker">Home</p><h1>Your business, at a glance</h1></div>
+        <div><p className="section-kicker">Home{userName ? ` · ${userName.split(" ")[0]}` : ""}</p><h1>Your business, at a glance</h1></div>
         <p>A live view of your books, team, and work in motion.</p>
       </header>
       <section className="financial-cover" aria-label="Financial pulse">
         <div className="cover-grain" aria-hidden="true" />
+        <div className="cover-watermark" aria-hidden="true"><BrandMark variant="gold" size="xl" /></div>
         <div className="cover-topline">
           <p className="cover-date">{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</p>
           <div className="quick-actions" aria-label="Ask your workmate">
@@ -348,6 +350,7 @@ function NeedsYou({ data, count, currency }: { data: DashboardData; count: numbe
         <p className="section-kicker">Needs you {queueCount > 0 && <span className="attention-count">{queueCount}</span>}</p>
         <div className="needs-you-actions">
           {items.length === 0 && workQueueState === "ready" && <span className="quiet-state">All clear</span>}
+          <a className="needs-you-inbox" href="/inbox">Open inbox <span aria-hidden="true">↗</span></a>
           <button className="brief-button" type="button" onClick={() => void summarize()} disabled={workQueueState !== "ready" || !workCards?.length || briefState === "loading"}>
             {briefState === "loading" ? "Summarizing…" : "Brief me"}
           </button>

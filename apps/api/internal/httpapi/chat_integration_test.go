@@ -224,7 +224,7 @@ func TestGoChatSessionIntegration(t *testing.T) {
 				{message: "Beta has no customers either.", usage: chatUsage{Input: 4, Output: 2}},
 			}}
 			chat, _ := handlerFor(provider)
-			response := post(chat, "/api/chat", `{"message":"now beta","sessionId":"`+sessionID+`"}`, fixture.orgA, "")
+			response := post(chat, "/api/chat", `{"message":"now beta customers","sessionId":"`+sessionID+`"}`, fixture.orgA, "")
 			if response.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}

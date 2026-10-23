@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/testenv"
@@ -230,7 +231,7 @@ func startOrgParityServer(t *testing.T) orgParityServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewOrgHandler(NewPgOrgRepository(pool), resolver, secret, nil)
+	handler := NewOrgHandler(NewPgOrgRepository(pool), resolver, capability.NewExecutor(pool, "", "", ""), secret, nil)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	return orgParityServer{goServer: server, repo: NewPgOrgRepository(pool), secret: secret}
@@ -342,7 +343,7 @@ func TestGoOrgRouteWorksThroughRuntimeRLS(t *testing.T) {
 		t.Fatalf("runtime resolver returned the wrong organization or grants: %+v", resolved)
 	}
 
-	handler := NewOrgHandler(NewPgOrgRepository(runtime), resolver, secret, nil)
+	handler := NewOrgHandler(NewPgOrgRepository(runtime), resolver, capability.NewExecutor(runtime, "", "", ""), secret, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/org", nil)
 	request.AddCookie(&http.Cookie{Name: session.SessionCookieName, Value: fixture.cookie})
 	request.AddCookie(&http.Cookie{Name: session.ActiveOrgCookieName, Value: fixture.orgA})
